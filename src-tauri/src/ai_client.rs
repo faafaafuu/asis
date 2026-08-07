@@ -74,6 +74,13 @@ pub trait AiProvider: Send + Sync {
 /// приложение уже запущено, ронять его из-за опечатки в конфиге нельзя.
 pub fn build_provider(config: &AiConfig) -> Box<dyn AiProvider> {
     match config.provider.as_str() {
+        "wikipedia" => match WikipediaProvider::new(config) {
+            Ok(provider) => Box::new(provider),
+            Err(err) => {
+                log::error!("провайдер Википедии не собрался ({err}) — работаем на mock");
+                Box::new(MockProvider::default())
+            }
+        },
         "http" => match HttpProvider::new(config) {
             Ok(provider) => Box::new(provider),
             Err(err) => {
@@ -429,6 +436,142 @@ impl AiProvider for HttpProvider {
     }
 }
 
+/* ───────────────────────────── Википедия ──────────────────────────────── */
+
+/// Определения без ключей и регистрации. Для «что это за слово» энциклопедия
+/// точнее генерации: она не выдумывает. Взамен не умеет ни примеров, ни диалога —
+/// это работа модели.
+pub struct WikipediaProvider {
+    client: reqwest::Client,
+}
+
+impl WikipediaProvider {
+    pub fn new(config: &AiConfig) -> Result<Self, AiError> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(config.timeout_ms.min(8_000)))
+            // Википедия отвечает 403 на запросы без внятного User-Agent —
+            // это её правило для автоматических клиентов.
+            .user_agent("Sufler/0.1 (https://github.com/faafaafuu/asis)")
+            .build()
+            .map_err(|_| AiError::Config("не удалось создать HTTP-клиент".into()))?;
+        Ok(Self { client })
+    }
+
+    /// Латиница — английская Википедия, кириллица — русская.
+    fn host(term: &str) -> &'static str {
+        if term.chars().any(|c| ('а'..='я').contains(&c.to_ascii_lowercase()) || c == 'ё') {
+            "ru.wikipedia.org"
+        } else {
+            "en.wikipedia.org"
+        }
+    }
+
+    async fn summary(&self, term: &str) -> Option<serde_json::Value> {
+        let url = format!(
+            "https://{}/api/rest_v1/page/summary/{}",
+            Self::host(term),
+            urlencoding(term)
+        );
+        let response = self.client.get(&url).send().await.ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        let value: serde_json::Value = response.json().await.ok()?;
+        // Страница-разрешение неоднозначностей определением не является.
+        if value.get("type").and_then(|v| v.as_str()) == Some("disambiguation") {
+            return None;
+        }
+        Some(value)
+    }
+
+    async fn via_search(&self, term: &str) -> Option<serde_json::Value> {
+        let url = format!(
+            "https://{}/w/api.php?action=query&list=search&srlimit=1&srsearch={}&format=json",
+            Self::host(term),
+            urlencoding(term)
+        );
+        let value: serde_json::Value = self.client.get(&url).send().await.ok()?.json().await.ok()?;
+        let title = value.pointer("/query/search/0/title")?.as_str()?.to_string();
+        self.summary(&title).await
+    }
+}
+
+/// Процентное кодирование без лишней зависимости: кодируем всё, кроме безопасного.
+fn urlencoding(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() * 3);
+    for byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char)
+            }
+            b' ' => out.push('_'),
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
+}
+
+/// Первое-второе предложение: в шапке нужен короткий ответ, а не абзац.
+fn first_sentences(text: &str, count: usize) -> String {
+    let mut result = String::new();
+    let mut taken = 0;
+    for ch in text.chars() {
+        result.push(ch);
+        if matches!(ch, '.' | '!' | '?') {
+            taken += 1;
+            if taken >= count {
+                break;
+            }
+        }
+    }
+    result.trim().to_string()
+}
+
+#[async_trait]
+impl AiProvider for WikipediaProvider {
+    async fn explain(&self, term: &str, _context: &str) -> Result<Explanation, AiError> {
+        let page = match self.summary(term).await {
+            Some(page) => page,
+            None => self.via_search(term).await.ok_or(AiError::Parse)?,
+        };
+
+        let extract = page
+            .get("extract")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or(AiError::Parse)?;
+
+        let def = first_sentences(extract, 2);
+        Ok(Explanation {
+            // Полная выжимка попадает под «?», если она содержательнее первой фразы.
+            simple: if extract.len() > def.len() + 40 {
+                extract.to_string()
+            } else {
+                String::new()
+            },
+            def,
+            examples: Vec::new(),
+        })
+    }
+
+    async fn ask(
+        &self,
+        term: &str,
+        _context: &str,
+        _thread: &[ThreadItem],
+        _question: &str,
+    ) -> Result<String, AiError> {
+        // Не притворяемся, что умеем вести диалог.
+        Ok(format!(
+            "Уточняющие вопросы умеет только языковая модель — сейчас определения берутся из \
+             Википедии. Подключить модель можно в config.json. Статья целиком: https://{}/wiki/{}",
+            WikipediaProvider::host(term),
+            urlencoding(term)
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +604,24 @@ mod tests {
     fn empty_answer_is_parse_error() {
         let value = serde_json::json!({ "choices": [{ "message": { "content": "{}" } }] });
         assert!(matches!(normalize_explanation(&value), Err(AiError::Parse)));
+    }
+
+    #[test]
+    fn wikipedia_picks_language_by_script() {
+        assert_eq!(WikipediaProvider::host("альбедо"), "ru.wikipedia.org");
+        assert_eq!(WikipediaProvider::host("albedo"), "en.wikipedia.org");
+    }
+
+    #[test]
+    fn url_encoding_survives_cyrillic_and_spaces() {
+        assert_eq!(urlencoding("albedo"), "albedo");
+        assert_eq!(urlencoding("ледниковый щит"), "%D0%BB%D0%B5%D0%B4%D0%BD%D0%B8%D0%BA%D0%BE%D0%B2%D1%8B%D0%B9_%D1%89%D0%B8%D1%82");
+    }
+
+    #[test]
+    fn takes_first_sentences_only() {
+        let text = "Альбедо — характеристика отражения. Измеряется долей. Третье предложение.";
+        assert_eq!(first_sentences(text, 2), "Альбедо — характеристика отражения. Измеряется долей.");
     }
 
     #[test]

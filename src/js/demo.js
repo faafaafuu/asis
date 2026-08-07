@@ -2,12 +2,17 @@
 // из дизайн-референса (кнопки «Загрузка / Ответ / Ошибка»).
 
 import { MockProvider } from "./ai-client.js";
+import { WikipediaProvider } from "./wiki-provider.js";
 import { WebHost } from "./web-host.js";
 
 const LATENCY_MS = 900; // как в референсе
 
+// По выделению отвечает Википедия — бесплатно, без ключей и для любого слова,
+// а не только для семи терминов демо-словаря.
+const liveClient = new WikipediaProvider();
+
 const host = new WebHost({
-  client: new MockProvider({ latencyMs: LATENCY_MS }),
+  client: liveClient,
   requireLeftCtrl: true,
 }).mount();
 
@@ -109,7 +114,5 @@ if (params.has("demo")) {
 // чтобы следующее выделение работало как в жизни.
 document.addEventListener("mousedown", (e) => {
   if (e.target.closest?.("[data-demo]")) return;
-  if (host.view.client instanceof MockProvider && host.view.client.forceState !== "auto") {
-    host.view.client = new MockProvider({ latencyMs: LATENCY_MS });
-  }
+  if (host.view.client instanceof MockProvider) host.view.client = liveClient;
 });

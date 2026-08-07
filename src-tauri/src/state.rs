@@ -26,6 +26,12 @@ impl AppState {
         }
     }
 
+    /// Пересобирает провайдера после смены настроек — чтобы не требовать перезапуска.
+    pub fn rebuild_provider(&self, config: &crate::config::AiConfig) {
+        let provider: Arc<dyn AiProvider> = Arc::from(build_provider(config));
+        *self.provider.write().expect("provider poisoned") = provider;
+    }
+
     pub fn provider(&self) -> Arc<dyn AiProvider> {
         self.provider.read().expect("provider poisoned").clone()
     }

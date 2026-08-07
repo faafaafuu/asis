@@ -356,12 +356,17 @@ export class TauriProvider {
 /**
  * @param {{provider?: 'mock'|'http'|'tauri', latencyMs?: number, forceState?: string, invoke?: Function} & Record<string, any>} cfg
  */
-export function createAiClient(cfg = {}) {
+export async function createAiClient(cfg = {}) {
   switch (cfg.provider ?? "mock") {
     case "http":
       return new HttpProvider(cfg);
     case "tauri":
       return new TauriProvider(cfg.invoke);
+    case "wikipedia": {
+      // Отдельным модулем и по требованию: провайдер нужен не всем сборкам.
+      const { WikipediaProvider } = await import("./wiki-provider.js");
+      return new WikipediaProvider(cfg);
+    }
     default:
       return new MockProvider(cfg);
   }

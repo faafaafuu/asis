@@ -23,6 +23,52 @@
         <button class="ob__btn" type="button" data-el="recheck">Проверить снова</button>
       </div>
 
+      <hr class="ob__sep" />
+
+      <h2 class="ob__subtitle">Откуда брать объяснения</h2>
+      <p class="ob__text ob__text--dim">
+        Из коробки работает Википедия: определения без ключей и регистрации. Чтобы
+        появились «простыми словами», примеры и уточняющие вопросы, нужна языковая
+        модель — у бесплатных сервисов хватает лимитов с запасом.
+      </p>
+
+      <label class="ob__field">
+        <span class="ob__label">Источник</span>
+        <select class="ob__input" data-el="preset">
+          <option value="wikipedia">Википедия — без ключа, только определения</option>
+          <option value="groq">Groq — бесплатный ключ, быстрые ответы</option>
+          <option value="google">Google AI Studio — бесплатный ключ</option>
+          <option value="openrouter">OpenRouter — бесплатные модели</option>
+          <option value="ollama">Ollama — модель на этом компьютере</option>
+          <option value="custom">Другой сервис с OpenAI-совместимым API</option>
+        </select>
+      </label>
+
+      <div data-el="modelFields" hidden>
+        <label class="ob__field">
+          <span class="ob__label">Адрес API</span>
+          <input class="ob__input" data-el="endpoint" type="text" spellcheck="false" />
+        </label>
+
+        <label class="ob__field" data-el="keyField">
+          <span class="ob__label">Ключ</span>
+          <input class="ob__input" data-el="apiKey" type="password" autocomplete="off"
+                 placeholder="вставьте ключ" />
+          <span class="ob__hint" data-el="keyHint"></span>
+        </label>
+
+        <label class="ob__field">
+          <span class="ob__label">Модель</span>
+          <input class="ob__input" data-el="model" type="text" spellcheck="false" />
+        </label>
+      </div>
+
+      <div class="ob__actions">
+        <button class="ob__btn ob__btn--primary" type="button" data-el="save">Сохранить</button>
+        <button class="ob__btn" type="button" data-el="test">Проверить</button>
+      </div>
+      <p class="ob__text ob__text--dim" data-el="aiStatus"></p>
+
       <p class="ob__note">
         Приложение остаётся в трее. Выделение текста с зажатым левым Ctrl открывает
         объяснение рядом с выделенным словом.

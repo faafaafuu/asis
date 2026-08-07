@@ -52,6 +52,9 @@ pub fn run() {
             commands::close_popup,
             commands::ai_explain,
             commands::ai_ask,
+            commands::ai_settings,
+            commands::save_ai_settings,
+            commands::test_ai,
             commands::integration_status,
             commands::open_permission_settings,
         ])

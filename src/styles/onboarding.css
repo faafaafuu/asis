@@ -81,3 +81,68 @@ body {
   color: var(--text-muted);
   font-size: var(--size-secondary);
 }
+
+/* ── Настройка модели ───────────────────────────────────────────────────── */
+
+.ob__sep {
+  border: none;
+  border-top: 1px solid var(--divider);
+  margin: 10px 0 4px;
+}
+
+.ob__subtitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ob__text--dim {
+  color: var(--text-muted);
+  font-size: var(--size-secondary);
+  /* pre-line нужен только системной подсказке с её переносами абзацев,
+     обычный текст должен переноситься по ширине окна. */
+  white-space: normal;
+}
+
+.ob__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.ob__label {
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--label);
+}
+
+.ob__input {
+  font: inherit;
+  font-size: var(--size-secondary);
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--input-color);
+  outline: none;
+}
+
+.ob__input:focus {
+  border-color: var(--btn-hover-border);
+}
+
+.ob__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ob__hint a {
+  color: var(--accent);
+}
+
+[hidden] {
+  display: none !important;
+}

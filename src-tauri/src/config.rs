@@ -34,7 +34,10 @@ pub struct AiConfig {
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
-            provider: "mock".into(),
+            // Из коробки — Википедия: определения без ключей и регистрации, для любого
+            // слова, а не для семи терминов демо-словаря. Заглушка (`mock`) остаётся
+            // для разработки и показа состояний интерфейса.
+            provider: "wikipedia".into(),
             endpoint: String::new(),
             api_key: String::new(),
             model: String::new(),
@@ -140,11 +143,11 @@ impl Config {
             self.ui.theme = v;
         }
 
-        // Провайдер `http` без endpoint работать не может — честно падаем обратно в mock,
+        // Провайдер `http` без endpoint работать не может — откатываемся на Википедию,
         // иначе пользователь получит бесконечную ошибку сети без объяснения причины.
         if self.ai.provider == "http" && self.ai.endpoint.is_empty() {
-            log::warn!("provider=http без endpoint — включён mock-провайдер");
-            self.ai.provider = "mock".into();
+            log::warn!("provider=http без endpoint — включён провайдер Википедии");
+            self.ai.provider = "wikipedia".into();
         }
     }
 }
