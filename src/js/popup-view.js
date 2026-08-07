@@ -276,7 +276,15 @@ export class PopupView {
   }
 
   #reportGeometry() {
-    // Хост узнаёт новый размер после того, как браузер посчитает лейаут.
+    // Синхронно: обращение к offsetWidth само заставляет браузер посчитать лейаут,
+    // поэтому размер уже верный. Ждать кадр здесь нельзя — до первого замера окно
+    // скрыто (чтобы не прыгало), а мобильный Safari придерживает
+    // requestAnimationFrame во время прокрутки, и попап оставался невидимым
+    // по секунде и дольше.
+    this.onGeometry({ width: this.el.offsetWidth, height: this.el.offsetHeight });
+
+    // Повторный замер после отрисовки: к этому моменту подгружаются шрифты и
+    // переносы строк могут поменять высоту.
     requestAnimationFrame(() => {
       this.onGeometry({ width: this.el.offsetWidth, height: this.el.offsetHeight });
     });

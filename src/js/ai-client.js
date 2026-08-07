@@ -221,7 +221,15 @@ export class HttpProvider {
       ],
       signal,
     );
-    return typeof raw === "string" ? raw : String(raw?.text ?? "");
+    if (typeof raw === "string") return raw;
+    return String(
+      raw?.choices?.[0]?.message?.content ??
+        raw?.message?.content ??
+        raw?.content?.[0]?.text ??
+        raw?.response ??
+        raw?.text ??
+        "",
+    );
   }
 
   async #send(messages, outerSignal) {
@@ -251,7 +259,9 @@ export class HttpProvider {
           "content-type": "application/json",
           ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
         },
-        body: JSON.stringify({ model: this.model || undefined, messages }),
+        // stream: false — Ollama иначе отвечает потоком построчного JSON.
+        // Для OpenAI-совместимых API поле безвредно.
+        body: JSON.stringify({ model: this.model || undefined, messages, stream: false }),
         signal: ctrl.signal,
       });
       if (!res.ok) {
@@ -288,7 +298,11 @@ export function normalizeExplain(raw, term) {
     }
   }
   // Типовая обёртка chat-completions: вытаскиваем текст ответа и парсим его как JSON.
-  const inner = data?.choices?.[0]?.message?.content ?? data?.content?.[0]?.text;
+  const inner =
+    data?.choices?.[0]?.message?.content ?? // OpenAI-совместимые, включая /v1 Ollama
+    data?.message?.content ?? // родной формат Ollama: POST /api/chat
+    data?.content?.[0]?.text ?? // Anthropic
+    data?.response; // generate-эндпоинты
   if (typeof inner === "string") {
     try {
       data = JSON.parse(inner);

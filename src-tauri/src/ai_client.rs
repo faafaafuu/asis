@@ -272,6 +272,9 @@ impl HttpProvider {
         let body = serde_json::json!({
             "model": (!self.model.is_empty()).then(|| self.model.clone()),
             "messages": messages,
+            // Ollama по умолчанию отвечает потоком построчного JSON — разобрать его
+            // как один объект нельзя. Для OpenAI-совместимых API поле безвредно.
+            "stream": false,
         });
 
         let mut last = AiError::Network;
@@ -316,8 +319,13 @@ impl HttpProvider {
 /// Вытаскивает текст ответа из типовых обёрток chat-completions.
 fn extract_text(value: &serde_json::Value) -> Option<String> {
     value
+        // OpenAI-совместимые API (в том числе /v1 у Ollama и LM Studio)
         .pointer("/choices/0/message/content")
+        // Родной формат Ollama: POST /api/chat
+        .or_else(|| value.pointer("/message/content"))
+        // Anthropic
         .or_else(|| value.pointer("/content/0/text"))
+        .or_else(|| value.pointer("/response"))
         .or_else(|| value.pointer("/text"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
