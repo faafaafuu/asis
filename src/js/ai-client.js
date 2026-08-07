@@ -14,12 +14,22 @@
 
 /** Тип ошибки важен для UI: всё, что не `abort`, показывается состоянием Error. */
 export class AiError extends Error {
-  /** @param {string} message @param {{kind: 'timeout'|'network'|'http'|'parse'|'abort'|'config', status?: number}} meta */
+  /** @param {string} message @param {{kind: 'timeout'|'network'|'http'|'parse'|'abort'|'config'|'backend', status?: number}} meta */
   constructor(message, meta) {
     super(message);
     this.name = "AiError";
     this.kind = meta.kind;
     this.status = meta.status;
+  }
+
+  /**
+   * Текст для состояния Error, если он осмысленнее общей фразы про сбой сети.
+   * `null` — показывать настроенный текст по умолчанию: «fetch failed» или
+   * «NetworkError» пользователю ничего не объясняют.
+   */
+  get userText() {
+    const speaking = ["backend", "http", "parse", "config"];
+    return speaking.includes(this.kind) && this.message ? this.message : null;
   }
 }
 
@@ -308,9 +318,10 @@ export class TauriProvider {
     try {
       return await this.invoke(cmd, args);
     } catch (err) {
-      // Rust отдаёт ошибку строкой — вид ошибки уже классифицирован на его стороне.
+      // Rust отдаёт готовый текст: сетевые ошибки он уже заменил на настроенную
+      // фразу, а всё остальное («Сервис ответил ошибкой 401») стоит показать как есть.
       const message = typeof err === "string" ? err : (err?.message ?? DEFAULT_ERROR_TEXT);
-      throw new AiError(message, { kind: "network" });
+      throw new AiError(message, { kind: "backend" });
     }
   }
 }

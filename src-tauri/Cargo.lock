@@ -3032,7 +3032,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "core-foundation",
- "core-graphics",
  "log",
  "reqwest",
  "serde",

@@ -99,5 +99,16 @@ for (const ref of fontRefs) {
 }
 ok(`${fontRefs.length} начертаний на месте`);
 
+// 5. Поле под тень задано в двух местах: константой в JS (её отправляют в Rust,
+//    который сдвигает окно) и padding-ом в CSS. Разъедутся — попап встанет со
+//    смещением, и заметить это можно будет только глазами на живом рабочем столе.
+console.log("Отступ под тень:");
+const windowJs = await readFile(join(SRC, "js/popup-window.js"), "utf8");
+const windowCss = await readFile(join(SRC, "styles/window.css"), "utf8");
+const jsInset = /SHADOW_INSET\s*=\s*(\d+)/.exec(windowJs)?.[1];
+const cssInset = /\.window-mount\s*\{[^}]*padding:\s*(\d+)px/.exec(windowCss)?.[1];
+if (jsInset && cssInset && jsInset === cssInset) ok(`${jsInset}px в JS и CSS совпадают`);
+else fail(`SHADOW_INSET=${jsInset} в JS, padding=${cssInset} в CSS`);
+
 console.log(failures ? `\nПроблем: ${failures}` : "\nВсё в порядке.");
 process.exit(failures ? 1 : 0);
