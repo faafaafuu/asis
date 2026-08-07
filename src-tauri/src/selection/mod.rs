@@ -1,0 +1,138 @@
+//! Системное выделение текста: единый интерфейс поверх очень разных API платформ
+//! (SPEC §9). Ядро приложения не должно знать, что на Windows это UI Automation,
+//! на macOS — Accessibility API, а на Linux — в лучшем случае PRIMARY selection.
+
+use serde::Serialize;
+
+use crate::config::TriggerConfig;
+
+// Платформенные реализации подключаются здесь. Пока фазы 6–8 не сделаны, все
+// десктопные системы честно ведут себя как «интеграция недоступна»: приложение
+// запускается и показывает онбординг, а не притворяется рабочим.
+#[cfg(target_os = "windows")]
+#[path = "unsupported.rs"]
+mod platform;
+
+#[cfg(target_os = "macos")]
+#[path = "unsupported.rs"]
+mod platform;
+
+#[cfg(target_os = "linux")]
+#[path = "unsupported.rs"]
+mod platform;
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+#[path = "unsupported.rs"]
+mod platform;
+
+/// Прямоугольник в экранных (не оконных) координатах, физические пиксели.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl ScreenRect {
+    pub fn left(&self) -> f64 {
+        self.x
+    }
+    pub fn top(&self) -> f64 {
+        self.y
+    }
+    pub fn bottom(&self) -> f64 {
+        self.y + self.height
+    }
+}
+
+/// Что удалось узнать о выделении.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Selection {
+    pub text: String,
+    /// Последний прямоугольник выделения (SPEC §4). `None` там, где система отдаёт
+    /// только текст без геометрии — тогда попап встаёт у курсора.
+    pub rect: Option<ScreenRect>,
+    /// Позиция курсора на момент срабатывания — запасной якорь.
+    pub cursor: (f64, f64),
+    /// Текст вокруг выделения, если платформа умеет его отдать: он идёт в AI как контекст.
+    #[serde(default)]
+    pub context: String,
+}
+
+impl Selection {
+    /// Якорь для позиционирования: прямоугольник выделения, иначе точка курсора.
+    pub fn anchor(&self) -> ScreenRect {
+        self.rect.unwrap_or(ScreenRect {
+            x: self.cursor.0,
+            y: self.cursor.1,
+            width: 1.0,
+            height: 1.0,
+        })
+    }
+}
+
+/// Насколько системная интеграция работоспособна прямо сейчас.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Capability {
+    /// Всё доступно.
+    Ready,
+    /// Нужно разрешение пользователя (macOS Accessibility — SPEC §9.2, §12.4).
+    NeedsPermission { title: String, hint: String },
+    /// Платформа не даёт нужного API. Не баг, а свойство окружения (SPEC §9.3, §12.1).
+    Unavailable { title: String, hint: String },
+}
+
+impl Capability {
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Capability::Ready)
+    }
+}
+
+/// Реализация под конкретную ОС.
+pub trait PlatformIntegration: Send + Sync {
+    /// Проверяется при старте и перед каждым показом онбординга.
+    fn capability(&self) -> Capability;
+
+    /// Один шаг опроса системного триггера. Возвращает `Some`, когда жест завершён:
+    /// пользователь отпустил левую кнопку мыши, держа левый Ctrl, и выделение непусто.
+    ///
+    /// Опрос, а не блокирующая подписка, выбран сознательно: он одинаково устроен на
+    /// всех платформах и не требует крутить нативный run loop внутри потока Tauri.
+    fn poll_trigger(&self, config: &TriggerConfig) -> Option<Selection>;
+
+    /// Нажат ли сейчас Esc. Нужен глобально: попап намеренно не забирает фокус,
+    /// поэтому обычный keydown в окне до него не дойдёт (SPEC §8).
+    /// Перехватывать Esc системным глобальным шорткатом нельзя — он сломает Esc
+    /// во всех остальных приложениях.
+    fn is_escape_pressed(&self) -> bool {
+        false
+    }
+
+    /// Нажата ли сейчас левая кнопка мыши — по ней закрываем попап при клике вне окна.
+    fn is_primary_mouse_down(&self) -> bool {
+        false
+    }
+
+    /// Позиция курсора в экранных координатах.
+    fn cursor_position(&self) -> Option<(f64, f64)> {
+        None
+    }
+
+    /// Открыть системные настройки, где выдаётся нужное разрешение. `false` — если
+    /// на этой платформе открывать нечего.
+    fn open_permission_settings(&self) -> bool {
+        false
+    }
+}
+
+/// Интервал опроса. 16мс — примерно кадр: жест «отпустил кнопку» не теряется,
+/// а нагрузка на процессор остаётся незаметной.
+pub const POLL_INTERVAL_MS: u64 = 16;
+
+pub fn create() -> Box<dyn PlatformIntegration> {
+    platform::create()
+}

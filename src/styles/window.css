@@ -1,0 +1,36 @@
+/* Стили окна попапа в приложении (не веб-режим).
+   Окно прозрачное и точно по размеру содержимого, поэтому здесь нет ни фона,
+   ни скролла: всё это живёт внутри самого попапа. */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  /* Окно не должно вести себя как страница: ни выделения текста подложки,
+     ни перетаскивания, ни контекстного меню webview. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Отступ под тень: он же SHADOW_INSET в popup-window.js и shadow_inset в overlay.rs.
+   Меняете здесь — меняйте там же, иначе попап встанет со смещением. */
+.window-mount {
+  padding: 48px;
+  width: max-content;
+}
+
+/* Внутри попапа выделять и вводить текст, наоборот, можно. */
+.popup__body,
+.popup__input {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Фолбэк без настоящего blur: сплошной фон вместо полупрозрачного (SPEC §5, §12.6). */
+:root[data-surface="opaque"] .popup {
+  background: var(--bg-solid);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}

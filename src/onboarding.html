@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Суфлёр — доступ и настройка</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/onboarding.css" />
+  </head>
+  <body>
+    <!-- Экран честного отказа: без него отсутствие разрешения выглядело бы как
+         «приложение просто не работает» (SPEC §9.2, §12.4, критерий приёмки §14). -->
+    <main class="ob">
+      <p class="ob__eyebrow">Суфлёр</p>
+      <h1 class="ob__title" data-el="title">Проверяем доступ…</h1>
+      <p class="ob__text" data-el="hint"></p>
+
+      <div class="ob__actions">
+        <button class="ob__btn ob__btn--primary" type="button" data-el="settings" hidden>
+          Открыть настройки системы
+        </button>
+        <button class="ob__btn" type="button" data-el="recheck">Проверить снова</button>
+      </div>
+
+      <p class="ob__note">
+        Приложение остаётся в трее. Выделение текста с зажатым левым Ctrl открывает
+        объяснение рядом с выделенным словом.
+      </p>
+    </main>
+    <script type="module" src="./js/onboarding.js"></script>
+  </body>
+</html>

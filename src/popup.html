@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru" data-theme="system" data-surface="opaque">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Суфлёр</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/popup.css" />
+    <link rel="stylesheet" href="./styles/window.css" />
+  </head>
+  <body>
+    <!-- Окно прозрачное, попап лежит с отступом под тень: тень по SPEC §5 выходит
+         за границы попапа, и без запаса окно бы её обрезало.
+
+         data-surface="opaque" — честный фолбэк из SPEC §5 и §12.6: backdrop-filter
+         в наложенном окне десктопного webview размывать нечего (за окном не контент
+         страницы, а другое приложение), поэтому фон сплошной. -->
+    <div id="mount" class="window-mount"></div>
+    <script type="module" src="./js/popup-window.js"></script>
+  </body>
+</html>
