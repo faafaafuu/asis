@@ -16,7 +16,7 @@ mod platform;
 mod platform;
 
 #[cfg(target_os = "linux")]
-#[path = "unsupported.rs"]
+#[path = "linux.rs"]
 mod platform;
 
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
