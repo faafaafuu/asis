@@ -64,6 +64,26 @@ export function isAnchorVisible(anchor, viewport) {
   return anchor.bottom >= vy - OFFSCREEN_MARGIN && anchor.top <= vy + viewport.height + OFFSCREEN_MARGIN;
 }
 
+export const MENU_PAD = 10; // отступ меню от краёв экрана
+export const MENU_LIFT = 48; // насколько меню поднимается над выделением
+export const MENU_DROP = 12; // насколько опускается, если сверху не поместилось
+
+/**
+ * Мини-меню ставится над НАЧАЛОМ выделения (первый rect): палец пользователя обычно
+ * в конце выделения, и меню не должно оказаться под ним.
+ * @param {{anchor: Anchor, size: Size, viewport: Viewport}} params
+ */
+export function placeMenu({ anchor, size, viewport }) {
+  const vw = viewport.width;
+  let left = anchor.left + anchor.width / 2 - size.width / 2;
+  left = Math.max(MENU_PAD, Math.min(left, vw - size.width - MENU_PAD));
+
+  let top = anchor.top - MENU_LIFT;
+  if (top < MENU_PAD) top = anchor.bottom + MENU_DROP;
+
+  return { left: Math.round(left), top: Math.round(top) };
+}
+
 /** Пустой rect (схлопнувшееся выделение) — не якорь. */
 export function isEmptyRect(rect) {
   return !rect || (!rect.width && !rect.height);

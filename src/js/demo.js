@@ -41,10 +41,37 @@ themeBtn?.addEventListener("click", () => {
   themeBtn.textContent = next === "light" ? "Тёмная" : "Светлая";
 });
 
+// Имитация тач-устройства: вместо Ctrl+выделения показывается мини-меню.
+const touchBtn = document.querySelector("[data-touch-switch]");
+touchBtn?.addEventListener("click", () => {
+  host.forceTouchMenu = !host.forceTouchMenu;
+  touchBtn.textContent = host.forceTouchMenu ? "Меню как на десктопе" : "Меню как на телефоне";
+  host.hideMenu();
+  host.hide();
+});
+
 // Автозапуск состояния из хэша — для скриншотов и ручной сверки с референсом:
-// #demo=loading | success | error, дополнительно &expanded=1&theme=light
+// #demo=loading | success | error, дополнительно &expanded=1&theme=light&touch=1
 const params = new URLSearchParams(location.hash.slice(1));
 if (params.has("theme")) document.documentElement.dataset.theme = params.get("theme");
+if (params.get("touch") === "1") {
+  host.forceTouchMenu = true;
+  if (touchBtn) touchBtn.textContent = "Меню как на десктопе";
+  // Выделяем слово программно, чтобы меню появилось само — для скриншота.
+  setTimeout(() => {
+    const node = [...document.querySelectorAll(".demo__text p")][1]?.firstChild;
+    if (!node) return;
+    const text = node.textContent;
+    const start = text.indexOf("криоконит");
+    if (start < 0) return;
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, start + "криоконит".length);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }, 50);
+}
 if (params.has("demo")) {
   const mode = params.get("demo");
   demo(mode);

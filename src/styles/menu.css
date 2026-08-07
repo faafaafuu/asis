@@ -1,0 +1,77 @@
+/* Мини-меню выделения на мобильных (SPEC §3 Mobile, §7 референса).
+   Компактная плашка «Копировать / Объяснить» рядом с выделенным текстом.
+
+   В референсе меню нарисовано только в тёмном варианте, и так и оставлено:
+   системные меню выделения текста тёмные независимо от темы приложения. */
+
+.menu-layer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 62; /* выше попапа: меню появляется раньше и перекрывает его */
+}
+
+.menu {
+  box-sizing: border-box;
+  width: var(--menu-width);
+  display: flex;
+  align-items: stretch;
+  padding: 3px;
+  border-radius: var(--menu-radius);
+  background: var(--menu-bg);
+  backdrop-filter: var(--menu-backdrop);
+  -webkit-backdrop-filter: var(--menu-backdrop);
+  border: 1px solid var(--menu-border);
+  box-shadow: var(--menu-shadow);
+  font-family: var(--font-ui);
+  animation: pop-in var(--menu-in) ease-out;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .menu {
+    background: #1b1815;
+  }
+}
+
+.menu__btn {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 4px;
+  border: none;
+  background: none;
+  color: var(--menu-text);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.menu__btn:hover,
+.menu__btn:focus-visible {
+  background: var(--menu-hover);
+}
+
+.menu__btn--explain {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--menu-accent);
+}
+
+.menu__glyph {
+  font-family: var(--font-term);
+  font-style: italic;
+  font-size: 15px;
+}
+
+.menu__sep {
+  width: 1px;
+  background: var(--menu-divider);
+  margin: 4px 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu {
+    animation: none;
+  }
+}
