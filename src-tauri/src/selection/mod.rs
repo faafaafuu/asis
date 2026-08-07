@@ -73,6 +73,11 @@ impl Selection {
 }
 
 /// Насколько системная интеграция работоспособна прямо сейчас.
+///
+/// Каждая платформа конструирует только свои варианты: Windows — Ready, macOS —
+/// Ready или NeedsPermission, Linux — Unavailable. Поэтому в любой отдельно взятой
+/// сборке часть вариантов «не используется», и предупреждение здесь ложное.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Capability {
