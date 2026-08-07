@@ -142,16 +142,29 @@ export class MockProvider {
     );
   }
 
-  async ask(term, _contextText, thread, _question, { signal } = {}) {
+  async ask(term, _contextText, thread, question, { signal } = {}) {
     await sleep(this.latencyMs, signal);
     if (this.forceState === "error") throw new AiError(DEFAULT_ERROR_TEXT, { kind: "network" });
     const d = lookup(term).data ?? { def: "", simple: "", examples: [] };
+
+    // Заглушка не должна притворяться моделью: первый ответ прямо говорит, что это
+    // демонстрационный режим. Иначе одинаковые реплики на разные вопросы выглядят
+    // не как заглушка, а как сломанный продукт.
+    if (thread.length === 0) {
+      return (
+        `Это демонстрационный режим: отвечает заглушка, а не модель. ` +
+        `Настоящие ответы включаются в config.json — там указываются адрес и ключ API. ` +
+        `По существу «${term}» — ${String(d.def || "определения в демо-словаре нет").replace(/\.$/, "")}.`
+      );
+    }
+
     const variants = [
       `Если совсем коротко: ${String(d.def).replace(/\.$/, "")}.`,
       `Иначе говоря: ${d.simple || "определение выше — самое короткое, что тут есть."}`,
       `Пример по делу: ${d.examples[0] ?? "—"}.`,
     ];
-    return variants[Math.max(0, thread.length - 1) % variants.length];
+    const answer = variants[(thread.length - 1) % variants.length];
+    return `${answer} (демо-режим: вопрос «${String(question).trim()}» модели не отправлялся)`;
   }
 }
 

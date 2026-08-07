@@ -178,10 +178,23 @@ impl AiProvider for MockProvider {
         term: &str,
         _context: &str,
         thread: &[ThreadItem],
-        _question: &str,
+        question: &str,
     ) -> Result<String, AiError> {
         tokio::time::sleep(Duration::from_millis(900)).await;
         let data = mock_lookup(term);
+
+        // Заглушка не притворяется моделью: пользователь должен понимать, почему
+        // ответы не связаны с его вопросом, и как включить настоящие (SPEC §10).
+        if thread.is_empty() {
+            return Ok(format!(
+                "Это демонстрационный режим: отвечает заглушка, а не модель. Настоящие ответы \
+                 включаются в config.json — там указываются адрес и ключ API. По существу \
+                 «{term}» — {}.",
+                data.as_ref()
+                    .map(|d| d.def.trim_end_matches('.').to_string())
+                    .unwrap_or_else(|| "определения в демо-словаре нет".into())
+            ));
+        }
         let variants = [
             format!(
                 "Если совсем коротко: {}.",
@@ -203,7 +216,11 @@ impl AiProvider for MockProvider {
                     .unwrap_or_else(|| "—".into())
             ),
         ];
-        Ok(variants[thread.len() % variants.len()].clone())
+        Ok(format!(
+            "{} (демо-режим: вопрос «{}» модели не отправлялся)",
+            variants[(thread.len() - 1) % variants.len()],
+            question.trim()
+        ))
     }
 }
 
