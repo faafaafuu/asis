@@ -6,6 +6,7 @@
 // поэтому он не знает ничего про источник данных: AI-клиент передаётся снаружи.
 
 import { DEFAULT_ERROR_TEXT } from "./ai-client.js";
+import { normalizeTerm } from "./term.js";
 
 const TEMPLATE = `
 <div class="popup" data-el="root" tabindex="-1" role="dialog" aria-label="Объяснение выделенного текста">
@@ -128,11 +129,14 @@ export class PopupView {
   }
 
   /** Открытие с новым термином: полный сброс состояния, мгновенный Loading. */
-  open({ term, context = "" }) {
+  open({ term: raw, context = "" }) {
     this.#abortAll();
+    const term = normalizeTerm(raw);
     this.state = {
       term,
-      context,
+      // Исходный текст выделения не теряется: если термин был обрезан, полная
+      // версия уходит в AI контекстом.
+      context: context || raw,
       phase: "loading",
       data: null,
       expanded: false,

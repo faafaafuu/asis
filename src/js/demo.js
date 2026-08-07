@@ -52,7 +52,24 @@ touchBtn?.addEventListener("click", () => {
 
 // Автозапуск состояния из хэша — для скриншотов и ручной сверки с референсом:
 // #demo=loading | success | error, дополнительно &expanded=1&theme=light&touch=1
+// &pin=1 (фиксировать попап в углу) &ask=вопрос (отправить вопрос в тред)
 const params = new URLSearchParams(location.hash.slice(1));
+
+// Фиксация позиции нужна для съёмки: кадры разных состояний должны совпадать по
+// координатам, иначе картинки «прыгают». На реальное позиционирование не влияет.
+if (params.get("pin") === "1") {
+  host.place = () => {
+    host.layer.style.left = "24px";
+    host.layer.style.top = "24px";
+    host.layer.style.visibility = "visible";
+  };
+  const showMenu = host.showTouchMenu.bind(host);
+  host.showTouchMenu = () => {
+    showMenu();
+    host.menuLayer.style.left = "24px";
+    host.menuLayer.style.top = "24px";
+  };
+}
 if (params.has("theme")) document.documentElement.dataset.theme = params.get("theme");
 if (params.get("touch") === "1") {
   host.forceTouchMenu = true;
@@ -78,6 +95,13 @@ if (params.has("demo")) {
   if (params.get("expanded") === "1") {
     // Раскрытие возможно только после прихода ответа.
     setTimeout(() => host.view.expand(), LATENCY_MS + 60);
+  }
+  if (params.has("ask")) {
+    // Вопрос в тред — тоже только после раскрытия.
+    setTimeout(() => {
+      host.view.ui.input.value = params.get("ask");
+      host.view.submitAsk();
+    }, LATENCY_MS + 160);
   }
 }
 
