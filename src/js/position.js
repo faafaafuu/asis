@@ -38,11 +38,13 @@ export function placePopup({ anchor, size, viewport }) {
     // Не помещается сверху — зеркалим под выделение.
     top = anchor.bottom + GAP;
     flipped = true;
-    if (top + size.height > vy + vh - INSET) {
-      // И снизу не помещается — прижимаем к нижнему краю минус inset.
-      top = Math.max(vy + INSET, vy + vh - size.height - INSET);
-    }
   }
+
+  // Финальный зажим в границы экрана. Нужен не только когда окно не помещается:
+  // выделение может целиком уехать за верхний или нижний край (страницу
+  // прокрутили), и тогда «под выделением» — это далеко за пределами экрана.
+  const maxTop = Math.max(vy + INSET, vy + vh - size.height - INSET);
+  top = Math.min(Math.max(top, vy + INSET), maxTop);
 
   return { left: Math.round(left), top: Math.round(top), flipped };
 }
