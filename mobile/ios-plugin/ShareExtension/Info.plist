@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDisplayName</key>
+    <!-- Название пункта в меню «Поделиться» -->
+    <string>Объяснить</string>
+    <key>CFBundleName</key>
+    <string>SuflerShare</string>
+    <key>CFBundlePackageType</key>
+    <string>XPC!</string>
+    <key>NSExtension</key>
+    <dict>
+        <key>NSExtensionPointIdentifier</key>
+        <string>com.apple.share-services</string>
+        <key>NSExtensionPrincipalClass</key>
+        <string>ActionViewController</string>
+        <key>NSExtensionAttributes</key>
+        <dict>
+            <!-- Расширение показывается только для обычного текста и ровно одного
+                 элемента: объяснять сразу несколько фрагментов попап не умеет. -->
+            <key>NSExtensionActivationRule</key>
+            <dict>
+                <key>NSExtensionActivationSupportsText</key>
+                <true/>
+                <key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
+                <integer>0</integer>
+                <key>NSExtensionActivationSupportsImageWithMaxCount</key>
+                <integer>0</integer>
+            </dict>
+        </dict>
+    </dict>
+</dict>
+</plist>

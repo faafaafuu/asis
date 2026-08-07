@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Название пункта в системном меню выделения текста.
+         Интерфейс продукта русскоязычный (SPEC §13), поэтому и здесь русский. -->
+    <string name="sufler_process_text_label">Объяснить</string>
+</resources>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Точка входа на Android (SPEC §9.4): intent-filter ACTION_PROCESS_TEXT.
+  Система сама добавляет зарегистрированную активность пунктом в контекстное меню
+  выделения текста в любом приложении, которое поддерживает android:process_text —
+  это подавляющее большинство текстовых полей и WebView.
+
+  Активность прозрачная и без истории: пользователь не должен видеть переключение
+  задач, он видит только попап поверх приложения, из которого выделял текст.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <activity
+            android:name="app.sufler.plugin.ProcessTextActivity"
+            android:label="@string/sufler_process_text_label"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
