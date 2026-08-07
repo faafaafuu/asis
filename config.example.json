@@ -1,0 +1,20 @@
+{
+  "_comment": "Скопируйте в config.json рядом с исполняемым файлом или в каталог конфигурации приложения (см. README). Ключи можно задать и переменными окружения SUFLER_AI_PROVIDER / SUFLER_AI_ENDPOINT / SUFLER_AI_KEY / SUFLER_AI_MODEL.",
+  "ai": {
+    "provider": "mock",
+    "endpoint": "",
+    "apiKey": "",
+    "model": "",
+    "timeoutMs": 12000,
+    "retries": 1,
+    "retryBackoffMs": 400
+  },
+  "ui": {
+    "theme": "system",
+    "errorText": "Сбой сети — нет ответа"
+  },
+  "trigger": {
+    "requireLeftCtrl": true,
+    "clipboardFallback": false
+  }
+}

@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #f3efe7; }
+  * { box-sizing: border-box; }
+  a { color: oklch(0.55 0.11 255); text-decoration: none; }
+  a:hover { color: oklch(0.45 0.11 255); }
+  ::selection { background: oklch(0.85 0.09 68); color: #221f1b; }
+  @keyframes skl { 0% { opacity: .45 } 50% { opacity: .9 } 100% { opacity: .45 } }
+  @keyframes pop-in { from { opacity: 0; transform: translateY(4px) scale(.985) } to { opacity: 1; transform: none } }
+  @keyframes spin { to { transform: rotate(360deg) } }
+</style>
+</helmet>
+
+<div style="min-height: 100vh; font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; color: #221f1b; background: #f3efe7; display: flex; flex-direction: column; align-items: center; padding: 64px 24px 120px;" onMouseUp="{{ onMouseUp }}">
+
+  <div style="width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 28px;">
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: oklch(0.55 0.09 52); font-family: 'IBM Plex Mono', monospace;">
+        <span style="width: 18px; height: 1px; background: oklch(0.62 0.1 52);"></span>
+        Демо-документ · выделите любое слово
+      </div>
+      <h1 style="margin: 0; font-family: 'Instrument Serif', Georgia, serif; font-size: 46px; line-height: 1.05; font-weight: 400; letter-spacing: -0.01em; text-wrap: pretty; color: #1c1a16;">Ледниковые щиты и обратная связь <em style="font-style: italic; color: oklch(0.5 0.11 48);">альбедо</em></h1>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 18px; font-size: 16.5px; line-height: 1.68; color: #3a352d; text-wrap: pretty;">
+      <p style="margin: 0;">Альбедо — это доля падающего излучения, которую поверхность отражает обратно в атмосферу. Свежий снег отражает до 90% света, тогда как открытая вода поглощает почти всё. Именно поэтому сокращение морского льда работает как усилитель: меньше льда — больше поглощённого тепла — ещё меньше льда.</p>
+      <p style="margin: 0;">Похожий механизм действует в криосфере на суше. Абляция ускоряется, когда на поверхности ледника скапливается криоконит — тёмная пыль из минеральных частиц и микроорганизмов. Он снижает отражательную способность локально, создавая тепловые ямы глубиной до нескольких сантиметров.</p>
+      <p style="margin: 0;">Моделирование таких процессов требует учёта изостазии: по мере таяния литосфера под щитом поднимается, меняя высоту поверхности и, следовательно, температуру у её основания. Пренебрежение этой связью систематически занижает прогнозы на горизонте столетия.</p>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 14px; border-top: 1px solid #e2dbcd;">
+      <span style="font-size: 12px; color: oklch(0.55 0.06 60); font-family: 'IBM Plex Mono', monospace; margin-right: 4px;">Состояния:</span>
+      <button type="button" onClick="{{ demoLoading }}" style="font: inherit; font-size: 13px; padding: 7px 13px; border-radius: 8px; border: 1px solid #ded5c4; background: #fbf9f4; color: #3a352d; cursor: pointer;" style-hover="border-color: oklch(0.68 0.1 52); color: oklch(0.45 0.11 48);">Загрузка</button>
+      <button type="button" onClick="{{ demoSuccess }}" style="font: inherit; font-size: 13px; padding: 7px 13px; border-radius: 8px; border: 1px solid #ded5c4; background: #fbf9f4; color: #3a352d; cursor: pointer;" style-hover="border-color: oklch(0.68 0.1 52); color: oklch(0.45 0.11 48);">Ответ</button>
+      <button type="button" onClick="{{ demoError }}" style="font: inherit; font-size: 13px; padding: 7px 13px; border-radius: 8px; border: 1px solid #ded5c4; background: #fbf9f4; color: #3a352d; cursor: pointer;" style-hover="border-color: oklch(0.68 0.1 52); color: oklch(0.45 0.11 48);">Ошибка</button>
+      <span style="flex: 1;"></span>
+      <span style="font-size: 12px; color: #9a9184; font-family: 'IBM Plex Mono', monospace;">Ctrl + выделение · на телефоне — пункт в меню</span>
+    </div>
+  </div>
+
+  <sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+    <div ref="{{ menuRef }}" onMouseDown="{{ swallow }}" style="position: fixed; left: {{ mLeft }}px; top: {{ mTop }}px; z-index: 62; width: 214px; display: flex; align-items: stretch; padding: 3px; border-radius: 9px; background: rgba(27, 24, 21, 0.92); backdrop-filter: blur(18px) saturate(150%); -webkit-backdrop-filter: blur(18px) saturate(150%); border: 1px solid rgba(255,240,220,0.1); box-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 26px -8px rgba(28,20,10,0.55); font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; animation: pop-in .12s ease-out;">
+      <button type="button" onClick="{{ copyFromMenu }}" tabIndex="-1" style="flex: 1; font: inherit; font-size: 13px; padding: 7px 4px; border: none; background: none; color: #e8e2d8; border-radius: 6px; cursor: pointer;" style-hover="background: rgba(255,240,220,0.09);">Копировать</button>
+      <span style="width: 1px; background: rgba(255,240,220,0.12); margin: 4px 1px;"></span>
+      <button type="button" onClick="{{ askFromMenu }}" tabIndex="-1" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font: inherit; font-size: 13px; padding: 7px 4px; border: none; background: none; color: oklch(0.86 0.09 68); border-radius: 6px; cursor: pointer;" style-hover="background: rgba(255,240,220,0.09);"><span style="font-family: 'Instrument Serif', Georgia, serif; font-style: italic; font-size: 15px;">?</span>Объяснить</button>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isDark }}" hint-placeholder-val="{{ true }}">
+    <div ref="{{ popupRef }}" onMouseDown="{{ swallow }}" tabIndex="-1" style="position: fixed; left: {{ left }}px; top: {{ top }}px; visibility: {{ vis }}; z-index: 60; width: {{ w }}px; max-width: calc(100vw - 24px); padding: 14px; border-radius: 10px; background: rgba(27, 24, 21, 0.87); backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%); border: 1px solid rgba(255,240,220,0.1); box-shadow: 0 1px 2px rgba(0,0,0,0.3), 0 16px 44px -10px rgba(28,20,10,0.6); color: #f2ece1; font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.4; animation: pop-in .13s ease-out; outline: none;">
+      <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px;">
+        <span style="flex: 1; min-width: 0; font-family: 'Instrument Serif', Georgia, serif; font-style: italic; font-size: 19px; line-height: 1.15; color: oklch(0.86 0.09 68); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ term }}</span>
+        <sc-if value="{{ canExpand }}" hint-placeholder-val="{{ true }}">
+          <button type="button" title="Проще и с примерами" onClick="{{ toggle }}" onMouseDown="{{ swallow }}" tabIndex="-1" style="flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; border: 1px solid rgba(255,240,220,0.16); background: rgba(255,240,220,0.05); color: #cdc5b8; font-family: 'Instrument Serif', Georgia, serif; font-size: 15px; line-height: 1; cursor: pointer; padding: 0;" style-hover="border-color: oklch(0.7 0.11 62); color: oklch(0.86 0.09 68); background: rgba(255,240,220,0.1);">?</button>
+        </sc-if>
+        <sc-if value="{{ expanded }}" hint-placeholder-val="{{ false }}">
+          <span style="flex: none; width: 5px; height: 5px; border-radius: 50%; background: oklch(0.7 0.11 62); margin-bottom: 4px;"></span>
+        </sc-if>
+      </div>
+      <sc-if value="{{ loading }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 9px;">
+          <div style="display: flex; align-items: center; gap: 8px; color: #a3a3ab; font-size: 13px;">
+            <span style="width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.22); border-top-color: #d9d9df; animation: spin .7s linear infinite; display: inline-block;"></span>
+            Анализирую…
+          </div>
+          <div style="height: 9px; border-radius: 5px; background: rgba(255,255,255,0.14); width: 100%; animation: skl 1.2s ease-in-out infinite;"></div>
+          <div style="height: 9px; border-radius: 5px; background: rgba(255,255,255,0.14); width: 88%; animation: skl 1.2s ease-in-out .15s infinite;"></div>
+          <div style="height: 9px; border-radius: 5px; background: rgba(255,255,255,0.14); width: 54%; animation: skl 1.2s ease-in-out .3s infinite;"></div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ success }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 10px; max-height: 340px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.22) transparent; padding-right: 2px; color: #e8e8ec;">
+          <div>{{ answer }}</div>
+          <sc-if value="{{ expanded }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; flex-direction: column; gap: 10px; padding-top: 9px; border-top: 1px solid rgba(255,240,220,0.1);">
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: oklch(0.72 0.1 62);">Простыми словами</span>
+                <span style="color: #e8e2d8;">{{ simple }}</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: oklch(0.72 0.1 62);">Примеры</span>
+                <sc-for list="{{ examples }}" as="ex" hint-placeholder-count="2">
+                  <span style="display: flex; gap: 7px; color: #cdc5b8; font-size: 13.5px;"><span style="color: oklch(0.7 0.11 62);">·</span>{{ ex }}</span>
+                </sc-for>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 9px; padding-top: 10px; border-top: 1px solid rgba(255,240,220,0.1);">
+                <sc-for list="{{ thread }}" as="m" hint-placeholder-count="0">
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <span style="font-family: 'Instrument Serif', Georgia, serif; font-style: italic; font-size: 15px; color: oklch(0.82 0.09 68);">{{ m.q }}</span>
+                    <span style="color: #d8d2c7; font-size: 13.5px;">{{ m.a }}</span>
+                  </div>
+                </sc-for>
+                <sc-if value="{{ pending }}" hint-placeholder-val="{{ false }}">
+                  <span style="display: flex; align-items: center; gap: 7px; color: #9c9488; font-size: 12.5px;"><span style="width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,0.2); border-top-color: #d9d2c6; animation: spin .7s linear infinite; display: inline-block;"></span>Думаю…</span>
+                </sc-if>
+                <div style="display: flex; gap: 7px; align-items: center;">
+                  <input type="text" value="{{ ask }}" onChange="{{ onAsk }}" onKeyDown="{{ onAskKey }}" onMouseDown="{{ keepFocus }}" placeholder="Спросить ещё…" style="flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(255,240,220,0.14); background: rgba(255,240,220,0.045); color: #f2ece1; outline: none;" style-focus="border-color: oklch(0.7 0.11 62);" />
+                  <button type="button" onClick="{{ submitAsk }}" onMouseDown="{{ swallow }}" tabIndex="-1" title="Отправить" style="flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 7px; border: 1px solid rgba(255,240,220,0.16); background: rgba(255,240,220,0.05); color: #ded5c6; font-size: 13px; cursor: pointer; padding: 0;" style-hover="border-color: oklch(0.7 0.11 62); color: oklch(0.86 0.09 68);">↵</button>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+      <sc-if value="{{ failed }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; align-items: center; gap: 8px; color: #f0b0a8; font-size: 13px;">
+          <span style="width: 6px; height: 6px; border-radius: 50%; background: #e2705f; display: inline-block;"></span>
+          {{ errorText }}
+        </div>
+      </sc-if>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isLight }}" hint-placeholder-val="{{ false }}">
+    <div ref="{{ popupRef }}" onMouseDown="{{ swallow }}" tabIndex="-1" style="position: fixed; left: {{ left }}px; top: {{ top }}px; visibility: {{ vis }}; z-index: 60; width: {{ w }}px; max-width: calc(100vw - 24px); padding: 14px; border-radius: 10px; background: rgba(253, 251, 246, 0.9); backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%); border: 1px solid rgba(60,45,25,0.09); box-shadow: 0 1px 2px rgba(40,30,15,0.1), 0 16px 44px -12px rgba(40,30,15,0.32); color: #221f1b; font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.4; animation: pop-in .13s ease-out; outline: none;">
+      <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 9px;">
+        <span style="flex: 1; min-width: 0; font-family: 'Instrument Serif', Georgia, serif; font-style: italic; font-size: 19px; line-height: 1.15; color: oklch(0.48 0.11 48); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ term }}</span>
+        <sc-if value="{{ canExpand }}" hint-placeholder-val="{{ true }}">
+          <button type="button" title="Проще и с примерами" onClick="{{ toggle }}" onMouseDown="{{ swallow }}" tabIndex="-1" style="flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; border: 1px solid rgba(60,45,25,0.14); background: rgba(60,45,25,0.035); color: #6b6355; font-family: 'Instrument Serif', Georgia, serif; font-size: 15px; line-height: 1; cursor: pointer; padding: 0;" style-hover="border-color: oklch(0.68 0.1 52); color: oklch(0.45 0.11 48); background: rgba(60,45,25,0.07);">?</button>
+        </sc-if>
+        <sc-if value="{{ expanded }}" hint-placeholder-val="{{ false }}">
+          <span style="flex: none; width: 5px; height: 5px; border-radius: 50%; background: oklch(0.62 0.11 52); margin-bottom: 4px;"></span>
+        </sc-if>
+      </div>
+      <sc-if value="{{ loading }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; flex-direction: column; gap: 9px;">
+          <div style="display: flex; align-items: center; gap: 8px; color: #6f6a63; font-size: 13px;">
+            <span style="width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,0.14); border-top-color: #4a4741; animation: spin .7s linear infinite; display: inline-block;"></span>
+            Анализирую…
+          </div>
+          <div style="height: 9px; border-radius: 5px; background: rgba(20,18,15,0.09); width: 100%; animation: skl 1.2s ease-in-out infinite;"></div>
+          <div style="height: 9px; border-radius: 5px; background: rgba(20,18,15,0.09); width: 88%; animation: skl 1.2s ease-in-out .15s infinite;"></div>
+          <div style="height: 9px; border-radius: 5px; background: rgba(20,18,15,0.09); width: 54%; animation: skl 1.2s ease-in-out .3s infinite;"></div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ success }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; flex-direction: column; gap: 10px; max-height: 340px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(20,18,15,0.2) transparent; padding-right: 2px; color: #2c2a27;">
+          <div>{{ answer }}</div>
+          <sc-if value="{{ expanded }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; flex-direction: column; gap: 10px; padding-top: 9px; border-top: 1px solid rgba(60,45,25,0.1);">
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: oklch(0.55 0.11 52);">Простыми словами</span>
+                <span style="color: #302c25;">{{ simple }}</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: oklch(0.55 0.11 52);">Примеры</span>
+                <sc-for list="{{ examples }}" as="ex" hint-placeholder-count="2">
+                  <span style="display: flex; gap: 7px; color: #5c5548; font-size: 13.5px;"><span style="color: oklch(0.62 0.11 52);">·</span>{{ ex }}</span>
+                </sc-for>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 9px; padding-top: 10px; border-top: 1px solid rgba(60,45,25,0.1);">
+                <sc-for list="{{ thread }}" as="m" hint-placeholder-count="0">
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <span style="font-family: 'Instrument Serif', Georgia, serif; font-style: italic; font-size: 15px; color: oklch(0.48 0.11 48);">{{ m.q }}</span>
+                    <span style="color: #3a352d; font-size: 13.5px;">{{ m.a }}</span>
+                  </div>
+                </sc-for>
+                <sc-if value="{{ pending }}" hint-placeholder-val="{{ false }}">
+                  <span style="display: flex; align-items: center; gap: 7px; color: #776f61; font-size: 12.5px;"><span style="width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid rgba(0,0,0,0.14); border-top-color: #4a4741; animation: spin .7s linear infinite; display: inline-block;"></span>Думаю…</span>
+                </sc-if>
+                <div style="display: flex; gap: 7px; align-items: center;">
+                  <input type="text" value="{{ ask }}" onChange="{{ onAsk }}" onKeyDown="{{ onAskKey }}" onMouseDown="{{ keepFocus }}" placeholder="Спросить ещё…" style="flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 7px; border: 1px solid rgba(60,45,25,0.14); background: rgba(60,45,25,0.03); color: #221f1b; outline: none;" style-focus="border-color: oklch(0.68 0.1 52);" />
+                  <button type="button" onClick="{{ submitAsk }}" onMouseDown="{{ swallow }}" tabIndex="-1" title="Отправить" style="flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 7px; border: 1px solid rgba(60,45,25,0.14); background: rgba(60,45,25,0.035); color: #4a4438; font-size: 13px; cursor: pointer; padding: 0;" style-hover="border-color: oklch(0.68 0.1 52); color: oklch(0.45 0.11 48);">↵</button>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+      <sc-if value="{{ failed }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; align-items: center; gap: 8px; color: #a3402f; font-size: 13px;">
+          <span style="width: 6px; height: 6px; border-radius: 50%; background: #c2503c; display: inline-block;"></span>
+          {{ errorText }}
+        </div>
+      </sc-if>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;'dark' | 'light'&quot;},&quot;trigger&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;ctrl&quot;,&quot;always&quot;],&quot;default&quot;:&quot;ctrl&quot;,&quot;tsType&quot;:&quot;'ctrl' | 'always'&quot;,&quot;section&quot;:&quot;Поведение&quot;},&quot;forceTouchMenu&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Поведение&quot;},&quot;responseState&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;auto&quot;,&quot;loading&quot;,&quot;error&quot;],&quot;default&quot;:&quot;auto&quot;,&quot;tsType&quot;:&quot;'auto' | 'loading' | 'error'&quot;,&quot;section&quot;:&quot;Поведение&quot;},&quot;latency&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0,&quot;max&quot;:3000,&quot;step&quot;:100,&quot;default&quot;:900,&quot;unit&quot;:&quot;ms&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Поведение&quot;},&quot;errorText&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Сбой сети — нет ответа&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Поведение&quot;}}">
+const ANSWERS = {
+  "излучение": {
+    def: "Перенос энергии волнами или частицами — в этом тексте речь о солнечном свете и тепле, приходящих на поверхность.",
+    simple: "Это энергия, которая летит от источника сама, без нагретого воздуха или воды-посредника. Долетела — нагрела то, во что попала.",
+    examples: ["солнечный свет, нагревающий снег", "тепло от костра, которое чувствуешь на расстоянии", "инфракрасный поток, уходящий с Земли обратно в космос"]
+  },
+  "альбедо": {
+    def: "Отражательная способность поверхности: доля падающего света, которая уходит обратно.",
+    simple: "Насколько поверхность «светлая» для солнца. Светлая отражает и остаётся холодной, тёмная поглощает и греется.",
+    examples: ["свежий снег — 0.8–0.9", "открытый океан — около 0.06", "белая крыша летом прохладнее чёрной"]
+  },
+  "криоконит": {
+    def: "Тёмный осадок из минеральной пыли, сажи и микроорганизмов на поверхности ледника.",
+    simple: "Грязь на льду. Она темнее льда, потому сильнее нагревается и проплавляет себе ямку.",
+    examples: ["криоконитовые колодцы глубиной в несколько сантиметров", "пыль от лесных пожаров, осевшая на ледник"]
+  },
+  "абляция": {
+    def: "Убыль массы льда: таяние, испарение, сублимация и механический отрыв.",
+    simple: "Всё, из-за чего ледник теряет лёд. Противоположность накоплению снега.",
+    examples: ["стаявший за лето слой на поверхности", "откол айсбергов от языка ледника"]
+  },
+  "изостазия": {
+    def: "Равновесие литосферы на пластичной мантии: снимите нагрузку — кора поднимется.",
+    simple: "Земная кора плавает, как плот. Убрали с него груз льда — плот всплывает, но очень медленно.",
+    examples: ["Скандинавия поднимается ~8 мм в год после последнего оледенения", "прогиб коры под Гренландским щитом"]
+  },
+  "криосфера": {
+    def: "Все формы льда в системе Земли: морской лёд, ледники и щиты, снежный покров, мерзлота.",
+    simple: "Вся замёрзшая часть планеты, вместе взятая.",
+    examples: ["арктический морской лёд", "мерзлота Сибири", "сезонный снежный покров"]
+  },
+  "литосфера": {
+    def: "Жёсткая внешняя оболочка Земли: кора и верхняя часть мантии.",
+    simple: "Твёрдая «скорлупа» планеты, которая лежит на более вязком слое под ней.",
+    examples: ["толщина под океаном — около 70 км", "континентальная литосфера — до 150 км"]
+  }
+};
+
+const STEMS = Object.keys(ANSWERS);
+
+function lookup(raw) {
+  const w = raw.toLowerCase().replace(/[^a-zа-яё\- ]/gi, "").trim();
+  if (ANSWERS[w]) return { term: w, data: ANSWERS[w] };
+  const base = w.replace(/(ами|ями|ах|ях|ов|ей|ий|ие|ия|ию|ей|ем|ом|ой|ы|и|е|у|ю|а|я)$/u, "");
+  for (const k of STEMS) {
+    const kb = k.replace(/(а|я|е|о)$/u, "");
+    if (base.length > 3 && (k.startsWith(base) || base.startsWith(kb))) return { term: k, data: ANSWERS[k] };
+  }
+  return { term: raw, data: null };
+}
+
+class Component extends DCLogic {
+  state = { open: false, phase: "loading", term: "", data: null, expanded: false, left: 0, top: 0, placed: false, ask: "", thread: [], pending: false };
+
+  MENU_W = 214;
+
+  componentDidMount() {
+    this.onKey = (e) => {
+      if (e.code === "ControlLeft") this.ctrlLeft = true;
+      if (e.key === "Escape") { if (this.state.menuOpen) this.setState({ menuOpen: false }); if (this.state.open) this.close(); }
+    };
+    this.onKeyUp = (e) => { if (e.code === "ControlLeft") this.ctrlLeft = false; };
+    this.onSelectionChange = () => {
+      if (!this.isTouch()) return;
+      clearTimeout(this.selTimer);
+      this.selTimer = setTimeout(() => {
+        const sel = window.getSelection();
+        const text = sel ? sel.toString().trim() : "";
+        if (!text || !sel.rangeCount) { if (this.state.menuOpen) this.setState({ menuOpen: false }); return; }
+        this.range = sel.getRangeAt(0).cloneRange();
+        const rects = this.range.getClientRects();
+        const r = rects.length ? rects[0] : this.range.getBoundingClientRect();
+        const pad = 10, w = this.MENU_W;
+        let left = Math.max(pad, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - pad));
+        let top = r.top - 48;
+        if (top < pad) top = r.bottom + 12;
+        this.setState({ menuOpen: true, mLeft: Math.round(left), mTop: Math.round(top), menuText: text });
+      }, 300);
+    };
+    document.addEventListener("selectionchange", this.onSelectionChange);
+    document.addEventListener("keyup", this.onKeyUp, true);
+    this.onDocDown = (e) => {
+      if (this.state.menuOpen && !(this.menuEl && this.menuEl.contains(e.target))) this.setState({ menuOpen: false });
+      if (!this.state.open) return;
+      if (this.el && this.el.contains(e.target)) return;
+      this.close();
+    };
+    this.onScroll = () => {
+      if (!this.state.open) return;
+      if (this.raf) return;
+      this.raf = requestAnimationFrame(() => {
+        this.raf = null;
+        if (this.range) {
+          const rects = this.range.getClientRects();
+          const r = rects.length ? rects[rects.length - 1] : this.range.getBoundingClientRect();
+          if (!r.width && !r.height) return;
+          if (r.bottom < -40 || r.top > window.innerHeight + 40) { this.close(); return; }
+          this.anchor = { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width };
+        }
+        this.place();
+      });
+    };
+    document.addEventListener("keydown", this.onKey, true);
+    document.addEventListener("mousedown", this.onDocDown, true);
+    window.addEventListener("resize", this.onScroll);
+    window.addEventListener("scroll", this.onScroll, true);
+  }
+  isTouch() {
+    if (this.props.forceTouchMenu) return true;
+    return window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  }
+
+  componentWillUnmount() {
+    document.removeEventListener("selectionchange", this.onSelectionChange);
+    document.removeEventListener("keyup", this.onKeyUp, true);
+    document.removeEventListener("keydown", this.onKey, true);
+    document.removeEventListener("mousedown", this.onDocDown, true);
+    window.removeEventListener("resize", this.onScroll);
+    window.removeEventListener("scroll", this.onScroll, true);
+    clearTimeout(this.timer);
+  }
+  componentDidUpdate() { this.place(); }
+
+  place() {
+    if (!this.state.open || !this.el || !this.anchor) return;
+    const gap = 12, pad = 12;
+    const r = this.anchor;
+    const w = this.el.offsetWidth, h = this.el.offsetHeight;
+    let left = r.left + r.width / 2 - w / 2;
+    left = Math.max(pad, Math.min(left, window.innerWidth - w - pad));
+    let top = r.top - gap - h;
+    if (top < pad) {
+      top = r.bottom + gap;
+      if (top + h > window.innerHeight - pad) top = Math.max(pad, window.innerHeight - h - pad);
+    }
+    if (!this.state.placed || Math.abs(left - this.state.left) > 0.5 || Math.abs(top - this.state.top) > 0.5) {
+      this.setState({ left: Math.round(left), top: Math.round(top), placed: true });
+    }
+  }
+
+  open(anchor, term, forced) {
+    this.anchor = anchor;
+    clearTimeout(this.timer);
+    const mode = forced || this.props.responseState || "auto";
+    const hit = lookup(term);
+    this.setState({ open: true, placed: false, phase: "loading", term: hit.term, data: null, expanded: false, ask: "", thread: [], pending: false });
+    if (mode === "loading") return;
+    const delay = Number(this.props.latency ?? 900);
+    this.timer = setTimeout(() => {
+      if (mode === "error") { this.setState({ phase: "error" }); return; }
+      const data = hit.data || { def: "Определения для «" + term + "» нет — выделите одно слово или термин.", simple: "", examples: [] };
+      this.setState({ phase: "success", data: data });
+    }, delay);
+  }
+
+  close() { clearTimeout(this.timer); clearTimeout(this.askTimer); this.setState({ open: false, placed: false }); }
+
+  submitAsk = () => {
+    const q = this.state.ask.trim();
+    if (!q || this.state.pending) return;
+    const i = this.state.thread.length;
+    this.setState({ thread: this.state.thread.concat([{ q: q, a: "" }]), ask: "", pending: true });
+    clearTimeout(this.askTimer);
+    this.askTimer = setTimeout(() => {
+      const d = this.state.data || { def: "", simple: "", examples: [] };
+      const variants = [
+        "Если совсем коротко: " + String(d.def).replace(/\.$/, "") + ".",
+        "Иначе говоря: " + (d.simple || "определение выше — самое короткое, что тут есть."),
+        "Пример по делу: " + (d.examples[0] || "—") + "."
+      ];
+      const thread = this.state.thread.slice();
+      if (thread[i]) thread[i] = { q: thread[i].q, a: variants[i % variants.length] };
+      this.setState({ thread: thread, pending: false });
+    }, Number(this.props.latency ?? 900));
+  };
+
+  handleMouseUp = (e) => {
+    if (this.el && this.el.contains(e.target)) return;
+    if (this.menuEl && this.menuEl.contains(e.target)) return;
+    if (e.target.closest && e.target.closest("button")) return;
+    if (this.isTouch()) return;
+    const needCtrl = (this.props.trigger || "ctrl") === "ctrl";
+    if (needCtrl && !(e.ctrlKey && this.ctrlLeft !== false)) return;
+    setTimeout(() => {
+      const sel = window.getSelection();
+      const text = sel ? sel.toString().trim() : "";
+      if (!text || !sel.rangeCount) { if (this.state.open) this.close(); return; }
+      this.range = sel.getRangeAt(0).cloneRange();
+      const rects = this.range.getClientRects();
+      const r = rects.length ? rects[rects.length - 1] : this.range.getBoundingClientRect();
+      this.open({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }, text);
+    }, 0);
+  };
+
+  demo(mode) {
+    this.range = null;
+    const node = document.querySelector("p");
+    const r = node ? node.getBoundingClientRect() : { left: 300, right: 400, top: 300, bottom: 320, width: 100 };
+    this.open({ left: r.left + 40, right: r.left + 140, top: r.top, bottom: r.top + 22, width: 100 }, "альбедо", mode);
+  }
+
+  renderVals() {
+    const theme = this.props.theme || "dark";
+    const s = this.state;
+    return {
+      isDark: s.open && theme === "dark",
+      isLight: s.open && theme === "light",
+      vis: s.placed ? "visible" : "hidden",
+      left: s.left, top: s.top,
+      term: s.term,
+      answer: s.data ? s.data.def : "",
+      simple: s.data ? s.data.simple : "",
+      examples: s.data && s.expanded ? s.data.examples : [],
+      canExpand: !!(s.data && s.data.simple) && !s.expanded,
+      w: s.expanded ? 480 : 400,
+      expanded: !!(s.data && s.expanded),
+      toggle: (e) => { e.preventDefault(); this.setState({ expanded: true }); },
+      ask: s.ask,
+      thread: s.thread,
+      pending: s.pending,
+      onAsk: (e) => this.setState({ ask: e.target.value }),
+      onAskKey: (e) => { if (e.key === "Enter") { e.preventDefault(); this.submitAsk(); } },
+      submitAsk: (e) => { e.preventDefault(); this.submitAsk(); },
+      keepFocus: (e) => e.stopPropagation(),
+      menuOpen: !!s.menuOpen && !s.open,
+      mLeft: s.mLeft || 0,
+      mTop: s.mTop || 0,
+      menuRef: (n) => { this.menuEl = n; },
+      askFromMenu: (e) => {
+        e.preventDefault();
+        const text = s.menuText || "";
+        this.setState({ menuOpen: false });
+        if (!text || !this.range) return;
+        const rects = this.range.getClientRects();
+        const r = rects.length ? rects[rects.length - 1] : this.range.getBoundingClientRect();
+        this.open({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }, text);
+      },
+      copyFromMenu: (e) => {
+        e.preventDefault();
+        const text = s.menuText || "";
+        if (text && navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+        this.setState({ menuOpen: false });
+      },
+      loading: s.phase === "loading",
+      success: s.phase === "success",
+      failed: s.phase === "error",
+      errorText: this.props.errorText ?? "Сбой сети — нет ответа",
+      popupRef: (n) => { this.el = n; },
+      onMouseUp: this.handleMouseUp,
+      swallow: (e) => e.preventDefault(),
+      demoLoading: () => this.demo("loading"),
+      demoSuccess: () => this.demo("success"),
+      demoError: () => this.demo("error")
+    };
+  }
+}
+</script>
+</body>
+</html>
