@@ -16,26 +16,37 @@ const host = new WebHost({
   requireLeftCtrl: true,
 }).mount();
 
-/** Демо-кнопки: тот же попап, но с зафиксированным состоянием ответа. */
-function demo(mode) {
+/**
+ * Демо-кнопки: тот же попап, но с зафиксированным состоянием ответа.
+ *
+ * Якорь — сама нажатая кнопка. Раньше попап привязывался к первому абзацу, и на
+ * телефоне это ломалось: пока доскроллишь до кнопок внизу страницы, абзац уходит за
+ * верхний край экрана, и окно открывается там же — за пределами видимого.
+ */
+function demo(mode, anchorEl) {
   host.view.client = new MockProvider({
     latencyMs: LATENCY_MS,
     forceState: mode === "success" ? "auto" : mode,
   });
-  const p = document.querySelector(".demo__text p");
-  const r = p
-    ? p.getBoundingClientRect()
-    : { left: 300, right: 400, top: 300, bottom: 320, width: 100 };
-  // Якорь имитирует выделенное слово внутри первого абзаца.
+
+  const r = anchorEl?.getBoundingClientRect();
+  const anchor = r
+    ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }
+    : // Без элемента — по центру экрана: попап всё равно должен быть виден.
+      {
+        left: window.innerWidth / 2 - 50,
+        right: window.innerWidth / 2 + 50,
+        top: window.innerHeight / 2,
+        bottom: window.innerHeight / 2 + 22,
+        width: 100,
+      };
+
   host.range = null;
-  host.showAt(
-    { left: r.left + 40, right: r.left + 140, top: r.top, bottom: r.top + 22, width: 100 },
-    "альбедо",
-  );
+  host.showAt(anchor, "альбедо");
 }
 
 for (const btn of document.querySelectorAll("[data-demo]")) {
-  btn.addEventListener("click", () => demo(btn.dataset.demo));
+  btn.addEventListener("click", () => demo(btn.dataset.demo, btn));
 }
 
 // Переключатель темы: попап читает её из data-theme на <html>.
@@ -96,7 +107,7 @@ if (params.get("touch") === "1") {
 }
 if (params.has("demo")) {
   const mode = params.get("demo");
-  demo(mode);
+  demo(mode, document.querySelector(".demo__text p"));
   if (params.get("expanded") === "1") {
     // Раскрытие возможно только после прихода ответа.
     setTimeout(() => host.view.expand(), LATENCY_MS + 60);
@@ -108,6 +119,25 @@ if (params.has("demo")) {
       host.view.submitAsk();
     }, LATENCY_MS + 160);
   }
+}
+
+// Диагностика для разбора проблем на чужих устройствах: #debug=1 показывает
+// строкой, где именно оказался попап. Без неё удалённо непонятно, не открылся он
+// или открылся за пределами экрана.
+if (params.get("debug") === "1") {
+  const panel = document.createElement("div");
+  panel.style.cssText =
+    "position:fixed;left:0;right:0;bottom:0;z-index:99;padding:6px 8px;" +
+    "font:12px/1.35 monospace;background:#1b1815;color:#f2ece1;white-space:pre-wrap";
+  document.body.append(panel);
+  setInterval(() => {
+    const r = host.view.el.getBoundingClientRect();
+    panel.textContent =
+      `скрыт=${host.layer.hidden} видимость=${host.layer.style.visibility || "—"}\n` +
+      `окно: ${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}×${Math.round(r.height)}\n` +
+      `экран: ${window.innerWidth}×${window.innerHeight}, прокрутка ${Math.round(window.scrollY)}\n` +
+      `на экране: ${r.top < window.innerHeight && r.bottom > 0 ? "да" : "НЕТ"}`;
+  }, 250);
 }
 
 // Восстанавливаем обычный (не форсированный) клиент после демо-показа,
