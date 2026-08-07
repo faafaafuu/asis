@@ -1,0 +1,132 @@
+/* Стили демо-документа — ровно те, что в `AI Popup.dc.html`.
+   Это страница для проверки попапа в браузере, в поставку приложения она не входит. */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #f3efe7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: oklch(0.85 0.09 68);
+  color: #221f1b;
+}
+
+.demo {
+  min-height: 100vh;
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  color: #221f1b;
+  background: #f3efe7;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 64px 24px 120px;
+}
+
+.demo__col {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.demo__header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.demo__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: oklch(0.55 0.09 52);
+  font-family: "IBM Plex Mono", monospace;
+}
+
+.demo__rule {
+  width: 18px;
+  height: 1px;
+  background: oklch(0.62 0.1 52);
+}
+
+.demo__title {
+  margin: 0;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 46px;
+  line-height: 1.05;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  text-wrap: pretty;
+  color: #1c1a16;
+}
+
+.demo__title em {
+  font-style: italic;
+  color: oklch(0.5 0.11 48);
+}
+
+.demo__text {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  font-size: 16.5px;
+  line-height: 1.68;
+  color: #3a352d;
+  text-wrap: pretty;
+}
+
+.demo__text p {
+  margin: 0;
+}
+
+.demo__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 14px;
+  border-top: 1px solid #e2dbcd;
+}
+
+.demo__bar-label {
+  font-size: 12px;
+  color: oklch(0.55 0.06 60);
+  font-family: "IBM Plex Mono", monospace;
+  margin-right: 4px;
+}
+
+.demo__btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 13px;
+  border-radius: 8px;
+  border: 1px solid #ded5c4;
+  background: #fbf9f4;
+  color: #3a352d;
+  cursor: pointer;
+}
+
+.demo__btn:hover {
+  border-color: oklch(0.68 0.1 52);
+  color: oklch(0.45 0.11 48);
+}
+
+.demo__spacer {
+  flex: 1;
+}
+
+.demo__hint {
+  font-size: 12px;
+  color: #9a9184;
+  font-family: "IBM Plex Mono", monospace;
+}

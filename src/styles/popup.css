@@ -1,0 +1,380 @@
+/* Вёрстка попапа — перенос `AI Popup.dc.html` из инлайновых стилей в классы.
+   Значения не меняются: там, где в референсе 9px или 13.5px, здесь тоже 9px и 13.5px. */
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes skl {
+  0% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Слой попапа в веб-режиме. В приложении его нет: попап там — отдельное системное
+   окно, поэтому ни transform, ни overflow родителей на него не влияют (SPEC §8). */
+.popup-layer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+}
+
+.popup {
+  box-sizing: border-box;
+  width: var(--pop-width);
+  max-width: calc(100vw - 24px);
+  padding: var(--pop-pad);
+  border-radius: var(--pop-radius);
+  background: var(--bg);
+  backdrop-filter: var(--backdrop);
+  -webkit-backdrop-filter: var(--backdrop);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--size-ui);
+  line-height: var(--line-ui);
+  animation: pop-in var(--pop-in) ease-out;
+  outline: none;
+}
+
+.popup[data-expanded="true"] {
+  width: var(--pop-width-expanded);
+}
+
+/* Фолбэк по SPEC §5 и §12.6: без blur — сплошной фон, а не полупрозрачная каша. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .popup {
+    background: var(--bg-solid);
+  }
+}
+
+.popup *,
+.popup *::before,
+.popup *::after {
+  box-sizing: border-box;
+}
+
+/* Состояния переключаются атрибутом hidden, а у блоков попапа собственный display
+   (flex/grid), который перебил бы его. Поэтому hidden делаем безусловным. */
+.popup [hidden] {
+  display: none !important;
+}
+
+/* ── Шапка ──────────────────────────────────────────────────────────────── */
+
+.popup__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.popup__term {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-term);
+  font-style: italic;
+  font-size: var(--size-term);
+  line-height: var(--line-term);
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popup__expand {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--btn-color);
+  font-family: var(--font-term);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.popup__expand:hover,
+.popup__expand:focus-visible {
+  border-color: var(--btn-hover-border);
+  color: var(--btn-hover-color);
+  background: var(--btn-hover-bg);
+}
+
+/* Точка вместо кнопки «?» после раскрытия. */
+.popup__mark {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  margin-bottom: 4px;
+}
+
+/* ── Loading ────────────────────────────────────────────────────────────── */
+
+.popup__loading {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.popup__loading-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--size-secondary);
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--spin-track);
+  border-top-color: var(--spin-head);
+  animation: spin var(--spin) linear infinite;
+}
+
+.spinner--sm {
+  width: 10px;
+  height: 10px;
+  border-top-color: var(--pending-spin-head);
+}
+
+.skeleton {
+  height: 9px;
+  border-radius: 5px;
+  background: var(--skeleton);
+  animation: skl var(--skeleton-cycle) ease-in-out infinite;
+}
+
+.skeleton--1 {
+  width: 100%;
+}
+.skeleton--2 {
+  width: 88%;
+  animation-delay: 0.15s;
+}
+.skeleton--3 {
+  width: 54%;
+  animation-delay: 0.3s;
+}
+
+/* ── Success ────────────────────────────────────────────────────────────── */
+
+.popup__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: var(--pop-body-max-height);
+  overflow-y: auto;
+  padding-right: 2px;
+  color: var(--text-body);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+
+.popup__body::-webkit-scrollbar {
+  width: 6px;
+}
+.popup__body::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 3px;
+}
+.popup__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.popup__extra {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--divider);
+}
+
+.popup__section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.popup__label {
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--label);
+}
+
+.popup__simple {
+  color: var(--simple);
+}
+
+.popup__examples {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.popup__example {
+  display: flex;
+  gap: 7px;
+  color: var(--example);
+  font-size: var(--size-example);
+}
+
+.popup__bullet {
+  color: var(--accent-dim);
+}
+
+/* ── Follow-up тред ─────────────────────────────────────────────────────── */
+
+.popup__thread {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 10px;
+  border-top: 1px solid var(--divider);
+}
+
+.popup__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.popup__message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.popup__question {
+  font-family: var(--font-term);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--thread-q);
+}
+
+.popup__answer-line {
+  color: var(--thread-a);
+  font-size: var(--size-example);
+}
+
+.popup__pending {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--pending);
+  font-size: 12.5px;
+}
+
+.popup__ask {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.popup__input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--size-secondary);
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--input-color);
+  outline: none;
+}
+
+.popup__input::placeholder {
+  color: var(--text-muted);
+}
+
+.popup__input:focus {
+  border-color: var(--btn-hover-border);
+}
+
+.popup__send {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--send-color);
+  font-size: var(--size-secondary);
+  cursor: pointer;
+}
+
+.popup__send:hover,
+.popup__send:focus-visible {
+  border-color: var(--btn-hover-border);
+  color: var(--btn-hover-color);
+}
+
+/* ── Error ──────────────────────────────────────────────────────────────── */
+
+.popup__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--error-text);
+  font-size: var(--size-secondary);
+}
+
+.popup__error-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--error);
+  display: inline-block;
+}
+
+/* ── Доступность ────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .popup {
+    animation: none;
+  }
+  .skeleton {
+    animation: none;
+    opacity: 0.7;
+  }
+  .spinner {
+    animation-duration: 2s;
+  }
+}

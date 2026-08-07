@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Суфлёр · демо-документ</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/popup.css" />
+    <link rel="stylesheet" href="./styles/demo.css" />
+  </head>
+  <body>
+    <!-- Демо-документ из дизайн-референса: на нём проверяются вёрстка, тайминги,
+         позиционирование и все состояния попапа без сборки Tauri. -->
+    <div class="demo">
+      <div class="demo__col">
+        <div class="demo__header">
+          <div class="demo__eyebrow">
+            <span class="demo__rule"></span>
+            Демо-документ · выделите любое слово
+          </div>
+          <h1 class="demo__title">
+            Ледниковые щиты и обратная связь <em>альбедо</em>
+          </h1>
+        </div>
+
+        <div class="demo__text">
+          <p>
+            Альбедо — это доля падающего излучения, которую поверхность отражает обратно в
+            атмосферу. Свежий снег отражает до 90% света, тогда как открытая вода поглощает почти
+            всё. Именно поэтому сокращение морского льда работает как усилитель: меньше льда —
+            больше поглощённого тепла — ещё меньше льда.
+          </p>
+          <p>
+            Похожий механизм действует в криосфере на суше. Абляция ускоряется, когда на
+            поверхности ледника скапливается криоконит — тёмная пыль из минеральных частиц и
+            микроорганизмов. Он снижает отражательную способность локально, создавая тепловые ямы
+            глубиной до нескольких сантиметров.
+          </p>
+          <p>
+            Моделирование таких процессов требует учёта изостазии: по мере таяния литосфера под
+            щитом поднимается, меняя высоту поверхности и, следовательно, температуру у её
+            основания. Пренебрежение этой связью систематически занижает прогнозы на горизонте
+            столетия.
+          </p>
+        </div>
+
+        <div class="demo__bar">
+          <span class="demo__bar-label">Состояния:</span>
+          <button class="demo__btn" type="button" data-demo="loading">Загрузка</button>
+          <button class="demo__btn" type="button" data-demo="success">Ответ</button>
+          <button class="demo__btn" type="button" data-demo="error">Ошибка</button>
+          <span class="demo__bar-label" style="margin-left: 12px">Тема:</span>
+          <button class="demo__btn" type="button" data-theme-switch>Светлая</button>
+          <span class="demo__spacer"></span>
+          <span class="demo__hint">Ctrl + выделение · на телефоне — пункт в меню</span>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./js/demo.js"></script>
+  </body>
+</html>
