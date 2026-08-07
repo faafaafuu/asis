@@ -12,7 +12,7 @@ use crate::config::TriggerConfig;
 mod platform;
 
 #[cfg(target_os = "macos")]
-#[path = "unsupported.rs"]
+#[path = "macos.rs"]
 mod platform;
 
 #[cfg(target_os = "linux")]

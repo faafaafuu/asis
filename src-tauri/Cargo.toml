@@ -52,8 +52,10 @@ windows = { version = "0.62", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Только CFString/CFRelease. Функции Accessibility API и CoreGraphics объявлены
+# вручную в selection/macos.rs: обёрточных крейтов для AX нужного качества нет,
+# а структуры CGRect/CFRange — три строки на repr(C).
 core-foundation = "0.10"
-core-graphics = "0.25"
 
 [features]
 # По умолчанию Tauri сам выбирает нужное; кастомных фич у приложения нет.
