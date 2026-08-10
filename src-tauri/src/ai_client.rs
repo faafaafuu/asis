@@ -41,10 +41,15 @@ pub enum AiError {
 
 impl AiError {
     /// Повторяем только то, что имеет шанс пройти со второй попытки.
+    ///
+    /// 429 сюда не входит намеренно. Ограничение частоты снимается через минуты
+    /// или сутки, а не через полсекунды: повтор гарантированно упрётся в тот же
+    /// отказ и потратит вторую попытку из дневной квоты. У бесплатных тарифов,
+    /// где эта квота и так мала, так сгорает вдвое больше запросов.
     fn retryable(&self) -> bool {
         match self {
             AiError::Network | AiError::Timeout => true,
-            AiError::Http(status) => *status == 408 || *status == 429 || *status >= 500,
+            AiError::Http(status) => *status == 408 || *status >= 500,
             _ => false,
         }
     }
@@ -53,6 +58,11 @@ impl AiError {
     pub fn user_text(&self, default_text: &str) -> String {
         match self {
             AiError::Network | AiError::Timeout => default_text.to_string(),
+            // Голое «ошибка 429» человеку ничего не говорит и выглядит как поломка,
+            // хотя чинится ожиданием.
+            AiError::Http(429) => {
+                "Сервис ограничил частоту запросов — попробуйте позже".to_string()
+            }
             other => other.to_string(),
         }
     }
@@ -254,11 +264,17 @@ impl AiProvider for MockProvider {
 /* ─────────────────────────────── HTTP ─────────────────────────────────── */
 
 const SYSTEM_PROMPT: &str = concat!(
-    "Ты объясняешь выделенный пользователем термин. Отвечай по-русски, даже если сам термин ",
-    "на другом языке — английское слово объясняется русским текстом. Отвечай по сути, без служебных ",
-    "фраз вроде «это фрагмент из абзаца». Верни строгий JSON: ",
-    r#"{"def": "одно-два предложения", "simple": "то же максимально просто", "examples": ["2–3 коротких примера"]}."#
+    "Ты объясняешь термин, который выделил пользователь. Ответь одним-двумя предложениями ",
+    "обычным текстом, по-русски — даже если сам термин на другом языке. Только объяснение: ",
+    "без вступлений, без списков, без разметки и без JSON."
 );
+
+/// Потолок длины ответа.
+///
+/// Без него модель пишет, пока не выговорится. В попапе это лишние секунды
+/// ожидания ради текста, который туда всё равно не поместится, а мелкие модели
+/// на длинной дистанции ещё и уходят в повторы и бессвязицу.
+const ANSWER_LIMIT: u32 = 220;
 
 /// Заготовка реального провайдера: нейтральный chat-подобный формат.
 /// Под конкретный API подгоняется правкой `request_body`/`extract_text`.
@@ -299,13 +315,26 @@ impl HttpProvider {
     }
 
     async fn send(&self, messages: Vec<Message<'_>>) -> Result<serde_json::Value, AiError> {
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": (!self.model.is_empty()).then(|| self.model.clone()),
             "messages": messages,
             // Ollama по умолчанию отвечает потоком построчного JSON — разобрать его
             // как один объект нельзя. Для OpenAI-совместимых API поле безвредно.
             "stream": false,
+            "max_tokens": ANSWER_LIMIT,
         });
+
+        // Родной API Ollama живёт по своим именам: max_tokens он не знает, зато
+        // понимает options.num_predict. Отправляем эти поля только ему — чужим
+        // сервисам лишние ключи ни к чему.
+        if self.endpoint.contains("/api/chat") {
+            body["options"] = serde_json::json!({ "num_predict": ANSWER_LIMIT });
+            // Иначе Ollama выгружает модель из памяти после пяти минут простоя,
+            // и первое же выделение после паузы ждёт её загрузки — десятки секунд
+            // против двенадцати, которые терпит таймаут. Человек видит «нет
+            // ответа» ровно там, где программа работает правильно.
+            body["keep_alive"] = serde_json::json!("30m");
+        }
 
         let mut last = AiError::Network;
         for attempt in 0..=self.retries {
@@ -382,9 +411,37 @@ fn extract_text(value: &serde_json::Value) -> Option<String> {
         .or_else(|| text_at(value.pointer("/choices/0/message/reasoning_content")))
 }
 
+/// Снимает обёртку ```json … ```, в которую модели любят заворачивать ответ.
+///
+/// Просим мы обычный текст, но модель — не подчинённый, а угадыватель: разметка
+/// проскакивает регулярно, особенно у мелких. Показать человеку определение
+/// вместе с тремя обратными кавычками — мелочь, из-за которой окно выглядит
+/// сломанным.
+fn strip_code_fence(text: &str) -> &str {
+    let trimmed = text.trim();
+    let Some(rest) = trimmed.strip_prefix("```") else {
+        return trimmed;
+    };
+    // Сразу за кавычками модели пишут имя языка — до конца строки нам не нужно.
+    let Some((_, body)) = rest.split_once('\n') else {
+        return trimmed;
+    };
+    let body = body.trim_end();
+    let body = body.strip_suffix("```").unwrap_or(body).trim();
+    // Пустота означает, что разметка оказалась не тем, чем мы её посчитали.
+    if body.is_empty() {
+        trimmed
+    } else {
+        body
+    }
+}
+
 /// Ответу модели не доверяем: приводим к контракту {def, simple, examples}.
+///
+/// Просим обычный текст, но JSON от больших моделей продолжаем понимать: они
+/// его присылают и без просьбы, а в нём есть «простыми словами» и примеры.
 fn normalize_explanation(value: &serde_json::Value) -> Result<Explanation, AiError> {
-    let candidate = match extract_text(value) {
+    let candidate = match extract_text(value).map(|text| strip_code_fence(&text).to_string()) {
         Some(text) => serde_json::from_str::<serde_json::Value>(&text).unwrap_or_else(|_| {
             // Модель ответила обычным текстом вместо JSON — это всё ещё определение.
             serde_json::json!({ "def": text })
@@ -477,7 +534,9 @@ impl AiProvider for HttpProvider {
         });
 
         let value = self.send(messages).await?;
-        extract_text(&value).ok_or(AiError::Parse)
+        extract_text(&value)
+            .map(|text| strip_code_fence(&text).to_string())
+            .ok_or(AiError::Parse)
     }
 }
 
@@ -657,6 +716,40 @@ mod tests {
         });
         let parsed = normalize_explanation(&value).unwrap();
         assert_eq!(parsed.def, "Альбедо — доля отражённого света.");
+    }
+
+    #[test]
+    fn code_fence_does_not_reach_the_window() {
+        let value = serde_json::json!({
+            "choices": [{ "message": { "content": "```json\n{\"def\": \"краткое определение\"}\n```" } }]
+        });
+        let parsed = normalize_explanation(&value).unwrap();
+        assert_eq!(parsed.def, "краткое определение");
+    }
+
+    #[test]
+    fn plain_answer_without_fence_survives_untouched() {
+        assert_eq!(
+            strip_code_fence("  Альбедо — это отражение.  "),
+            "Альбедо — это отражение."
+        );
+        assert_eq!(
+            strip_code_fence("```"),
+            "```",
+            "обрывок разметки не должен съедать ответ"
+        );
+    }
+
+    #[test]
+    fn rate_limit_is_not_retried() {
+        assert!(
+            !AiError::Http(429).retryable(),
+            "повтор упрётся в тот же лимит"
+        );
+        assert!(
+            AiError::Http(503).retryable(),
+            "временную ошибку сервера повторяем"
+        );
     }
 
     #[test]
