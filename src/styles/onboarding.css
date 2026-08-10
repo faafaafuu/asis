@@ -214,6 +214,23 @@ body {
   color: var(--accent);
 }
 
+/* Ссылка-переключатель под списком: это не действие, а показ остального,
+   и кнопкой она выглядеть не должна. */
+.ob__link {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent-dim);
+  cursor: pointer;
+}
+
+.ob__link:hover {
+  color: var(--accent);
+}
+
 /* Поле «другая модель» с кнопкой в одну строку: поле тянется, кнопка держит
    свою ширину. */
 .ob__model-add {

@@ -276,14 +276,32 @@ ui.save.addEventListener("click", async () => {
 // проверена на настоящих терминах, а не взята из чужого рейтинга. Первая
 // отвечает точнее и знает научные слова, вторая легче и шустрее, но на редких
 // терминах ошибается. Всё, что уже установлено, показывается и без этого списка.
-const RECOMMENDED = [
-  { name: "qwen2.5:7b", size: "4.7 ГБ", note: "точнее, знает термины" },
-  { name: "gemma3:4b", size: "3.3 ГБ", note: "легче и быстрее" },
-  // Самая маленькая. В списке она не потому, что хороша, а потому, что на
-  // слабой машине остальные просто не пойдут. Оговорка про ошибки честная:
-  // на проверке она уверенно перепутала значение редкого термина.
-  { name: "gemma3:1b", size: "0.8 ГБ", note: "для слабых машин, чаще ошибается" },
+// Размеры взяты из реестра Ollama (registry.ollama.ai), а не по памяти:
+// у каждой строки это настоящий объём загрузки.
+//
+// Первые три проверены на живых терминах, и подпись у них про качество.
+// Остальные я не проверял — и подпись у них поэтому только о том, что можно
+// утверждать наверняка: чьё семейство и насколько крупная. Придумывать им
+// достоинства значило бы выдать догадку за рекомендацию.
+const CATALOG = [
+  { name: "qwen2.5:7b", size: "4.7 ГБ", note: "точнее всех, знает термины", top: true },
+  { name: "gemma3:4b", size: "3.3 ГБ", note: "быстрее, на редких словах слабее", top: true },
+  { name: "gemma3:1b", size: "0.8 ГБ", note: "для слабых машин, чаще ошибается", top: true },
+  { name: "qwen2.5:3b", size: "1.9 ГБ", note: "то же семейство, что и первая, но меньше" },
+  { name: "llama3.2:3b", size: "2.0 ГБ", note: "Llama от Meta, компактная" },
+  { name: "phi4-mini", size: "2.5 ГБ", note: "Phi от Microsoft, компактная" },
+  { name: "mistral:7b", size: "4.4 ГБ", note: "Mistral, размером с первую" },
+  { name: "qwen3:4b", size: "2.5 ГБ", note: "новее qwen2.5, но думает перед ответом дольше" },
+  { name: "gemma3:12b", size: "8.1 ГБ", note: "самая крупная здесь, нужна мощная машина" },
 ];
+
+/**
+ * Развёрнут ли полный каталог.
+ *
+ * По умолчанию видно три строки. Девять незнакомых имён на первом экране —
+ * это не выбор, а работа по сравнению того, о чём человек ничего не знает.
+ */
+let showAllModels = false;
 
 /** Идущие сейчас загрузки: имя модели → строка состояния для показа. */
 const pulling = new Map();
@@ -367,7 +385,7 @@ function renderModels(status) {
   const chosen = ui.model.value.trim();
   const shown = new Set();
 
-  for (const item of RECOMMENDED) {
+  for (const item of showAllModels ? CATALOG : CATALOG.filter((m) => m.top)) {
     shown.add(item.name);
     const found = installed.get(item.name);
     ui.modelsList.append(
@@ -405,6 +423,9 @@ function renderModels(status) {
     if (shown.has(name)) continue;
     ui.modelsList.append(makeRow({ name, note: "", size: "", installed: false, chosen: false }));
   }
+
+  ui.modelsToggle.textContent = showAllModels ? "Свернуть список" : "Показать другие модели";
+  ui.modelAdd.hidden = !showAllModels;
 
   // Объяснение порядка, а не украшение: без него непонятно, зачем качать
   // и когда. Первое, что человек видит, — что это делается один раз.
@@ -453,6 +474,11 @@ async function startPull(name) {
   pulling.delete(name);
   await refreshModels();
 }
+
+ui.modelsToggle.addEventListener("click", () => {
+  showAllModels = !showAllModels;
+  renderModels({ running: true, installed: lastInstalled });
+});
 
 ui.modelPull.addEventListener("click", () => {
   const name = ui.modelCustom.value.trim();

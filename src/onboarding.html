@@ -68,12 +68,16 @@
           <span class="ob__label">Модель</span>
           <div class="ob__models" data-el="modelsList"></div>
 
-          <!-- Ollama знает сотни моделей, в списке их быть не может. Раньше за
-               любой моделью вне списка приходилось идти в терминал — то есть
-               туда, куда обычный человек не пойдёт вовсе. -->
-          <div class="ob__model-add">
+          <!-- Список нарочно начинается с трёх строк: девять вариантов на первом
+               экране — это не выбор, а работа по сравнению незнакомых имён. -->
+          <button class="ob__link" type="button" data-el="modelsToggle">Показать другие модели</button>
+
+          <!-- Поле остаётся, но последним и внутри развёрнутого списка: это выход
+               для того, кто знает конкретное имя с ollama.com, а не основной
+               способ выбрать модель. -->
+          <div class="ob__model-add" data-el="modelAdd" hidden>
             <input class="ob__input" data-el="modelCustom" type="text" spellcheck="false"
-                   placeholder="другая модель — например, llama3.2:3b" />
+                   placeholder="или имя модели с ollama.com/library" />
             <button class="ob__btn" type="button" data-el="modelPull">Скачать</button>
           </div>
 
