@@ -279,6 +279,10 @@ ui.save.addEventListener("click", async () => {
 const RECOMMENDED = [
   { name: "qwen2.5:7b", size: "4.7 ГБ", note: "точнее, знает термины" },
   { name: "gemma3:4b", size: "3.3 ГБ", note: "легче и быстрее" },
+  // Самая маленькая. В списке она не потому, что хороша, а потому, что на
+  // слабой машине остальные просто не пойдут. Оговорка про ошибки честная:
+  // на проверке она уверенно перепутала значение редкого термина.
+  { name: "gemma3:1b", size: "0.8 ГБ", note: "для слабых машин, чаще ошибается" },
 ];
 
 /** Идущие сейчас загрузки: имя модели → строка состояния для показа. */
@@ -382,6 +386,7 @@ function renderModels(status) {
   // Всё остальное, что человек скачал сам, — тоже его выбор, прятать нельзя.
   for (const model of status.installed) {
     if (shown.has(model.name)) continue;
+    shown.add(model.name);
     ui.modelsList.append(
       makeRow({
         name: model.name,
@@ -391,6 +396,14 @@ function renderModels(status) {
         chosen: chosen === model.name,
       }),
     );
+  }
+
+  // Модель, которую качают прямо сейчас, может не быть ни в списке, ни среди
+  // установленных — так бывает с любой, вписанной руками. Без этой строки
+  // загрузка шла бы вслепую: кнопку нажали, а на экране ничего не изменилось.
+  for (const name of pulling.keys()) {
+    if (shown.has(name)) continue;
+    ui.modelsList.append(makeRow({ name, note: "", size: "", installed: false, chosen: false }));
   }
 
   // Объяснение порядка, а не украшение: без него непонятно, зачем качать
@@ -415,19 +428,50 @@ async function refreshModels() {
   }
 }
 
+/**
+ * Качает модель по имени — из списка или вписанную руками, разницы нет.
+ *
+ * Строку состояния ставим до запроса, а не по первому событию: между нажатием
+ * и первым ответом Ollama проходит секунда-другая, и всё это время окно
+ * выглядело бы так, будто кнопку не нажали.
+ */
+async function startPull(name) {
+  if (!name || pulling.has(name)) return;
+  pulling.set(name, "готовлюсь…");
+  renderModels({ running: true, installed: lastInstalled });
+
+  try {
+    await api.invoke("pull_model", { model: name });
+  } catch (err) {
+    // Сюда попадает и опечатка в имени: Ollama отвечает, что такой модели нет.
+    ui.modelsHint.textContent = `Не удалось скачать «${name}»: ${err}`;
+    pulling.delete(name);
+    renderModels({ running: true, installed: lastInstalled });
+    return;
+  }
+
+  pulling.delete(name);
+  await refreshModels();
+}
+
+ui.modelPull.addEventListener("click", () => {
+  const name = ui.modelCustom.value.trim();
+  if (!name) return;
+  ui.modelCustom.value = "";
+  startPull(name);
+});
+
+// Enter в поле — то же самое, что нажать кнопку: вписал имя, нажал ввод.
+ui.modelCustom.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  ui.modelPull.click();
+});
+
 ui.modelsList.addEventListener("click", async (event) => {
   const pull = event.target.closest("[data-pull]");
   if (pull) {
-    const name = pull.dataset.pull;
-    pulling.set(name, "готовлюсь…");
-    renderModels(await api.invoke("local_models").catch(() => null));
-    try {
-      await api.invoke("pull_model", { model: name });
-    } catch (err) {
-      ui.modelsHint.textContent = `Не удалось скачать: ${err}`;
-    }
-    pulling.delete(name);
-    await refreshModels();
+    startPull(pull.dataset.pull);
     return;
   }
 

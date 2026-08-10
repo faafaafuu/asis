@@ -67,6 +67,16 @@
         <div class="ob__field" data-el="modelsBlock" hidden>
           <span class="ob__label">Модель</span>
           <div class="ob__models" data-el="modelsList"></div>
+
+          <!-- Ollama знает сотни моделей, в списке их быть не может. Раньше за
+               любой моделью вне списка приходилось идти в терминал — то есть
+               туда, куда обычный человек не пойдёт вовсе. -->
+          <div class="ob__model-add">
+            <input class="ob__input" data-el="modelCustom" type="text" spellcheck="false"
+                   placeholder="другая модель — например, llama3.2:3b" />
+            <button class="ob__btn" type="button" data-el="modelPull">Скачать</button>
+          </div>
+
           <p class="ob__hint" data-el="modelsHint"></p>
         </div>
 
