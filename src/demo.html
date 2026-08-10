@@ -3,6 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Пустая иконка: без неё окно само просит /favicon.ico, файла нет, и в журнал
+         каждый раз падает «asset not found» — шум, который мешает читать настоящие ошибки. -->
+    <link rel="icon" href="data:," />
     <title>Суфлёр · демо-документ</title>
     <link rel="stylesheet" href="./styles/fonts.css" />
     <link rel="stylesheet" href="./styles/tokens.css" />

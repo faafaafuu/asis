@@ -105,7 +105,7 @@ jobs:
 
             | Система | Файл |
             |---|---|
-            | Windows 10/11 | `.exe` — обычный установщик (или `.msi`) |
+            | Windows 10/11 | `.exe` — обычный установщик |
             | macOS, Apple Silicon | `_aarch64.dmg` |
             | macOS, Intel | `_x64.dmg` |
             | Linux (Ubuntu, Debian) | `.deb` |
