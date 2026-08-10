@@ -2,7 +2,7 @@
 #
 # Почему CI, а не одна машина: Tauri собирает установщик только на той же ОС, для
 # которой он предназначен. .dmg требует macOS (подпись и notarization идут через
-# инструменты Apple), .exe/.msi — Windows SDK, .deb/.AppImage — Linux. Кросс-сборки
+# инструменты Apple), .exe — Windows SDK, .deb/.AppImage — Linux. Кросс-сборки
 # для macOS и Windows официально не поддерживаются, поэтому здесь матрица раннеров.
 #
 # Запуск: пуш тега вида v0.1.0 либо вручную через «Run workflow».
@@ -37,7 +37,7 @@ jobs:
           - label: macOS (Intel) → .dmg
             platform: macos-latest
             args: --target x86_64-apple-darwin
-          - label: Windows → .msi и .exe
+          - label: Windows → .exe
             platform: windows-latest
             args: ""
           - label: Linux → .deb и .AppImage
@@ -84,6 +84,19 @@ jobs:
       - name: Проверки перед сборкой
         run: npm run check
 
+      # Описание релиза собирается из CHANGELOG.md, чтобы в каждой версии было
+      # написано, что в ней изменилось, а не один и тот же шаблон.
+      - name: Заметки к версии
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<SUFLER_NOTES_EOF'
+            node scripts/release-notes.mjs "${{ github.ref_name }}"
+            echo
+            echo 'SUFLER_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Сборка установщика
         uses: tauri-apps/tauri-action@v0
         env:
@@ -100,28 +113,7 @@ jobs:
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-dev', github.run_number) }}
           releaseName: Суфлёр ${{ github.ref_name }}
-          releaseBody: |
-            ## Скачать
-
-            | Система | Файл |
-            |---|---|
-            | Windows 10/11 | `.exe` — обычный установщик |
-            | macOS, Apple Silicon | `_aarch64.dmg` |
-            | macOS, Intel | `_x64.dmg` |
-            | Linux (Ubuntu, Debian) | `.deb` |
-            | Linux (любой) | `.AppImage` — просто сделайте файл исполняемым |
-            | Android | `.apk` |
-
-            Скачайте файл под свою систему и запустите. Командная строка не нужна.
-
-            **При первом запуске.** Windows покажет окно «Windows защитила ваш
-            компьютер» — «Подробнее» → «Выполнить в любом случае». macOS скажет, что
-            разработчик не подтверждён — откройте приложение правым кликом →
-            «Открыть», затем разрешите доступ в разделе «Конфиденциальность и
-            безопасность → Универсальный доступ».
-
-            **Как пользоваться.** Программа живёт в трее. Выделите текст в любом
-            приложении, удерживая **левый Ctrl** — рядом появится объяснение.
+          releaseBody: ${{ steps.notes.outputs.body }}
           # Публикуем сразу: пуш тега — уже осознанное действие, лишний ручной шаг
           # «опубликовать черновик» только задерживает появление файлов у людей.
           releaseDraft: false
