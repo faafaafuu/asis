@@ -8,6 +8,16 @@
 import { DEFAULT_ERROR_TEXT } from "./ai-client.js";
 import { normalizeTerm } from "./term.js";
 
+/**
+ * Предел ожидания ответа. Больше любого разумного сетевого таймаута (у запросов
+ * к Википедии он 8 секунд, у моделей — 12), потому что это не замена им, а последняя
+ * страховка: срабатывает, только если ответа не будет уже никогда.
+ */
+const RESPONSE_TIMEOUT_MS = 20_000;
+
+/** Отдельный текст, а не общая «ошибка сети»: причина здесь другая и подсказка тоже. */
+const NO_RESPONSE_TEXT = "Ответ не пришёл. Откройте настройку через значок в трее и нажмите «Проверить».";
+
 const TEMPLATE = `
 <div class="popup" data-el="root" tabindex="-1" role="dialog" aria-label="Объяснение выделенного текста">
   <div class="popup__head">
@@ -147,15 +157,31 @@ export class PopupView {
 
     this.explainAbort = new AbortController();
     const signal = this.explainAbort.signal;
+
+    // Сторож. Обещание, которое не сбылось и не порвалось, — это вечный кружок
+    // загрузки: окно висит, объяснения нет, и человеку неоткуда узнать почему.
+    // Такое бывает не от медленной сети (у сетевых запросов свой таймаут), а когда
+    // ответ теряется по дороге — например, обработчик в Rust упал на панике и просто
+    // ничего не ответил. Молчание — тоже отказ, и показать его обязаны мы.
+    const watchdog = setTimeout(() => {
+      if (this.state.term !== term || this.state.phase !== "loading") return;
+      this.explainAbort.abort();
+      this.state.phase = "error";
+      this.state.errorMessage = NO_RESPONSE_TEXT;
+      this.render();
+    }, RESPONSE_TIMEOUT_MS);
+
     this.client
       .explain(term, context, { signal })
       .then((data) => {
+        clearTimeout(watchdog);
         if (signal.aborted || this.state.term !== term) return;
         this.state.data = data;
         this.state.phase = "success";
         this.render();
       })
       .catch((err) => {
+        clearTimeout(watchdog);
         if (signal.aborted || err?.kind === "abort" || this.state.term !== term) return;
         this.state.phase = "error";
         this.state.errorMessage = err?.userText ?? this.errorText;
@@ -183,15 +209,27 @@ export class PopupView {
     const signal = this.askAbort.signal;
     const asked = this.state.term;
 
+    // Тот же сторож, что и у объяснения: вопрос без ответа оставляет тред
+    // с крутящимся индикатором и запрещает задать следующий (pending не снимется).
+    const watchdog = setTimeout(() => {
+      if (!this.state.pending || this.state.term !== asked) return;
+      this.askAbort.abort();
+      if (this.state.thread[index]) this.state.thread[index].a = NO_RESPONSE_TEXT;
+      this.state.pending = false;
+      this.render();
+    }, RESPONSE_TIMEOUT_MS);
+
     this.client
       .ask(this.state.term, this.state.context, this.state.thread.slice(0, index), question, { signal })
       .then((answer) => {
+        clearTimeout(watchdog);
         if (signal.aborted || this.state.term !== asked) return;
         if (this.state.thread[index]) this.state.thread[index].a = answer;
         this.state.pending = false;
         this.render();
       })
       .catch((err) => {
+        clearTimeout(watchdog);
         if (signal.aborted || err?.kind === "abort" || this.state.term !== asked) return;
         // Ошибку в треде показываем на месте вопроса, не сбивая уже полученное объяснение.
         if (this.state.thread[index]) this.state.thread[index].a = this.errorText;

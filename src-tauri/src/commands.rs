@@ -52,11 +52,20 @@ pub async fn ai_explain(
     term: String,
     context: String,
 ) -> Result<Explanation, String> {
+    // Отметка о самом факте вызова. Без неё по журналу нельзя отличить «запрос ушёл
+    // и не вернулся» от «попап открылся, но до запроса дело не дошло», а это разные
+    // поломки в разных местах.
+    log::info!("запрошено объяснение «{term}»");
+
     let provider = state.provider();
     let fallback = state.error_text();
     provider
         .explain(&term, &context)
         .await
+        // Причину пишем в журнал полностью. Пользователю уходит короткая фраза, но
+        // когда он скажет «не работает», разбираться придётся по файлу — а там до
+        // сих пор не было ни слова о том, что именно не сложилось.
+        .inspect_err(|err| log::warn!("объяснение «{term}» не получено: {err}"))
         .map_err(|err| err.user_text(&fallback))
 }
 
@@ -73,6 +82,7 @@ pub async fn ai_ask(
     provider
         .ask(&term, &context, &thread, &question)
         .await
+        .inspect_err(|err| log::warn!("ответ на вопрос про «{term}» не получен: {err}"))
         .map_err(|err| err.user_text(&fallback))
 }
 
