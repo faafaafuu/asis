@@ -26,7 +26,7 @@ async function refresh() {
   try {
     const status = await api.invoke("integration_status");
     if (status.kind === "ready") {
-      render({ ...READY, canOpenSettings: false });
+      render({ ...READY, canOpenSettings: false, ready: true });
       return;
     }
     render({
@@ -34,20 +34,30 @@ async function refresh() {
       hint: status.hint,
       // Кнопку показываем только там, где системе действительно есть что открыть.
       canOpenSettings: status.kind === "needsPermission",
+      ready: false,
     });
   } catch (err) {
     render({
       title: "Не удалось проверить доступ",
       hint: String(err),
       canOpenSettings: false,
+      ready: false,
     });
   }
 }
 
-function render({ title, hint, canOpenSettings }) {
+function render({ title, hint, canOpenSettings, ready }) {
   ui.title.textContent = title;
   ui.hint.textContent = hint;
   ui.settings.hidden = !canOpenSettings;
+
+  // «Всё готово» — сообщение, которое читают один раз, а место оно занимало
+  // всегда, отодвигая вниз единственное, зачем окно открывают: выбор источника.
+  // Когда доступ есть, заголовок и кнопка проверки не нужны — они переезжают
+  // в раздел «Если что-то не работает», где их и станут искать. Когда доступа
+  // нет, всё наоборот: это главное сообщение окна, и оно наверху.
+  ui.status.hidden = ready;
+  ui.recheckHere.hidden = !ready;
 }
 
 /* ── Проверка перехвата ─────────────────────────────────────────────────── */
@@ -261,6 +271,7 @@ ui.test.addEventListener("click", async () => {
 });
 
 ui.recheck.addEventListener("click", refresh);
+ui.recheckHere.addEventListener("click", refresh);
 ui.settings.addEventListener("click", async () => {
   const opened = await api?.invoke("open_permission_settings");
   if (!opened) {

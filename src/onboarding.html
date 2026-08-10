@@ -16,17 +16,23 @@
          «приложение просто не работает» (SPEC §9.2, §12.4, критерий приёмки §14). -->
     <main class="ob">
       <p class="ob__eyebrow">Суфлёр</p>
-      <h1 class="ob__title" data-el="title">Проверяем доступ…</h1>
-      <p class="ob__text" data-el="hint"></p>
 
-      <div class="ob__actions">
-        <button class="ob__btn ob__btn--primary" type="button" data-el="settings" hidden>
-          Открыть настройки системы
-        </button>
-        <button class="ob__btn" type="button" data-el="recheck">Проверить снова</button>
+      <!-- Видно только тогда, когда доступа нет: тогда это главное сообщение окна.
+           Когда всё работает, «Всё готово» сообщать незачем — человек это и так
+           видит по тому, что программа работает. -->
+      <div data-el="status">
+        <h1 class="ob__title" data-el="title">Проверяем доступ…</h1>
+        <p class="ob__text" data-el="hint"></p>
+
+        <div class="ob__actions">
+          <button class="ob__btn ob__btn--primary" type="button" data-el="settings" hidden>
+            Открыть настройки системы
+          </button>
+          <button class="ob__btn" type="button" data-el="recheck">Проверить снова</button>
+        </div>
+
+        <hr class="ob__sep" />
       </div>
-
-      <hr class="ob__sep" />
 
       <h2 class="ob__subtitle">Откуда брать объяснения</h2>
       <p class="ob__text ob__text--dim">
@@ -111,6 +117,9 @@
         </div>
 
         <div class="ob__actions">
+          <button class="ob__btn" type="button" data-el="recheckHere" hidden>
+            Проверить доступ
+          </button>
           <button class="ob__btn" type="button" data-el="logs">Открыть журнал</button>
         </div>
       </details>
