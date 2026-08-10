@@ -55,7 +55,7 @@ pub fn spawn(app: &AppHandle) -> Integration {
         loop {
             let config = {
                 let state = app.state::<AppState>();
-                let config = state.config.read().expect("config poisoned");
+                let config = state.config();
                 config.trigger.clone()
             };
 

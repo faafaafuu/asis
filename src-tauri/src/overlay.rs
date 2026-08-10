@@ -63,7 +63,7 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
 
     let state = app.state::<AppState>();
     let (theme, error_text) = {
-        let config = state.config.read().expect("config poisoned");
+        let config = state.config();
         (config.ui.theme.clone(), config.ui.error_text.clone())
     };
 

@@ -329,7 +329,12 @@ impl HttpProvider {
         if !self.api_key.is_empty() {
             request = request.bearer_auth(&self.api_key);
         }
+        log::info!("запрос к модели: {}", self.endpoint);
         let response = request.send().await.map_err(|err| {
+            // Подробность нужна именно здесь: «Сбой сети» на экране одинаково выглядит
+            // и при отказе TLS, и при недоступном хосте, и при таймауте, а чинятся они
+            // по-разному — сертификат, прокси, терпение.
+            log::warn!("запрос к модели не удался: {err}");
             if err.is_timeout() {
                 AiError::Timeout
             } else {
@@ -338,6 +343,7 @@ impl HttpProvider {
         })?;
 
         let status = response.status();
+        log::info!("модель ответила {status}");
         if !status.is_success() {
             return Err(AiError::Http(status.as_u16()));
         }
@@ -497,7 +503,17 @@ impl WikipediaProvider {
             Self::host(term),
             urlencoding(term)
         );
-        let response = self.client.get(&url).send().await.ok()?;
+        // Журнал вокруг самого сетевого вызова: без этих двух строк «запрос ушёл и
+        // не вернулся» неотличимо от «запрос даже не начался».
+        log::info!("запрос к {}", Self::host(term));
+        let response = match self.client.get(&url).send().await {
+            Ok(response) => response,
+            Err(err) => {
+                log::warn!("сеть не ответила: {err}");
+                return None;
+            }
+        };
+        log::info!("ответ {} от {}", response.status(), Self::host(term));
         if !response.status().is_success() {
             return None;
         }

@@ -1,8 +1,10 @@
 //! Команды, доступные фронтенду попапа.
 
+use std::time::Duration;
+
 use tauri::{AppHandle, Manager, State};
 
-use crate::ai_client::{Explanation, ThreadItem};
+use crate::ai_client::{AiError, Explanation, ThreadItem};
 use crate::config::{RuntimeConfig, TriggerConfig};
 use crate::overlay;
 use crate::selection::{Capability, Diagnostics};
@@ -17,15 +19,54 @@ fn persist(app: &AppHandle, state: &AppState) -> Result<(), String> {
         .map_err(|err| format!("не удалось определить каталог настроек: {err}"))?;
     std::fs::create_dir_all(&path).map_err(|err| err.to_string())?;
 
-    let config = state.config.read().expect("config poisoned");
+    let config = state.config();
     let json = serde_json::to_string_pretty(&*config).map_err(|err| err.to_string())?;
     std::fs::write(path.join("config.json"), json).map_err(|err| err.to_string())
+}
+
+/// Предел ожидания провайдера. Заведомо больше любого внутреннего таймаута
+/// (у Википедии 8 секунд, у моделей 12 плюс повтор), потому что это не второй
+/// таймаут, а рубеж на случай, когда внутренний почему-то не сработал.
+const CALL_LIMIT: Duration = Duration::from_secs(25);
+
+/// Выполняет обращение к провайдеру так, чтобы окно получило ответ при любом исходе.
+///
+/// Прямой `await` в команде оставлял окно с вечным индикатором сразу в двух случаях.
+/// Паника внутри задачи не роняет приложение и никуда не печатается — она просто не
+/// отвечает, а обещание в браузере остаётся висеть навсегда. Зависшая задача ведёт
+/// себя точно так же. Отдельная задача превращает панику в `JoinError`, а внешний
+/// предел — зависание в ошибку; и то и другое попадает в журнал с указанием, что
+/// именно случилось, и на экран внятной фразой.
+async fn guarded<T>(
+    what: &str,
+    task: impl std::future::Future<Output = Result<T, AiError>> + Send + 'static,
+    fallback: String,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+{
+    let handle = tauri::async_runtime::spawn(task);
+    match tokio::time::timeout(CALL_LIMIT, handle).await {
+        Ok(Ok(Ok(value))) => Ok(value),
+        Ok(Ok(Err(err))) => {
+            log::warn!("{what}: {err}");
+            Err(err.user_text(&fallback))
+        }
+        Ok(Err(err)) => {
+            log::error!("{what}: обработчик оборвался ({err})");
+            Err("Внутренняя ошибка — подробности в журнале".into())
+        }
+        Err(_) => {
+            log::error!("{what}: ответа нет дольше {} с", CALL_LIMIT.as_secs());
+            Err("Ответ не пришёл. Проверьте соединение, а если нужен VPN — впишите прокси в настройке.".into())
+        }
+    }
 }
 
 /// Настройки, нужные окну при старте: тема и текст ошибки по умолчанию.
 #[tauri::command]
 pub fn runtime_config(state: State<'_, AppState>) -> RuntimeConfig {
-    RuntimeConfig::from(&*state.config.read().expect("config poisoned"))
+    RuntimeConfig::from(&*state.config())
 }
 
 /// Фронтенд посчитал свой размер — можно ставить окно на место и показывать.
@@ -59,14 +100,13 @@ pub async fn ai_explain(
 
     let provider = state.provider();
     let fallback = state.error_text();
-    provider
-        .explain(&term, &context)
-        .await
-        // Причину пишем в журнал полностью. Пользователю уходит короткая фраза, но
-        // когда он скажет «не работает», разбираться придётся по файлу — а там до
-        // сих пор не было ни слова о том, что именно не сложилось.
-        .inspect_err(|err| log::warn!("объяснение «{term}» не получено: {err}"))
-        .map_err(|err| err.user_text(&fallback))
+    let what = format!("объяснение «{term}»");
+    guarded(
+        &what,
+        async move { provider.explain(&term, &context).await },
+        fallback,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -79,11 +119,13 @@ pub async fn ai_ask(
 ) -> Result<String, String> {
     let provider = state.provider();
     let fallback = state.error_text();
-    provider
-        .ask(&term, &context, &thread, &question)
-        .await
-        .inspect_err(|err| log::warn!("ответ на вопрос про «{term}» не получен: {err}"))
-        .map_err(|err| err.user_text(&fallback))
+    let what = format!("вопрос про «{term}»");
+    guarded(
+        &what,
+        async move { provider.ask(&term, &context, &thread, &question).await },
+        fallback,
+    )
+    .await
 }
 
 /// Настройки, которые пользователь может менять из окна: провайдер и доступ к модели.
@@ -101,7 +143,7 @@ pub struct AiSettings {
 /// незачем, а понять «ключ сохранён» пользователю нужно.
 #[tauri::command]
 pub fn ai_settings(state: State<'_, AppState>) -> AiSettings {
-    let config = state.config.read().expect("config poisoned");
+    let config = state.config();
     AiSettings {
         provider: config.ai.provider.clone(),
         endpoint: config.ai.endpoint.clone(),
@@ -123,7 +165,7 @@ pub fn save_ai_settings(
     settings: AiSettings,
 ) -> Result<(), String> {
     {
-        let mut config = state.config.write().expect("config poisoned");
+        let mut config = state.config_mut();
         config.ai.provider = settings.provider;
         config.ai.endpoint = settings.endpoint;
         config.ai.model = settings.model;
@@ -137,7 +179,7 @@ pub fn save_ai_settings(
 
     persist(&app, &state)?;
 
-    let config = state.config.read().expect("config poisoned");
+    let config = state.config();
     state.rebuild_provider(&config.ai);
     Ok(())
 }
@@ -145,7 +187,7 @@ pub fn save_ai_settings(
 /// Настройки жеста для окна: чем открывается попап и разрешён ли запасной способ.
 #[tauri::command]
 pub fn trigger_settings(state: State<'_, AppState>) -> TriggerConfig {
-    state.config.read().expect("config poisoned").trigger.clone()
+    state.config().trigger.clone()
 }
 
 #[tauri::command]
@@ -155,7 +197,7 @@ pub fn save_trigger_settings(
     settings: TriggerConfig,
 ) -> Result<(), String> {
     {
-        let mut config = state.config.write().expect("config poisoned");
+        let mut config = state.config_mut();
         config.trigger = settings;
     }
     persist(&app, &state)
@@ -199,11 +241,14 @@ pub fn open_logs(app: AppHandle) -> Result<(), String> {
 pub async fn test_ai(state: State<'_, AppState>) -> Result<String, String> {
     let provider = state.provider();
     let fallback = state.error_text();
-    provider
-        .explain("альбедо", "")
-        .await
-        .map(|explanation| explanation.def)
-        .map_err(|err| err.user_text(&fallback))
+    log::info!("проверка провайдера");
+    guarded(
+        "проверка провайдера",
+        async move { provider.explain("альбедо", "").await },
+        fallback,
+    )
+    .await
+    .map(|explanation| explanation.def)
 }
 
 /// Состояние системной интеграции — для окна онбординга.
