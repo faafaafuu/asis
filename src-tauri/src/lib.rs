@@ -23,10 +23,20 @@ use crate::state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Программа уже запущена — вместо второй копии показываем окно первой и уходим.
     #[cfg(target_os = "windows")]
-    if !instance::claim() {
-        return;
+    {
+        // `--quit` — не запуск, а просьба: установщик так останавливает работающую
+        // программу перед заменой файлов. Копия ставит событие и сразу уходит,
+        // а работающая по нему закрывается сама и убирает за собой значок в трее.
+        if std::env::args().any(|arg| arg == "--quit") {
+            instance::request_quit();
+            return;
+        }
+
+        // Программа уже запущена — вместо второй копии показываем окно первой и уходим.
+        if !instance::claim() {
+            return;
+        }
     }
 
     let builder = tauri::Builder::default().plugin(

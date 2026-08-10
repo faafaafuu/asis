@@ -17,7 +17,7 @@
 use windows::core::w;
 use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, WAIT_OBJECT_0};
 use windows::Win32::System::Threading::{
-    CreateEventW, CreateMutexW, SetEvent, WaitForSingleObject, INFINITE,
+    CreateEventW, CreateMutexW, SetEvent, WaitForMultipleObjects, INFINITE,
 };
 
 /// Имена в пространстве `Local\` — то есть в пределах сеанса пользователя.
@@ -25,6 +25,9 @@ use windows::Win32::System::Threading::{
 /// пользоваться программой каждый в своём сеансе.
 const MUTEX_NAME: windows::core::PCWSTR = w!("Local\\app.sufler.popup.instance");
 const EVENT_NAME: windows::core::PCWSTR = w!("Local\\app.sufler.popup.show");
+/// Просьба закрыться. Нужна установщику: он обновляет файлы поверх работающей
+/// программы и обязан её сначала остановить.
+const QUIT_EVENT_NAME: windows::core::PCWSTR = w!("Local\\app.sufler.popup.quit");
 
 /// Занимает право быть единственной копией.
 ///
@@ -57,23 +60,60 @@ unsafe fn signal() {
     }
 }
 
-/// Слушает просьбы от других копий и открывает окно настройки.
+/// Просит работающую копию закрыться и ничего не ждёт.
+///
+/// Вызывается из запуска с ключом `--quit` — так установщик останавливает
+/// программу перед заменой файлов. Раньше он просто убивал процесс, и значок
+/// в трее оставался висеть призраком: Windows убирает его не сразу после
+/// смерти программы, а когда по нему проведут мышью. После каждого обновления
+/// человек видел в трее лишнего Суфлёра, а то и трёх.
+pub fn request_quit() {
+    unsafe {
+        if let Ok(event) = CreateEventW(None, false, false, QUIT_EVENT_NAME) {
+            let _ = SetEvent(event);
+        }
+    }
+}
+
+/// Слушает просьбы от других копий: показать окно или закрыться.
 pub fn listen(app: tauri::AppHandle) {
     std::thread::spawn(move || unsafe {
-        let Ok(event) = CreateEventW(None, false, false, EVENT_NAME) else {
+        let Ok(show) = CreateEventW(None, false, false, EVENT_NAME) else {
             log::warn!("не удалось создать событие показа окна — повторный запуск ярлыка ничего не покажет");
             return;
         };
+        let Ok(quit) = CreateEventW(None, false, false, QUIT_EVENT_NAME) else {
+            log::warn!("не удалось создать событие выхода — установщик снимет программу силой");
+            return;
+        };
+
+        let events = [show, quit];
         loop {
-            if WaitForSingleObject(event, INFINITE) != WAIT_OBJECT_0 {
+            // Ждём оба сразу: bWaitAll = false — «разбуди на первом же».
+            let signaled = WaitForMultipleObjects(&events, false, INFINITE);
+
+            if signaled == WAIT_OBJECT_0 {
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    if let Err(err) = crate::overlay::show_onboarding(&handle) {
+                        log::error!("не удалось показать окно по повторному запуску: {err}");
+                    }
+                });
+                continue;
+            }
+
+            if signaled.0 == WAIT_OBJECT_0.0 + 1 {
+                log::info!("получена просьба закрыться — выходим");
+                let handle = app.clone();
+                // Через главный поток: выход разбирает окна и значок в трее,
+                // а это работа для того потока, который их создавал.
+                let _ = app.run_on_main_thread(move || handle.exit(0));
                 return;
             }
-            let handle = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                if let Err(err) = crate::overlay::show_onboarding(&handle) {
-                    log::error!("не удалось показать окно по повторному запуску: {err}");
-                }
-            });
+
+            // Ожидание сломалось (дескриптор закрыт, система отказала) — слушать
+            // дальше нечего, но и делать из этого трагедию незачем.
+            return;
         }
     });
 }
