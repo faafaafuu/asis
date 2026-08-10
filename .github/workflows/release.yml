@@ -108,11 +108,17 @@ jobs:
       # в release-notes.mjs: он вычисляется из настоящего файла, а не из текста.
       - name: Хеш установщика
         shell: bash
+        # NOTES_BODY передан через env, а не подставлен прямо в run через ${{ }}:
+        # текст заметок — это CHANGELOG.md, и в нём уже случались обратные кавычки
+        # (`.exe`). Подставленные прямо в скрипт, они выполнились бы как команда
+        # оболочки, а не легли текстом — ровно это и произошло с первого раза,
+        # «файл `.exe`» превратилось в «файл .». Через env оболочка видит готовое
+        # значение переменной и не перечитывает его как код.
         run: |
           file=$(find src-tauri/target/release/bundle/nsis -name '*.exe' | head -n1)
           hash=$(sha256sum "$file" | cut -d' ' -f1)
           {
-            echo "${{ steps.notes.outputs.body }}"
+            printf '%s\n' "$NOTES_BODY"
             echo
             echo "## Проверка файла"
             echo
@@ -120,13 +126,14 @@ jobs:
             echo "Windows покажет предупреждение SmartScreen, это ожидаемо (см. раздел «Скачать» выше)."
             echo "Сверить, что файл не подменили, можно хешем SHA-256:"
             echo
-            echo "\`\`\`"
-            echo "$hash  $(basename "$file")"
-            echo "\`\`\`"
+            echo '```'
+            printf '%s  %s\n' "$hash" "$(basename "$file")"
+            echo '```'
           } > notes-with-hash.md
           gh release edit "${{ github.ref_name }}" --notes-file notes-with-hash.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES_BODY: ${{ steps.notes.outputs.body }}
 
 # macOS, Android и Linux здесь намеренно отсутствуют.
 #
