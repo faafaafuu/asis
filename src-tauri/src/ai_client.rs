@@ -321,6 +321,14 @@ impl HttpProvider {
         })
     }
 
+    /// Один заход за ответом на вопрос: отправить и достать текст.
+    async fn answer_once(&self, messages: Vec<Message<'_>>) -> Result<String, AiError> {
+        let value = self.send(messages).await?;
+        extract_text(&value)
+            .map(|text| strip_code_fence(&text).to_string())
+            .ok_or(AiError::Parse)
+    }
+
     async fn send(&self, messages: Vec<Message<'_>>) -> Result<serde_json::Value, AiError> {
         let mut body = serde_json::json!({
             "model": (!self.model.is_empty()).then(|| self.model.clone()),
@@ -545,39 +553,51 @@ impl AiProvider for HttpProvider {
         thread: &[ThreadItem],
         question: &str,
     ) -> Result<String, AiError> {
-        let mut messages = vec![
-            Message {
-                role: "system",
-                content: format!(
-                    "Пользователь уточняет ранее объяснённый термин «{term}». \
-                     Отвечай коротко, обычным текстом, без JSON. \
-                     Отвечай по-русски, даже если сам термин на другом языке."
-                ),
-            },
-            Message {
-                role: "user",
-                content: format!("Исходный контекст: {context}"),
-            },
-        ];
-        for item in thread {
+        let messages = || {
+            let mut messages = vec![
+                Message {
+                    role: "system",
+                    content: format!(
+                        "Пользователь уточняет ранее объяснённый термин «{term}». \
+                         Отвечай коротко, обычным текстом, без JSON. \
+                         Отвечай по-русски, даже если сам термин на другом языке."
+                    ),
+                },
+                Message {
+                    role: "user",
+                    content: format!("Исходный контекст: {context}"),
+                },
+            ];
+            for item in thread {
+                messages.push(Message {
+                    role: "user",
+                    content: item.q.clone(),
+                });
+                messages.push(Message {
+                    role: "assistant",
+                    content: item.a.clone(),
+                });
+            }
             messages.push(Message {
                 role: "user",
-                content: item.q.clone(),
+                content: question.to_string(),
             });
-            messages.push(Message {
-                role: "assistant",
-                content: item.a.clone(),
-            });
-        }
-        messages.push(Message {
-            role: "user",
-            content: question.to_string(),
-        });
+            messages
+        };
 
-        let value = self.send(messages).await?;
-        extract_text(&value)
-            .map(|text| strip_code_fence(&text).to_string())
-            .ok_or(AiError::Parse)
+        let answer = self.answer_once(messages()).await?;
+        if !has_foreign_script(&answer) {
+            return Ok(answer);
+        }
+
+        // То же, что и у объяснения: срыв на чужой язык случаен и на повторе
+        // почти всегда проходит. В длинном ответе на вопрос он заметнее — там
+        // модели есть где разогнаться, — так что защита нужна и здесь.
+        log::warn!("ответ на вопрос сорвался на другой язык — переспрашиваем");
+        match self.answer_once(messages()).await {
+            Ok(second) => Ok(second),
+            Err(_) => Ok(answer),
+        }
     }
 }
 
