@@ -165,12 +165,28 @@ jobs:
 
       # Модуль плагина подключается к сгенерированному проекту: сам проект
       # в репозитории не хранится, его каждый раз создаёт `android init`.
+      #
+      # Шага здесь два, и второй обязателен. Одна только строка в settings.gradle
+      # говорит Gradle, что такой модуль существует, но не связывает его
+      # с приложением: модуль собирается и никуда не попадает, .apk выходит без
+      # классов плагина. Приложение при этом собирается зелёным и падает при
+      # первом же запуске на ClassNotFoundException — Rust регистрирует плагин
+      # при старте (mobile.rs), и класса не находит.
       - name: Подключить плагин выделения
         run: |
           {
             echo 'include(":sufler-plugin")'
             echo 'project(":sufler-plugin").projectDir = file("../../../mobile/android-plugin")'
           } >> src-tauri/gen/android/settings.gradle
+
+          # Зависимость дописывается в первый блок dependencies { } файла
+          # приложения: своего места под неё в сгенерированном файле нет,
+          # а перезаписывать файл целиком нельзя — его содержимое задаёт Tauri.
+          gradle_app=src-tauri/gen/android/app/build.gradle.kts
+          sed -i '0,/^dependencies {/s//dependencies {\n    implementation(project(":sufler-plugin"))/' "$gradle_app"
+
+          echo "--- проверка, что зависимость на месте ---"
+          grep -n 'sufler-plugin' "$gradle_app"
 
       - name: Сборка .apk
         run: npm run tauri -- android build --apk

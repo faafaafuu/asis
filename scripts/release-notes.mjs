@@ -33,10 +33,10 @@ export function sectionFor(changelog, version) {
 
 const INSTALL = `## Скачать
 
-Windows 10 / 11, файл \`.exe\`. Установщик не подписан — при первом запуске
-Windows покажет предупреждение SmartScreen, «Выполнить в любом случае».
+Windows 10 / 11, файл \`.exe\`. Не подписан — SmartScreen покажет предупреждение,
+«Выполнить в любом случае».
 
-Выделите текст, удерживая левый Ctrl — появится объяснение. Программа живёт в трее.`;
+Выделите текст с левым Ctrl. Программа живёт в трее.`;
 
 export function releaseNotes(changelog, tag) {
   const version = tag.replace(/^v/, "");
