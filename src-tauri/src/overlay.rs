@@ -42,10 +42,9 @@ pub fn ensure_popup_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         return Ok(window);
     }
 
-    let window = WebviewWindowBuilder::new(app, POPUP_LABEL, WebviewUrl::App("popup.html".into()))
+    let builder = WebviewWindowBuilder::new(app, POPUP_LABEL, WebviewUrl::App("popup.html".into()))
         .title("Суфлёр")
         .inner_size(400.0, 160.0)
-        .decorations(false)
         .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
@@ -54,10 +53,18 @@ pub fn ensure_popup_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         // Попап не должен забирать фокус клавиатуры у приложения, из которого
         // пользователь выделил текст (SPEC §8).
         .focused(false)
-        .visible(false)
-        .build()?;
+        .visible(false);
 
-    Ok(window)
+    // .decorations() существует только у настольного окна: рамка со крестиком —
+    // понятие рабочего стола, на телефоне окна занимают экран целиком и такой
+    // рамки не бывает в принципе. К тому же этот путь на мобильных не выполняется
+    // никогда — see show_for_selection: его вызывает только watcher, а тот
+    // запускается лишь на десктопе (SPEC §9.4, §9.5), — но собираться обязан
+    // и здесь: cfg проверяет исходный код целиком, а не только достижимые ветки.
+    #[cfg(desktop)]
+    let builder = builder.decorations(false);
+
+    Ok(builder.build()?)
 }
 
 /// Показывает попап для нового выделения: сохраняет якорь и отдаёт фронтенду термин.
@@ -129,6 +136,10 @@ pub fn apply_geometry(
     window.set_position(PhysicalPosition::new(x - pad, y - pad))?;
     window.show()?;
     // На части оконных менеджеров always-on-top «слетает» после show — подтверждаем.
+    // Понятие «поверх других окон» — тоже настольное: на телефоне окна не делят
+    // экран, там ему просто не с чем конкурировать. Как и apply_geometry в целом,
+    // на мобильных этот путь не выполняется, но обязан собираться.
+    #[cfg(desktop)]
     window.set_always_on_top(true)?;
 
     // На Linux окно приходится сфокусировать, иначе его нечем закрыть: глобального
