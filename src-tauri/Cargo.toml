@@ -1,6 +1,6 @@
 [package]
 name = "sufler"
-version = "0.1.5"
+version = "0.1.6"
 description = "Суфлёр — системный AI-попап по выделению текста"
 authors = ["Sufler"]
 edition = "2021"
@@ -47,6 +47,9 @@ windows = { version = "0.62", features = [
   "Win32_System_DataExchange",
   "Win32_System_Memory",
   "Win32_System_Threading",
+  # CreateMutexW/CreateEventW принимают атрибуты безопасности, поэтому живут за этой
+  # фичей — даже когда атрибуты не нужны и передаётся None.
+  "Win32_Security",
   "Win32_UI_Accessibility",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",

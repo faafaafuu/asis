@@ -6,6 +6,8 @@
 mod ai_client;
 mod commands;
 mod config;
+#[cfg(target_os = "windows")]
+mod instance;
 #[cfg(mobile)]
 mod mobile;
 mod overlay;
@@ -20,6 +22,12 @@ use crate::state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Программа уже запущена — вместо второй копии показываем окно первой и уходим.
+    #[cfg(target_os = "windows")]
+    if !instance::claim() {
+        return;
+    }
+
     let builder = tauri::Builder::default().plugin(
         tauri_plugin_log::Builder::new()
             // Собственные цели ДОБАВЛЯЮТСЯ к стандартным, а не заменяют их. Без сброса
@@ -49,12 +57,6 @@ pub fn run() {
     builder
         .setup(|app| {
             let config_dir = app.path().app_config_dir().ok();
-            // Первый запуск определяем по отсутствию файла настроек: только в этот раз
-            // приложению есть что сказать пользователю.
-            let first_run = config_dir
-                .as_ref()
-                .map(|dir| !dir.join("config.json").exists())
-                .unwrap_or(true);
             let config = Config::load(config_dir);
             log::info!("AI-провайдер: {}", config.ai.provider);
             app.manage(AppState::new(config));
@@ -63,15 +65,24 @@ pub fn run() {
             {
                 setup_tray(app.handle())?;
 
-                // Окно первого запуска. Раньше оно открывалось только при нехватке
-                // разрешений — а на Windows разрешений не требуется, поэтому после
-                // установки не появлялось ничего: ни окна, ни объяснения, как этим
-                // пользоваться. Со стороны это неотличимо от «программа не запустилась».
-                if first_run {
-                    if let Err(err) = overlay::show_onboarding(app.handle()) {
-                        log::error!("не удалось открыть окно первого запуска: {err}");
-                    }
+                // Окно открывается при КАЖДОМ запуске, а не только при первом.
+                //
+                // Раньше условием было отсутствие файла настроек — то есть окно
+                // показывалось ровно один раз в жизни. Стоило человеку что-нибудь
+                // сохранить, и дальше запуск проходил совершенно молча: программа
+                // уходила в трей, где Windows 11 по умолчанию прячет новые значки под
+                // стрелку. Щелчок по ярлыку не давал ничего, и это неотличимо от
+                // сломанной программы.
+                //
+                // Ярлык обязан отвечать. Работать программа продолжает в фоне, окно
+                // здесь — не главный экран, а подтверждение «я запущена» плюс
+                // настройки; закрыть его можно сразу.
+                if let Err(err) = overlay::show_onboarding(app.handle()) {
+                    log::error!("не удалось открыть окно: {err}");
                 }
+
+                #[cfg(target_os = "windows")]
+                instance::listen(app.handle().clone());
                 // Наблюдатель за системным выделением есть только на десктопе:
                 // на мобильных вход — пункт меню «Объяснить» из нативного плагина
                 // (SPEC §9.4, §9.5).
