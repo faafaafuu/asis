@@ -9,7 +9,7 @@
     "check": "node scripts/check-frontend.mjs",
     "icon": "tauri icon app-icon.png",
     "tauri": "tauri",
-    "test": "node --test \"src/js/*.test.js\" \"scripts/*.test.mjs\""
+    "test": "node --test src/js scripts"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0"

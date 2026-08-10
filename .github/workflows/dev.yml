@@ -1,0 +1,72 @@
+# Проверочная сборка рабочей ветки.
+#
+# Зачем отдельно от релизной: релиз — это событие, о нём узнают люди и идут
+# скачивать. Если каждую правку публиковать релизом, список версий превращается
+# в ленту черновиков, и понять, какую из них ставить, становится невозможно.
+# Поэтому здесь всё то же самое, но без публикации: готовый установщик кладётся
+# артефактом к запуску. Он доступен из вкладки Actions тому, кто его ждёт,
+# и не попадается на глаза тем, кто пришёл за рабочей версией.
+#
+# Только Windows: проверочная сборка нужна, чтобы быстро увидеть «собралось и
+# работает», а не чтобы покрыть все системы. Полная матрица — при выпуске.
+#
+# Запуск: пуш в dev либо вручную через «Run workflow» на любой ветке.
+
+name: Проверочная сборка
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows → .exe
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Кэш сборки Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Проверки перед сборкой
+        run: npm run check
+
+      # Тесты гоняются здесь, а не в релизной сборке: падать они должны до того,
+      # как версия уедет к людям, а не в момент выпуска.
+      - name: Тесты
+        run: npm test
+
+      - name: Тесты Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Сборка установщика
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Ни tagName, ни releaseName: без них tauri-action ничего не публикует,
+        # а просто оставляет собранные файлы в target.
+
+      - name: Приложить установщик к запуску
+        uses: actions/upload-artifact@v4
+        with:
+          name: sufler-windows-${{ github.sha }}
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          # Проверочные сборки живут недолго: их смотрят в тот же день.
+          retention-days: 14
