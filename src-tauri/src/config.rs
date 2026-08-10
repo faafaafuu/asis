@@ -176,6 +176,12 @@ impl Config {
 pub struct RuntimeConfig {
     pub theme: String,
     pub error_text: String,
+    /// Умеет ли источник отвечать на вопросы, а не только выдавать определение.
+    ///
+    /// От этого зависит, показывать ли «?»: у модели «простыми словами» и примеры
+    /// спрашиваются отдельным запросом, когда человек нажал кнопку, а Википедия
+    /// разговаривать не умеет — ей нечего ответить, кроме той же статьи.
+    pub dialogue: bool,
 }
 
 impl From<&Config> for RuntimeConfig {
@@ -183,6 +189,7 @@ impl From<&Config> for RuntimeConfig {
         Self {
             theme: config.ui.theme.clone(),
             error_text: config.ui.error_text.clone(),
+            dialogue: config.ai.provider != "wikipedia",
         }
     }
 }

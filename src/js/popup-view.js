@@ -18,6 +18,16 @@ const RESPONSE_TIMEOUT_MS = 20_000;
 /** Отдельный текст, а не общая «ошибка сети»: причина здесь другая и подсказка тоже. */
 const NO_RESPONSE_TEXT = "Ответ не пришёл. Откройте настройку через значок в трее и нажмите «Проверить».";
 
+/**
+ * Вопрос, который прячется за кнопкой «?».
+ *
+ * Раньше «простыми словами» и примеры приходили вместе с определением, одним
+ * ответом. Платили за это все: каждое выделение ждало, пока модель напишет
+ * втрое больше текста, который в девяти случаях из десяти никто не раскрывал.
+ * Теперь их спрашивают тогда, когда попросили.
+ */
+const ELABORATE_QUESTION = "Объясни это простыми словами и приведи один короткий пример.";
+
 const TEMPLATE = `
 <div class="popup" data-el="root" tabindex="-1" role="dialog" aria-label="Объяснение выделенного текста">
   <div class="popup__head">
@@ -77,6 +87,8 @@ export class PopupView {
   constructor(opts) {
     this.client = opts.client;
     this.errorText = opts.errorText ?? DEFAULT_ERROR_TEXT;
+    /** Умеет ли источник отвечать на вопросы — см. RuntimeConfig::dialogue в Rust. */
+    this.dialogue = opts.dialogue ?? false;
     this.onGeometry = opts.onGeometry ?? (() => {});
     this.onClose = opts.onClose ?? (() => {});
 
@@ -102,6 +114,7 @@ export class PopupView {
     /** Все незавершённые запросы отменяются при закрытии (SPEC §8). */
     this.explainAbort = null;
     this.askAbort = null;
+    this.elaborateAbort = null;
 
     this.#bind();
   }
@@ -192,7 +205,47 @@ export class PopupView {
   expand() {
     if (this.state.expanded || !this.#canExpand()) return;
     this.state.expanded = true;
+    // У Википедии развёрнутый текст уже на руках — он пришёл вместе с определением.
+    // У модели его ещё нет: спрашиваем сейчас, раз человек попросил.
+    if (!this.state.data?.simple && this.dialogue) this.#elaborate();
     this.render();
+  }
+
+  /** Догружает «простыми словами» отдельным вопросом к модели. */
+  #elaborate() {
+    const asked = this.state.term;
+    this.state.pending = true;
+    this.elaborateAbort = new AbortController();
+    const signal = this.elaborateAbort.signal;
+
+    // Тот же сторож, что у объяснения и у вопроса: без него незакрытый pending
+    // навсегда оставит крутящийся индикатор и заблокирует поле ввода.
+    const watchdog = setTimeout(() => {
+      if (!this.state.pending || this.state.term !== asked) return;
+      this.elaborateAbort.abort();
+      if (this.state.data) this.state.data.simple = NO_RESPONSE_TEXT;
+      this.state.pending = false;
+      this.render();
+    }, RESPONSE_TIMEOUT_MS);
+
+    this.client
+      .ask(asked, this.state.context, [], ELABORATE_QUESTION, { signal })
+      .then((answer) => {
+        clearTimeout(watchdog);
+        if (signal.aborted || this.state.term !== asked) return;
+        if (this.state.data) this.state.data.simple = answer;
+        this.state.pending = false;
+        this.render();
+      })
+      .catch((err) => {
+        clearTimeout(watchdog);
+        if (signal.aborted || err?.kind === "abort" || this.state.term !== asked) return;
+        // Определение уже показано и остаётся на месте: неудача касается только
+        // раскрытия, ронять из-за неё весь попап незачем.
+        if (this.state.data) this.state.data.simple = this.errorText;
+        this.state.pending = false;
+        this.render();
+      });
   }
 
   submitAsk() {
@@ -245,12 +298,17 @@ export class PopupView {
   #abortAll() {
     this.explainAbort?.abort();
     this.askAbort?.abort();
+    this.elaborateAbort?.abort();
     this.explainAbort = null;
     this.askAbort = null;
+    this.elaborateAbort = null;
   }
 
   #canExpand() {
-    return Boolean(this.state.data?.simple) && !this.state.expanded;
+    if (this.state.expanded) return false;
+    // Текст под «?» либо уже есть, либо его есть у кого спросить. Показывать
+    // кнопку, за которой пусто, — обманывать: человек нажмёт и ничего не получит.
+    return Boolean(this.state.data?.simple) || (this.dialogue && this.state.phase === "success");
   }
 
   render() {

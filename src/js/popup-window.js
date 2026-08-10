@@ -39,14 +39,18 @@ if (api) {
     .then((config) => {
       applyTheme(config.theme);
       view.errorText = config.errorText || DEFAULT_ERROR_TEXT;
+      view.dialogue = Boolean(config.dialogue);
     })
     .catch(() => applyTheme("system"));
 
   // Новое выделение: Rust уже сохранил якорь, нам остаётся показать содержимое.
   api.listen("popup:open", (event) => {
-    const { term, context, theme, errorText } = event.payload ?? {};
+    const { term, context, theme, errorText, dialogue } = event.payload ?? {};
     if (theme) applyTheme(theme);
     if (errorText) view.errorText = errorText;
+    // Источник могли сменить в настройках, пока окно жило: сведения о том, есть
+    // ли кому отвечать на «?», приходят с каждым открытием.
+    if (dialogue !== undefined) view.dialogue = Boolean(dialogue);
     view.open({ term: term ?? "", context: context ?? "" });
   });
 

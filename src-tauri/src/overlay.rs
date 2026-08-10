@@ -29,6 +29,10 @@ pub struct OpenPayload {
     pub context: String,
     pub theme: String,
     pub error_text: String,
+    /// См. `RuntimeConfig::dialogue`. Приходит с каждым открытием, а не только
+    /// при старте окна: источник меняют в настройках, а окно попапа живёт до
+    /// конца сеанса и иначе показывало бы «?» по вчерашним сведениям.
+    pub dialogue: bool,
 }
 
 /// Создаёт окно попапа, если его ещё нет. Окно рождается скрытым: первым делом его
@@ -62,9 +66,13 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
     let window = ensure_popup_window(app)?;
 
     let state = app.state::<AppState>();
-    let (theme, error_text) = {
+    let (theme, error_text, dialogue) = {
         let config = state.config();
-        (config.ui.theme.clone(), config.ui.error_text.clone())
+        (
+            config.ui.theme.clone(),
+            config.ui.error_text.clone(),
+            config.ai.provider != "wikipedia",
+        )
     };
 
     let payload = OpenPayload {
@@ -72,6 +80,7 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
         context: selection.context.clone(),
         theme,
         error_text,
+        dialogue,
     };
     state.set_selection(selection);
 
