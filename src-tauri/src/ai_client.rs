@@ -741,18 +741,6 @@ mod tests {
     }
 
     #[test]
-    fn rate_limit_is_not_retried() {
-        assert!(
-            !AiError::Http(429).retryable(),
-            "повтор упрётся в тот же лимит"
-        );
-        assert!(
-            AiError::Http(503).retryable(),
-            "временную ошибку сервера повторяем"
-        );
-    }
-
-    #[test]
     fn empty_content_does_not_shadow_later_fields() {
         let value = serde_json::json!({ "choices": [{ "message": { "content": "   " } }] });
         assert!(extract_text(&value).is_none(), "пробелы — это не ответ");
@@ -795,8 +783,11 @@ mod tests {
     fn retry_policy_covers_only_transient_failures() {
         assert!(AiError::Timeout.retryable());
         assert!(AiError::Http(503).retryable());
-        assert!(AiError::Http(429).retryable());
         assert!(!AiError::Http(401).retryable());
         assert!(!AiError::Parse.retryable());
+        // 429 раньше повторяли, теперь нет: ограничение частоты снимается через
+        // минуты или сутки, так что вторая попытка упирается в тот же отказ
+        // и лишь вдвое быстрее сжигает дневную квоту.
+        assert!(!AiError::Http(429).retryable());
     }
 }

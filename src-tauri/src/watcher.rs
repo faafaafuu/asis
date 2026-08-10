@@ -4,7 +4,7 @@
 //! «отпустил левую кнопку мыши с зажатым левым Ctrl», просит показать попап.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
@@ -30,6 +30,14 @@ impl Integration {
     }
 }
 
+/// Насколько быстрый повтор того же выделения считаем одним жестом.
+///
+/// Порог человеческий, а не технический: интервал двойного щелчка в Windows
+/// по умолчанию 500 мс и настраивается пользователем в бо́льшую сторону. Брать
+/// сильно больше нельзя — осмысленное повторное выделение того же слова
+/// (например, после того как попап закрыли) перестанет открывать окно.
+const REPEAT_WINDOW: Duration = Duration::from_millis(700);
+
 /// Запускает наблюдателя. Возвращает интеграцию, чтобы вызывающий положил её в state.
 pub fn spawn(app: &AppHandle) -> Integration {
     let integration: Arc<dyn PlatformIntegration> = Arc::from(create());
@@ -52,6 +60,8 @@ pub fn spawn(app: &AppHandle) -> Integration {
     let app = app.clone();
     std::thread::spawn(move || {
         log::info!("наблюдатель за выделением запущен");
+        // Последнее показанное выделение — чтобы отличить новый жест от повтора.
+        let mut last_shown: Option<(String, Instant)> = None;
         loop {
             let config = {
                 let state = app.state::<AppState>();
@@ -80,14 +90,30 @@ pub fn spawn(app: &AppHandle) -> Integration {
 
             if let Some(selection) = worker.poll_trigger(&config) {
                 if !selection.text.trim().is_empty() {
-                    // Показ окна — только в главном потоке: этого требуют оконные API
-                    // всех трёх платформ.
-                    let handle = app.clone();
-                    let _ = app.run_on_main_thread(move || {
-                        if let Err(err) = overlay::show_for_selection(&handle, selection) {
-                            log::error!("не удалось показать попап: {err}");
-                        }
-                    });
+                    // Двойной щелчок — самый естественный способ выделить одно слово,
+                    // но для системы это два нажатия и два отпускания, то есть два
+                    // жеста подряд с одним и тем же текстом. Человек считает, что
+                    // выделил один раз, а платит за это ожиданием: локальная модель
+                    // считает оба запроса по очереди, и ответ приходит вдвое позже.
+                    let repeat = last_shown
+                        .as_ref()
+                        .is_some_and(|(text, at)| {
+                            *text == selection.text && at.elapsed() < REPEAT_WINDOW
+                        });
+
+                    if repeat {
+                        log::debug!("тот же текст сразу следом — считаем повтором жеста");
+                    } else {
+                        last_shown = Some((selection.text.clone(), Instant::now()));
+                        // Показ окна — только в главном потоке: этого требуют оконные API
+                        // всех трёх платформ.
+                        let handle = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            if let Err(err) = overlay::show_for_selection(&handle, selection) {
+                                log::error!("не удалось показать попап: {err}");
+                            }
+                        });
+                    }
                 }
             }
 
