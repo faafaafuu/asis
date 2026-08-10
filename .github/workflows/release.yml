@@ -101,6 +101,33 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+      # Установщик не подписан — платная подпись стоит денег ради личного проекта.
+      # Без неё нельзя убрать предупреждение SmartScreen, но можно дать человеку
+      # способ убедиться, что скачанный файл — тот же самый, что собрала сборка,
+      # а не что-то подменённое по дороге. Хеш добавляется отдельным шагом, а не
+      # в release-notes.mjs: он вычисляется из настоящего файла, а не из текста.
+      - name: Хеш установщика
+        shell: bash
+        run: |
+          file=$(find src-tauri/target/release/bundle/nsis -name '*.exe' | head -n1)
+          hash=$(sha256sum "$file" | cut -d' ' -f1)
+          {
+            echo "${{ steps.notes.outputs.body }}"
+            echo
+            echo "## Проверка файла"
+            echo
+            echo "Установщик не подписан — это личный проект, платная подпись ради него не куплена."
+            echo "Windows покажет предупреждение SmartScreen, это ожидаемо (см. раздел «Скачать» выше)."
+            echo "Сверить, что файл не подменили, можно хешем SHA-256:"
+            echo
+            echo "\`\`\`"
+            echo "$hash  $(basename "$file")"
+            echo "\`\`\`"
+          } > notes-with-hash.md
+          gh release edit "${{ github.ref_name }}" --notes-file notes-with-hash.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 # macOS, Android и Linux здесь намеренно отсутствуют.
 #
 # macOS и Android не собрались ни разу за всю историю выпусков: их задания
