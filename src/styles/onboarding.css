@@ -185,6 +185,14 @@ body {
   border-color: var(--accent);
 }
 
+/* Нескачанная модель приглушена: по одному взгляду видно, что уже есть,
+   а что ещё предстоит ждать. Кнопка внутри остаётся в полную яркость —
+   иначе она читалась бы как отключённая. */
+.ob__model[data-absent="true"] .ob__model-name,
+.ob__model[data-absent="true"] .ob__model-note {
+  color: var(--text-muted);
+}
+
 .ob__model-name {
   color: var(--text);
 }

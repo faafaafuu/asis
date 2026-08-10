@@ -293,18 +293,23 @@ const pulling = new Map();
  */
 let lastInstalled = [];
 
-function makeRow({ name, note, installed, chosen }) {
+function makeRow({ name, note, size, installed, chosen }) {
   const row = document.createElement("div");
   row.className = "ob__model";
   if (chosen) row.dataset.chosen = "true";
+  // Нескачанная строка приглушена: по одному взгляду на список должно быть
+  // видно, что у тебя есть, а что придётся ждать.
+  if (!installed) row.dataset.absent = "true";
 
   const title = document.createElement("span");
   title.className = "ob__model-name";
   title.textContent = name;
 
+  // Размер показываем всегда, а не только у нескачанных: у скачанной он
+  // отвечает на вопрос «сколько это занимает у меня на диске».
   const hint = document.createElement("span");
   hint.className = "ob__model-note";
-  hint.textContent = note;
+  hint.textContent = note ? `${note} · ${size}` : size;
 
   row.append(title, hint);
 
@@ -323,10 +328,17 @@ function makeRow({ name, note, installed, chosen }) {
     row.dataset.pick = name;
     const state = document.createElement("span");
     state.className = "ob__model-state";
-    state.textContent = chosen ? "выбрана" : "выбрать";
+    // «Скачана» вместо молчания: раньше строка без кнопки выглядела так же,
+    // как строка с кнопкой, и понять, что уже есть на диске, было нельзя.
+    state.textContent = chosen ? "✓ выбрана" : "скачана — выбрать";
     row.append(state);
     return row;
   }
+
+  const state = document.createElement("span");
+  state.className = "ob__model-state";
+  state.textContent = "не скачана";
+  row.append(state);
 
   const button = document.createElement("button");
   button.type = "button";
@@ -353,13 +365,16 @@ function renderModels(status) {
 
   for (const item of RECOMMENDED) {
     shown.add(item.name);
-    const has = installed.has(item.name);
+    const found = installed.get(item.name);
     ui.modelsList.append(
       makeRow({
         name: item.name,
-        note: has ? item.note : `${item.note} · ${item.size}`,
-        installed: has,
-        chosen: has && chosen === item.name,
+        note: item.note,
+        // У скачанной берём настоящий размер с диска, у остальной — обещанный
+        // из списка: до загрузки точного размера никто не знает.
+        size: found ? `${found.sizeGb} ГБ` : item.size,
+        installed: Boolean(found),
+        chosen: Boolean(found) && chosen === item.name,
       }),
     );
   }
@@ -370,16 +385,25 @@ function renderModels(status) {
     ui.modelsList.append(
       makeRow({
         name: model.name,
-        note: `${model.sizeGb} ГБ`,
+        note: "",
+        size: `${model.sizeGb} ГБ`,
         installed: true,
         chosen: chosen === model.name,
       }),
     );
   }
 
-  ui.modelsHint.textContent = pulling.size
-    ? "Загрузка идёт в фоне — окно можно закрыть, она не прервётся."
-    : "";
+  // Объяснение порядка, а не украшение: без него непонятно, зачем качать
+  // и когда. Первое, что человек видит, — что это делается один раз.
+  if (pulling.size) {
+    ui.modelsHint.textContent = "Загрузка идёт в фоне — окно можно закрыть, она не прервётся.";
+  } else if (installed.size === 0) {
+    ui.modelsHint.textContent =
+      "Ни одной модели пока нет. Скачайте любую — это разовое действие, дальше она работает без интернета.";
+  } else {
+    ui.modelsHint.textContent =
+      "Модель скачивается один раз и дальше работает без интернета. Объяснения берутся из выбранной.";
+  }
 }
 
 async function refreshModels() {
