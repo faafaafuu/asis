@@ -138,13 +138,4 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev \
   libayatana-appindicator3-dev librsvg2-dev libssl-dev
 ```
 
-Посмотреть интерфейс без сборки приложения: `npm run dev` и открыть
-<http://localhost:5173/demo.html>. Та же страница развёрнута онлайн —
-<http://84.247.166.53:5173/demo.html>: выделите слово в тексте с зажатым левым Ctrl.
 
-Развернуть демонстрацию у себя:
-
-```bash
-docker build -t sufler-demo .
-docker run -d --restart unless-stopped -p 5173:5173 sufler-demo
-```
