@@ -42,9 +42,24 @@ pub fn ensure_popup_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         return Ok(window);
     }
 
-    let builder = WebviewWindowBuilder::new(app, POPUP_LABEL, WebviewUrl::App("popup.html".into()))
+    // Десктоп и мобильные здесь не делят одну цепочку методов: decorations,
+    // always_on_top, skip_taskbar, shadow и focused существуют только в настольном
+    // API Tauri — рамка окна, задачная панель, «поверх других окон», фокус мимо
+    // приложения — на телефоне у этих понятий просто нет прообраза, экран и так
+    // один на всё и модальный. Разводить цепочку по одному методу за раз не
+    // выйдет: rustc глушит однотипные ошибки в одной цепочке после первой, и
+    // каждая починка вскрывала бы следующую только на очередном запуске CI.
+    //
+    // Мобильная ветка ничем не рискует в рантайме: ensure_popup_window вызывает
+    // только show_for_selection, а его — только watcher, который запускается
+    // исключительно на десктопе (SPEC §9.4, §9.5). На телефоне вход другой —
+    // пункт меню «Объяснить» из нативного плагина. Здесь достаточно, чтобы
+    // функция типобезопасно существовала и собиралась.
+    #[cfg(desktop)]
+    let window = WebviewWindowBuilder::new(app, POPUP_LABEL, WebviewUrl::App("popup.html".into()))
         .title("Суфлёр")
         .inner_size(400.0, 160.0)
+        .decorations(false)
         .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
@@ -53,18 +68,15 @@ pub fn ensure_popup_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         // Попап не должен забирать фокус клавиатуры у приложения, из которого
         // пользователь выделил текст (SPEC §8).
         .focused(false)
-        .visible(false);
+        .visible(false)
+        .build()?;
 
-    // .decorations() существует только у настольного окна: рамка со крестиком —
-    // понятие рабочего стола, на телефоне окна занимают экран целиком и такой
-    // рамки не бывает в принципе. К тому же этот путь на мобильных не выполняется
-    // никогда — see show_for_selection: его вызывает только watcher, а тот
-    // запускается лишь на десктопе (SPEC §9.4, §9.5), — но собираться обязан
-    // и здесь: cfg проверяет исходный код целиком, а не только достижимые ветки.
-    #[cfg(desktop)]
-    let builder = builder.decorations(false);
+    #[cfg(not(desktop))]
+    let window = WebviewWindowBuilder::new(app, POPUP_LABEL, WebviewUrl::App("popup.html".into()))
+        .visible(false)
+        .build()?;
 
-    Ok(builder.build()?)
+    Ok(window)
 }
 
 /// Показывает попап для нового выделения: сохраняет якорь и отдаёт фронтенду термин.
