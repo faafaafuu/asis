@@ -303,6 +303,9 @@ const CATALOG = [
  */
 let showAllModels = false;
 
+/** Показывать ли пояснения к моделям. По умолчанию нет — см. разметку. */
+let showModelNotes = false;
+
 /** Идущие сейчас загрузки: имя модели → строка состояния для показа. */
 const pulling = new Map();
 
@@ -323,23 +326,40 @@ function makeRow({ name, note, size, installed, chosen }) {
   // видно, что у тебя есть, а что придётся ждать.
   if (!installed) row.dataset.absent = "true";
 
+  // Два яруса, а не один ряд: имя модели и её состояние сверху, пояснение
+  // строкой ниже. В один ряд пояснение зажималось между именем и кнопкой,
+  // ломалось на три строки, и размер отрывался от текста, к которому относится.
+  const head = document.createElement("div");
+  head.className = "ob__model-head";
+
   const title = document.createElement("span");
   title.className = "ob__model-name";
   title.textContent = name;
 
   // Размер показываем всегда, а не только у нескачанных: у скачанной он
-  // отвечает на вопрос «сколько это занимает у меня на диске».
+  // отвечает на вопрос «сколько это занимает у меня на диске». В отличие от
+  // пояснения это не справка, а часть решения — его не прячем.
+  const sizeEl = document.createElement("span");
+  sizeEl.className = "ob__model-size";
+  sizeEl.textContent = size;
+
+  head.append(title, sizeEl);
+
   const hint = document.createElement("span");
   hint.className = "ob__model-note";
-  hint.textContent = note ? `${note} · ${size}` : size;
+  hint.textContent = note;
+  // Наведение показывает пояснение и без раскрытия списка: тому, кто просто
+  // хочет узнать про одну строку, незачем разворачивать все девять.
+  if (note) row.title = note;
 
-  row.append(title, hint);
+  row.append(head);
+  if (note) row.append(hint);
 
   if (pulling.has(name)) {
     const progress = document.createElement("span");
     progress.className = "ob__model-state";
     progress.textContent = pulling.get(name);
-    row.append(progress);
+    head.append(progress);
     return row;
   }
 
@@ -353,26 +373,23 @@ function makeRow({ name, note, size, installed, chosen }) {
     // «Скачана» вместо молчания: раньше строка без кнопки выглядела так же,
     // как строка с кнопкой, и понять, что уже есть на диске, было нельзя.
     state.textContent = chosen ? "✓ выбрана" : "скачана — выбрать";
-    row.append(state);
+    head.append(state);
     return row;
   }
 
-  const state = document.createElement("span");
-  state.className = "ob__model-state";
-  state.textContent = "не скачана";
-  row.append(state);
-
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "ob__btn";
+  button.className = "ob__btn ob__btn--slim";
   button.dataset.pull = name;
   button.textContent = "Скачать";
-  row.append(button);
+  head.append(button);
   return row;
 }
 
 function renderModels(status) {
   ui.modelsList.replaceChildren();
+  ui.modelsList.dataset.notes = showModelNotes ? "on" : "off";
+  ui.modelsInfo.textContent = showModelNotes ? "скрыть пояснения" : "чем отличаются";
   lastInstalled = status?.installed ?? lastInstalled;
 
   if (!status?.running) {
@@ -477,6 +494,11 @@ async function startPull(name) {
 
 ui.modelsToggle.addEventListener("click", () => {
   showAllModels = !showAllModels;
+  renderModels({ running: true, installed: lastInstalled });
+});
+
+ui.modelsInfo.addEventListener("click", () => {
+  showModelNotes = !showModelNotes;
   renderModels({ running: true, installed: lastInstalled });
 });
 

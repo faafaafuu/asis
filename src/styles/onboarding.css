@@ -75,6 +75,13 @@ body {
   color: var(--accent);
 }
 
+/* Кнопка внутри строки списка: та же кнопка, но не в полный рост — иначе она
+   перевешивает строку, к которой относится. */
+.ob__btn--slim {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
 .ob__btn[hidden] {
   display: none;
 }
@@ -164,13 +171,24 @@ body {
    а мелкие переключатели рядом с длинными именами моделей только мешают. */
 .ob__model {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 3px;
   padding: 8px 10px;
   border-radius: 7px;
   border: 1px solid var(--input-border);
   background: var(--input-bg);
   font-size: var(--size-secondary);
+}
+
+/* Верхний ярус: имя слева, состояние или кнопка справа. */
+.ob__model-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  /* Кнопка выше текста, и без этого строка с ней получалась заметно толще
+     соседних — список выглядел неровным. */
+  min-height: 26px;
 }
 
 .ob__model[data-pick] {
@@ -195,13 +213,36 @@ body {
 
 .ob__model-name {
   color: var(--text);
+  font-family: var(--font-mono);
 }
 
-.ob__model-note {
+/* Размер прижимает состояние к правому краю: у него margin-right: auto,
+   и работает это даже когда размер неизвестен и строка пуста. */
+.ob__model-size {
   color: var(--text-muted);
   font-size: 12px;
-  /* Заметка растягивается и отжимает состояние вправо. */
-  flex: 1;
+  margin-right: auto;
+  white-space: nowrap;
+}
+
+/* Пояснение по умолчанию скрыто — оно справка, а не часть выбора. */
+.ob__model-note {
+  display: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.ob__models[data-notes="on"] .ob__model-note {
+  display: block;
+}
+
+/* Заголовок списка: подпись слева, переключатель пояснений справа. */
+.ob__models-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .ob__model-state {
