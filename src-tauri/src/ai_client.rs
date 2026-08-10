@@ -254,7 +254,8 @@ impl AiProvider for MockProvider {
 /* ─────────────────────────────── HTTP ─────────────────────────────────── */
 
 const SYSTEM_PROMPT: &str = concat!(
-    "Ты объясняешь выделенный пользователем термин. Отвечай по-русски, по сути, без служебных ",
+    "Ты объясняешь выделенный пользователем термин. Отвечай по-русски, даже если сам термин ",
+    "на другом языке — английское слово объясняется русским текстом. Отвечай по сути, без служебных ",
     "фраз вроде «это фрагмент из абзаца». Верни строгий JSON: ",
     r#"{"def": "одно-два предложения", "simple": "то же максимально просто", "examples": ["2–3 коротких примера"]}."#
 );
@@ -351,19 +352,34 @@ impl HttpProvider {
     }
 }
 
+/// Строка по указателю — если она там есть и не пуста.
+///
+/// Пустую строку приравниваем к отсутствию ответа. Без этого перебор вариантов
+/// ниже останавливался бы на первом же поле: рассуждающие модели кладут в
+/// `content` именно `""`, и дальше искать было уже негде.
+fn text_at(value: Option<&serde_json::Value>) -> Option<String> {
+    value
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// Вытаскивает текст ответа из типовых обёрток chat-completions.
 fn extract_text(value: &serde_json::Value) -> Option<String> {
-    value
-        // OpenAI-совместимые API (в том числе /v1 у Ollama и LM Studio)
-        .pointer("/choices/0/message/content")
+    // OpenAI-совместимые API (в том числе /v1 у Ollama и LM Studio)
+    text_at(value.pointer("/choices/0/message/content"))
         // Родной формат Ollama: POST /api/chat
-        .or_else(|| value.pointer("/message/content"))
+        .or_else(|| text_at(value.pointer("/message/content")))
         // Anthropic
-        .or_else(|| value.pointer("/content/0/text"))
-        .or_else(|| value.pointer("/response"))
-        .or_else(|| value.pointer("/text"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+        .or_else(|| text_at(value.pointer("/content/0/text")))
+        .or_else(|| text_at(value.pointer("/response")))
+        .or_else(|| text_at(value.pointer("/text")))
+        // Рассуждающие модели (gpt-oss и родня) отдают видимый ответ отдельным
+        // полем, а content оставляют пустым. Для нас это тот же ответ: сервис
+        // вернул 200 и текст — молчать из-за формы обёртки нельзя.
+        .or_else(|| text_at(value.pointer("/choices/0/message/reasoning")))
+        .or_else(|| text_at(value.pointer("/choices/0/message/reasoning_content")))
 }
 
 /// Ответу модели не доверяем: приводим к контракту {def, simple, examples}.
@@ -436,7 +452,8 @@ impl AiProvider for HttpProvider {
                 role: "system",
                 content: format!(
                     "Пользователь уточняет ранее объяснённый термин «{term}». \
-                     Отвечай коротко, обычным текстом, без JSON."
+                     Отвечай коротко, обычным текстом, без JSON. \
+                     Отвечай по-русски, даже если сам термин на другом языке."
                 ),
             },
             Message {
@@ -630,6 +647,22 @@ mod tests {
         let parsed = normalize_explanation(&value).unwrap();
         assert_eq!(parsed.def, "просто текст");
         assert!(parsed.examples.is_empty());
+    }
+
+    #[test]
+    fn normalize_reads_answer_of_reasoning_model() {
+        // gpt-oss и родня: content пустой, ответ лежит в reasoning.
+        let value = serde_json::json!({
+            "choices": [{ "message": { "content": "", "reasoning": "Альбедо — доля отражённого света." } }]
+        });
+        let parsed = normalize_explanation(&value).unwrap();
+        assert_eq!(parsed.def, "Альбедо — доля отражённого света.");
+    }
+
+    #[test]
+    fn empty_content_does_not_shadow_later_fields() {
+        let value = serde_json::json!({ "choices": [{ "message": { "content": "   " } }] });
+        assert!(extract_text(&value).is_none(), "пробелы — это не ответ");
     }
 
     #[test]
