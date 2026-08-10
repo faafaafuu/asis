@@ -56,12 +56,16 @@ reqwest = { version = "0.13", default-features = false, features = [
 
 # На Android системного OpenSSL нет, и native-tls тянет за собой openssl-sys,
 # который под aarch64-linux-android не собирается вовсе — именно на нём падала
-# сборка .apk во всех выпусках. Здесь TLS свой, на rustls: корневые сертификаты
-# он несёт с собой, а C-зависимостей не требует.
+# сборка .apk во всех выпусках. Здесь TLS свой, на rustls.
+#
+# webpki-roots нужен вместе с ним: rustls сам по себе не знает, кому доверять,
+# а системного хранилища сертификатов, откуда их взять, на Android для нас нет.
+# Эта фича вшивает список корневых центров в приложение.
 [target.'cfg(target_os = "android")'.dependencies]
 reqwest = { version = "0.13", default-features = false, features = [
   "json",
-  "rustls-tls",
+  "rustls",
+  "webpki-roots",
   "socks",
   "system-proxy",
   "charset",
