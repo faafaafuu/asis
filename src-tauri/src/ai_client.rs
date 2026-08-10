@@ -276,6 +276,13 @@ const SYSTEM_PROMPT: &str = concat!(
 /// на длинной дистанции ещё и уходят в повторы и бессвязицу.
 const ANSWER_LIMIT: u32 = 220;
 
+/// Насколько модели позволено выбирать неочевидные слова.
+///
+/// По умолчанию у Ollama 0.8 — это настройка для сочинительства. Здесь же нужен
+/// словарь: на одно и то же слово ожидается один и тот же ответ, а не новая
+/// формулировка каждый раз. Заодно реже случаются срывы на чужой язык.
+const TEMPERATURE: f32 = 0.2;
+
 /// Заготовка реального провайдера: нейтральный chat-подобный формат.
 /// Под конкретный API подгоняется правкой `request_body`/`extract_text`.
 pub struct HttpProvider {
@@ -322,13 +329,17 @@ impl HttpProvider {
             // как один объект нельзя. Для OpenAI-совместимых API поле безвредно.
             "stream": false,
             "max_tokens": ANSWER_LIMIT,
+            "temperature": TEMPERATURE,
         });
 
         // Родной API Ollama живёт по своим именам: max_tokens он не знает, зато
         // понимает options.num_predict. Отправляем эти поля только ему — чужим
         // сервисам лишние ключи ни к чему.
         if self.endpoint.contains("/api/chat") {
-            body["options"] = serde_json::json!({ "num_predict": ANSWER_LIMIT });
+            body["options"] = serde_json::json!({
+                "num_predict": ANSWER_LIMIT,
+                "temperature": TEMPERATURE,
+            });
             // Иначе Ollama выгружает модель из памяти после пяти минут простоя,
             // и первое же выделение после паузы ждёт её загрузки — десятки секунд
             // против двенадцати, которые терпит таймаут. Человек видит «нет
@@ -479,11 +490,27 @@ fn normalize_explanation(value: &serde_json::Value) -> Result<Explanation, AiErr
     })
 }
 
+/// Есть ли в тексте иероглифы и кана.
+///
+/// Модели, обученной на китайском, случается сорваться на него посреди русского
+/// ответа. Бывает редко и на повторе не воспроизводится — значит это не
+/// непонимание задачи, а разовый промах при выборе очередного слова.
+fn has_foreign_script(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(c as u32,
+            0x4E00..=0x9FFF   // основные иероглифы
+            | 0x3400..=0x4DBF // редкие иероглифы
+            | 0x3040..=0x30FF // японские каны
+            | 0xAC00..=0xD7AF // корейский хангыль
+        )
+    })
+}
+
 #[async_trait]
 impl AiProvider for HttpProvider {
     async fn explain(&self, term: &str, context: &str) -> Result<Explanation, AiError> {
-        let value = self
-            .send(vec![
+        let messages = || {
+            vec![
                 Message {
                     role: "system",
                     content: SYSTEM_PROMPT.to_string(),
@@ -492,9 +519,23 @@ impl AiProvider for HttpProvider {
                     role: "user",
                     content: format!("Термин: «{term}».\nКонтекст: {context}"),
                 },
-            ])
-            .await?;
-        normalize_explanation(&value)
+            ]
+        };
+
+        let parsed = normalize_explanation(&self.send(messages()).await?)?;
+        if !has_foreign_script(&parsed.def) {
+            return Ok(parsed);
+        }
+
+        // Переспрашиваем ровно один раз: повтор почти всегда даёт чистый ответ,
+        // а бесконечно бороться с моделью за язык — не наше дело. Если и второй
+        // раз с иероглифами, отдаём как есть: объяснение по существу всё же
+        // лучше, чем пустое окно.
+        log::warn!("ответ сорвался на другой язык — переспрашиваем");
+        match normalize_explanation(&self.send(messages()).await?) {
+            Ok(second) => Ok(second),
+            Err(_) => Ok(parsed),
+        }
     }
 
     async fn ask(
@@ -737,6 +778,16 @@ mod tests {
             strip_code_fence("```"),
             "```",
             "обрывок разметки не должен съедать ответ"
+        );
+    }
+
+    #[test]
+    fn foreign_script_is_noticed_only_when_it_is_there() {
+        assert!(has_foreign_script("«Failed» означает 失败 в этом контексте"));
+        assert!(!has_foreign_script("«Failed» означает неудачу или сбой."));
+        assert!(
+            !has_foreign_script("Throttling — это ограничение скорости"),
+            "латиница в термине — не повод переспрашивать"
         );
     }
 
