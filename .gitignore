@@ -20,3 +20,6 @@ npm-debug.log*
 # ОС
 .DS_Store
 Thumbs.db
+
+# Рабочие копии агента — не часть проекта.
+.claude/worktrees/
