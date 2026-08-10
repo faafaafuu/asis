@@ -106,6 +106,10 @@ async function refreshCapture() {
     const { text, state } = verdictFor(diag) ?? { text: "", state: "idle" };
     ui.capture.textContent = text;
     ui.capture.dataset.state = state;
+    // Диагностика нужна ровно тогда, когда перехват не сработал, — тогда и
+    // показываем её сами. Закрывать раздел обратно не станем: человек его уже
+    // увидел и вправе решать сам, когда свернуть.
+    if (state === "warn") ui.advanced.open = true;
   } catch {
     // Молча: команда опрашивается раз в секунду, и сыпать ошибками в окно,
     // пока пользователь читает соседний раздел, — только мешать.
@@ -194,6 +198,9 @@ function presetFor(settings) {
 function applyPreset(name, { keepValues = false } = {}) {
   const preset = PRESETS[name];
   ui.modelFields.hidden = preset.provider !== "http";
+  // Адрес и прокси живут под спойлером, но прятать их надо по тому же признаку:
+  // у Википедии нет ни того, ни другого, и пустые поля там только сбивают с толку.
+  ui.advancedModel.hidden = preset.provider !== "http";
   ui.keyField.hidden = !preset.key;
   ui.keyHint.textContent = preset.hint ?? "";
   if (!keepValues) {

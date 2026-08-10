@@ -28,30 +28,6 @@
 
       <hr class="ob__sep" />
 
-      <h2 class="ob__subtitle">Проверка перехвата</h2>
-      <p class="ob__text ob__text--dim">
-        Выделите мышью любое слово в браузере или редакторе, удерживая левый Ctrl.
-        Строка ниже обновится сама — по ней видно, дошёл ли жест до приложения и
-        отдала ли программа текст.
-      </p>
-      <p class="ob__capture" data-el="capture">Жду выделения…</p>
-
-      <label class="ob__check">
-        <input type="checkbox" data-el="clipboardFallback" />
-        <span>Забирать выделение копированием, если программа не отдаёт его системе</span>
-      </label>
-      <p class="ob__hint">
-        Так устроены Chrome, Edge, Telegram, Discord, VS Code — они не показывают
-        выделение системе напрямую. Приложение нажимает Ctrl+C за вас и сразу
-        возвращает в буфер обмена то, что там было.
-      </p>
-
-      <div class="ob__actions">
-        <button class="ob__btn" type="button" data-el="logs">Открыть журнал</button>
-      </div>
-
-      <hr class="ob__sep" />
-
       <h2 class="ob__subtitle">Откуда брать объяснения</h2>
       <p class="ob__text ob__text--dim">
         Из коробки работает Википедия: определения без ключей и регистрации. Чтобы
@@ -72,11 +48,6 @@
       </label>
 
       <div data-el="modelFields" hidden>
-        <label class="ob__field">
-          <span class="ob__label">Адрес API</span>
-          <input class="ob__input" data-el="endpoint" type="text" spellcheck="false" />
-        </label>
-
         <label class="ob__field" data-el="keyField">
           <span class="ob__label">Ключ</span>
           <input class="ob__input" data-el="apiKey" type="password" autocomplete="off"
@@ -88,17 +59,6 @@
           <span class="ob__label">Модель</span>
           <input class="ob__input" data-el="model" type="text" spellcheck="false" />
         </label>
-
-        <label class="ob__field">
-          <span class="ob__label">Прокси</span>
-          <input class="ob__input" data-el="proxy" type="text" spellcheck="false"
-                 placeholder="socks5://127.0.0.1:1080 — если сервис недоступен" />
-          <span class="ob__hint">
-            Нужен, когда ключ есть, а запросы не доходят. Большинство VPN-клиентов
-            поднимают у себя socks5 на 127.0.0.1 — посмотрите порт в их настройках.
-            Пусто — идём напрямую.
-          </span>
-        </label>
       </div>
 
       <div class="ob__actions">
@@ -106,6 +66,54 @@
         <button class="ob__btn" type="button" data-el="test">Проверить</button>
       </div>
       <p class="ob__text ob__text--dim" data-el="aiStatus"></p>
+
+      <!-- Всё, что нужно раз в жизни, — под спойлером. Раньше две трети окна занимали
+           счётчик перехвата, адрес API и прокси: человеку, у которого работает, они
+           не говорят ничего, а «10 из 14» ещё и выглядит как поломка. Раздел сам
+           раскроется, если жест перестанет срабатывать, — см. refreshCapture. -->
+      <details class="ob__more" data-el="advanced">
+        <summary class="ob__more-head">Если что-то не работает</summary>
+
+        <h3 class="ob__subtitle">Проверка перехвата</h3>
+        <p class="ob__text ob__text--dim">
+          Выделите мышью любое слово в браузере или редакторе, удерживая левый Ctrl.
+          Строка ниже обновится сама — по ней видно, дошёл ли жест до приложения и
+          отдала ли программа текст.
+        </p>
+        <p class="ob__capture" data-el="capture">Жду выделения…</p>
+
+        <label class="ob__check">
+          <input type="checkbox" data-el="clipboardFallback" />
+          <span>Забирать выделение копированием, если программа не отдаёт его системе</span>
+        </label>
+        <p class="ob__hint">
+          Так устроены Chrome, Edge, Telegram, Discord, VS Code — они не показывают
+          выделение системе напрямую. Приложение нажимает Ctrl+C за вас и сразу
+          возвращает в буфер обмена то, что там было.
+        </p>
+
+        <div data-el="advancedModel" hidden>
+          <label class="ob__field">
+            <span class="ob__label">Адрес API</span>
+            <input class="ob__input" data-el="endpoint" type="text" spellcheck="false" />
+          </label>
+
+          <label class="ob__field">
+            <span class="ob__label">Прокси</span>
+            <input class="ob__input" data-el="proxy" type="text" spellcheck="false"
+                   placeholder="socks5://127.0.0.1:1080 — если сервис недоступен" />
+            <span class="ob__hint">
+              Нужен, когда ключ есть, а запросы не доходят. Большинство VPN-клиентов
+              поднимают у себя socks5 на 127.0.0.1 — посмотрите порт в их настройках.
+              Пусто — идём напрямую.
+            </span>
+          </label>
+        </div>
+
+        <div class="ob__actions">
+          <button class="ob__btn" type="button" data-el="logs">Открыть журнал</button>
+        </div>
+      </details>
 
       <p class="ob__note">
         Приложение остаётся в трее. Выделение текста с зажатым левым Ctrl открывает

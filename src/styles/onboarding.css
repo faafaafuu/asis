@@ -142,6 +142,37 @@ body {
   color: var(--text-muted);
 }
 
+/* ── «Если что-то не работает» ──────────────────────────────────────────── */
+
+/* Раздел для тех редких случаев, когда что-то пошло не так. Свёрнут по
+   умолчанию: у человека, у которого всё работает, он не должен отнимать
+   ни внимания, ни высоты окна. */
+.ob__more {
+  border-top: 1px solid var(--divider);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ob__more-head {
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+  /* Своя стрелка не нужна — системный маркер понятен и привычен, но по центру
+     строки он смотрится ровнее. */
+  list-style-position: outside;
+}
+
+.ob__more-head:hover {
+  color: var(--text);
+}
+
+/* Пока раздел свёрнут, промежутки внутри него не должны создавать пустоту. */
+.ob__more:not([open]) {
+  gap: 0;
+}
+
 .ob__hint a {
   color: var(--accent);
 }
