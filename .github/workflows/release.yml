@@ -1,9 +1,17 @@
-# Сборка установщиков под все платформы.
+# Сборка установщика.
 #
 # Почему CI, а не одна машина: Tauri собирает установщик только на той же ОС, для
-# которой он предназначен. .dmg требует macOS (подпись и notarization идут через
-# инструменты Apple), .exe — Windows SDK, .deb/.AppImage — Linux. Кросс-сборки
-# для macOS и Windows официально не поддерживаются, поэтому здесь матрица раннеров.
+# которой он предназначен. .exe требует Windows SDK, .dmg — инструментов Apple,
+# .deb/.AppImage — Linux. Кросс-сборка официально не поддерживается.
+#
+# Пока здесь только Windows. macOS и Android падали во всех выпусках подряд,
+# начиная с 0.1.2: .dmg и .apk не собрались ни разу, но релиз всё равно выходил
+# и обещал их в описании. Обещать файл, которого нет, — хуже, чем честно его
+# не предлагать. Вернём платформу сюда тогда, когда её сборка заработает
+# и кто-то проверит результат на живой системе.
+#
+# Linux собирался успешно, но ни разу не был проверен в работе, поэтому пока
+# тоже не выпускается. Вернуть его — дописать одну строку в матрицу.
 #
 # Запуск: только пуш тега вида v0.1.0 — и никак иначе.
 # Результат — опубликованный релиз на GitHub, где под каждую ОС лежит готовый
@@ -38,17 +46,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: macOS (Apple Silicon) → .dmg
-            platform: macos-latest
-            args: --target aarch64-apple-darwin
-          - label: macOS (Intel) → .dmg
-            platform: macos-latest
-            args: --target x86_64-apple-darwin
           - label: Windows → .exe
             platform: windows-latest
-            args: ""
-          - label: Linux → .deb и .AppImage
-            platform: ubuntu-22.04
             args: ""
 
     runs-on: ${{ matrix.platform }}
@@ -64,27 +63,11 @@ jobs:
 
       - name: Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Кэш сборки Rust
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-
-      # Системные зависимости Tauri на Linux. Без них webkit2gtk не найдётся и
-      # сборка упадёт на этапе конфигурации, а не компиляции.
-      - name: Зависимости Linux
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            patchelf
 
       - run: npm ci
 
@@ -108,17 +91,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Подпись macOS. Без этих секретов .dmg соберётся, но при первом запуске
-          # система покажет предупреждение «разработчик не подтверждён» —
-          # пользователю придётся открывать через контекстное меню.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}-dev', github.run_number) }}
+          tagName: ${{ github.ref_name }}
           releaseName: Суфлёр ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
           # Публикуем сразу: пуш тега — уже осознанное действие, лишний ручной шаг
@@ -127,94 +101,19 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
-  android:
-    name: Android → .apk
-    runs-on: ubuntu-22.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Android NDK
-        run: |
-          sdkmanager --install "ndk;27.0.12077973"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
-
-      - name: Rust с Android-таргетами
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - run: npm ci
-
-      # Проект под Android генерируется и в репозиторий не коммитится.
-      # Модуль плагина из mobile/android-plugin подключается к нему после генерации —
-      # см. mobile/android-plugin/README.md.
-      - name: Генерация Android-проекта
-        run: npm run tauri -- android init
-
-      - name: Подключить плагин выделения
-        run: |
-          {
-            echo 'include(":sufler-plugin")'
-            echo 'project(":sufler-plugin").projectDir = file("../../../mobile/android-plugin")'
-          } >> src-tauri/gen/android/settings.gradle
-
-      # Ключ подписи. Без него собирается только debug-APK: релизный неподписанный
-      # Android установить не даст.
-      - name: Ключ подписи
-        # Секреты нельзя проверять напрямую в условии, поэтому сначала кладём их в env.
-        env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
-        if: env.KEYSTORE != ''
-        run: |
-          echo "$KEYSTORE" | base64 -d > src-tauri/gen/android/keystore.jks
-          {
-            echo "storeFile=keystore.jks"
-            echo "storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
-            echo "keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}"
-            echo "keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}"
-          } > src-tauri/gen/android/keystore.properties
-
-      - name: Сборка APK
-        run: npm run tauri -- android build --apk
-
-      # APK кладём в тот же релиз, что и десктопные установщики: человек не должен
-      # искать сборку под телефон в отдельном разделе с артефактами, доступном
-      # только авторизованным пользователям GitHub.
-      - name: Приложить APK к релизу
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          files: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-          fail_on_unmatched_files: true
-
-      # При ручном запуске тега нет, поэтому APK остаётся артефактом сборки.
-      - name: Выложить APK артефактом
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: sufler-android
-          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
-          if-no-files-found: error
+# macOS, Android и Linux здесь намеренно отсутствуют.
+#
+# macOS и Android не собрались ни разу за всю историю выпусков: их задания
+# падали в каждом релизе, начиная с 0.1.2, и .dmg с .apk не существовало
+# в природе — при том что описание релиза их обещало. Задания убраны, а не
+# отключены условием: закомментированный код гниёт, а история хранит его
+# лучше файла. Вернём, когда сборка заработает и результат проверят на живой
+# системе.
+#
+# Linux собирался успешно, но его установщик никто не запускал. Выпускать
+# непроверенное — это перекладывать отладку на того, кто просто хотел
+# пользоваться программой.
+#
 # iOS (.ipa) здесь намеренно нет.
 #
 # Собрать его можно только на macOS-раннере и только с сертификатом Apple Developer
