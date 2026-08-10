@@ -7,8 +7,10 @@
 # артефактом к запуску. Он доступен из вкладки Actions тому, кто его ждёт,
 # и не попадается на глаза тем, кто пришёл за рабочей версией.
 #
-# Только Windows: проверочная сборка нужна, чтобы быстро увидеть «собралось и
-# работает», а не чтобы покрыть все системы. Полная матрица — при выпуске.
+# Windows — основная проверка: собралось и работает. macOS и Android здесь же,
+# но по другой причине: их сборки не проходили ни разу за всю историю проекта,
+# и чинить их можно только так — правка, сборка, чтение лога. В релиз они
+# вернутся, когда станут зелёными, а не раньше.
 #
 # Запуск: пуш в dev либо вручную через «Run workflow» на любой ветке.
 
@@ -69,4 +71,113 @@ jobs:
           path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
           # Проверочные сборки живут недолго: их смотрят в тот же день.
+          retention-days: 14
+
+  # ── Платформы, которые чиним ────────────────────────────────────────────────
+  #
+  # Падение любой из них не должно мешать основной проверке, поэтому они здесь
+  # отдельными заданиями и с continue-on-error: пока они красные, это ожидаемо,
+  # и превращать из-за них весь запуск в красный — значит приучить себя не
+  # смотреть на цвет вовсе.
+
+  macos:
+    name: macOS → .dmg
+    runs-on: macos-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      # Ни одной переменной APPLE_*. Раньше их передавали всегда, а секретов
+      # с сертификатом не существует — и tauri-action честно пытался
+      # импортировать пустой сертификат в связку ключей и падал. Программа
+      # при этом собиралась целиком: красной сборка была из-за подписи, а не
+      # из-за кода. Без подписи .dmg работает, просто система при первом
+      # запуске предупреждает о неизвестном разработчике.
+      - name: Сборка .dmg
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target aarch64-apple-darwin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sufler-macos-${{ github.sha }}
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    name: Android → .apk
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Android NDK
+        run: |
+          sdkmanager --install "ndk;27.0.12077973"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Подготовка проекта Android
+        run: npm run tauri -- android init
+
+      # Модуль плагина подключается к сгенерированному проекту: сам проект
+      # в репозитории не хранится, его каждый раз создаёт `android init`.
+      - name: Подключить плагин выделения
+        run: |
+          {
+            echo 'include(":sufler-plugin")'
+            echo 'project(":sufler-plugin").projectDir = file("../../../mobile/android-plugin")'
+          } >> src-tauri/gen/android/settings.gradle
+
+      - name: Сборка .apk
+        run: npm run tauri -- android build --apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sufler-android-${{ github.sha }}
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
           retention-days: 14
