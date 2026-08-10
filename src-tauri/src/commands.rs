@@ -235,6 +235,34 @@ pub fn open_logs(app: AppHandle) -> Result<(), String> {
         .map_err(|err| format!("не удалось открыть {}: {err}", dir.display()))
 }
 
+/// Какие модели стоят на этом компьютере и отвечает ли вообще Ollama.
+///
+/// Адрес берём из настроек, а не из воздуха: человек мог поднять Ollama на
+/// другом порту. Держатель конфигурации живёт в своей области видимости —
+/// иначе он поехал бы через `await`, а этого делать нельзя.
+#[tauri::command]
+pub async fn local_models(app: AppHandle) -> crate::ollama::Status {
+    let host = {
+        let state = app.state::<AppState>();
+        let config = state.config();
+        crate::ollama::host_from(&config.ai.endpoint)
+    };
+    crate::ollama::status(&host).await
+}
+
+/// Скачивает модель. Ход загрузки уходит событиями `model:pull` — команда
+/// возвращается только когда всё скачано, поэтому окно её не ждёт.
+#[tauri::command]
+pub async fn pull_model(app: AppHandle, model: String) -> Result<(), String> {
+    let host = {
+        let state = app.state::<AppState>();
+        let config = state.config();
+        crate::ollama::host_from(&config.ai.endpoint)
+    };
+    log::info!("скачиваю модель {model}");
+    crate::ollama::pull(app.clone(), host, model).await
+}
+
 /// Пробный запрос: пользователь должен увидеть, что ключ рабочий, до того как
 /// начнёт выделять текст и получать «Сбой сети».
 #[tauri::command]

@@ -10,6 +10,7 @@ mod config;
 mod instance;
 #[cfg(mobile)]
 mod mobile;
+mod ollama;
 mod overlay;
 mod selection;
 mod state;
@@ -107,6 +108,8 @@ pub fn run() {
             commands::save_trigger_settings,
             commands::capture_diagnostics,
             commands::open_logs,
+            commands::local_models,
+            commands::pull_model,
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить приложение");

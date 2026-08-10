@@ -213,6 +213,14 @@ function applyPreset(name, { keepValues = false } = {}) {
   ui.advancedModel.hidden = preset.provider !== "http";
   ui.keyField.hidden = !preset.key;
   ui.keyHint.textContent = preset.hint ?? "";
+
+  // У Ollama модели лежат на этом же компьютере — их можно показать списком
+  // и доставить недостающую. У облачных сервисов список бесконечен и меняется
+  // без предупреждения, там честнее оставить поле для ввода.
+  const local = name === "ollama";
+  ui.modelsBlock.hidden = !local;
+  ui.modelField.hidden = local;
+  if (local) refreshModels();
   if (!keepValues) {
     ui.endpoint.value = preset.endpoint;
     ui.model.value = preset.model;
@@ -238,24 +246,197 @@ async function loadSettings() {
 
 ui.preset.addEventListener("change", () => applyPreset(ui.preset.value));
 
-ui.save.addEventListener("click", async () => {
+async function saveAi() {
   const preset = PRESETS[ui.preset.value];
+  await api.invoke("save_ai_settings", {
+    settings: {
+      provider: preset.provider,
+      endpoint: ui.endpoint.value.trim(),
+      apiKey: ui.apiKey.value.trim(),
+      model: ui.model.value.trim(),
+      proxy: ui.proxy.value.trim(),
+    },
+  });
+  ui.apiKey.value = "";
+}
+
+ui.save.addEventListener("click", async () => {
   ui.aiStatus.textContent = "Сохраняю…";
   try {
-    await api.invoke("save_ai_settings", {
-      settings: {
-        provider: preset.provider,
-        endpoint: ui.endpoint.value.trim(),
-        apiKey: ui.apiKey.value.trim(),
-        model: ui.model.value.trim(),
-        proxy: ui.proxy.value.trim(),
-      },
-    });
-    ui.apiKey.value = "";
+    await saveAi();
     ui.aiStatus.textContent = "Сохранено. Нажмите «Проверить», чтобы убедиться, что работает.";
   } catch (err) {
     ui.aiStatus.textContent = `Не удалось сохранить: ${err}`;
   }
+});
+
+/* ── Модели на этом компьютере ──────────────────────────────────────────── */
+
+// Что предлагаем поставить. Список короткий намеренно: каждая модель здесь
+// проверена на настоящих терминах, а не взята из чужого рейтинга. Первая
+// отвечает точнее и знает научные слова, вторая легче и шустрее, но на редких
+// терминах ошибается. Всё, что уже установлено, показывается и без этого списка.
+const RECOMMENDED = [
+  { name: "qwen2.5:7b", size: "4.7 ГБ", note: "точнее, знает термины" },
+  { name: "gemma3:4b", size: "3.3 ГБ", note: "легче и быстрее" },
+];
+
+/** Идущие сейчас загрузки: имя модели → строка состояния для показа. */
+const pulling = new Map();
+
+/**
+ * Последний известный список установленного.
+ *
+ * Прогресс загрузки приходит десятки раз в минуту, и спрашивать у Ollama состав
+ * моделей на каждый процент — бессмысленная работа: за время загрузки он не
+ * меняется. Перерисовываем по запомненному.
+ */
+let lastInstalled = [];
+
+function makeRow({ name, note, installed, chosen }) {
+  const row = document.createElement("div");
+  row.className = "ob__model";
+  if (chosen) row.dataset.chosen = "true";
+
+  const title = document.createElement("span");
+  title.className = "ob__model-name";
+  title.textContent = name;
+
+  const hint = document.createElement("span");
+  hint.className = "ob__model-note";
+  hint.textContent = note;
+
+  row.append(title, hint);
+
+  if (pulling.has(name)) {
+    const progress = document.createElement("span");
+    progress.className = "ob__model-state";
+    progress.textContent = pulling.get(name);
+    row.append(progress);
+    return row;
+  }
+
+  if (installed) {
+    // Выбор — щелчок по строке целиком, а не по крошечной галочке: строк мало,
+    // промахнуться не по чему.
+    row.tabIndex = 0;
+    row.dataset.pick = name;
+    const state = document.createElement("span");
+    state.className = "ob__model-state";
+    state.textContent = chosen ? "выбрана" : "выбрать";
+    row.append(state);
+    return row;
+  }
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ob__btn";
+  button.dataset.pull = name;
+  button.textContent = "Скачать";
+  row.append(button);
+  return row;
+}
+
+function renderModels(status) {
+  ui.modelsList.replaceChildren();
+  lastInstalled = status?.installed ?? lastInstalled;
+
+  if (!status?.running) {
+    ui.modelsHint.textContent =
+      "Ollama не отвечает. Установите её с ollama.com и запустите — программа сама увидит.";
+    return;
+  }
+
+  const installed = new Map(status.installed.map((m) => [m.name, m]));
+  const chosen = ui.model.value.trim();
+  const shown = new Set();
+
+  for (const item of RECOMMENDED) {
+    shown.add(item.name);
+    const has = installed.has(item.name);
+    ui.modelsList.append(
+      makeRow({
+        name: item.name,
+        note: has ? item.note : `${item.note} · ${item.size}`,
+        installed: has,
+        chosen: has && chosen === item.name,
+      }),
+    );
+  }
+
+  // Всё остальное, что человек скачал сам, — тоже его выбор, прятать нельзя.
+  for (const model of status.installed) {
+    if (shown.has(model.name)) continue;
+    ui.modelsList.append(
+      makeRow({
+        name: model.name,
+        note: `${model.sizeGb} ГБ`,
+        installed: true,
+        chosen: chosen === model.name,
+      }),
+    );
+  }
+
+  ui.modelsHint.textContent = pulling.size
+    ? "Загрузка идёт в фоне — окно можно закрыть, она не прервётся."
+    : "";
+}
+
+async function refreshModels() {
+  if (!api) return;
+  try {
+    renderModels(await api.invoke("local_models"));
+  } catch {
+    renderModels(null);
+  }
+}
+
+ui.modelsList.addEventListener("click", async (event) => {
+  const pull = event.target.closest("[data-pull]");
+  if (pull) {
+    const name = pull.dataset.pull;
+    pulling.set(name, "готовлюсь…");
+    renderModels(await api.invoke("local_models").catch(() => null));
+    try {
+      await api.invoke("pull_model", { model: name });
+    } catch (err) {
+      ui.modelsHint.textContent = `Не удалось скачать: ${err}`;
+    }
+    pulling.delete(name);
+    await refreshModels();
+    return;
+  }
+
+  const pick = event.target.closest("[data-pick]");
+  if (!pick) return;
+  ui.model.value = pick.dataset.pick;
+  try {
+    await saveAi();
+    ui.aiStatus.textContent = `Модель ${pick.dataset.pick} выбрана. Нажмите «Проверить».`;
+  } catch (err) {
+    ui.aiStatus.textContent = `Не удалось сохранить: ${err}`;
+  }
+  await refreshModels();
+});
+
+// Ход загрузки идёт событиями из Rust: сотни строк в секунду там сведены
+// к шагу в один процент, здесь остаётся только показать.
+api?.listen("model:pull", (event) => {
+  const { model, percent, status, done, error } = event.payload ?? {};
+  if (!model) return;
+  if (error) {
+    pulling.delete(model);
+    ui.modelsHint.textContent = `Не удалось скачать ${model}: ${error}`;
+    refreshModels();
+    return;
+  }
+  if (done) {
+    pulling.delete(model);
+    refreshModels();
+    return;
+  }
+  pulling.set(model, percent > 0 ? `${status} ${percent}%` : `${status}…`);
+  renderModels({ running: true, installed: lastInstalled });
 });
 
 ui.test.addEventListener("click", async () => {

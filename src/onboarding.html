@@ -61,7 +61,16 @@
           <span class="ob__hint" data-el="keyHint"></span>
         </label>
 
-        <label class="ob__field">
+        <!-- Список моделей — только для Ollama: у неё они лежат на этом же
+             компьютере, их видно и можно доставить. У облачных сервисов список
+             моделей огромен и меняется без предупреждения, там честнее поле. -->
+        <div class="ob__field" data-el="modelsBlock" hidden>
+          <span class="ob__label">Модель</span>
+          <div class="ob__models" data-el="modelsList"></div>
+          <p class="ob__hint" data-el="modelsHint"></p>
+        </div>
+
+        <label class="ob__field" data-el="modelField">
           <span class="ob__label">Модель</span>
           <input class="ob__input" data-el="model" type="text" spellcheck="false" />
         </label>
