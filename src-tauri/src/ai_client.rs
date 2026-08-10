@@ -70,6 +70,26 @@ pub trait AiProvider: Send + Sync {
     ) -> Result<String, AiError>;
 }
 
+/// Навешивает прокси на клиент, если он задан.
+///
+/// Кривой адрес не считаем поводом отказать в работе: клиент собирается дальше, но
+/// уже без прокси, и в журнал уходит внятная строка. Иначе одна опечатка в поле
+/// оставила бы человека вообще без объяснений — включая те, что прекрасно доходят
+/// напрямую, вроде Википедии.
+fn with_proxy(builder: reqwest::ClientBuilder, proxy: &str) -> reqwest::ClientBuilder {
+    let proxy = proxy.trim();
+    if proxy.is_empty() {
+        return builder;
+    }
+    match reqwest::Proxy::all(proxy) {
+        Ok(p) => builder.proxy(p),
+        Err(err) => {
+            log::warn!("прокси «{proxy}» не понят ({err}) — работаем напрямую");
+            builder
+        }
+    }
+}
+
 /// Собирает провайдера по конфигурации. Неизвестное имя — это mock, а не паника:
 /// приложение уже запущено, ронять его из-за опечатки в конфиге нельзя.
 pub fn build_provider(config: &AiConfig) -> Box<dyn AiProvider> {
@@ -261,10 +281,12 @@ impl HttpProvider {
         if config.endpoint.is_empty() {
             return Err(AiError::Config("не задан endpoint AI-провайдера".into()));
         }
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(config.timeout_ms))
-            .build()
-            .map_err(|_| AiError::Config("не удалось создать HTTP-клиент".into()))?;
+        let client = with_proxy(
+            reqwest::Client::builder().timeout(Duration::from_millis(config.timeout_ms)),
+            &config.proxy,
+        )
+        .build()
+        .map_err(|_| AiError::Config("не удалось создать HTTP-клиент".into()))?;
         Ok(Self {
             client,
             endpoint: config.endpoint.clone(),
@@ -447,12 +469,15 @@ pub struct WikipediaProvider {
 
 impl WikipediaProvider {
     pub fn new(config: &AiConfig) -> Result<Self, AiError> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(config.timeout_ms.min(8_000)))
-            // Википедия отвечает 403 на запросы без внятного User-Agent —
-            // это её правило для автоматических клиентов.
-            .user_agent("Sufler/0.1 (https://github.com/faafaafuu/asis)")
-            .build()
+        let client = with_proxy(
+            reqwest::Client::builder()
+                .timeout(Duration::from_millis(config.timeout_ms.min(8_000)))
+                // Википедия отвечает 403 на запросы без внятного User-Agent —
+                // это её правило для автоматических клиентов.
+                .user_agent("Sufler/0.1 (https://github.com/faafaafuu/asis)"),
+            &config.proxy,
+        )
+        .build()
             .map_err(|_| AiError::Config("не удалось создать HTTP-клиент".into()))?;
         Ok(Self { client })
     }

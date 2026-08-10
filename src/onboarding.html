@@ -85,6 +85,17 @@
           <span class="ob__label">Модель</span>
           <input class="ob__input" data-el="model" type="text" spellcheck="false" />
         </label>
+
+        <label class="ob__field">
+          <span class="ob__label">Прокси</span>
+          <input class="ob__input" data-el="proxy" type="text" spellcheck="false"
+                 placeholder="socks5://127.0.0.1:1080 — если сервис недоступен" />
+          <span class="ob__hint">
+            Нужен, когда ключ есть, а запросы не доходят. Большинство VPN-клиентов
+            поднимают у себя socks5 на 127.0.0.1 — посмотрите порт в их настройках.
+            Пусто — идём напрямую.
+          </span>
+        </label>
       </div>
 
       <div class="ob__actions">

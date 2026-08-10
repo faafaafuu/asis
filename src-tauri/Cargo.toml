@@ -1,6 +1,6 @@
 [package]
 name = "sufler"
-version = "0.1.2"
+version = "0.1.3"
 description = "Суфлёр — системный AI-попап по выделению текста"
 authors = ["Sufler"]
 edition = "2021"
@@ -33,6 +33,9 @@ tokio = { version = "1", features = ["time", "rt", "sync", "macros"] }
 reqwest = { version = "0.13", default-features = false, features = [
   "json",
   "native-tls",
+  # socks нужен ради адресов вида socks5://127.0.0.1:1080 — именно такой поднимает
+  # у себя большинство VPN-клиентов. Без этой фичи reqwest понимает только http-прокси.
+  "socks",
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

@@ -1,10 +1,12 @@
 {
-  "_comment": "Скопируйте в config.json рядом с исполняемым файлом или в каталог конфигурации приложения (см. README). Ключи можно задать и переменными окружения SUFLER_AI_PROVIDER / SUFLER_AI_ENDPOINT / SUFLER_AI_KEY / SUFLER_AI_MODEL.",
+  "_comment": "Скопируйте в config.json рядом с исполняемым файлом или в каталог конфигурации приложения (см. README). Ключи можно задать и переменными окружения SUFLER_AI_PROVIDER / SUFLER_AI_ENDPOINT / SUFLER_AI_KEY / SUFLER_AI_MODEL / SUFLER_AI_PROXY.",
   "ai": {
     "provider": "wikipedia",
     "endpoint": "",
     "apiKey": "",
     "model": "",
+    "_proxy": "http://хост:порт или socks5://хост:порт — если сервис не отвечает из вашей страны. Пусто — напрямую.",
+    "proxy": "",
     "timeoutMs": 12000,
     "retries": 1,
     "retryBackoffMs": 400
@@ -15,6 +17,6 @@
   },
   "trigger": {
     "requireLeftCtrl": true,
-    "clipboardFallback": false
+    "clipboardFallback": true
   }
 }

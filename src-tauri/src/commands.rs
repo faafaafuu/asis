@@ -94,6 +94,7 @@ pub struct AiSettings {
     pub endpoint: String,
     pub api_key: String,
     pub model: String,
+    pub proxy: String,
 }
 
 /// Текущие настройки для окна. Ключ отдаём замаскированным: показывать его целиком
@@ -110,6 +111,7 @@ pub fn ai_settings(state: State<'_, AppState>) -> AiSettings {
             "••••••••".into()
         },
         model: config.ai.model.clone(),
+        proxy: config.ai.proxy.clone(),
     }
 }
 
@@ -125,6 +127,7 @@ pub fn save_ai_settings(
         config.ai.provider = settings.provider;
         config.ai.endpoint = settings.endpoint;
         config.ai.model = settings.model;
+        config.ai.proxy = settings.proxy;
         // Пустое поле ключа означает «не менять»: в окно он приходит замаскированным,
         // и сохранять маску вместо настоящего ключа нельзя.
         if !settings.api_key.is_empty() && !settings.api_key.starts_with('•') {

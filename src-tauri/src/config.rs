@@ -26,6 +26,14 @@ pub struct AiConfig {
     pub endpoint: String,
     pub api_key: String,
     pub model: String,
+    /// Прокси для запросов к модели: `http://host:port` или `socks5://host:port`.
+    /// Пусто — идём напрямую (и всё равно уважаем системные HTTP_PROXY/HTTPS_PROXY).
+    ///
+    /// Нужен потому, что почти все бесплатные сервисы моделей недоступны из части
+    /// стран: ключ у человека есть, интернет есть, а запрос не доходит. Своё поле
+    /// в настройках честнее, чем совет «настройте системный прокси» — VPN-клиенты
+    /// поднимают локальный socks5 и системные настройки при этом не трогают.
+    pub proxy: String,
     pub timeout_ms: u64,
     pub retries: u32,
     pub retry_backoff_ms: u64,
@@ -41,6 +49,7 @@ impl Default for AiConfig {
             endpoint: String::new(),
             api_key: String::new(),
             model: String::new(),
+            proxy: String::new(),
             timeout_ms: 12_000,
             retries: 1,
             retry_backoff_ms: 400,
@@ -144,6 +153,9 @@ impl Config {
         }
         if let Ok(v) = std::env::var("SUFLER_AI_MODEL") {
             self.ai.model = v;
+        }
+        if let Ok(v) = std::env::var("SUFLER_AI_PROXY") {
+            self.ai.proxy = v;
         }
         if let Ok(v) = std::env::var("SUFLER_THEME") {
             self.ui.theme = v;

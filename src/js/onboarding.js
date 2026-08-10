@@ -158,14 +158,14 @@ const PRESETS = {
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
     model: "llama-3.3-70b-versatile",
     key: true,
-    hint: "Бесплатный ключ: console.groq.com/keys",
+    hint: "Бесплатный ключ: console.groq.com/keys. Из России сервис не отвечает напрямую — включите VPN или впишите прокси ниже.",
   },
   google: {
     provider: "http",
     endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
     model: "gemini-2.0-flash",
     key: true,
-    hint: "Бесплатный ключ: aistudio.google.com/apikey",
+    hint: "Бесплатный ключ: aistudio.google.com/apikey. Из России недоступен — нужен VPN или прокси ниже.",
   },
   openrouter: {
     provider: "http",
@@ -211,6 +211,7 @@ async function loadSettings() {
     applyPreset(name, { keepValues: true });
     ui.endpoint.value = settings.endpoint || PRESETS[name].endpoint;
     ui.model.value = settings.model || PRESETS[name].model;
+    ui.proxy.value = settings.proxy || "";
     ui.apiKey.value = "";
     ui.apiKey.placeholder = settings.apiKey ? "ключ сохранён — оставьте пустым" : "вставьте ключ";
   } catch (err) {
@@ -230,6 +231,7 @@ ui.save.addEventListener("click", async () => {
         endpoint: ui.endpoint.value.trim(),
         apiKey: ui.apiKey.value.trim(),
         model: ui.model.value.trim(),
+        proxy: ui.proxy.value.trim(),
       },
     });
     ui.apiKey.value = "";
