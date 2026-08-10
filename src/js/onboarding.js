@@ -170,7 +170,7 @@ const PRESETS = {
   openrouter: {
     provider: "http",
     endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "meta-llama/llama-3.3-70b-instruct:free",
+    model: "openai/gpt-oss-20b:free",
     key: true,
     hint: "Ключ: openrouter.ai/keys — у моделей с пометкой :free платить не нужно",
   },
