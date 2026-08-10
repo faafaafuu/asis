@@ -25,6 +25,30 @@
 
       <hr class="ob__sep" />
 
+      <h2 class="ob__subtitle">Проверка перехвата</h2>
+      <p class="ob__text ob__text--dim">
+        Выделите мышью любое слово в браузере или редакторе, удерживая левый Ctrl.
+        Строка ниже обновится сама — по ней видно, дошёл ли жест до приложения и
+        отдала ли программа текст.
+      </p>
+      <p class="ob__capture" data-el="capture">Жду выделения…</p>
+
+      <label class="ob__check">
+        <input type="checkbox" data-el="clipboardFallback" />
+        <span>Забирать выделение копированием, если программа не отдаёт его системе</span>
+      </label>
+      <p class="ob__hint">
+        Так устроены Chrome, Edge, Telegram, Discord, VS Code — они не показывают
+        выделение системе напрямую. Приложение нажимает Ctrl+C за вас и сразу
+        возвращает в буфер обмена то, что там было.
+      </p>
+
+      <div class="ob__actions">
+        <button class="ob__btn" type="button" data-el="logs">Открыть журнал</button>
+      </div>
+
+      <hr class="ob__sep" />
+
       <h2 class="ob__subtitle">Откуда брать объяснения</h2>
       <p class="ob__text ob__text--dim">
         Из коробки работает Википедия: определения без ключей и регистрации. Чтобы

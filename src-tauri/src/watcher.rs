@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
 
-use crate::selection::{create, Capability, PlatformIntegration, POLL_INTERVAL_MS};
+use crate::selection::{create, Capability, Diagnostics, PlatformIntegration, POLL_INTERVAL_MS};
 use crate::state::AppState;
 use crate::overlay;
 
@@ -23,6 +23,10 @@ impl Integration {
 
     pub fn open_permission_settings(&self) -> bool {
         self.0.open_permission_settings()
+    }
+
+    pub fn diagnostics(&self) -> Diagnostics {
+        self.0.diagnostics()
     }
 }
 

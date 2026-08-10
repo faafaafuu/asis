@@ -7,12 +7,15 @@
 
 use std::sync::Mutex;
 
-use windows::Win32::Foundation::{HGLOBAL, POINT};
+use windows::Win32::Foundation::{HANDLE, HGLOBAL, POINT};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
-use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
-use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+use windows::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, OpenClipboard,
+    SetClipboardData,
+};
+use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::Ole::{
     SafeArrayAccessData, SafeArrayGetLBound, SafeArrayGetUBound, SafeArrayUnaccessData,
     CF_UNICODETEXT,
@@ -26,7 +29,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
-use super::{Capability, PlatformIntegration, ScreenRect, Selection};
+use super::{Capability, Diagnostics, PlatformIntegration, ScreenRect, Selection};
 use crate::config::TriggerConfig;
 
 /// Состояние жеста между опросами: без него нельзя отличить «кнопка нажата»
@@ -41,6 +44,20 @@ struct GestureState {
 
 pub struct Platform {
     gesture: Mutex<GestureState>,
+    diag: Mutex<Diagnostics>,
+}
+
+impl Platform {
+    fn note(&self, last: impl Into<String>, source: &str, captured: bool) {
+        if let Ok(mut diag) = self.diag.lock() {
+            diag.gestures += 1;
+            if captured {
+                diag.captured += 1;
+            }
+            diag.last = last.into();
+            diag.source = source.into();
+        }
+    }
 }
 
 thread_local! {
@@ -74,12 +91,29 @@ fn cursor() -> Option<(f64, f64)> {
 }
 
 /// Текст и геометрия выделения в сфокусированном элементе.
+///
+/// Попыток несколько не от неуверенности: Chromium (значит — Chrome, Edge, Electron,
+/// а это Telegram, Discord, VS Code, Slack) не держит дерево доступности постоянно.
+/// Он строит его в ответ на первое обращение извне, и этот самый первый запрос
+/// возвращает пустоту. Одна попытка означала бы «в браузере не работает никогда».
 fn selection_via_uia() -> Option<(String, Option<ScreenRect>)> {
+    for attempt in 0..3 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+        }
+        if let Some(found) = selection_via_uia_once() {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn selection_via_uia_once() -> Option<(String, Option<ScreenRect>)> {
     ensure_com();
     unsafe {
         let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
         let element = automation.GetFocusedElement().ok()?;
-        let pattern: IUIAutomationTextPattern = element.GetCurrentPatternAs(UIA_TextPatternId).ok()?;
+        let pattern = text_pattern_of(&automation, &element)?;
         let ranges = pattern.GetSelection().ok()?;
         if ranges.Length().ok()? == 0 {
             return None;
@@ -95,6 +129,31 @@ fn selection_via_uia() -> Option<(String, Option<ScreenRect>)> {
         let rect = last_bounding_rect(&range);
         Some((text, rect))
     }
+}
+
+/// TextPattern у самого элемента или у ближайшего предка.
+///
+/// Фокус нередко стоит на маленьком внутреннем узле (строка, ячейка, инлайн-элемент),
+/// а текстом целиком владеет контейнер выше — документ или поле ввода. Поэтому если
+/// на элементе паттерна нет, поднимаемся на несколько уровней, а не сдаёмся сразу.
+unsafe fn text_pattern_of(
+    automation: &IUIAutomation,
+    element: &windows::Win32::UI::Accessibility::IUIAutomationElement,
+) -> Option<IUIAutomationTextPattern> {
+    if let Ok(pattern) = element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) {
+        return Some(pattern);
+    }
+
+    let walker = automation.ControlViewWalker().ok()?;
+    let mut current = element.clone();
+    for _ in 0..4 {
+        let parent = walker.GetParentElement(&current).ok()?;
+        if let Ok(pattern) = parent.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) {
+            return Some(pattern);
+        }
+        current = parent;
+    }
+    None
 }
 
 /// Из массива прямоугольников выделения берём ПОСЛЕДНИЙ: для многострочного
@@ -133,12 +192,45 @@ unsafe fn last_bounding_rect(
 /// Фолбэк для приложений без поддержки UI Automation (SPEC §9.1, §12.3):
 /// симулируем Ctrl+C и читаем буфер обмена. Координат выделения этот путь не даёт —
 /// попап встанет у курсора.
+///
+/// Две тонкости, без которых фолбэк опаснее, чем его отсутствие:
+///
+/// 1. Мы обязаны понять, скопировалось ли что-то ВООБЩЕ. Приложение могло проглотить
+///    Ctrl+C, и тогда в буфере лежит то, что пользователь копировал час назад, — попап
+///    объяснил бы совершенно постороннее слово с полной уверенностью. Отличить новое
+///    содержимое от старого сравнением текста нельзя (можно скопировать то же слово
+///    дважды), поэтому смотрим на счётчик изменений буфера, который ведёт сама система.
+/// 2. Буфер обмена принадлежит пользователю. Забрать его себе и не вернуть — значит
+///    незаметно стереть то, что человек нёс из одного окна в другое. Сохраняем прежний
+///    текст и кладём обратно.
 fn selection_via_clipboard() -> Option<String> {
     unsafe {
+        let before = GetClipboardSequenceNumber();
+        let saved = read_clipboard_text();
+
         send_ctrl_c();
-        // Приложению нужно время, чтобы положить текст в буфер.
-        std::thread::sleep(std::time::Duration::from_millis(120));
-        read_clipboard_text()
+
+        // Приложению нужно время положить текст в буфер, но сколько — заранее неизвестно:
+        // редактор справится за миллисекунды, тяжёлая веб-страница — за сотни. Ждём
+        // события, а не фиксированную паузу, иначе попап тормозил бы на ровном месте.
+        let mut changed = false;
+        for _ in 0..20 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            if GetClipboardSequenceNumber() != before {
+                changed = true;
+                break;
+            }
+        }
+
+        if !changed {
+            return None;
+        }
+
+        let text = read_clipboard_text();
+        if let Some(previous) = saved {
+            write_clipboard_text(&previous);
+        }
+        text
     }
 }
 
@@ -183,6 +275,32 @@ unsafe fn read_clipboard_text() -> Option<String> {
     text.filter(|t| !t.trim().is_empty())
 }
 
+/// Возвращает в буфер обмена то, что там было до нашего Ctrl+C.
+///
+/// После `SetClipboardData` память принадлежит системе — освобождать её нельзя,
+/// поэтому выделенный блок намеренно не трогаем дальше.
+unsafe fn write_clipboard_text(text: &str) {
+    let mut utf16: Vec<u16> = text.encode_utf16().collect();
+    utf16.push(0);
+    let bytes = utf16.len() * std::mem::size_of::<u16>();
+
+    let Ok(block) = GlobalAlloc(GMEM_MOVEABLE, bytes) else {
+        return;
+    };
+    let ptr = GlobalLock(block) as *mut u16;
+    if ptr.is_null() {
+        return;
+    }
+    std::ptr::copy_nonoverlapping(utf16.as_ptr(), ptr, utf16.len());
+    let _ = GlobalUnlock(block);
+
+    if OpenClipboard(None).is_ok() {
+        let _ = EmptyClipboard();
+        let _ = SetClipboardData(CF_UNICODETEXT.0 as u32, Some(HANDLE(block.0)));
+        let _ = CloseClipboard();
+    }
+}
+
 impl PlatformIntegration for Platform {
     fn capability(&self) -> Capability {
         // Отдельного разрешения Windows не требует: UI Automation доступен обычному
@@ -218,8 +336,10 @@ impl PlatformIntegration for Platform {
         let cursor = cursor().unwrap_or((0.0, 0.0));
 
         if let Some((text, rect)) = selection_via_uia() {
+            let text = text.trim().to_string();
+            self.note(format!("получено слово «{}»", short(&text)), "UI Automation", true);
             return Some(Selection {
-                text: text.trim().to_string(),
+                text,
                 rect,
                 cursor,
                 context: String::new(),
@@ -228,17 +348,43 @@ impl PlatformIntegration for Platform {
 
         if config.clipboard_fallback {
             log::debug!("UI Automation не отдал выделение — пробуем буфер обмена");
-            let text = selection_via_clipboard()?;
-            return Some(Selection {
-                text: text.trim().to_string(),
-                rect: None,
-                cursor,
-                context: String::new(),
-            });
+            match selection_via_clipboard() {
+                Some(text) => {
+                    let text = text.trim().to_string();
+                    self.note(
+                        format!("получено слово «{}»", short(&text)),
+                        "буфер обмена",
+                        true,
+                    );
+                    return Some(Selection {
+                        text,
+                        rect: None,
+                        cursor,
+                        context: String::new(),
+                    });
+                }
+                None => {
+                    self.note(
+                        "приложение не отдало выделение ни через систему, ни через копирование",
+                        "—",
+                        false,
+                    );
+                    return None;
+                }
+            }
         }
 
+        self.note(
+            "приложение не отдало выделение; включите запасной способ через копирование",
+            "—",
+            false,
+        );
         log::debug!("выделение не получено: приложение не отдаёт TextPattern");
         None
+    }
+
+    fn diagnostics(&self) -> Diagnostics {
+        self.diag.lock().map(|d| d.clone()).unwrap_or_default()
     }
 
     fn is_escape_pressed(&self) -> bool {
@@ -254,8 +400,21 @@ impl PlatformIntegration for Platform {
     }
 }
 
+/// Обрезка для строки статуса: в диагностику попадает выделение любой длины,
+/// а окно настройки — не место для трёх абзацев. Режем по символам, а не по байтам:
+/// кириллица в UTF-8 занимает два байта, и срез по индексу байта уронил бы процесс.
+fn short(text: &str) -> String {
+    let trimmed: String = text.chars().take(40).collect();
+    if trimmed.chars().count() < text.chars().count() {
+        format!("{trimmed}…")
+    } else {
+        trimmed
+    }
+}
+
 pub fn create() -> Box<dyn PlatformIntegration> {
     Box::new(Platform {
         gesture: Mutex::new(GestureState::default()),
+        diag: Mutex::new(Diagnostics::default()),
     })
 }

@@ -50,6 +50,103 @@ function render({ title, hint, canOpenSettings }) {
   ui.settings.hidden = !canOpenSettings;
 }
 
+/* ── Проверка перехвата ─────────────────────────────────────────────────── */
+
+/**
+ * Превращает счётчики наблюдателя в одну строку для пользователя.
+ *
+ * Что приходит в diag:
+ *   gestures — сколько раз поймали жест «отпустил мышь с зажатым левым Ctrl»;
+ *   captured — сколько раз из них удалось достать текст;
+ *   last     — что случилось в последний раз, уже человеческим языком;
+ *   source   — «UI Automation», «буфер обмена» или «—».
+ *
+ * Возвращает { text, state }, где state: "idle" | "ok" | "warn" —
+ * по нему строка красится в нейтральный, акцентный или тревожный цвет.
+ */
+function verdictFor(diag) {
+  const { gestures = 0, captured = 0, last = "", source = "" } = diag ?? {};
+
+  if (gestures === 0) {
+    return {
+      text:
+        "Приложение работает и ждёт жеста.\n" +
+        "Выделите слово мышью, удерживая ЛЕВЫЙ Ctrl — правый попап не открывает.",
+      state: "idle",
+    };
+  }
+
+  if (captured === 0) {
+    return {
+      text:
+        `Жест доходит (раз: ${gestures}), но текст получить не удалось ни разу.\n` +
+        "Скорее всего программа не показывает выделение системе — включите галочку ниже.\n" +
+        `Последнее: ${last}`,
+      state: "warn",
+    };
+  }
+
+  // Захваты есть, но последняя попытка провалилась. Тревожным это не считаем:
+  // среди программ всегда найдётся одна упрямая, и красить строку в цвет ошибки
+  // из-за неё — значит приучить пользователя не верить этой строке вообще.
+  const lastFailed = source === "—";
+  return {
+    text:
+      `Перехват работает: ${captured} из ${gestures}.` +
+      (lastFailed ? "" : ` Источник: ${source}.`) +
+      `\nПоследнее: ${last}`,
+    state: lastFailed ? "idle" : "ok",
+  };
+}
+
+async function refreshCapture() {
+  if (!api) return;
+  try {
+    const diag = await api.invoke("capture_diagnostics");
+    const { text, state } = verdictFor(diag) ?? { text: "", state: "idle" };
+    ui.capture.textContent = text;
+    ui.capture.dataset.state = state;
+  } catch {
+    // Молча: команда опрашивается раз в секунду, и сыпать ошибками в окно,
+    // пока пользователь читает соседний раздел, — только мешать.
+  }
+}
+
+// Опрос, а не событие: наблюдатель живёт в своём потоке и ничего не знает об окне,
+// а раз в секунду — достаточно часто, чтобы строка казалась живой.
+setInterval(refreshCapture, 1000);
+
+ui.clipboardFallback.addEventListener("change", async () => {
+  if (!api) return;
+  try {
+    const settings = await api.invoke("trigger_settings");
+    settings.clipboardFallback = ui.clipboardFallback.checked;
+    await api.invoke("save_trigger_settings", { settings });
+  } catch (err) {
+    ui.capture.textContent = `Не удалось сохранить: ${err}`;
+    ui.capture.dataset.state = "warn";
+  }
+});
+
+ui.logs.addEventListener("click", async () => {
+  try {
+    await api?.invoke("open_logs");
+  } catch (err) {
+    ui.capture.textContent = `Журнал не открылся: ${err}`;
+    ui.capture.dataset.state = "warn";
+  }
+});
+
+async function loadTrigger() {
+  if (!api) return;
+  try {
+    const settings = await api.invoke("trigger_settings");
+    ui.clipboardFallback.checked = settings.clipboardFallback;
+  } catch {
+    /* окно открыто вне приложения — настроек нет */
+  }
+}
+
 /* ── Настройка источника объяснений ─────────────────────────────────────── */
 
 // Готовые наборы: пользователь выбирает сервис, а не заполняет адреса руками.
@@ -165,3 +262,5 @@ ui.settings.addEventListener("click", async () => {
 
 refresh();
 loadSettings();
+loadTrigger();
+refreshCapture();

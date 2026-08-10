@@ -3,10 +3,24 @@
 use tauri::{AppHandle, Manager, State};
 
 use crate::ai_client::{Explanation, ThreadItem};
-use crate::config::RuntimeConfig;
+use crate::config::{RuntimeConfig, TriggerConfig};
 use crate::overlay;
-use crate::selection::Capability;
+use crate::selection::{Capability, Diagnostics};
 use crate::state::AppState;
+
+/// Записывает текущую конфигурацию на диск. Вынесено отдельно: настройки правятся
+/// из двух мест окна (модель и триггер), а файл должен быть один и всегда целиком.
+fn persist(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let path = app
+        .path()
+        .app_config_dir()
+        .map_err(|err| format!("не удалось определить каталог настроек: {err}"))?;
+    std::fs::create_dir_all(&path).map_err(|err| err.to_string())?;
+
+    let config = state.config.read().expect("config poisoned");
+    let json = serde_json::to_string_pretty(&*config).map_err(|err| err.to_string())?;
+    std::fs::write(path.join("config.json"), json).map_err(|err| err.to_string())
+}
 
 /// Настройки, нужные окну при старте: тема и текст ошибки по умолчанию.
 #[tauri::command]
@@ -108,18 +122,62 @@ pub fn save_ai_settings(
         }
     }
 
-    let path = app
-        .path()
-        .app_config_dir()
-        .map_err(|err| format!("не удалось определить каталог настроек: {err}"))?;
-    std::fs::create_dir_all(&path).map_err(|err| err.to_string())?;
+    persist(&app, &state)?;
 
     let config = state.config.read().expect("config poisoned");
-    let json = serde_json::to_string_pretty(&*config).map_err(|err| err.to_string())?;
-    std::fs::write(path.join("config.json"), json).map_err(|err| err.to_string())?;
-
     state.rebuild_provider(&config.ai);
     Ok(())
+}
+
+/// Настройки жеста для окна: чем открывается попап и разрешён ли запасной способ.
+#[tauri::command]
+pub fn trigger_settings(state: State<'_, AppState>) -> TriggerConfig {
+    state.config.read().expect("config poisoned").trigger.clone()
+}
+
+#[tauri::command]
+pub fn save_trigger_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: TriggerConfig,
+) -> Result<(), String> {
+    {
+        let mut config = state.config.write().expect("config poisoned");
+        config.trigger = settings;
+    }
+    persist(&app, &state)
+}
+
+/// Что наблюдатель видел в последнее время — живая сводка для окна настройки.
+#[tauri::command]
+pub fn capture_diagnostics(app: AppHandle) -> Diagnostics {
+    app.state::<crate::watcher::Integration>().diagnostics()
+}
+
+/// Открывает каталог с журналом в проводнике. Когда попап не появляется, журнал —
+/// единственное место, где написано почему; заставлять пользователя искать путь
+/// вида `%LOCALAPPDATA%\app.sufler.popup\logs` бессмысленно.
+#[tauri::command]
+pub fn open_logs(app: AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|err| format!("каталог журнала не определён: {err}"))?;
+    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+
+    let opener = if cfg!(target_os = "windows") {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+
+    std::process::Command::new(opener)
+        .arg(&dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("не удалось открыть {}: {err}", dir.display()))
 }
 
 /// Пробный запрос: пользователь должен увидеть, что ключ рабочий, до того как

@@ -5,6 +5,9 @@ html,
 body {
   margin: 0;
   padding: 0;
+  /* Содержимое длиннее окна на невысоких экранах — иначе нижние разделы
+     (проверка перехвата, кнопки) просто нельзя достать. */
+  overflow-y: auto;
   background: var(--bg-solid);
   color: var(--text);
   font-family: var(--font-ui);
@@ -141,6 +144,49 @@ body {
 
 .ob__hint a {
   color: var(--accent);
+}
+
+/* ── Проверка перехвата ─────────────────────────────────────────────────── */
+
+/* Строка живого статуса. Моноширинный шрифт здесь не для красоты: строка
+   обновляется на месте, и при пропорциональном шрифте она дёргалась бы по ширине. */
+.ob__capture {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--divider);
+  background: var(--input-bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-body);
+  /* В строке несколько предложений, разделённых переводами строк: так вердикт и
+     подробности не сливаются в один абзац. */
+  white-space: pre-line;
+}
+
+.ob__capture[data-state="ok"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ob__capture[data-state="warn"] {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.ob__check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: var(--size-secondary);
+  color: var(--text-body);
+  cursor: pointer;
+}
+
+.ob__check input {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
 }
 
 [hidden] {

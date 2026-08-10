@@ -229,9 +229,13 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
         ONBOARDING_LABEL,
         WebviewUrl::App("onboarding.html".into()),
     )
-    .title("Суфлёр — настройка доступа")
-    .inner_size(520.0, 460.0)
-    .resizable(false)
+    .title("Суфлёр — настройка и проверка")
+    .inner_size(560.0, 720.0)
+    // Окно выросло: кроме разрешений в нём теперь живая проверка перехвата и выбор
+    // источника объяснений. На ноутбуке с невысоким экраном фиксированная высота
+    // обрезала бы нижнюю половину, поэтому размер отдан пользователю.
+    .resizable(true)
+    .min_inner_size(460.0, 420.0)
     .build()?;
 
     window.set_position(LogicalPosition::new(120.0, 120.0))?;

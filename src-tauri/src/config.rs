@@ -74,7 +74,6 @@ pub struct TriggerConfig {
     pub require_left_ctrl: bool,
     /// Разрешить фолбэк через буфер обмена там, где системный API не отдал выделение
     /// (Windows, приложения без поддержки UI Automation — SPEC §9.1, §12.3).
-    /// По умолчанию выключен: это чтение чужого буфера обмена, нужно согласие.
     pub clipboard_fallback: bool,
     /// Linux: открывать попап по изменению PRIMARY selection, хотя факт нажатия Ctrl
     /// на этом окружении определить нельзя (SPEC §9.3). По умолчанию выключено —
@@ -86,7 +85,14 @@ impl Default for TriggerConfig {
     fn default() -> Self {
         Self {
             require_left_ctrl: true,
-            clipboard_fallback: false,
+            // На Windows запасной путь включён сразу, и это осознанный выбор в пользу
+            // работоспособности. UI Automation молчит в самых ходовых программах —
+            // всё, что построено на Chromium: браузеры, Telegram, Discord, VS Code.
+            // С выключенным фолбэком продукт там просто не отвечает на жест, и
+            // пользователю неоткуда узнать почему. Согласие, которого требует SPEC §12.3,
+            // спрашивается не молчанием, а окном первого запуска, где этот пункт описан
+            // словами и выключается одной галочкой.
+            clipboard_fallback: cfg!(target_os = "windows"),
             linux_primary_without_ctrl: false,
         }
     }
