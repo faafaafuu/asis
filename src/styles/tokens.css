@@ -1,7 +1,8 @@
 /* Дизайн-токены. Все значения взяты из SPEC §5/§11 и `AI Popup.dc.html` как есть.
    Ничего не «улучшено» и не округлено: попап должен совпадать с референсом попиксельно.
 
-   Тема выбирается атрибутом на <html>: data-theme="dark" | "light" | "system".
+   Тема выбирается атрибутом на <html>:
+   data-theme="dark" | "light" | "neon" | "synthwave" | "system".
    "system" отдаёт решение prefers-color-scheme (нужно на мобильных и в вебе);
    на десктопе тему проставляет Rust по системной настройке, чтобы не было
    мигания при первом кадре. */
@@ -30,6 +31,10 @@
   --size-example: 13.5px;
   --size-label: 10px;
   --ls-label: 0.12em;
+  /* Начертание заголовков: тёплые темы набирают их курсивной антиквой как есть,
+     неоновые — прописными и жирным. Значения по умолчанию — для тёплых. */
+  --term-transform: none;
+  --term-weight: 400;
 
   /* Анимации */
   --pop-in: 0.13s;
@@ -179,6 +184,127 @@
     --input-color: #221f1b;
     --send-color: #4a4438;
   }
+}
+
+/* ── Неон ───────────────────────────────────────────────────────────────────
+   Тёмная тема другой природы: не «фон + мягкая тень», а свечение по контуру.
+   Отсюда острые углы вместо скруглений, отсутствие размытия под окном
+   (за неоновой рамкой размывать нечего) и другая пара шрифтов.
+
+   Rajdhani без кириллицы — за ним в стопке идёт Exo 2 того же склада, браузер
+   сам берёт из него недостающие буквы. Порядок важен: поменяй местами — и
+   латиница поедет в Exo 2, а весь смысл Rajdhani пропадёт. */
+:root[data-theme="neon"] {
+  color-scheme: dark;
+
+  --pop-radius: 2px;
+  --menu-radius: 2px;
+
+  --font-ui: "JetBrains Mono", ui-monospace, monospace;
+  --font-term: "Rajdhani", "Exo 2", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* Заголовки в неоне набираются прописными — так задумано в макете. */
+  --term-transform: uppercase;
+  --term-weight: 700;
+
+  --bg: linear-gradient(165deg, #0b0f16 0%, #060809 60%, #0a0710 100%);
+  --bg-solid: #070a0f;
+  --backdrop: none;
+  --border: rgba(0, 240, 255, 0.4);
+  --shadow: 0 0 12px rgba(0, 240, 255, 0.35), 0 0 60px -10px oklch(0.7 0.22 330 / 0.4);
+  --divider: rgba(0, 240, 255, 0.16);
+
+  --text: #d8f7fa;
+  --text-body: #c5eef3;
+  --text-muted: #6f9aa3;
+
+  --accent: oklch(0.85 0.16 195);
+  --accent-dim: oklch(0.7 0.18 330);
+  --label: oklch(0.7 0.18 330);
+
+  --error: oklch(0.72 0.2 20);
+  --error-text: oklch(0.78 0.16 20);
+
+  --btn-border: rgba(0, 240, 255, 0.35);
+  --btn-bg: rgba(0, 240, 255, 0.06);
+  --btn-color: #9fdde6;
+  --btn-hover-bg: rgba(0, 240, 255, 0.12);
+  --btn-hover-border: oklch(0.85 0.16 195);
+  --btn-hover-color: oklch(0.9 0.14 195);
+
+  --skeleton: rgba(0, 240, 255, 0.14);
+  --spin-track: rgba(0, 240, 255, 0.2);
+  --spin-head: oklch(0.85 0.16 195);
+  --scroll-thumb: rgba(0, 240, 255, 0.25);
+
+  --simple: #cfeff4;
+  --example: #a8d6de;
+  --thread-q: oklch(0.85 0.16 195);
+  --thread-a: #bfe6ec;
+  --pending: #6f9aa3;
+  --pending-spin-head: oklch(0.85 0.16 195);
+
+  --input-border: rgba(0, 240, 255, 0.28);
+  --input-bg: rgba(0, 240, 255, 0.05);
+  --input-color: #d8f7fa;
+  --send-color: oklch(0.85 0.16 195);
+}
+
+/* ── Синтвейв ───────────────────────────────────────────────────────────────
+   Тот же строй, что у неона, но розово-оранжевый: закат вместо терминала. */
+:root[data-theme="synthwave"] {
+  color-scheme: dark;
+
+  --pop-radius: 2px;
+  --menu-radius: 2px;
+
+  --font-ui: "JetBrains Mono", ui-monospace, monospace;
+  --font-term: "Rajdhani", "Exo 2", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --term-transform: uppercase;
+  --term-weight: 700;
+
+  --bg: linear-gradient(165deg, #1a0a24 0%, #12081c 55%, #200a1a 100%);
+  --bg-solid: #150a1e;
+  --backdrop: none;
+  --border: rgba(255, 70, 180, 0.4);
+  --shadow: 0 0 16px rgba(255, 70, 180, 0.3), 0 0 70px -10px oklch(0.75 0.18 55 / 0.35);
+  --divider: rgba(255, 70, 180, 0.16);
+
+  --text: #fbe9f6;
+  --text-body: #f2ddec;
+  --text-muted: #a8809e;
+
+  --accent: oklch(0.72 0.24 350);
+  --accent-dim: oklch(0.75 0.18 55);
+  --label: oklch(0.75 0.18 55);
+
+  --error: oklch(0.72 0.2 20);
+  --error-text: oklch(0.78 0.16 20);
+
+  --btn-border: rgba(255, 70, 180, 0.35);
+  --btn-bg: rgba(255, 70, 180, 0.07);
+  --btn-color: #e5b6d6;
+  --btn-hover-bg: rgba(255, 70, 180, 0.14);
+  --btn-hover-border: oklch(0.72 0.24 350);
+  --btn-hover-color: oklch(0.8 0.2 350);
+
+  --skeleton: rgba(255, 70, 180, 0.16);
+  --spin-track: rgba(255, 70, 180, 0.22);
+  --spin-head: oklch(0.72 0.24 350);
+  --scroll-thumb: rgba(255, 70, 180, 0.28);
+
+  --simple: #f6e2f0;
+  --example: #d9b3cd;
+  --thread-q: oklch(0.72 0.24 350);
+  --thread-a: #eed7e7;
+  --pending: #a8809e;
+  --pending-spin-head: oklch(0.72 0.24 350);
+
+  --input-border: rgba(255, 70, 180, 0.3);
+  --input-bg: rgba(255, 70, 180, 0.06);
+  --input-color: #fbe9f6;
+  --send-color: oklch(0.75 0.18 55);
 }
 
 /* Мини-меню на мобильных в референсе есть только в тёмном варианте — так и оставлено:

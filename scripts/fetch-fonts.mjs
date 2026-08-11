@@ -1,5 +1,14 @@
-// Скачивает шрифты дизайн-референса (IBM Plex Sans / IBM Plex Mono / Instrument Serif)
-// в src/assets/fonts и генерирует src/styles/fonts.css с локальными @font-face.
+// Скачивает шрифты дизайн-референса в src/assets/fonts и генерирует
+// src/styles/fonts.css с локальными @font-face.
+//
+// Наборов два, по темам:
+//   • Light/Dark — IBM Plex Sans + IBM Plex Mono + Instrument Serif;
+//   • Neon/Synthwave — Rajdhani + JetBrains Mono.
+//
+// Exo 2 нужен из-за Rajdhani: кириллицы у того нет вовсе, только латиница.
+// Без пары русские заголовки в неоновых темах падали бы на случайный系ый шрифт
+// и ломали вид. Exo 2 того же техно-склада, в стопке идёт следом за Rajdhani —
+// браузер сам берёт из него те буквы, которых в первом не нашлось.
 //
 // Зачем: попап — системное окно, которое обязано появляться мгновенно и работать без
 // сети (CSP приложения запрещает внешние запросы). Тянуть Google Fonts во время показа
@@ -11,7 +20,13 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const CSS_URL =
-  "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap";
+  "https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1" +
+  "&family=IBM+Plex+Sans:wght@400;500;600" +
+  "&family=IBM+Plex+Mono:wght@400;500" +
+  "&family=Rajdhani:wght@600;700" +
+  "&family=Exo+2:wght@600;700" +
+  "&family=JetBrains+Mono:wght@400;500" +
+  "&display=swap";
 
 // UA современного браузера — иначе Google отдаёт ttf вместо woff2.
 const UA =
