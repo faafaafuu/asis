@@ -318,6 +318,15 @@ const pulling = new Map();
  */
 let lastInstalled = [];
 
+/** Отвечала ли Ollama при последнем опросе. */
+let lastRunning = false;
+
+/**
+ * Последняя неудача при работе с моделями — держится до следующего действия.
+ * Отдельно от подсказки: подсказку перерисовка переписывает каждый раз.
+ */
+let modelsProblem = "";
+
 function makeRow({ name, note, size, installed, chosen }) {
   const row = document.createElement("div");
   row.className = "ob__model";
@@ -391,12 +400,21 @@ function renderModels(status) {
   ui.modelsList.dataset.notes = showModelNotes ? "on" : "off";
   ui.modelsInfo.textContent = showModelNotes ? "скрыть пояснения" : "чем отличаются";
   lastInstalled = status?.installed ?? lastInstalled;
+  lastRunning = status?.running ?? false;
 
   if (!status?.running) {
-    ui.modelsHint.textContent =
-      "Ollama не отвечает. Установите её с ollama.com и запустите — программа сама увидит.";
+    // Установлена, но молчит — обычное дело после перезагрузки: Ollama не
+    // всегда прописывается в автозапуск. Советовать «установите с ollama.com»
+    // тому, у кого она уже стоит, — значит переложить вину на человека и не
+    // сказать, что делать. Предлагаем запустить прямо отсюда.
+    ui.ollamaStart.hidden = !status?.present;
+    ui.modelsHint.textContent = status?.present
+      ? "Ollama установлена, но не запущена — скачанные модели не видны, пока она молчит."
+      : "Ollama не найдена. Установите её с ollama.com — программа сама увидит.";
     return;
   }
+
+  ui.ollamaStart.hidden = true;
 
   const installed = new Map(status.installed.map((m) => [m.name, m]));
   const chosen = ui.model.value.trim();
@@ -444,9 +462,14 @@ function renderModels(status) {
   ui.modelsToggle.textContent = showAllModels ? "Свернуть список" : "Показать другие модели";
   ui.modelAdd.hidden = !showAllModels;
 
-  // Объяснение порядка, а не украшение: без него непонятно, зачем качать
-  // и когда. Первое, что человек видит, — что это делается один раз.
-  if (pulling.size) {
+  // Сообщение о неудаче переживает перерисовку и держится, пока человек не
+  // начнёт новое действие. Раньше его писали прямо в подсказку, а следующая
+  // же строка этой функции затирала текст дежурным пояснением — сообщение
+  // жило миллисекунды, и со стороны нажатие «Скачать» выглядело так, будто
+  // кнопка ничего не делает. Именно так и терялась ошибка «Ollama не отвечает».
+  if (modelsProblem) {
+    ui.modelsHint.textContent = modelsProblem;
+  } else if (pulling.size) {
     ui.modelsHint.textContent = "Загрузка идёт в фоне — окно можно закрыть, она не прервётся.";
   } else if (installed.size === 0) {
     ui.modelsHint.textContent =
@@ -475,16 +498,20 @@ async function refreshModels() {
  */
 async function startPull(name) {
   if (!name || pulling.has(name)) return;
+  modelsProblem = "";
   pulling.set(name, "готовлюсь…");
-  renderModels({ running: true, installed: lastInstalled });
+  redraw();
 
   try {
     await api.invoke("pull_model", { model: name });
   } catch (err) {
-    // Сюда попадает и опечатка в имени: Ollama отвечает, что такой модели нет.
-    ui.modelsHint.textContent = `Не удалось скачать «${name}»: ${err}`;
+    // Сюда попадает и опечатка в имени, и молчащая Ollama: сообщение держится
+    // до следующего действия, а не гаснет на ближайшей перерисовке.
+    modelsProblem = `Не удалось скачать «${name}»: ${err}`;
     pulling.delete(name);
-    renderModels({ running: true, installed: lastInstalled });
+    // Заодно уточняем, жива ли Ollama вообще: если нет — покажется кнопка
+    // «Запустить», а не одно лишь сообщение о неудаче.
+    await refreshModels();
     return;
   }
 
@@ -492,14 +519,52 @@ async function startPull(name) {
   await refreshModels();
 }
 
+/**
+ * Перерисовка по запомненному состоянию — без похода в Rust.
+ *
+ * Раньше в таких местах писалось `{ running: true }`, то есть окно уверяло
+ * само себя, что Ollama отвечает, даже когда она молчала.
+ */
+function redraw() {
+  renderModels({ running: lastRunning, present: true, installed: lastInstalled });
+}
+
 ui.modelsToggle.addEventListener("click", () => {
   showAllModels = !showAllModels;
-  renderModels({ running: true, installed: lastInstalled });
+  redraw();
 });
 
 ui.modelsInfo.addEventListener("click", () => {
   showModelNotes = !showModelNotes;
-  renderModels({ running: true, installed: lastInstalled });
+  redraw();
+});
+
+ui.ollamaStart.addEventListener("click", async () => {
+  modelsProblem = "";
+  ui.ollamaStart.disabled = true;
+  ui.modelsHint.textContent = "Запускаю Ollama…";
+  try {
+    await api.invoke("start_ollama");
+  } catch (err) {
+    modelsProblem = `Не удалось запустить: ${err}`;
+    ui.ollamaStart.disabled = false;
+    await refreshModels();
+    return;
+  }
+
+  // Сервер поднимается несколько секунд. Спрашиваем раз в секунду, пока не
+  // ответит: молчаливое ожидание неотличимо от «кнопка не сработала».
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await refreshModels();
+    if (lastRunning) break;
+  }
+
+  ui.ollamaStart.disabled = false;
+  if (!lastRunning) {
+    modelsProblem = "Ollama запущена, но пока не отвечает. Подождите немного и нажмите «Обновить».";
+    redraw();
+  }
 });
 
 ui.modelPull.addEventListener("click", () => {

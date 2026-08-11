@@ -74,6 +74,13 @@
           </div>
           <div class="ob__models" data-el="modelsList"></div>
 
+          <!-- Видна, только когда Ollama стоит, но не отвечает: после
+               перезагрузки она не всегда поднимается сама, и со стороны это
+               выглядит так, будто из программы пропали все модели. -->
+          <button class="ob__btn ob__btn--primary" type="button" data-el="ollamaStart" hidden>
+            Запустить Ollama
+          </button>
+
           <!-- Список нарочно начинается с трёх строк: девять вариантов на первом
                экране — это не выбор, а работа по сравнению незнакомых имён. -->
           <button class="ob__link" type="button" data-el="modelsToggle">Показать другие модели</button>

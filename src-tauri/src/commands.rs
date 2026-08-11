@@ -204,9 +204,16 @@ pub fn save_trigger_settings(
 }
 
 /// Что наблюдатель видел в последнее время — живая сводка для окна настройки.
+///
+/// try_state, а не state: наблюдателя кладут в состояние только на десктопе, а
+/// state() при отсутствии значения не возвращает ошибку, а паникует. Окно
+/// опрашивает эту команду раз в секунду, так что на телефоне обычный state()
+/// ронял бы приложение через секунду после запуска.
 #[tauri::command]
 pub fn capture_diagnostics(app: AppHandle) -> Diagnostics {
-    app.state::<crate::watcher::Integration>().diagnostics()
+    app.try_state::<crate::watcher::Integration>()
+        .map(|integration| integration.diagnostics())
+        .unwrap_or_default()
 }
 
 /// Открывает каталог с журналом в проводнике. Когда попап не появляется, журнал —
@@ -248,6 +255,17 @@ pub async fn local_models(app: AppHandle) -> crate::ollama::Status {
         crate::ollama::host_from(&config.ai.endpoint)
     };
     crate::ollama::status(&host).await
+}
+
+/// Запускает Ollama, если она стоит, но не поднята.
+///
+/// После перезагрузки Windows Ollama не всегда стартует сама — записи в
+/// автозапуске у неё может не быть вовсе. Со стороны это выглядит так, будто
+/// из программы пропали все скачанные модели, хотя они лежат на диске.
+#[tauri::command]
+pub fn start_ollama() -> Result<(), String> {
+    log::info!("запускаю Ollama по просьбе из окна");
+    crate::ollama::start()
 }
 
 /// Скачивает модель. Ход загрузки уходит событиями `model:pull` — команда

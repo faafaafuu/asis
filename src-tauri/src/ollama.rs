@@ -27,9 +27,13 @@ pub struct Model {
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
-    /// Отвечает ли Ollama. Не «установлена» — установленная, но не запущенная
-    /// служба для нас неотличима от отсутствующей, и совет будет один и тот же.
+    /// Отвечает ли сервер прямо сейчас.
     pub running: bool,
+    /// Лежит ли Ollama на диске. Раньше этого поля не было, и окно на всякий
+    /// молчание советовало «установите с ollama.com» — а человеку с уже
+    /// установленной Ollama, которая просто не поднялась после перезагрузки,
+    /// этот совет говорит, что виноват он, и не говорит, что делать.
+    pub present: bool,
     pub installed: Vec<Model>,
 }
 
@@ -88,9 +92,73 @@ pub fn host_from(endpoint: &str) -> String {
     }
 }
 
+/// Путь к исполняемому файлу Ollama, если она стоит на этом компьютере.
+///
+/// Сначала оконное приложение: на Windows именно оно поднимает сервер и живёт
+/// в трее, как это делает сам человек, запуская Ollama из меню «Пуск».
+/// Консольный `ollama` — запасной вариант, ему нужна команда `serve`.
+pub fn executable() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let dir = std::path::Path::new(&local).join("Programs").join("Ollama");
+        for name in ["ollama app.exe", "ollama.exe"] {
+            let path = dir.join(name);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+    }
+
+    // Общий путь для всех систем: ищем в PATH руками, чтобы не тащить крейт
+    // ради одного перебора каталогов.
+    let names: &[&str] = if cfg!(windows) {
+        &["ollama.exe"]
+    } else {
+        &["ollama"]
+    };
+    let path_var = std::env::var_os("PATH")?;
+    std::env::split_paths(&path_var).find_map(|dir| {
+        names
+            .iter()
+            .map(|name| dir.join(name))
+            .find(|candidate| candidate.exists())
+    })
+}
+
+/// Запускает Ollama. Возвращается сразу: сервер поднимается пару секунд, и
+/// ждать его здесь нечем — окно само переспросит состояние.
+pub fn start() -> Result<(), String> {
+    let exe = executable().ok_or("Ollama не найдена на этом компьютере")?;
+    let windowed = exe
+        .file_name()
+        .map(|name| name.to_string_lossy().contains("app"))
+        .unwrap_or(false);
+
+    let mut command = std::process::Command::new(&exe);
+    // Оконное приложение поднимает сервер само, консольному нужно сказать.
+    if !windowed {
+        command.arg("serve");
+    }
+
+    // Без этого флага на секунду мелькнёт чёрное окно консоли — со стороны
+    // выглядит как сбой, хотя всё идёт правильно.
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("не удалось запустить Ollama: {err}"))
+}
+
 /// Что сейчас установлено. Молчаливо: неответ Ollama — не ошибка, а «не
 /// запущена», и окно покажет это отдельным сообщением.
 pub async fn status(host: &str) -> Status {
+    let present = executable().is_some();
     let client = reqwest::Client::new();
     let url = format!("{host}/api/tags");
 
@@ -99,6 +167,7 @@ pub async fn status(host: &str) -> Status {
         _ => {
             return Status {
                 running: false,
+                present,
                 installed: Vec::new(),
             }
         }
@@ -107,6 +176,7 @@ pub async fn status(host: &str) -> Status {
     let Ok(tags) = response.json::<TagsResponse>().await else {
         return Status {
             running: false,
+            present,
             installed: Vec::new(),
         };
     };
@@ -123,6 +193,7 @@ pub async fn status(host: &str) -> Status {
 
     Status {
         running: true,
+        present: true,
         installed,
     }
 }
