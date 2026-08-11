@@ -200,6 +200,17 @@ jobs:
 
       - name: Сборка .apk
         run: npm run tauri -- android build --apk
+        # То же выравнивание под 16 КБ, что и в .cargo/config.toml, но
+        # переменными окружения: они действуют независимо от того, из какого
+        # каталога tauri-cli решит позвать cargo, а конфигурационный файл
+        # ищется относительно текущего каталога и однажды уже потерялся.
+        # Переменные адресные, на конкретную архитектуру, поэтому сборку
+        # вспомогательных macro-крейтов для самой машины сборки они не задевают.
+        env:
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
+          CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
+          CARGO_TARGET_I686_LINUX_ANDROID_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
 
       - uses: actions/upload-artifact@v4
         with:
