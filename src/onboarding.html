@@ -6,7 +6,7 @@
     <!-- Пустая иконка: без неё окно само просит /favicon.ico, файла нет, и в журнал
          каждый раз падает «asset not found» — шум, который мешает читать настоящие ошибки. -->
     <link rel="icon" href="data:," />
-    <title>Суфлёр — доступ и настройка</title>
+    <title>Суфлёр</title>
     <link rel="stylesheet" href="./styles/fonts.css" />
     <link rel="stylesheet" href="./styles/tokens.css" />
     <!-- Стили попапа нужны здесь ради телефона: там объяснение показывается
@@ -15,8 +15,6 @@
     <link rel="stylesheet" href="./styles/onboarding.css" />
   </head>
   <body>
-    <!-- Экран честного отказа: без него отсутствие разрешения выглядело бы как
-         «приложение просто не работает» (SPEC §9.2, §12.4, критерий приёмки §14). -->
     <!-- Объяснение поверх настроек — только на телефоне. Там у приложения одно
          окно на всё, отдельного окна попапа быть не может, а пункт «Объяснить»
          из меню выделения должен что-то показать. -->
@@ -26,156 +24,161 @@
     </div>
 
     <main class="ob">
-      <p class="ob__eyebrow">Суфлёр</p>
+      <!-- Шапка: имя программы и вход в настройки вида. Кнопок окна здесь нет —
+           рамку рисует система, свои были бы вторым комплектом поверх её. -->
+      <header class="ob__bar">
+        <span class="ob__brand" data-i18n="app.name">Суфлёр</span>
 
-      <!-- Видно только тогда, когда доступа нет: тогда это главное сообщение окна.
+        <div class="ob__view">
+          <button class="ob__view-btn" type="button" data-el="viewBtn" aria-expanded="false">
+            <span data-i18n="view.title">Вид</span>
+            <span class="ob__chevron" aria-hidden="true"></span>
+          </button>
+
+          <div class="ob__menu" data-el="viewMenu" hidden>
+            <span class="ob__menu-label" data-i18n="view.theme">Тема</span>
+            <div class="ob__menu-group" data-el="themeList"></div>
+            <span class="ob__menu-label" data-i18n="view.language">Язык</span>
+            <div class="ob__menu-group" data-el="langList"></div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Виден только тогда, когда доступа нет: тогда это главное сообщение окна.
            Когда всё работает, «Всё готово» сообщать незачем — человек это и так
            видит по тому, что программа работает. -->
-      <div data-el="status">
+      <section class="ob__block" data-el="status">
         <h1 class="ob__title" data-el="title">Проверяем доступ…</h1>
-        <p class="ob__text" data-el="hint"></p>
-
+        <p class="ob__lead" data-el="hint"></p>
         <div class="ob__actions">
-          <button class="ob__btn ob__btn--primary" type="button" data-el="settings" hidden>
-            Открыть настройки системы
-          </button>
-          <button class="ob__btn" type="button" data-el="recheck">Проверить снова</button>
+          <button class="ob__btn ob__btn--primary" type="button" data-el="settings"
+                  data-i18n="access.openSettings" hidden>Открыть настройки системы</button>
+          <button class="ob__btn ob__btn--quiet" type="button" data-el="recheck"
+                  data-i18n="access.recheck">Проверить доступ</button>
         </div>
+      </section>
 
-        <hr class="ob__sep" />
-      </div>
+      <section class="ob__block">
+        <h1 class="ob__title" data-i18n="source.title">Откуда брать объяснения</h1>
+        <p class="ob__lead" data-i18n="source.lead">
+          Википедия работает без ключа. Модель нужна для «простыми словами», примеров и вопросов.
+        </p>
+      </section>
 
-      <h2 class="ob__subtitle">Откуда брать объяснения</h2>
-      <p class="ob__text ob__text--dim">
-        Википедия работает без ключа. Модель нужна для «простыми словами»,
-        примеров и вопросов.
-      </p>
-
-      <label class="ob__field">
-        <span class="ob__label">Источник</span>
-        <!-- Обёртка нужна ради стрелки: системную не подвинуть и не покрасить,
-             она прижимается к краю и висит не по центру. Рисуем свою. -->
+      <section class="ob__block">
+        <span class="ob__label" data-i18n="source.label">Источник</span>
+        <!-- Обёртка нужна ради стрелки: системную не подвинуть и не покрасить. -->
         <span class="ob__select">
-          <select class="ob__input" data-el="preset">
-            <option value="wikipedia">Википедия — без ключа, только определения</option>
-            <option value="groq">Groq — бесплатный ключ, быстрые ответы</option>
-            <option value="google">Google AI Studio — бесплатный ключ</option>
-            <option value="openrouter">OpenRouter — бесплатные модели</option>
-            <option value="ollama">Ollama — модель на этом устройстве</option>
-            <option value="custom">Другой сервис с OpenAI-совместимым API</option>
+          <select class="ob__underline" data-el="preset">
+            <option value="wikipedia" data-i18n="source.wikipedia">Википедия — без ключа, только определения</option>
+            <option value="groq" data-i18n="source.groq">Groq — бесплатный ключ, быстрые ответы</option>
+            <option value="google" data-i18n="source.google">Google AI Studio — бесплатный ключ</option>
+            <option value="openrouter" data-i18n="source.openrouter">OpenRouter — бесплатные модели</option>
+            <option value="ollama" data-i18n="source.ollama">Ollama — модель на этом устройстве</option>
+            <option value="custom" data-i18n="source.custom">Другой сервис с OpenAI-совместимым API</option>
           </select>
+          <span class="ob__chevron" aria-hidden="true"></span>
         </span>
-      </label>
+      </section>
 
       <div data-el="modelFields" hidden>
-        <label class="ob__field" data-el="keyField">
-          <span class="ob__label">Ключ</span>
-          <input class="ob__input" data-el="apiKey" type="password" autocomplete="off"
-                 placeholder="вставьте ключ" />
+        <section class="ob__block" data-el="keyField">
+          <span class="ob__label" data-i18n="key.label">Ключ</span>
+          <input class="ob__underline" data-el="apiKey" type="password" autocomplete="off"
+                 data-i18n-ph="key.placeholder" placeholder="вставьте ключ" />
           <span class="ob__hint" data-el="keyHint"></span>
-        </label>
+        </section>
 
         <!-- Список моделей — только для Ollama: у неё они лежат на этом же
-             компьютере, их видно и можно доставить. У облачных сервисов список
+             устройстве, их видно и можно доставить. У облачных сервисов список
              моделей огромен и меняется без предупреждения, там честнее поле. -->
-        <div class="ob__field" data-el="modelsBlock" hidden>
-          <!-- Пояснения к моделям спрятаны за кнопкой: когда выбираешь из
-               списка, девять строк текста про семейства и точность — это шум,
-               сквозь который приходится продираться к именам. -->
-          <div class="ob__models-head">
-            <span class="ob__label">Модель</span>
-            <button class="ob__link" type="button" data-el="modelsInfo">чем отличаются</button>
+        <section class="ob__block" data-el="modelsBlock" hidden>
+          <div class="ob__row">
+            <span class="ob__label" data-i18n="model.label">Модель</span>
+            <button class="ob__link" type="button" data-el="modelsInfo" data-i18n="model.compare">чем отличаются</button>
           </div>
+
           <div class="ob__models" data-el="modelsList"></div>
 
-          <!-- Видна, только когда Ollama стоит, но не отвечает: после
-               перезагрузки она не всегда поднимается сама, и со стороны это
-               выглядит так, будто из программы пропали все модели. -->
-          <button class="ob__btn ob__btn--primary" type="button" data-el="ollamaStart" hidden>
-            Запустить Ollama
-          </button>
+          <!-- Видна, только когда Ollama стоит, но не отвечает. -->
+          <button class="ob__btn ob__btn--primary" type="button" data-el="ollamaStart"
+                  data-i18n="models.ollamaStart" hidden>Запустить Ollama</button>
 
-          <!-- Список нарочно начинается с трёх строк: девять вариантов на первом
-               экране — это не выбор, а работа по сравнению незнакомых имён. -->
-          <button class="ob__link" type="button" data-el="modelsToggle">Показать другие модели</button>
+          <button class="ob__link" type="button" data-el="modelsToggle" data-i18n="model.showMore">Показать другие модели</button>
 
-          <!-- Поле остаётся, но последним и внутри развёрнутого списка: это выход
-               для того, кто знает конкретное имя с ollama.com, а не основной
-               способ выбрать модель. -->
-          <div class="ob__model-add" data-el="modelAdd" hidden>
-            <input class="ob__input" data-el="modelCustom" type="text" spellcheck="false"
-                   placeholder="или имя модели с ollama.com/library" />
-            <button class="ob__btn" type="button" data-el="modelPull">Скачать</button>
+          <!-- Поле последнее и внутри развёрнутого списка: это выход для того,
+               кто знает конкретное имя, а не основной способ выбрать модель. -->
+          <div class="ob__add" data-el="modelAdd" hidden>
+            <input class="ob__underline" data-el="modelCustom" type="text" spellcheck="false"
+                   data-i18n-ph="model.other" placeholder="или имя модели с ollama.com/library" />
+            <button class="ob__btn ob__btn--quiet" type="button" data-el="modelPull" data-i18n="model.download">Скачать</button>
           </div>
 
           <p class="ob__hint" data-el="modelsHint"></p>
-        </div>
+        </section>
 
-        <label class="ob__field" data-el="modelField">
-          <span class="ob__label">Модель</span>
-          <input class="ob__input" data-el="model" type="text" spellcheck="false" />
-        </label>
+        <section class="ob__block" data-el="modelField">
+          <span class="ob__label" data-i18n="model.label">Модель</span>
+          <input class="ob__underline" data-el="model" type="text" spellcheck="false" />
+        </section>
       </div>
 
       <div class="ob__actions">
-        <button class="ob__btn ob__btn--primary" type="button" data-el="save">Сохранить</button>
-        <button class="ob__btn" type="button" data-el="test">Проверить</button>
+        <button class="ob__btn ob__btn--primary" type="button" data-el="save" data-i18n="action.save">Сохранить</button>
+        <button class="ob__btn ob__btn--quiet" type="button" data-el="test" data-i18n="action.test">Проверить</button>
       </div>
-      <p class="ob__text ob__text--dim" data-el="aiStatus"></p>
+      <p class="ob__hint" data-el="aiStatus"></p>
 
-      <!-- Всё, что нужно раз в жизни, — под спойлером. Раньше две трети окна занимали
-           счётчик перехвата, адрес API и прокси: человеку, у которого работает, они
-           не говорят ничего, а «10 из 14» ещё и выглядит как поломка. Раздел сам
-           раскроется, если жест перестанет срабатывать, — см. refreshCapture. -->
+      <!-- Всё, что нужно раз в жизни, — под спойлером. Раздел сам раскроется,
+           если жест перестанет срабатывать, — см. refreshCapture. -->
       <details class="ob__more" data-el="advanced">
-        <summary class="ob__more-head">Если что-то не работает</summary>
+        <summary class="ob__more-head">
+          <span class="ob__chevron ob__chevron--right" aria-hidden="true"></span>
+          <span data-i18n="advanced.title">Если что-то не работает</span>
+        </summary>
 
         <!-- Проверка перехвата — про мышь и левый Ctrl, то есть только про
-             компьютер. На телефоне выделение приходит из системного меню,
-             проверять там нечего, и весь блок прячется. -->
-        <div data-el="captureBlock">
-        <h3 class="ob__subtitle">Проверка перехвата</h3>
-        <p class="ob__text ob__text--dim">
-          Выделите слово с левым Ctrl — строка ниже обновится сама.
-        </p>
-        <p class="ob__capture" data-el="capture">Жду выделения…</p>
+             компьютер. На телефоне выделение приходит из системного меню. -->
+        <div class="ob__block" data-el="captureBlock">
+          <h2 class="ob__subtitle" data-i18n="capture.title">Проверка перехвата</h2>
+          <p class="ob__lead" data-i18n="capture.lead">
+            Выделите слово с левым Ctrl — строка ниже обновится сама.
+          </p>
+          <p class="ob__capture" data-el="capture" data-i18n="capture.waiting">Жду выделения…</p>
 
-        <label class="ob__check">
-          <input type="checkbox" data-el="clipboardFallback" />
-          <span>Забирать выделение копированием, если программа не отдаёт его системе</span>
-        </label>
-        <p class="ob__hint">
-          Нужно для Chrome, Telegram, VS Code: они не отдают выделение системе.
-        </p>
-        </div>
-
-        <div data-el="advancedModel" hidden>
-          <label class="ob__field">
-            <span class="ob__label">Адрес API</span>
-            <input class="ob__input" data-el="endpoint" type="text" spellcheck="false" />
-          </label>
-
-          <label class="ob__field">
-            <span class="ob__label">Прокси</span>
-            <input class="ob__input" data-el="proxy" type="text" spellcheck="false"
-                   placeholder="socks5://127.0.0.1:1080 — если сервис недоступен" />
-            <span class="ob__hint">
-              Если ключ есть, а запросы не доходят. Пусто — напрямую.
+          <label class="ob__check">
+            <input type="checkbox" data-el="clipboardFallback" />
+            <span class="ob__check-text">
+              <span data-i18n="capture.clipboard">Забирать выделение копированием, если программа не отдаёт его системе</span>
+              <span class="ob__hint" data-i18n="capture.clipboardHint">Нужно для Chrome, Telegram, VS Code: они не отдают выделение системе.</span>
             </span>
           </label>
         </div>
 
+        <div data-el="advancedModel" hidden>
+          <section class="ob__block">
+            <span class="ob__label" data-i18n="endpoint.label">Адрес API</span>
+            <input class="ob__underline" data-el="endpoint" type="text" spellcheck="false" />
+          </section>
+
+          <section class="ob__block">
+            <span class="ob__label" data-i18n="proxy.label">Прокси</span>
+            <input class="ob__underline" data-el="proxy" type="text" spellcheck="false"
+                   data-i18n-ph="proxy.placeholder" placeholder="socks5://127.0.0.1:1080 — если сервис недоступен" />
+            <span class="ob__hint" data-i18n="proxy.hint">Если ключ есть, а запросы не доходят. Пусто — напрямую.</span>
+          </section>
+        </div>
+
         <div class="ob__actions">
-          <button class="ob__btn" type="button" data-el="recheckHere" hidden>
-            Проверить доступ
-          </button>
-          <button class="ob__btn" type="button" data-el="logs">Открыть журнал</button>
+          <button class="ob__btn ob__btn--quiet" type="button" data-el="recheckHere"
+                  data-i18n="access.recheck" hidden>Проверить доступ</button>
+          <button class="ob__btn ob__btn--quiet" type="button" data-el="logs" data-i18n="logs.open">Открыть журнал</button>
         </div>
       </details>
 
       <!-- Текст подставляется по системе: на телефоне нет ни трея, ни левого
            Ctrl, и обещать их там — врать. -->
-      <p class="ob__note" data-el="note">
+      <p class="ob__note" data-el="note" data-i18n="note.desktop">
         Приложение остаётся в трее. Выделение текста с зажатым левым Ctrl открывает
         объяснение рядом с выделенным словом.
       </p>

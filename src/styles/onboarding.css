@@ -1,12 +1,17 @@
-/* Окно онбординга. Оформление подчинено тем же токенам, что и попап,
-   чтобы приложение выглядело одним продуктом, а не двумя разными. */
+/* Окно настройки. Свёрстано по `Settings Window.dc.html` из макета.
+   Цвета и шрифты берутся токенами: одна и та же вёрстка обслуживает
+   четыре темы, включая неоновые с другой парой шрифтов и острыми углами.
+
+   Правило вертикальных отступов одно: расстояния задаёт gap контейнера.
+   Личных margin у элементов нет — когда их было три вида сразу, они
+   складывались и разъезжались. */
 
 html,
 body {
   margin: 0;
   padding: 0;
   /* Содержимое длиннее окна на невысоких экранах — иначе нижние разделы
-     (проверка перехвата, кнопки) просто нельзя достать. */
+     просто нельзя достать. */
   overflow-y: auto;
   background: var(--bg-solid);
   color: var(--text);
@@ -16,222 +21,538 @@ body {
 }
 
 .ob {
-  padding: 32px 34px;
+  padding: 14px 36px 40px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 34px;
 }
 
-/* Расстояния по вертикали задаёт только gap контейнера. Раньше их назначали
-   тремя способами сразу — общим gap, личными margin у элементов и системными
-   отступами абзацев, которые нигде не сбрасывались, — и они складывались:
-   между списком моделей и кнопками получался провал в полсотни пикселей,
-   а между соседними полями — то 10, то 24. */
 .ob p,
 .ob h1,
-.ob h2,
-.ob h3 {
+.ob h2 {
   margin: 0;
 }
 
 /* Пустой элемент всё равно участвует в gap и оставляет за собой дыру.
-   Строка состояния под кнопками пуста почти всегда — она заполняется только
-   после «Сохранить» или «Проверить». */
+   Строка состояния пуста почти всегда — она заполняется только после
+   «Сохранить» или «Проверить». */
 .ob p:empty {
   display: none;
 }
 
-.ob__eyebrow {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: var(--size-label);
-  letter-spacing: var(--ls-label);
-  text-transform: uppercase;
-  color: var(--label);
+[hidden] {
+  display: none !important;
 }
 
-.ob__title {
-  margin: 0;
-  font-family: var(--font-term);
-  font-style: italic;
-  font-weight: 400;
-  font-size: 28px;
-  line-height: 1.15;
-  color: var(--accent);
-}
+/* ── Шапка ──────────────────────────────────────────────────────────────── */
 
-.ob__text {
-  margin: 0;
-  color: var(--text-body);
-  white-space: pre-line;
-}
-
-.ob__actions {
+.ob__bar {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* Своя строка отступа: шапка липнет к верхнему краю окна, а не участвует
+     в общем ритме разделов. */
+  margin-bottom: -14px;
+}
+
+.ob__brand {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ── Блок раздела ───────────────────────────────────────────────────────── */
+
+/* Внутри раздела интервалы плотнее, чем между разделами: подпись, поле и
+   пояснение — одна мысль, а не три. */
+.ob__block {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
-.ob__btn {
-  font: inherit;
-  font-size: var(--size-secondary);
-  padding: 9px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--btn-border);
-  background: var(--btn-bg);
-  color: var(--btn-color);
-  cursor: pointer;
-}
-
-.ob__btn:hover,
-.ob__btn:focus-visible {
-  border-color: var(--btn-hover-border);
-  color: var(--btn-hover-color);
-  background: var(--btn-hover-bg);
-}
-
-.ob__btn--primary {
-  color: var(--accent);
-}
-
-/* Кнопка внутри строки списка: та же кнопка, но не в полный рост — иначе она
-   перевешивает строку, к которой относится. */
-.ob__btn--slim {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-
-.ob__btn[hidden] {
-  display: none;
-}
-
-.ob__note {
-  /* Единственный намеренно увеличенный отступ во всём окне: заметка внизу
-     не относится ни к одному разделу, и прижатая к последнему она читалась бы
-     как его продолжение. */
-  margin-top: 8px;
-  color: var(--text-muted);
-  font-size: var(--size-secondary);
-}
-
-/* ── Настройка модели ───────────────────────────────────────────────────── */
-
-.ob__sep {
-  border: none;
-  border-top: 1px solid var(--divider);
-  margin: 0;
+.ob__title {
+  font-family: var(--font-term);
+  font-style: italic;
+  font-weight: var(--term-weight);
+  text-transform: var(--term-transform);
+  font-size: 29px;
+  line-height: 1.15;
+  color: var(--text);
 }
 
 .ob__subtitle {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
+  font-family: var(--font-term);
+  font-style: italic;
+  font-weight: var(--term-weight);
+  text-transform: var(--term-transform);
+  font-size: 20px;
+  line-height: 1.2;
+  color: var(--text);
 }
 
-.ob__text--dim {
+.ob__lead {
+  font-size: 14px;
+  line-height: 1.6;
+  font-weight: 300;
   color: var(--text-muted);
-  font-size: var(--size-secondary);
-  /* pre-line нужен только системной подсказке с её переносами абзацев,
-     обычный текст должен переноситься по ширине окна. */
-  white-space: normal;
+  max-width: 40em;
 }
 
-/* Поле — это подпись и элемент ввода одним блоком: между ними 6, а до соседей
-   столько же, сколько между всеми остальными частями окна. */
-.ob__field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.ob__hint {
+  font-size: 12.5px;
+  line-height: 1.6;
+  font-weight: 300;
+  color: var(--text-muted);
 }
 
-/* Поля внутри одной группы (ключ, модель) разделены так же, как всё окно, —
-   иначе группа выглядела бы плотнее или рыхлее соседних разделов. */
-[data-el="modelFields"],
-[data-el="advancedModel"] {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+.ob__note {
+  font-size: 12.5px;
+  line-height: 1.6;
+  font-weight: 300;
+  color: var(--text-muted);
 }
 
 .ob__label {
   font-family: var(--font-mono);
   font-size: var(--size-label);
-  letter-spacing: var(--ls-label);
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--label);
 }
 
-.ob__input {
+.ob__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ── Поля: подчёркивание вместо рамки ───────────────────────────────────── */
+
+.ob__underline {
+  width: 100%;
+  padding: 4px 2px 11px;
+  border: none;
+  border-bottom: 1px solid var(--input-border);
+  background: transparent;
+  color: var(--text);
   font: inherit;
-  font-size: var(--size-secondary);
-  padding: 8px 10px;
-  border-radius: 7px;
-  border: 1px solid var(--input-border);
-  background: var(--input-bg);
-  color: var(--input-color);
+  font-size: 15px;
   outline: none;
 }
 
-/* Раскрытый список рисует не страница, а система, и наши цвета до него не
-   доходят: фон он берёт светлый, а цвет текста наследует от поля — светлый.
-   Получался белый список с белыми буквами. Здесь важен именно непрозрачный
-   фон: --input-bg полупрозрачный и под системным списком превратился бы
-   в ту же белизну. */
-.ob__input option {
+.ob__underline::placeholder {
+  color: var(--text-muted);
+}
+
+.ob__underline:hover {
+  border-bottom-color: var(--accent-dim);
+}
+
+.ob__underline:focus {
+  border-bottom-color: var(--accent);
+}
+
+/* Раскрытый список рисует система, и наши цвета до него не доходят: фон он
+   берёт светлый, а цвет текста наследует от поля. Красим сами, непрозрачным. */
+.ob__underline option {
   background-color: var(--bg-solid);
   color: var(--text);
 }
 
-/* ── Выпадающий список ──────────────────────────────────────────────────── */
-
-/* Системную стрелку не подвинуть и не покрасить: она прижата к самому краю,
-   стоит не по центру и живёт своей жизнью в каждой теме. Убираем её и рисуем
-   свою — из двух линий, без картинок, цветом из той же палитры. */
 .ob__select {
   position: relative;
   display: block;
 }
 
 .ob__select select {
-  width: 100%;
   appearance: none;
-  /* Место под стрелку, чтобы длинное название под неё не заезжало. */
-  padding-right: 38px;
+  padding-right: 30px;
+  cursor: pointer;
 }
 
-.ob__select::after {
-  content: "";
-  position: absolute;
-  right: 15px;
-  top: 50%;
-  width: 8px;
-  height: 8px;
-  /* Уголок повёрнут на 45°, поэтому его видимый центр ниже геометрического —
-     сдвигаем вверх на две трети высоты, иначе кажется съехавшим вниз. */
-  margin-top: -6px;
+/* Уголок из двух линий: системную стрелку не подвинуть и не покрасить. */
+.ob__chevron {
+  width: 7px;
+  height: 7px;
   border-right: 1.5px solid var(--text-muted);
   border-bottom: 1.5px solid var(--text-muted);
   transform: rotate(45deg);
-  /* Щелчок должен попадать в список, а не в стрелку поверх него. */
+  /* Повёрнутый уголок кажется съехавшим вниз — приподнимаем. */
+  margin-top: -3px;
+  flex: none;
+}
+
+.ob__select .ob__chevron {
+  position: absolute;
+  right: 6px;
+  top: 50%;
   pointer-events: none;
 }
 
-.ob__input:focus {
-  border-color: var(--btn-hover-border);
+.ob__chevron--right {
+  transform: rotate(-45deg);
+  margin-top: 0;
+  transition: transform 0.15s ease;
 }
 
-.ob__hint {
+/* ── Кнопки ─────────────────────────────────────────────────────────────── */
+
+.ob__actions {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.ob__btn {
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  border: none;
+}
+
+/* Главное действие — заливка акцентом, форма таблетки. */
+.ob__btn--primary {
+  align-self: flex-start;
+  padding: 11px 22px;
+  border-radius: 999px;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  font-weight: 500;
+}
+
+.ob__btn--primary:hover {
+  background: var(--btn-primary-hover);
+}
+
+/* Второстепенное — просто текст: рядом с таблеткой вторая рамка спорила бы
+   с ней за внимание. */
+.ob__btn--quiet {
+  padding: 11px 4px;
+  background: none;
+  color: var(--text-muted);
+}
+
+.ob__btn--quiet:hover {
+  color: var(--text);
+}
+
+/* Ссылка внутри блока: не действие, а переход к подробностям. */
+.ob__link {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--accent-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ob__link:hover {
+  color: var(--accent);
+}
+
+/* ── Меню вида: тема и язык ─────────────────────────────────────────────── */
+
+.ob__view {
+  position: relative;
+}
+
+.ob__view-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 2px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ob__view-btn:hover {
+  color: var(--text);
+}
+
+.ob__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 20;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: var(--pop-radius);
+  border: 1px solid var(--border);
+  background: var(--bg-solid);
+  box-shadow: var(--shadow);
+}
+
+.ob__menu-label {
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--label);
+}
+
+.ob__menu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Разделитель между темой и языком делает пауза, а не линия: список короткий,
+   линия в нём выглядела бы тяжелее самих пунктов. */
+.ob__menu-group + .ob__menu-label {
+  margin-top: 6px;
+}
+
+.ob__menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-body);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ob__menu-item:hover {
+  background: var(--btn-hover-bg);
+  color: var(--text);
+}
+
+.ob__menu-item[aria-checked="true"] {
+  color: var(--accent);
+}
+
+/* Точка вместо галочки: тот же маркер, что отмечает выбранную модель. */
+.ob__menu-item[aria-checked="true"]::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+/* ── Список моделей ─────────────────────────────────────────────────────── */
+
+.ob__models {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Строка целиком — цель для щелчка. Разделяются строки линией снизу, а не
+   рамкой вокруг: рамки превращали список в набор карточек. */
+.ob__model {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 4px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.ob__model:last-child {
+  border-bottom: none;
+}
+
+.ob__model[data-pick] {
+  cursor: pointer;
+}
+
+.ob__model[data-pick]:hover {
+  background: var(--btn-hover-bg);
+}
+
+.ob__model-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ob__model-name {
+  font-family: var(--font-term);
+  font-style: italic;
+  font-weight: var(--term-weight);
+  font-size: 17px;
+  color: var(--text-body);
+  white-space: nowrap;
+}
+
+.ob__model[data-chosen="true"] .ob__model-name {
+  color: var(--text);
+}
+
+.ob__model-size {
   font-size: 12px;
   color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ob__model-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex: none;
+}
+
+.ob__model[data-chosen="true"] .ob__model-state {
+  color: var(--accent-dim);
+}
+
+/* Точка у выбранной модели — тот же маркер, что в меню вида. */
+.ob__model[data-chosen="true"] .ob__model-state::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+/* Нескачанная модель приглушена: по одному взгляду видно, что уже есть. */
+.ob__model[data-absent="true"] .ob__model-name,
+.ob__model[data-absent="true"] .ob__model-size {
+  color: var(--text-muted);
+}
+
+/* Пояснение по умолчанию скрыто — оно справка, а не часть выбора. */
+.ob__model-note {
+  display: none;
+  width: 100%;
+  padding: 0 4px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.ob__models[data-notes="on"] .ob__model {
+  flex-wrap: wrap;
+}
+
+.ob__models[data-notes="on"] .ob__model-note {
+  display: block;
+}
+
+.ob__add {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.ob__add .ob__underline {
+  font-size: 13.5px;
+}
+
+/* ── «Если что-то не работает» ──────────────────────────────────────────── */
+
+.ob__more {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.ob__more-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  /* Свой уголок вместо системного треугольника — он крупнее текста и в разных
+     системах рисуется по-разному. */
+  list-style: none;
+}
+
+.ob__more-head::-webkit-details-marker {
+  display: none;
+}
+
+.ob__more-head:hover {
+  color: var(--text);
+}
+
+.ob__more[open] .ob__chevron--right {
+  transform: rotate(45deg);
+}
+
+/* Свёрнутый раздел — одна строка, внутренние промежутки ей не нужны. */
+.ob__more:not([open]) {
+  gap: 0;
+}
+
+/* Строка живого статуса. Моноширинный шрифт не для красоты: строка
+   обновляется на месте, и при пропорциональном она дёргалась бы по ширине.
+   Слева полоса вместо рамки — так это цитата от программы, а не поле ввода. */
+.ob__capture {
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--accent-dim);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--accent-dim);
+  /* В строке несколько предложений, разделённых переводами строк. */
+  white-space: pre-line;
+}
+
+.ob__capture[data-state="warn"] {
+  border-left-color: var(--error);
+  color: var(--error-text);
+}
+
+.ob__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.ob__check input {
+  margin-top: 3px;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-dim);
+  cursor: pointer;
+  flex: none;
+}
+
+.ob__check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  font-weight: 300;
+  color: var(--text-body);
 }
 
 /* ── Объяснение поверх настроек (только телефон) ────────────────────────── */
 
-/* Затемняем страницу под собой: объяснение — то, ради чего человек сюда попал
-   из чужого приложения, и настройки в этот момент только отвлекают. */
 .ob__overlay {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: 30;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -245,232 +566,4 @@ body {
 .ob__overlay-mount {
   width: 100%;
   max-width: 420px;
-}
-
-/* ── Список моделей ─────────────────────────────────────────────────────── */
-
-/* Блок «Модель» целиком: заголовок со ссылкой, список, кнопка, подсказка.
-   Внутри интервалы плотнее общего — это одна связка, а не разные разделы. */
-[data-el="modelsBlock"] {
-  gap: 8px;
-}
-
-.ob__models {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-/* Строка целиком — цель для щелчка: строк мало, промахнуться не по чему,
-   а мелкие переключатели рядом с длинными именами моделей только мешают. */
-.ob__model {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 8px 10px;
-  border-radius: 7px;
-  border: 1px solid var(--input-border);
-  background: var(--input-bg);
-  font-size: var(--size-secondary);
-}
-
-/* Верхний ярус: имя слева, состояние или кнопка справа. */
-.ob__model-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  /* Кнопка выше текста, и без этого строка с ней получалась заметно толще
-     соседних — список выглядел неровным. */
-  min-height: 26px;
-}
-
-.ob__model[data-pick] {
-  cursor: pointer;
-}
-
-.ob__model[data-pick]:hover {
-  border-color: var(--accent-dim);
-}
-
-.ob__model[data-chosen="true"] {
-  border-color: var(--accent);
-}
-
-/* Нескачанная модель приглушена: по одному взгляду видно, что уже есть,
-   а что ещё предстоит ждать. Кнопка внутри остаётся в полную яркость —
-   иначе она читалась бы как отключённая. */
-.ob__model[data-absent="true"] .ob__model-name,
-.ob__model[data-absent="true"] .ob__model-note {
-  color: var(--text-muted);
-}
-
-.ob__model-name {
-  color: var(--text);
-  font-family: var(--font-mono);
-}
-
-/* Размер прижимает состояние к правому краю: у него margin-right: auto,
-   и работает это даже когда размер неизвестен и строка пуста. */
-.ob__model-size {
-  color: var(--text-muted);
-  font-size: 12px;
-  margin-right: auto;
-  white-space: nowrap;
-}
-
-/* Пояснение по умолчанию скрыто — оно справка, а не часть выбора. */
-.ob__model-note {
-  display: none;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.ob__models[data-notes="on"] .ob__model-note {
-  display: block;
-}
-
-/* Заголовок списка: подпись слева, переключатель пояснений справа. */
-.ob__models-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.ob__model-state {
-  color: var(--text-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.ob__model[data-chosen="true"] .ob__model-state {
-  color: var(--accent);
-}
-
-/* Кнопка запуска Ollama появляется вместо списка, поэтому не тянется во всю
-   ширину: полоса на весь блок выглядела бы как заглушка, а не как действие. */
-.ob__btn[data-el="ollamaStart"] {
-  align-self: flex-start;
-}
-
-/* Ссылка-переключатель под списком: это не действие, а показ остального,
-   и кнопкой она выглядеть не должна. */
-.ob__link {
-  align-self: flex-start;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 12px;
-  color: var(--accent-dim);
-  cursor: pointer;
-}
-
-.ob__link:hover {
-  color: var(--accent);
-}
-
-/* Поле «другая модель» с кнопкой в одну строку: поле тянется, кнопка держит
-   свою ширину. */
-.ob__model-add {
-  display: flex;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-.ob__model-add .ob__input {
-  flex: 1;
-  min-width: 0;
-}
-
-/* ── «Если что-то не работает» ──────────────────────────────────────────── */
-
-/* Раздел для тех редких случаев, когда что-то пошло не так. Свёрнут по
-   умолчанию: у человека, у которого всё работает, он не должен отнимать
-   ни внимания, ни высоты окна. */
-.ob__more {
-  border-top: 1px solid var(--divider);
-  padding-top: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.ob__more-head {
-  font-size: var(--size-secondary);
-  color: var(--text-muted);
-  cursor: pointer;
-  /* Своя стрелка не нужна — системный маркер понятен и привычен, но по центру
-     строки он смотрится ровнее. */
-  list-style-position: outside;
-}
-
-.ob__more-head:hover {
-  color: var(--text);
-}
-
-/* Свёрнутый раздел — это одна строка, и внутренние промежутки ей не нужны:
-   иначе под заголовком висела бы пустота. */
-.ob__more:not([open]) {
-  gap: 0;
-}
-
-/* Блок проверки перехвата внутри раздела живёт по тем же правилам. */
-[data-el="captureBlock"] {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.ob__hint a {
-  color: var(--accent);
-}
-
-/* ── Проверка перехвата ─────────────────────────────────────────────────── */
-
-/* Строка живого статуса. Моноширинный шрифт здесь не для красоты: строка
-   обновляется на месте, и при пропорциональном шрифте она дёргалась бы по ширине. */
-.ob__capture {
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--divider);
-  background: var(--input-bg);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-body);
-  /* В строке несколько предложений, разделённых переводами строк: так вердикт и
-     подробности не сливаются в один абзац. */
-  white-space: pre-line;
-}
-
-.ob__capture[data-state="ok"] {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.ob__capture[data-state="warn"] {
-  border-color: var(--error);
-  color: var(--error);
-}
-
-.ob__check {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  font-size: var(--size-secondary);
-  color: var(--text-body);
-  cursor: pointer;
-}
-
-.ob__check input {
-  margin: 2px 0 0;
-  accent-color: var(--accent);
-}
-
-[hidden] {
-  display: none !important;
 }

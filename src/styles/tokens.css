@@ -89,6 +89,11 @@
   --input-bg: rgba(255, 240, 220, 0.045);
   --input-color: #f2ece1;
   --send-color: #ded5c6;
+
+  /* Кнопка главного действия — заливка акцентом, текст по ней тёмный. */
+  --btn-primary-bg: oklch(0.62 0.13 52);
+  --btn-primary-fg: #1b1613;
+  --btn-primary-hover: oklch(0.68 0.13 52);
 }
 
 /* ── Светлая тема ───────────────────────────────────────────────────────── */
@@ -135,6 +140,10 @@
   --input-bg: rgba(60, 45, 25, 0.03);
   --input-color: #221f1b;
   --send-color: #4a4438;
+
+  --btn-primary-bg: oklch(0.55 0.12 50);
+  --btn-primary-fg: #fdfbf6;
+  --btn-primary-hover: oklch(0.48 0.11 48);
 }
 
 /* data-theme="system": те же светлые значения, но по системной настройке.
@@ -183,6 +192,10 @@
     --input-bg: rgba(60, 45, 25, 0.03);
     --input-color: #221f1b;
     --send-color: #4a4438;
+
+    --btn-primary-bg: oklch(0.55 0.12 50);
+    --btn-primary-fg: #fdfbf6;
+    --btn-primary-hover: oklch(0.48 0.11 48);
   }
 }
 
@@ -248,6 +261,10 @@
   --input-bg: rgba(0, 240, 255, 0.05);
   --input-color: #d8f7fa;
   --send-color: oklch(0.85 0.16 195);
+
+  --btn-primary-bg: oklch(0.85 0.16 195);
+  --btn-primary-fg: #04181c;
+  --btn-primary-hover: oklch(0.9 0.14 195);
 }
 
 /* ── Синтвейв ───────────────────────────────────────────────────────────────
@@ -305,6 +322,10 @@
   --input-bg: rgba(255, 70, 180, 0.06);
   --input-color: #fbe9f6;
   --send-color: oklch(0.75 0.18 55);
+
+  --btn-primary-bg: oklch(0.72 0.24 350);
+  --btn-primary-fg: #1d0716;
+  --btn-primary-hover: oklch(0.8 0.2 350);
 }
 
 /* Мини-меню на мобильных в референсе есть только в тёмном варианте — так и оставлено:
