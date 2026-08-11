@@ -240,6 +240,24 @@ pub fn is_point_inside_popup(app: &AppHandle, x: f64, y: f64) -> bool {
         && y <= pos.y as f64 + size.height as f64
 }
 
+/// Закрывает окно попапа, чтобы оно создалось заново при следующем выделении.
+///
+/// Нужно после сна компьютера: окно у нас прозрачное и поверх остальных, а
+/// такое рисуется через подсистему композиции, связь с которой сон разрывает.
+/// Починить существующее окно нечем — только построить новое, благо стоит это
+/// доли секунды и происходит незаметно, пока человек ничего не выделял.
+pub fn rebuild_popup(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(POPUP_LABEL) {
+        // destroy, а не hide: спрятанное окно осталось бы тем же самым, с той же
+        // разорванной связью, и попап так и не появился бы.
+        if let Err(err) = window.destroy() {
+            log::warn!("не удалось закрыть окно попапа: {err}");
+            return;
+        }
+    }
+    app.state::<AppState>().clear_selection();
+}
+
 pub fn hide_popup(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(POPUP_LABEL) {
         let _ = window.hide();
