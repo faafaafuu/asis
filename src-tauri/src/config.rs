@@ -182,6 +182,13 @@ pub struct RuntimeConfig {
     /// спрашиваются отдельным запросом, когда человек нажал кнопку, а Википедия
     /// разговаривать не умеет — ей нечего ответить, кроме той же статьи.
     pub dialogue: bool,
+    /// Телефон это или компьютер.
+    ///
+    /// Окно настройки общее для всех систем, но часть его текста верна только
+    /// на компьютере: ни трея, ни левого Ctrl на телефоне нет, и обещать их
+    /// там — врать человеку в лицо. Определяем в Rust, а не по строке браузера:
+    /// здесь это известно достоверно, на этапе сборки.
+    pub mobile: bool,
 }
 
 impl From<&Config> for RuntimeConfig {
@@ -190,6 +197,7 @@ impl From<&Config> for RuntimeConfig {
             theme: config.ui.theme.clone(),
             error_text: config.ui.error_text.clone(),
             dialogue: config.ai.provider != "wikipedia",
+            mobile: cfg!(mobile),
         }
     }
 }

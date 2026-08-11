@@ -8,6 +8,31 @@ for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] =
 
 applyTheme("system");
 
+/**
+ * Телефон это или компьютер — приходит из Rust, где известно на этапе сборки.
+ *
+ * Окно настройки одно на все системы, но часть его верна только на компьютере:
+ * ни трея, ни левого Ctrl, ни локальной Ollama на телефоне нет.
+ */
+let isMobile = false;
+
+async function applyPlatform() {
+  if (!api) return;
+  try {
+    const config = await api.invoke("runtime_config");
+    isMobile = Boolean(config.mobile);
+  } catch {
+    // Не узнали — остаёмся на настольном варианте: он и был всё это время.
+    return;
+  }
+  if (!isMobile) return;
+
+  ui.note.textContent =
+    "Выделите текст в любом приложении и выберите «Объяснить» в меню рядом с «Копировать».";
+  // Проверка перехвата — про мышь и левый Ctrl, на телефоне проверять нечего.
+  ui.captureBlock.hidden = true;
+}
+
 const READY = {
   title: "Всё готово",
   hint: "Выделите текст в любом приложении, удерживая левый Ctrl — рядом появится объяснение.",
@@ -193,7 +218,7 @@ const PRESETS = {
     endpoint: "http://localhost:11434/api/chat",
     model: "qwen2.5:3b",
     key: false,
-    hint: "Модель работает на этом компьютере: ollama pull qwen2.5:3b",
+    hint: "Модель работает на этом устройстве, без интернета и ключей",
   },
   custom: { provider: "http", endpoint: "", model: "", key: true },
 };
@@ -270,7 +295,7 @@ ui.save.addEventListener("click", async () => {
   }
 });
 
-/* ── Модели на этом компьютере ──────────────────────────────────────────── */
+/* ── Модели на этом устройстве ──────────────────────────────────────────── */
 
 // Что предлагаем поставить. Список короткий намеренно: каждая модель здесь
 // проверена на настоящих терминах, а не взята из чужого рейтинга. Первая
@@ -403,6 +428,19 @@ function renderModels(status) {
   lastRunning = status?.running ?? false;
 
   if (!status?.running) {
+    // На телефоне Ollama не бывает вовсе — это программа для компьютера.
+    // Советовать «установите её» бессмысленно, а кнопка запуска не запустит
+    // ничего. Зато телефон может спрашивать компьютер в той же сети — это
+    // единственный рабочий путь, о нём и говорим.
+    if (isMobile) {
+      ui.ollamaStart.hidden = true;
+      ui.modelsHint.textContent =
+        "На телефоне Ollama не работает — она для компьютера. Укажите адрес компьютера " +
+        "с Ollama в вашей сети: раскройте «Если что-то не работает» и впишите в «Адрес API» " +
+        "что-то вроде http://192.168.1.5:11434/api/chat";
+      return;
+    }
+
     // Установлена, но молчит — обычное дело после перезагрузки: Ollama не
     // всегда прописывается в автозапуск. Советовать «установите с ollama.com»
     // тому, у кого она уже стоит, — значит переложить вину на человека и не
@@ -642,7 +680,11 @@ ui.settings.addEventListener("click", async () => {
   }
 });
 
-refresh();
-loadSettings();
-loadTrigger();
-refreshCapture();
+// Платформа — первой: от неё зависят подписи и то, какие разделы вообще имеют
+// смысл. loadSettings идёт следом, потому что список моделей опирается на неё.
+applyPlatform().then(() => {
+  refresh();
+  loadSettings();
+  loadTrigger();
+  refreshCapture();
+});

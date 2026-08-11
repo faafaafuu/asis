@@ -48,7 +48,7 @@
           <option value="groq">Groq — бесплатный ключ, быстрые ответы</option>
           <option value="google">Google AI Studio — бесплатный ключ</option>
           <option value="openrouter">OpenRouter — бесплатные модели</option>
-          <option value="ollama">Ollama — модель на этом компьютере</option>
+          <option value="ollama">Ollama — модель на этом устройстве</option>
           <option value="custom">Другой сервис с OpenAI-совместимым API</option>
         </select>
       </label>
@@ -116,6 +116,10 @@
       <details class="ob__more" data-el="advanced">
         <summary class="ob__more-head">Если что-то не работает</summary>
 
+        <!-- Проверка перехвата — про мышь и левый Ctrl, то есть только про
+             компьютер. На телефоне выделение приходит из системного меню,
+             проверять там нечего, и весь блок прячется. -->
+        <div data-el="captureBlock">
         <h3 class="ob__subtitle">Проверка перехвата</h3>
         <p class="ob__text ob__text--dim">
           Выделите мышью любое слово в браузере или редакторе, удерживая левый Ctrl.
@@ -133,6 +137,7 @@
           выделение системе напрямую. Приложение нажимает Ctrl+C за вас и сразу
           возвращает в буфер обмена то, что там было.
         </p>
+        </div>
 
         <div data-el="advancedModel" hidden>
           <label class="ob__field">
@@ -160,7 +165,9 @@
         </div>
       </details>
 
-      <p class="ob__note">
+      <!-- Текст подставляется по системе: на телефоне нет ни трея, ни левого
+           Ctrl, и обещать их там — врать. -->
+      <p class="ob__note" data-el="note">
         Приложение остаётся в трее. Выделение текста с зажатым левым Ctrl открывает
         объяснение рядом с выделенным словом.
       </p>
