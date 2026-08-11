@@ -64,11 +64,21 @@ jobs:
         # Ни tagName, ни releaseName: без них tauri-action ничего не публикует,
         # а просто оставляет собранные файлы в target.
 
-      - name: Приложить установщик к запуску
+      # Кроме установщика кладём и саму программу отдельным файлом.
+      #
+      # Установщик неподписан, и Smart App Control на свежей Windows его иногда
+      # просто отказывается запускать («Политика управления приложениями
+      # заблокировала этот файл») — проверить свою же сборку становится нечем.
+      # Готовый sufler.exe этой политике не подчиняется так же жёстко, и его
+      # достаточно положить поверх установленного: фронтенд Tauri вшивает
+      # внутрь исполняемого файла, отдельных файлов страниц у программы нет.
+      - name: Приложить установщик и программу к запуску
         uses: actions/upload-artifact@v4
         with:
           name: sufler-windows-${{ github.sha }}
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/sufler.exe
           if-no-files-found: error
           # Проверочные сборки живут недолго: их смотрят в тот же день.
           retention-days: 14
