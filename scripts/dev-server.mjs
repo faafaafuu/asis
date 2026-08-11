@@ -49,6 +49,12 @@ const server = createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+// Слушаем только петлевой адрес. Без указания хоста Node слушает 0.0.0.0, то
+// есть отдаёт содержимое src/ всей сети — в кафе или коворкинге это раздача
+// исходников соседям. Для демонстрации наружу есть Dockerfile, там это
+// осознанное решение; HOST оставлен на такой случай.
+const HOST = process.env.HOST ?? "127.0.0.1";
+
+server.listen(PORT, HOST, () => {
   console.log(`Суфлёр · dev-сервер: http://localhost:${PORT}/demo.html`);
 });

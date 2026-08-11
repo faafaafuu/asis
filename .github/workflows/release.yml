@@ -76,13 +76,20 @@ jobs:
 
       # Описание релиза собирается из CHANGELOG.md, чтобы в каждой версии было
       # написано, что в ней изменилось, а не один и тот же шаблон.
+      # Имя тега идёт через окружение, а не подстановкой ${{ }} в тело скрипта.
+      # Подставленное прямо в команду, оно становится частью кода оболочки: тег
+      # вида v1.0"; rm -rf /; " выполнился бы как команда. Создавать теги может
+      # только тот, у кого есть доступ на запись, но полагаться на это незачем —
+      # через переменную оболочка видит готовое значение и кодом его не считает.
       - name: Заметки к версии
         id: notes
         shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
         run: |
           {
             echo 'body<<SUFLER_NOTES_EOF'
-            node scripts/release-notes.mjs "${{ github.ref_name }}"
+            node scripts/release-notes.mjs "$TAG"
             echo
             echo 'SUFLER_NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
@@ -126,10 +133,11 @@ jobs:
             printf '%s  %s\n' "$hash" "$(basename "$file")"
             echo '```'
           } > notes-with-hash.md
-          gh release edit "${{ github.ref_name }}" --notes-file notes-with-hash.md
+          gh release edit "$TAG" --notes-file notes-with-hash.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NOTES_BODY: ${{ steps.notes.outputs.body }}
+          TAG: ${{ github.ref_name }}
 
 # macOS, Android и Linux здесь намеренно отсутствуют.
 #

@@ -19,8 +19,13 @@ fn persist(app: &AppHandle, state: &AppState) -> Result<(), String> {
         .map_err(|err| format!("не удалось определить каталог настроек: {err}"))?;
     std::fs::create_dir_all(&path).map_err(|err| err.to_string())?;
 
-    let config = state.config();
-    let json = serde_json::to_string_pretty(&*config).map_err(|err| err.to_string())?;
+    // Ключ шифруется прямо перед записью: в памяти он нужен обычной строкой,
+    // а на диске лежит файлом с обычными правами — его читает всё, что запущено
+    // от имени пользователя, а на общей машине и соседняя учётная запись.
+    let mut config = state.config().clone();
+    config.ai.api_key = crate::secret::protect(&config.ai.api_key);
+
+    let json = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
     std::fs::write(path.join("config.json"), json).map_err(|err| err.to_string())
 }
 

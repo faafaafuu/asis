@@ -13,6 +13,7 @@ mod mobile;
 mod net;
 mod ollama;
 mod overlay;
+mod secret;
 mod selection;
 mod state;
 mod watcher;

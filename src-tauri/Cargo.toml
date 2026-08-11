@@ -84,6 +84,9 @@ windows = { version = "0.62", features = [
   # CreateMutexW/CreateEventW принимают атрибуты безопасности, поэтому живут за этой
   # фичей — даже когда атрибуты не нужны и передаётся None.
   "Win32_Security",
+  # CryptProtectData/CryptUnprotectData — шифрование ключа AI-сервиса средствами
+  # системы: расшифровать сможет только та же учётная запись на той же машине.
+  "Win32_Security_Cryptography",
   "Win32_UI_Accessibility",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
