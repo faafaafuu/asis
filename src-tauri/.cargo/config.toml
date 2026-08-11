@@ -1,0 +1,22 @@
+# Выравнивание сегментов под 16 КБ для Android.
+#
+# Android 15 переходит на страницы памяти по 16 КБ вместо 4 КБ. Библиотека,
+# собранная по-старому, всё ещё запускается, но система встречает её отдельным
+# окном «This app isn't 16 KB compatible» — со стороны это выглядит как
+# поломка, хотя приложение работает.
+#
+# Флаг ставится линковщику, а не компилятору: выравнивание задаётся при сборке
+# итоговой .so. Указываем для всех четырёх архитектур Android — Google Play
+# требует их все, и собираются они по отдельности.
+
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.i686-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

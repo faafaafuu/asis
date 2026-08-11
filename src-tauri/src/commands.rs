@@ -300,13 +300,19 @@ pub async fn test_ai(state: State<'_, AppState>) -> Result<String, String> {
 /// Состояние системной интеграции — для окна онбординга.
 #[tauri::command]
 pub fn integration_status(app: AppHandle) -> Capability {
-    let integration = app.state::<crate::watcher::Integration>();
-    integration.capability()
+    // На мобильных наблюдателя нет вовсе — там вход через системное меню
+    // «Объяснить», разрешений он не требует. Отвечаем «всё доступно»: окно по
+    // этому ответу прячет верхний блок про доступ, и на телефоне остаётся
+    // ровно то, что там осмысленно, — выбор источника и модели.
+    app.try_state::<crate::watcher::Integration>()
+        .map(|integration| integration.capability())
+        .unwrap_or(Capability::Ready)
 }
 
 /// Открыть системные настройки с нужным разрешением (macOS Accessibility и т.п.).
 #[tauri::command]
 pub fn open_permission_settings(app: AppHandle) -> bool {
-    let integration = app.state::<crate::watcher::Integration>();
-    integration.open_permission_settings()
+    app.try_state::<crate::watcher::Integration>()
+        .map(|integration| integration.open_permission_settings())
+        .unwrap_or(false)
 }
