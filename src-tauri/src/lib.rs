@@ -72,7 +72,19 @@ pub fn run() {
             let config_dir = app.path().app_config_dir().ok();
             let config = Config::load(config_dir);
             log::info!("AI-провайдер: {}", config.ai.provider);
+            let key_stored_plain = config.ai.key_stored_plain;
             app.manage(AppState::new(config));
+
+            // Ключ от прежней версии лежит на диске открытым. Перешифровываем
+            // сами и сразу: иначе защита включилась бы только у того, кто
+            // случайно зайдёт в настройки и что-нибудь сохранит.
+            if key_stored_plain {
+                let state = app.state::<AppState>();
+                match commands::persist(app.handle(), &state) {
+                    Ok(()) => log::info!("ключ переведён на шифрование"),
+                    Err(err) => log::warn!("не удалось перешифровать ключ: {err}"),
+                }
+            }
 
             #[cfg(desktop)]
             {

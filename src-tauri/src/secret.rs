@@ -21,6 +21,11 @@
 /// ключа: у людей уже есть настройки, и они обязаны продолжать работать.
 const PREFIX: &str = "dpapi:";
 
+/// Зашифровано ли уже это значение.
+pub fn is_protected(value: &str) -> bool {
+    value.starts_with(PREFIX)
+}
+
 /// Готовит ключ к записи на диск.
 ///
 /// Не смогли зашифровать — возвращаем как есть. Отказ сохранить настройки был
@@ -200,6 +205,14 @@ mod tests {
         assert_eq!(protect(""), "");
         // Двойное шифрование ломало бы ключ при каждом сохранении настроек.
         assert_eq!(protect("dpapi:abc"), "dpapi:abc");
+    }
+
+    #[test]
+    fn protection_is_recognised() {
+        assert!(is_protected("dpapi:abc"));
+        // Настоящий ключ Groq начинается с gsk_ и меткой быть не может.
+        assert!(!is_protected("gsk_test_key"));
+        assert!(!is_protected(""));
     }
 
     #[test]

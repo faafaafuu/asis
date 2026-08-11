@@ -12,7 +12,7 @@ use crate::state::AppState;
 
 /// Записывает текущую конфигурацию на диск. Вынесено отдельно: настройки правятся
 /// из двух мест окна (модель и триггер), а файл должен быть один и всегда целиком.
-fn persist(app: &AppHandle, state: &AppState) -> Result<(), String> {
+pub fn persist(app: &AppHandle, state: &AppState) -> Result<(), String> {
     let path = app
         .path()
         .app_config_dir()
