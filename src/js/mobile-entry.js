@@ -17,21 +17,24 @@ const PLUGIN = "sufler";
  * @param {(text: string) => void} onSelection
  */
 export async function attachMobileEntry(api, onSelection) {
-    const listener = globalThis.__TAURI__?.core?.addPluginListener;
-    if (typeof listener === "function") {
+  const listener = globalThis.__TAURI__?.core?.addPluginListener;
+  if (typeof listener === "function") {
     try {
       await listener(PLUGIN, "selection", (payload) => {
         const text = String(payload?.text ?? "").trim();
         if (text) onSelection(text);
       });
     } catch (err) {
-      // Плагина нет — значит это десктопная сборка, и это нормально.
-      console.debug("плагин выделения недоступен:", err);
-      return;
+      // Подписка не удалась — но это не повод не забрать текст, который уже
+      // ждёт. Раньше здесь стоял return, и одна неудачная подписка отменяла
+      // единственный путь, работающий при холодном запуске: пункт «Объяснить»
+      // на незапущенном приложении молчал.
+      console.debug("подписка на выделение не удалась:", err);
     }
   }
 
-  // Текст, пришедший до подписки.
+  // Текст, пришедший до подписки. Именно этим путём приходит выделение, когда
+  // пункт меню запускает приложение с нуля, — то есть в большинстве случаев.
   try {
     const pending = await api.invoke(`plugin:${PLUGIN}|pendingSelection`);
     const text = String(pending?.text ?? "").trim();
