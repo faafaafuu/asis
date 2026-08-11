@@ -9,11 +9,22 @@
     <title>Суфлёр — доступ и настройка</title>
     <link rel="stylesheet" href="./styles/fonts.css" />
     <link rel="stylesheet" href="./styles/tokens.css" />
+    <!-- Стили попапа нужны здесь ради телефона: там объяснение показывается
+         поверх настроек, отдельного окна попапа на мобильных не бывает. -->
+    <link rel="stylesheet" href="./styles/popup.css" />
     <link rel="stylesheet" href="./styles/onboarding.css" />
   </head>
   <body>
     <!-- Экран честного отказа: без него отсутствие разрешения выглядело бы как
          «приложение просто не работает» (SPEC §9.2, §12.4, критерий приёмки §14). -->
+    <!-- Объяснение поверх настроек — только на телефоне. Там у приложения одно
+         окно на всё, отдельного окна попапа быть не может, а пункт «Объяснить»
+         из меню выделения должен что-то показать. -->
+    <div class="ob__overlay" data-el="overlay" hidden>
+      <div class="ob__overlay-mount" data-el="overlayMount"></div>
+      <button class="ob__btn" type="button" data-el="overlayClose">Закрыть</button>
+    </div>
+
     <main class="ob">
       <p class="ob__eyebrow">Суфлёр</p>
 

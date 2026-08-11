@@ -1,6 +1,9 @@
 // Окно «доступ и настройка»: показывает, чего именно не хватает системной интеграции.
 
 import { tauri, applyTheme } from "./bridge.js";
+import { PopupView } from "./popup-view.js";
+import { TauriProvider, DEFAULT_ERROR_TEXT } from "./ai-client.js";
+import { attachMobileEntry } from "./mobile-entry.js";
 
 const api = tauri();
 const ui = {};
@@ -18,8 +21,9 @@ let isMobile = false;
 
 async function applyPlatform() {
   if (!api) return;
+  let config;
   try {
-    const config = await api.invoke("runtime_config");
+    config = await api.invoke("runtime_config");
     isMobile = Boolean(config.mobile);
   } catch {
     // Не узнали — остаёмся на настольном варианте: он и был всё это время.
@@ -31,6 +35,45 @@ async function applyPlatform() {
     "Выделите текст в любом приложении и выберите «Объяснить» в меню рядом с «Копировать».";
   // Проверка перехвата — про мышь и левый Ctrl, на телефоне проверять нечего.
   ui.captureBlock.hidden = true;
+
+  attachExplainOverlay(config);
+}
+
+/**
+ * Показ объяснения поверх настроек — только на телефоне.
+ *
+ * На компьютере попап живёт отдельным окном, которое Rust ставит рядом с
+ * выделенным словом. На телефоне окон не бывает: приложение занимает экран
+ * целиком, и второму окну взяться неоткуда. Поэтому текст из пункта «Объяснить»
+ * показываем прямо здесь, поверх настроек.
+ *
+ * Сама связка «нативный плагин → событие → попап» была написана давно и лежала
+ * без дела: её подключал popup-window.js, а он на телефоне не открывается —
+ * там главным окном идёт эта страница. Отсюда и тишина в ответ на пункт меню.
+ */
+function attachExplainOverlay(config) {
+  const view = new PopupView({
+    client: new TauriProvider(api.invoke),
+    errorText: config.errorText || DEFAULT_ERROR_TEXT,
+    dialogue: Boolean(config.dialogue),
+    // Размер окна на телефоне не наш: страница и так во весь экран.
+    onGeometry: () => {},
+    onClose: () => {
+      ui.overlay.hidden = true;
+      view.close();
+    },
+  });
+  ui.overlayMount.append(view.el);
+
+  ui.overlayClose.addEventListener("click", () => {
+    ui.overlay.hidden = true;
+    view.close();
+  });
+
+  attachMobileEntry(api, (term) => {
+    ui.overlay.hidden = false;
+    view.open({ term, context: "" });
+  });
 }
 
 const READY = {

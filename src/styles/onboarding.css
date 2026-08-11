@@ -159,6 +159,29 @@ body {
   color: var(--text-muted);
 }
 
+/* ── Объяснение поверх настроек (только телефон) ────────────────────────── */
+
+/* Затемняем страницу под собой: объяснение — то, ради чего человек сюда попал
+   из чужого приложения, и настройки в этот момент только отвлекают. */
+.ob__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.55);
+  overflow-y: auto;
+}
+
+.ob__overlay-mount {
+  width: 100%;
+  max-width: 420px;
+}
+
 /* ── Список моделей ─────────────────────────────────────────────────────── */
 
 .ob__models {
