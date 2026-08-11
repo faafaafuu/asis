@@ -53,14 +53,18 @@
 
       <label class="ob__field">
         <span class="ob__label">Источник</span>
-        <select class="ob__input" data-el="preset">
-          <option value="wikipedia">Википедия — без ключа, только определения</option>
-          <option value="groq">Groq — бесплатный ключ, быстрые ответы</option>
-          <option value="google">Google AI Studio — бесплатный ключ</option>
-          <option value="openrouter">OpenRouter — бесплатные модели</option>
-          <option value="ollama">Ollama — модель на этом устройстве</option>
-          <option value="custom">Другой сервис с OpenAI-совместимым API</option>
-        </select>
+        <!-- Обёртка нужна ради стрелки: системную не подвинуть и не покрасить,
+             она прижимается к краю и висит не по центру. Рисуем свою. -->
+        <span class="ob__select">
+          <select class="ob__input" data-el="preset">
+            <option value="wikipedia">Википедия — без ключа, только определения</option>
+            <option value="groq">Groq — бесплатный ключ, быстрые ответы</option>
+            <option value="google">Google AI Studio — бесплатный ключ</option>
+            <option value="openrouter">OpenRouter — бесплатные модели</option>
+            <option value="ollama">Ollama — модель на этом устройстве</option>
+            <option value="custom">Другой сервис с OpenAI-совместимым API</option>
+          </select>
+        </span>
       </label>
 
       <div data-el="modelFields" hidden>

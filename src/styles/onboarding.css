@@ -181,6 +181,40 @@ body {
   color: var(--text);
 }
 
+/* ── Выпадающий список ──────────────────────────────────────────────────── */
+
+/* Системную стрелку не подвинуть и не покрасить: она прижата к самому краю,
+   стоит не по центру и живёт своей жизнью в каждой теме. Убираем её и рисуем
+   свою — из двух линий, без картинок, цветом из той же палитры. */
+.ob__select {
+  position: relative;
+  display: block;
+}
+
+.ob__select select {
+  width: 100%;
+  appearance: none;
+  /* Место под стрелку, чтобы длинное название под неё не заезжало. */
+  padding-right: 38px;
+}
+
+.ob__select::after {
+  content: "";
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  /* Уголок повёрнут на 45°, поэтому его видимый центр ниже геометрического —
+     сдвигаем вверх на две трети высоты, иначе кажется съехавшим вниз. */
+  margin-top: -6px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: rotate(45deg);
+  /* Щелчок должен попадать в список, а не в стрелку поверх него. */
+  pointer-events: none;
+}
+
 .ob__input:focus {
   border-color: var(--btn-hover-border);
 }
