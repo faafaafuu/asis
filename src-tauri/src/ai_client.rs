@@ -306,7 +306,7 @@ impl HttpProvider {
             return Err(AiError::Config("не задан endpoint AI-провайдера".into()));
         }
         let client = with_proxy(
-            reqwest::Client::builder().timeout(Duration::from_millis(config.timeout_ms)),
+            crate::net::client_builder().timeout(Duration::from_millis(config.timeout_ms)),
             &config.proxy,
         )
         .build()
@@ -613,7 +613,7 @@ pub struct WikipediaProvider {
 impl WikipediaProvider {
     pub fn new(config: &AiConfig) -> Result<Self, AiError> {
         let client = with_proxy(
-            reqwest::Client::builder()
+            crate::net::client_builder()
                 .timeout(Duration::from_millis(config.timeout_ms.min(8_000)))
                 // Википедия отвечает 403 на запросы без внятного User-Agent —
                 // это её правило для автоматических клиентов.

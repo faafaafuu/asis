@@ -159,7 +159,7 @@ pub fn start() -> Result<(), String> {
 /// запущена», и окно покажет это отдельным сообщением.
 pub async fn status(host: &str) -> Status {
     let present = executable().is_some();
-    let client = reqwest::Client::new();
+    let client = crate::net::client_builder().build().unwrap_or_default();
     let url = format!("{host}/api/tags");
 
     let response = match client.get(&url).send().await {
@@ -205,7 +205,7 @@ pub async fn status(host: &str) -> Status {
 /// поэтому читаем кусками и разбираем по строкам — целиком такой ответ
 /// не разобрать.
 pub async fn pull(app: AppHandle, host: String, model: String) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = crate::net::client_builder().build().unwrap_or_default();
     let url = format!("{host}/api/pull");
 
     let mut response = client

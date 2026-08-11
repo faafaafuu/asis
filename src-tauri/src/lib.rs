@@ -10,6 +10,7 @@ mod config;
 mod instance;
 #[cfg(mobile)]
 mod mobile;
+mod net;
 mod ollama;
 mod overlay;
 mod selection;
