@@ -147,6 +147,8 @@ pub fn run() {
             commands::local_models,
             commands::pull_model,
             commands::start_ollama,
+            commands::appearance,
+            commands::save_appearance,
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить приложение");

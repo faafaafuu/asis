@@ -34,7 +34,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: Config) -> Self {
-        let provider: Arc<dyn AiProvider> = Arc::from(build_provider(&config.ai));
+        let provider: Arc<dyn AiProvider> = Arc::from(build_provider(&config.ai, &config.ui.language));
         Self {
             config: RwLock::new(config),
             provider: RwLock::new(provider),
@@ -53,8 +53,13 @@ impl AppState {
     }
 
     /// Пересобирает провайдера после смены настроек — чтобы не требовать перезапуска.
-    pub fn rebuild_provider(&self, config: &crate::config::AiConfig) {
-        let provider: Arc<dyn AiProvider> = Arc::from(build_provider(config));
+    ///
+    /// Язык передаётся снаружи, а не читается здесь из конфигурации: вызывают
+    /// эту функцию, уже держа гварду настроек, и второй захват той же блокировки
+    /// на том же потоке под Windows встаёт намертво, стоит писателю выстроиться
+    /// между ними.
+    pub fn rebuild_provider(&self, config: &crate::config::AiConfig, language: &str) {
+        let provider: Arc<dyn AiProvider> = Arc::from(build_provider(config, language));
         *unpoison(self.provider.write()) = provider;
     }
 
@@ -79,6 +84,6 @@ impl AppState {
     }
 
     pub fn error_text(&self) -> String {
-        self.config().ui.error_text.clone()
+        self.config().ui.resolved_error_text()
     }
 }

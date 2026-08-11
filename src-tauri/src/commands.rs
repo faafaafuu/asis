@@ -185,7 +185,51 @@ pub fn save_ai_settings(
     persist(&app, &state)?;
 
     let config = state.config();
-    state.rebuild_provider(&config.ai);
+    state.rebuild_provider(&config.ai, &config.ui.language);
+    Ok(())
+}
+
+/// Вид приложения: тема и язык. Отдельно от настроек модели — это разные
+/// решения, и менять их человек может независимо.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Appearance {
+    pub theme: String,
+    pub language: String,
+}
+
+#[tauri::command]
+pub fn appearance(state: State<'_, AppState>) -> Appearance {
+    let config = state.config();
+    Appearance {
+        theme: config.ui.theme.clone(),
+        language: config.ui.language.clone(),
+    }
+}
+
+/// Сохраняет тему и язык.
+///
+/// Провайдера пересобираем: от языка зависит подсказка модели, иначе после
+/// переключения на английский объяснения продолжали бы приходить по-русски.
+#[tauri::command]
+pub fn save_appearance(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    appearance: Appearance,
+) -> Result<(), String> {
+    {
+        let mut config = state.config_mut();
+        config.ui.theme = appearance.theme;
+        config.ui.language = appearance.language;
+        // Текст ошибки, оставшийся от прежнего языка, сбрасываем: пусть его
+        // подставит перевод, иначе в английском окне висела бы русская фраза.
+        config.ui.error_text = String::new();
+    }
+
+    persist(&app, &state)?;
+
+    let config = state.config();
+    state.rebuild_provider(&config.ai, &config.ui.language);
     Ok(())
 }
 

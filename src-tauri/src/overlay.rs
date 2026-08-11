@@ -89,7 +89,7 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
         let config = state.config();
         (
             config.ui.theme.clone(),
-            config.ui.error_text.clone(),
+            config.ui.resolved_error_text(),
             config.ai.provider != "wikipedia",
         )
     };

@@ -102,7 +102,7 @@ fn with_proxy(builder: reqwest::ClientBuilder, proxy: &str) -> reqwest::ClientBu
 
 /// Собирает провайдера по конфигурации. Неизвестное имя — это mock, а не паника:
 /// приложение уже запущено, ронять его из-за опечатки в конфиге нельзя.
-pub fn build_provider(config: &AiConfig) -> Box<dyn AiProvider> {
+pub fn build_provider(config: &AiConfig, language: &str) -> Box<dyn AiProvider> {
     match config.provider.as_str() {
         "wikipedia" => match WikipediaProvider::new(config) {
             Ok(provider) => Box::new(provider),
@@ -111,7 +111,7 @@ pub fn build_provider(config: &AiConfig) -> Box<dyn AiProvider> {
                 Box::new(MockProvider::default())
             }
         },
-        "http" => match HttpProvider::new(config) {
+        "http" => match HttpProvider::new(config, language) {
             Ok(provider) => Box::new(provider),
             Err(err) => {
                 log::error!("HTTP-провайдер не собрался ({err}) — работаем на mock");
@@ -263,11 +263,28 @@ impl AiProvider for MockProvider {
 
 /* ─────────────────────────────── HTTP ─────────────────────────────────── */
 
-const SYSTEM_PROMPT: &str = concat!(
+const SYSTEM_PROMPT_RU: &str = concat!(
     "Ты объясняешь термин, который выделил пользователь. Ответь одним-двумя предложениями ",
     "обычным текстом, по-русски — даже если сам термин на другом языке. Только объяснение: ",
     "без вступлений, без списков, без разметки и без JSON."
 );
+
+const SYSTEM_PROMPT_EN: &str = concat!(
+    "You explain a term the user selected. Answer in one or two plain-text sentences ",
+    "in English, even if the term itself is in another language. The explanation only: ",
+    "no preamble, no lists, no markup, no JSON."
+);
+
+/// Подсказка модели на языке интерфейса.
+///
+/// Язык ответа и язык интерфейса обязаны совпадать: русское объяснение в
+/// английском окне читается как поломка, а не как забота.
+fn system_prompt(language: &str) -> &'static str {
+    match language {
+        "en" => SYSTEM_PROMPT_EN,
+        _ => SYSTEM_PROMPT_RU,
+    }
+}
 
 /// Потолок длины ответа.
 ///
@@ -292,6 +309,8 @@ pub struct HttpProvider {
     model: String,
     retries: u32,
     retry_backoff_ms: u64,
+    /// Язык, на котором модель обязана отвечать. См. `system_prompt`.
+    language: String,
 }
 
 #[derive(Serialize)]
@@ -301,7 +320,7 @@ struct Message<'a> {
 }
 
 impl HttpProvider {
-    pub fn new(config: &AiConfig) -> Result<Self, AiError> {
+    pub fn new(config: &AiConfig, language: &str) -> Result<Self, AiError> {
         if config.endpoint.is_empty() {
             return Err(AiError::Config("не задан endpoint AI-провайдера".into()));
         }
@@ -318,6 +337,7 @@ impl HttpProvider {
             model: config.model.clone(),
             retries: config.retries,
             retry_backoff_ms: config.retry_backoff_ms,
+            language: language.to_string(),
         })
     }
 
@@ -521,11 +541,14 @@ impl AiProvider for HttpProvider {
             vec![
                 Message {
                     role: "system",
-                    content: SYSTEM_PROMPT.to_string(),
+                    content: system_prompt(&self.language).to_string(),
                 },
                 Message {
                     role: "user",
-                    content: format!("Термин: «{term}».\nКонтекст: {context}"),
+                    content: match self.language.as_str() {
+                        "en" => format!("Term: “{term}”.\nContext: {context}"),
+                        _ => format!("Термин: «{term}».\nКонтекст: {context}"),
+                    },
                 },
             ]
         };
@@ -557,15 +580,25 @@ impl AiProvider for HttpProvider {
             let mut messages = vec![
                 Message {
                     role: "system",
-                    content: format!(
-                        "Пользователь уточняет ранее объяснённый термин «{term}». \
-                         Отвечай коротко, обычным текстом, без JSON. \
-                         Отвечай по-русски, даже если сам термин на другом языке."
-                    ),
+                    content: match self.language.as_str() {
+                        "en" => format!(
+                            "The user is asking a follow-up about the term “{term}”. \
+                             Answer briefly, in plain text, no JSON. \
+                             Answer in English, even if the term itself is in another language."
+                        ),
+                        _ => format!(
+                            "Пользователь уточняет ранее объяснённый термин «{term}». \
+                             Отвечай коротко, обычным текстом, без JSON. \
+                             Отвечай по-русски, даже если сам термин на другом языке."
+                        ),
+                    },
                 },
                 Message {
                     role: "user",
-                    content: format!("Исходный контекст: {context}"),
+                    content: match self.language.as_str() {
+                        "en" => format!("Original context: {context}"),
+                        _ => format!("Исходный контекст: {context}"),
+                    },
                 },
             ];
             for item in thread {

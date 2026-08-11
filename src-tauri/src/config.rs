@@ -70,16 +70,37 @@ impl Default for AiConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct UiConfig {
-    /// `system` | `dark` | `light`
+    /// `system` | `dark` | `light` | `neon` | `synthwave`
     pub theme: String,
+    /// `ru` | `en`. Задаёт и язык интерфейса, и язык, на котором отвечает модель:
+    /// объяснение по-русски в английском интерфейсе выглядело бы поломкой.
+    pub language: String,
+    /// Текст ошибки по умолчанию. Пустой — берём из перевода по языку: иначе
+    /// при смене языка здесь навсегда осталась бы фраза на прежнем.
     pub error_text: String,
+}
+
+impl UiConfig {
+    /// Текст ошибки для окна: своё значение из настроек главнее, пустое
+    /// означает «возьми по языку». Одно место на всё приложение — иначе при
+    /// добавлении языка часть окон осталась бы на прежнем.
+    pub fn resolved_error_text(&self) -> String {
+        if !self.error_text.is_empty() {
+            return self.error_text.clone();
+        }
+        match self.language.as_str() {
+            "en" => "Network error — no response".into(),
+            _ => "Сбой сети — нет ответа".into(),
+        }
+    }
 }
 
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
             theme: "system".into(),
-            error_text: "Сбой сети — нет ответа".into(),
+            language: "ru".into(),
+            error_text: String::new(),
         }
     }
 }
@@ -207,15 +228,18 @@ pub struct RuntimeConfig {
     /// там — врать человеку в лицо. Определяем в Rust, а не по строке браузера:
     /// здесь это известно достоверно, на этапе сборки.
     pub mobile: bool,
+    /// Язык интерфейса: `ru` | `en`.
+    pub language: String,
 }
 
 impl From<&Config> for RuntimeConfig {
     fn from(config: &Config) -> Self {
         Self {
             theme: config.ui.theme.clone(),
-            error_text: config.ui.error_text.clone(),
+            error_text: config.ui.resolved_error_text(),
             dialogue: config.ai.provider != "wikipedia",
             mobile: cfg!(mobile),
+            language: config.ui.language.clone(),
         }
     }
 }
