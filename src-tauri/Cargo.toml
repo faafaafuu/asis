@@ -1,6 +1,6 @@
 [package]
 name = "sufler"
-version = "1.1.0"
+version = "1.2.0"
 description = "Суфлёр — системный AI-попап по выделению текста"
 authors = ["Sufler"]
 edition = "2021"
