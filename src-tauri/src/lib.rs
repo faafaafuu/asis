@@ -149,6 +149,8 @@ pub fn run() {
             commands::start_ollama,
             commands::appearance,
             commands::save_appearance,
+            commands::ollama_install_size,
+            commands::install_ollama,
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить приложение");

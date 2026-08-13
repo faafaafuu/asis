@@ -60,6 +60,10 @@ const STRINGS = {
     "models.ollamaMobile":
       "На телефоне Ollama не работает — она для компьютера. Укажите адрес компьютера с Ollama в вашей сети: раскройте «Если что-то не работает» и впишите в «Адрес API» что-то вроде http://192.168.1.5:11434/api/chat",
     "models.ollamaStart": "Запустить Ollama",
+    "models.ollamaInstall": "Установить Ollama",
+    "models.ollamaInstalling": "Устанавливаю Ollama",
+    "models.ollamaInstalled": "Ollama установлена — можно скачивать модели.",
+    "models.ollamaInstallFailed": "Не удалось установить Ollama:",
     "models.ollamaStarting": "Запускаю Ollama…",
     "models.ollamaSlow": "Ollama запущена, но пока не отвечает. Подождите немного и нажмите «Обновить».",
 
@@ -155,6 +159,10 @@ const STRINGS = {
     "models.ollamaMobile":
       "Ollama does not run on phones — it is for computers. Point this app at a computer with Ollama on your network: open “If something is not working” and put something like http://192.168.1.5:11434/api/chat into “API address”",
     "models.ollamaStart": "Start Ollama",
+    "models.ollamaInstall": "Install Ollama",
+    "models.ollamaInstalling": "Installing Ollama",
+    "models.ollamaInstalled": "Ollama installed — you can download models now.",
+    "models.ollamaInstallFailed": "Could not install Ollama:",
     "models.ollamaStarting": "Starting Ollama…",
     "models.ollamaSlow": "Ollama started but is not responding yet. Wait a moment and press “Refresh”.",
 

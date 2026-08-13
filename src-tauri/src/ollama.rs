@@ -125,6 +125,200 @@ pub fn executable() -> Option<std::path::PathBuf> {
     })
 }
 
+/* ── Установка Ollama ────────────────────────────────────────────────────── */
+
+/// Событие с ходом установки. Отдельно от загрузки моделей: там качается модель,
+/// здесь — сама программа, и путать эти два прогресса в одном событии нельзя.
+const INSTALL_EVENT: &str = "ollama:install";
+
+/// Где брать установщик. Только официальный репозиторий и только по https:
+/// мы запускаем скачанное на машине человека, и подменённый файл здесь означал
+/// бы чужой код с его правами.
+const RELEASE_API: &str = "https://api.github.com/repos/ollama/ollama/releases/latest";
+const ASSET_NAME: &str = "OllamaSetup.exe";
+
+#[derive(Deserialize)]
+struct Release {
+    #[serde(default)]
+    assets: Vec<Asset>,
+}
+
+#[derive(Deserialize)]
+struct Asset {
+    name: String,
+    size: u64,
+    browser_download_url: String,
+}
+
+/// Сколько весит установщик — чтобы окно сказало это до нажатия, а не после.
+pub async fn install_size_gb() -> Option<f64> {
+    let asset = latest_asset().await.ok()?;
+    Some((asset.size as f64 / 1e9 * 10.0).round() / 10.0)
+}
+
+async fn latest_asset() -> Result<Asset, String> {
+    let client = crate::net::client_builder()
+        .user_agent("Sufler")
+        .build()
+        .map_err(|err| err.to_string())?;
+
+    let release: Release = client
+        .get(RELEASE_API)
+        .send()
+        .await
+        .map_err(|err| format!("не удалось спросить о последней версии: {err}"))?
+        .json()
+        .await
+        .map_err(|err| format!("ответ о версии не разобрался: {err}"))?;
+
+    release
+        .assets
+        .into_iter()
+        .find(|asset| asset.name == ASSET_NAME)
+        .ok_or_else(|| format!("в последнем выпуске Ollama нет файла {ASSET_NAME}"))
+}
+
+/// Скачивает официальный установщик Ollama и запускает его.
+///
+/// Установщик весит полтора гигабайта, поэтому качаем потоком и докладываем
+/// о ходе: молчаливое ожидание такой длины неотличимо от зависшей программы.
+pub async fn install(app: AppHandle) -> Result<(), String> {
+    let asset = latest_asset().await?;
+    emit_install(&app, 0, "скачиваю", false, None);
+
+    let client = crate::net::client_builder()
+        .user_agent("Sufler")
+        // Полтора гигабайта на медленной линии — это надолго; общий предел
+        // времени здесь только помешает.
+        .timeout(std::time::Duration::from_secs(3 * 60 * 60))
+        .build()
+        .map_err(|err| err.to_string())?;
+
+    let mut response = client
+        .get(&asset.browser_download_url)
+        .send()
+        .await
+        .map_err(|err| format!("загрузка не началась: {err}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("сервер ответил {}", response.status()));
+    }
+
+    let path = std::env::temp_dir().join(ASSET_NAME);
+    let mut file = std::fs::File::create(&path).map_err(|err| format!("нет доступа к временной папке: {err}"))?;
+
+    let mut written: u64 = 0;
+    let mut last_percent = u8::MAX;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|err| format!("загрузка прервалась: {err}"))?
+    {
+        use std::io::Write;
+        file.write_all(&chunk).map_err(|err| format!("не удалось записать файл: {err}"))?;
+        written += chunk.len() as u64;
+
+        let percent = ((written as f64 / asset.size as f64) * 100.0) as u8;
+        if percent != last_percent {
+            last_percent = percent;
+            emit_install(&app, percent, "скачиваю", false, None);
+        }
+    }
+    drop(file);
+
+    // Размер обязан совпасть с заявленным. Обрыв связи даёт «успешно
+    // скачанный» огрызок, а запускать огрызок как установщик — плохая идея.
+    if written != asset.size {
+        let _ = std::fs::remove_file(&path);
+        return Err(format!(
+            "файл скачался не полностью: {written} байт вместо {}",
+            asset.size
+        ));
+    }
+
+    emit_install(&app, 100, "проверяю подпись", false, None);
+    verify_signature(&path)?;
+
+    emit_install(&app, 100, "устанавливаю", false, None);
+    run_installer(&path)?;
+
+    emit_install(&app, 100, "готово", true, None);
+    Ok(())
+}
+
+/// Проверяет, что установщик подписан и подпись действительна.
+///
+/// Скачанное мы запускаем с правами пользователя, поэтому одного https мало:
+/// он говорит, что файл пришёл с GitHub, но не что его собрала Ollama.
+/// Подпись говорит именно это.
+#[cfg(target_os = "windows")]
+fn verify_signature(path: &std::path::Path) -> Result<(), String> {
+    let output = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &format!(
+                "(Get-AuthenticodeSignature -LiteralPath '{}').Status",
+                path.display()
+            ),
+        ])
+        .output()
+        .map_err(|err| format!("не удалось проверить подпись: {err}"))?;
+
+    let status = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if status == "Valid" {
+        log::info!("подпись установщика Ollama действительна");
+        return Ok(());
+    }
+
+    let _ = std::fs::remove_file(path);
+    Err(format!(
+        "подпись установщика недействительна ({status}) — файл удалён, ничего не запускаем"
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn verify_signature(_path: &std::path::Path) -> Result<(), String> {
+    Err("установка Ollama из программы поддерживается только на Windows".into())
+}
+
+/// Запускает установщик тихо: без вопросов, но с полосой хода от самой Ollama.
+///
+/// Ждём завершения, а не запускаем и забываем: окну нужно знать, когда можно
+/// спрашивать про модели, а до конца установки их ещё нет.
+#[cfg(target_os = "windows")]
+fn run_installer(path: &std::path::Path) -> Result<(), String> {
+    let status = std::process::Command::new(path)
+        // Ключи Inno Setup: без мастера, без перезагрузки.
+        .args(["/SILENT", "/NORESTART"])
+        .status()
+        .map_err(|err| format!("установщик не запустился: {err}"))?;
+
+    if !status.success() {
+        return Err(format!("установщик завершился с кодом {status}"));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_installer(_path: &std::path::Path) -> Result<(), String> {
+    Err("установка Ollama из программы поддерживается только на Windows".into())
+}
+
+fn emit_install(app: &AppHandle, percent: u8, status: &str, done: bool, error: Option<String>) {
+    let _ = app.emit(
+        INSTALL_EVENT,
+        Progress {
+            model: String::new(),
+            percent,
+            status: status.to_string(),
+            done,
+            error,
+        },
+    );
+}
+
 /// Запускает Ollama. Возвращается сразу: сервер поднимается пару секунд, и
 /// ждать его здесь нечем — окно само переспросит состояние.
 pub fn start() -> Result<(), String> {

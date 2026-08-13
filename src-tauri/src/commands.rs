@@ -317,6 +317,20 @@ pub fn start_ollama() -> Result<(), String> {
     crate::ollama::start()
 }
 
+/// Сколько весит установщик Ollama. Окно показывает это на кнопке: полтора
+/// гигабайта — не та цифра, которую человек должен узнать уже после нажатия.
+#[tauri::command]
+pub async fn ollama_install_size() -> Option<f64> {
+    crate::ollama::install_size_gb().await
+}
+
+/// Скачивает и ставит Ollama. Ход установки уходит событиями `ollama:install`.
+#[tauri::command]
+pub async fn install_ollama(app: AppHandle) -> Result<(), String> {
+    log::info!("устанавливаю Ollama по просьбе из окна");
+    crate::ollama::install(app).await
+}
+
 /// Скачивает модель. Ход загрузки уходит событиями `model:pull` — команда
 /// возвращается только когда всё скачано, поэтому окно её не ждёт.
 #[tauri::command]

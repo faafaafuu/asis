@@ -57,6 +57,9 @@ pub fn ensure_popup_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     // функция типобезопасно существовала и собиралась.
     #[cfg(desktop)]
     let window = WebviewWindowBuilder::new(app, POPUP_LABEL, WebviewUrl::App("popup.html".into()))
+        // Тема до первого кадра: попап появляется мгновенно поверх чужого окна,
+        // и вспышка чужой темы здесь заметнее, чем где-либо ещё.
+        .initialization_script(&theme_script(app))
         .title("Суфлёр")
         .inner_size(400.0, 160.0)
         .decorations(false)
@@ -265,6 +268,36 @@ pub fn hide_popup(app: &AppHandle) {
     app.state::<AppState>().clear_selection();
 }
 
+/// Скрипт, проставляющий тему и язык до первого кадра страницы.
+///
+/// Выполняется при создании документа, когда `<html>` может ещё не
+/// существовать, — поэтому пробуем сразу, а если элемента нет, ждём готовности
+/// разметки. Значения подставляются как строки JSON: тема приходит из файла
+/// настроек, который человек вправе править руками, и кавычка в нём иначе
+/// сломала бы весь скрипт.
+fn theme_script(app: &AppHandle) -> String {
+    let state = app.state::<AppState>();
+    let config = state.config();
+    let theme = serde_json::to_string(&config.ui.theme).unwrap_or_else(|_| "\"system\"".into());
+    let language = serde_json::to_string(&config.ui.language).unwrap_or_else(|_| "\"ru\"".into());
+
+    format!(
+        r#"(function () {{
+  var view = {{ theme: {theme}, language: {language} }};
+  window.__SUFLER_VIEW__ = view;
+  var apply = function () {{
+    if (!document.documentElement) return false;
+    document.documentElement.dataset.theme = view.theme;
+    document.documentElement.lang = view.language;
+    return true;
+  }};
+  if (!apply()) {{
+    document.addEventListener('readystatechange', apply);
+  }}
+}})();"#
+    )
+}
+
 /// Окно онбординга: объясняет, какого разрешения не хватает, и как его выдать
 /// (SPEC §9.2, §14 — «понятный экран с инструкцией, а не тихий отказ»).
 pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
@@ -279,6 +312,12 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
         ONBOARDING_LABEL,
         WebviewUrl::App("onboarding.html".into()),
     )
+    // Тема проставляется до того, как страница начнёт рисоваться.
+    //
+    // Раньше в разметке стояла тема по умолчанию, а настоящую окно узнавало
+    // запросом к Rust уже после загрузки — и на секунду показывало чужую.
+    // Здесь скрипт выполняется в момент создания документа, до первого кадра.
+    .initialization_script(&theme_script(app))
     .title("Суфлёр — настройка и проверка")
     .inner_size(560.0, 720.0)
     // Окно выросло: кроме разрешений в нём теперь живая проверка перехвата и выбор

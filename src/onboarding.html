@@ -104,6 +104,11 @@
           <button class="ob__btn ob__btn--primary" type="button" data-el="ollamaStart"
                   data-i18n="models.ollamaStart" hidden>Запустить Ollama</button>
 
+          <!-- Видна, когда Ollama не установлена вовсе. Размер пишется на самой
+               кнопке: полтора гигабайта — не та цифра, которую человек должен
+               узнать уже после нажатия. -->
+          <button class="ob__btn ob__btn--primary" type="button" data-el="ollamaInstall" hidden></button>
+
           <button class="ob__link" type="button" data-el="modelsToggle" data-i18n="model.showMore">Показать другие модели</button>
 
           <!-- Поле последнее и внутри развёрнутого списка: это выход для того,

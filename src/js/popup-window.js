@@ -33,15 +33,16 @@ function close() {
 }
 
 if (api) {
-  // Тема и текст ошибки приходят из конфигурации приложения.
+  // Тему Rust проставил до первого кадра — здесь её не трогаем вовсе.
+  // Попап всплывает поверх чужого окна мгновенно, и вспышка чужой темы
+  // заметна именно тут.
   api
     .invoke("runtime_config")
     .then((config) => {
-      applyTheme(config.theme);
       view.errorText = config.errorText || DEFAULT_ERROR_TEXT;
       view.dialogue = Boolean(config.dialogue);
     })
-    .catch(() => applyTheme("system"));
+    .catch(() => {});
 
   // Новое выделение: Rust уже сохранил якорь, нам остаётся показать содержимое.
   api.listen("popup:open", (event) => {

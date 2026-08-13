@@ -10,14 +10,16 @@ const api = tauri();
 const ui = {};
 for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] = node;
 
-applyTheme("system");
+// Тему и язык Rust проставил до первого кадра — здесь только подхватываем,
+// чтобы не сбросить их обратно на значения по умолчанию.
+const injected = globalThis.__SUFLER_VIEW__;
 
 /* ── Вид: тема и язык ───────────────────────────────────────────────────── */
 
 /** Темы в порядке меню. Названия переводятся, коды — нет. */
 const THEMES = ["system", "light", "dark", "neon", "synthwave"];
 
-let view = { theme: "system", language: "ru" };
+let view = { theme: injected?.theme ?? "system", language: injected?.language ?? "ru" };
 
 /**
  * Перерисовывает всё, что зависит от языка.
@@ -74,17 +76,22 @@ async function saveView(next) {
 }
 
 async function loadView() {
-  if (!api) {
-    applyLanguage("ru");
-    return;
-  }
-  try {
-    view = await api.invoke("appearance");
-  } catch {
-    /* окно открыто вне приложения — остаёмся на значениях по умолчанию */
-  }
+  // Язык применяем сразу, из подставленного Rust значения: ждать ответа по IPC
+  // значило бы показать секунду русского текста человеку, выбравшему английский.
   applyTheme(view.theme);
   applyLanguage(view.language);
+  if (!api) return;
+
+  // Перечитываем на случай, если настройки поменяли в обход этого окна.
+  try {
+    const fresh = await api.invoke("appearance");
+    if (fresh.theme === view.theme && fresh.language === view.language) return;
+    view = fresh;
+    applyTheme(view.theme);
+    applyLanguage(view.language);
+  } catch {
+    /* окно открыто вне приложения — остаёмся на подставленных значениях */
+  }
 }
 
 ui.viewBtn.addEventListener("click", (event) => {
@@ -572,7 +579,11 @@ function renderModels(status) {
     // всегда прописывается в автозапуск. Советовать «установите с ollama.com»
     // тому, у кого она уже стоит, — значит переложить вину на человека и не
     // сказать, что делать. Предлагаем запустить прямо отсюда.
+    // Установлена, но молчит — предлагаем запустить. Не найдена вовсе —
+    // предлагаем поставить: ходить за ней на сайт вручную человек не обязан.
     ui.ollamaStart.hidden = !status?.present;
+    ui.ollamaInstall.hidden = Boolean(status?.present);
+    if (!status?.present) labelInstallButton();
     ui.modelsHint.textContent = status?.present
       ? t("models.ollamaStopped")
       : t("models.ollamaMissing");
@@ -580,6 +591,7 @@ function renderModels(status) {
   }
 
   ui.ollamaStart.hidden = true;
+  ui.ollamaInstall.hidden = true;
 
   const installed = new Map(status.installed.map((m) => [m.name, m]));
   const chosen = ui.model.value.trim();
@@ -700,6 +712,50 @@ ui.modelsToggle.addEventListener("click", () => {
 ui.modelsInfo.addEventListener("click", () => {
   showModelNotes = !showModelNotes;
   redraw();
+});
+
+/**
+ * Размер установщика Ollama — пишем прямо на кнопке.
+ *
+ * Полтора гигабайта человек должен видеть до нажатия, а не узнавать из
+ * ползущей полосы. Спрашиваем у GitHub один раз, при первом показе кнопки;
+ * не ответил — кнопка остаётся без размера, но работает.
+ */
+let installSize = null;
+
+async function labelInstallButton() {
+  if (installSize === null && api) {
+    try {
+      installSize = await api.invoke("ollama_install_size");
+    } catch {
+      installSize = 0;
+    }
+  }
+  ui.ollamaInstall.textContent = installSize
+    ? `${t("models.ollamaInstall")} · ${installSize} ГБ`
+    : t("models.ollamaInstall");
+}
+
+ui.ollamaInstall.addEventListener("click", async () => {
+  modelsProblem = "";
+  ui.ollamaInstall.disabled = true;
+  try {
+    await api.invoke("install_ollama");
+    modelsProblem = t("models.ollamaInstalled");
+  } catch (err) {
+    modelsProblem = `${t("models.ollamaInstallFailed")} ${err}`;
+  }
+  ui.ollamaInstall.disabled = false;
+  await refreshModels();
+});
+
+// Ход установки: те же события, что у загрузки моделей, но своим каналом —
+// путать «качается модель» и «ставится сама Ollama» нельзя.
+api?.listen("ollama:install", (event) => {
+  const { percent, status, done } = event.payload ?? {};
+  if (done) return;
+  ui.ollamaInstall.textContent =
+    percent > 0 ? `${t("models.ollamaInstalling")} · ${status} ${percent}%` : `${t("models.ollamaInstalling")} · ${status}`;
 });
 
 ui.ollamaStart.addEventListener("click", async () => {
