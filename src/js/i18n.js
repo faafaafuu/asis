@@ -94,6 +94,8 @@ const STRINGS = {
 
     "speech.title": "Голосовые вопросы",
     "speech.lead": "Зажмите левый Alt с пробелом и говорите. Распознавание работает на этом компьютере.",
+    "speech.device": "Микрофон",
+    "speech.deviceAuto": "Основной в системе",
     "speech.download": "Скачать распознавание",
     "speech.ready": "Распознавание готово",
     "speech.gpu": "Будет считать видеокарта — расшифровка почти мгновенная.",
@@ -218,6 +220,8 @@ const STRINGS = {
 
     "speech.title": "Voice questions",
     "speech.lead": "Hold left Alt with Space and speak. Recognition runs on this computer.",
+    "speech.device": "Microphone",
+    "speech.deviceAuto": "System default",
     "speech.download": "Download recognition",
     "speech.ready": "Recognition is ready",
     "speech.gpu": "The GPU will do the work — transcription is near instant.",

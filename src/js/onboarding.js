@@ -363,6 +363,7 @@ async function saveVoice() {
     // второй оставляем как был.
     voice: engine === "piper" ? ui.voiceName.value : undefined,
     edgeVoice: engine === "edge" ? ui.voiceName.value : undefined,
+    inputDevice: ui.speechDevice.value,
     rate: Number(ui.voiceRate.value),
     speakAnswers: false,
   };
@@ -429,6 +430,27 @@ api?.listen("voice:install", (event) => {
 
 async function loadSpeech() {
   if (!api) return;
+
+  // Микрофоны: «основной» и «тот, в который говорят» совпадают не всегда.
+  try {
+    const devices = await api.invoke("input_devices");
+    const chosen = (await api.invoke("voice_settings")).inputDevice ?? "";
+    ui.speechDevice.replaceChildren();
+    const auto = document.createElement("option");
+    auto.value = "";
+    auto.textContent = t("speech.deviceAuto");
+    ui.speechDevice.append(auto);
+    for (const name of devices) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      ui.speechDevice.append(option);
+    }
+    ui.speechDevice.value = devices.includes(chosen) ? chosen : "";
+  } catch {
+    /* окно открыто вне приложения */
+  }
+
   try {
     const status = await api.invoke("speech_status");
     if (status.ready) {
@@ -444,6 +466,8 @@ async function loadSpeech() {
     /* окно открыто вне приложения */
   }
 }
+
+ui.speechDevice.addEventListener("change", saveVoice);
 
 ui.speechDownload.addEventListener("click", async () => {
   if (!api) return;

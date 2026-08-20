@@ -27,7 +27,8 @@ const WHISPER_RATE: u32 = 16_000;
 const MAX_SECONDS: usize = 120;
 
 enum Command {
-    Start,
+    /// Имя устройства записи. Пусто — то, что система считает основным.
+    Start(String),
     /// Закончить и отдать записанное.
     Stop(Sender<Recording>),
 }
@@ -53,8 +54,8 @@ fn commands() -> Option<&'static Sender<Command>> {
 
                     for command in rx {
                         match command {
-                            Command::Start => {
-                                active = open_input().map(|(stream, buffer, rate)| {
+                            Command::Start(preferred) => {
+                                active = open_input(&preferred).map(|(stream, buffer, rate)| {
                                     if let Err(err) = stream.play() {
                                         log::warn!("микрофон не запустился: {err}");
                                     }
@@ -67,6 +68,19 @@ fn commands() -> Option<&'static Sender<Command>> {
                             Command::Stop(reply) => {
                                 let recording = match active.take() {
                                     Some((stream, buffer, rate)) => {
+                                        // Прежде чем закрыть микрофон — подождать.
+                                        //
+                                        // Звук приходит не по одному отсчёту, а
+                                        // порциями, и последняя порция в момент
+                                        // отпускания клавиши ещё в пути. Закрывая
+                                        // устройство сразу, мы теряли хвост фразы:
+                                        // человек договаривал слово, а в записи его
+                                        // уже не было. Треть секунды с запасом
+                                        // перекрывает размер порции у любого
+                                        // разумного устройства.
+                                        std::thread::sleep(
+                                            std::time::Duration::from_millis(350),
+                                        );
                                         drop(stream);
                                         let samples = std::mem::take(
                                             &mut *buffer
@@ -91,11 +105,43 @@ fn commands() -> Option<&'static Sender<Command>> {
         .into()
 }
 
-/// Открывает устройство ввода и начинает складывать отсчёты в общий буфер.
-fn open_input() -> Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32)> {
+/// Какие устройства записи видит система.
+///
+/// Списком, потому что «основное устройство» и «то, в которое человек говорит»
+/// — разные вещи чаще, чем кажется: виртуальные микрофоны от программ вроде
+/// DroidCam и микрофоны геймпадов охотно занимают первое место и пишут тишину.
+pub fn devices() -> Vec<String> {
     let host = cpal::default_host();
-    let device = host.default_input_device()?;
+    host.input_devices()
+        .map(|list| list.filter_map(|d| d.description().ok().map(|d| d.name().to_string())).collect())
+        .unwrap_or_default()
+}
+
+/// Открывает устройство ввода и начинает складывать отсчёты в общий буфер.
+fn open_input(preferred: &str) -> Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32)> {
+    let host = cpal::default_host();
+
+    let device = if preferred.trim().is_empty() {
+        host.default_input_device()?
+    } else {
+        // Названное устройство, а если его больше нет (отключили наушники) —
+        // основное: молчать из-за пропавшего микрофона хуже, чем писать не с того.
+        host.input_devices()
+            .ok()?
+            .find(|d| d.description().map(|d| d.name() == preferred).unwrap_or(false))
+            .or_else(|| host.default_input_device())?
+    };
+
+    let name = device
+        .description()
+        .map(|d| d.name().to_string())
+        .unwrap_or_else(|_| "без имени".into());
     let config = device.default_input_config().ok()?;
+    log::info!(
+        "пишу с устройства «{name}»: {} Гц, каналов {}",
+        config.sample_rate(),
+        config.channels()
+    );
     // В cpal 0.17 частота отдаётся уже числом, без обёртки.
     let rate = config.sample_rate();
     let channels = config.channels() as usize;
@@ -131,10 +177,10 @@ fn open_input() -> Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32)> 
     Some((stream, buffer, rate))
 }
 
-/// Начать запись.
-pub fn start() {
+/// Начать запись с названного устройства (пусто — с основного).
+pub fn start(device: &str) {
     if let Some(tx) = commands() {
-        let _ = tx.send(Command::Start);
+        let _ = tx.send(Command::Start(device.to_string()));
     }
 }
 
@@ -148,8 +194,26 @@ pub fn stop() -> Option<Vec<u8>> {
     tx.send(Command::Stop(reply)).ok()?;
     let recording = answer.recv().ok()?;
 
+    // Громкость самого громкого места. Без неё «не расслышало» и «микрофон
+    // пишет тишину» выглядят в журнале одинаково, а чинятся по-разному.
+    let peak = recording
+        .samples
+        .iter()
+        .fold(0.0_f32, |max, s| max.max(s.abs()));
+    let seconds = recording.samples.len() as f32 / recording.sample_rate.max(1) as f32;
+    log::info!("записано {seconds:.1} с, громкость {:.0}%", peak * 100.0);
+
     // Меньше четверти секунды — это не вопрос, а случайное касание клавиши.
     if recording.samples.len() < recording.sample_rate as usize / 4 {
+        return None;
+    }
+
+    // Порог не «абсолютная тишина», а «ничего, кроме шума». На пустой записи
+    // whisper не молчит, а выдумывает — «Продолжение следует...» и прочие титры
+    // из роликов, на которых его учили. Лучше честно сказать, что не расслышали.
+    const SILENCE: f32 = 0.02;
+    if peak < SILENCE {
+        log::warn!("в записи тишина — проверьте, тот ли микрофон выбран");
         return None;
     }
 

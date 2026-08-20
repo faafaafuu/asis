@@ -191,6 +191,8 @@ pub fn run() {
             #[cfg(desktop)]
             commands::speech_status,
             #[cfg(desktop)]
+            commands::input_devices,
+            #[cfg(desktop)]
             commands::speech_install,
             commands::startup_settings,
             commands::save_startup_settings,
@@ -244,7 +246,12 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                     // Зажали левый Alt с пробелом — пишем, пока держат.
                     voice::hotkey::Event::TalkStart => {
                         log::info!("Alt+пробел: слушаю");
-                        voice::stt::start();
+                        let device = {
+                            let state = app.state::<AppState>();
+                            let device = state.config().voice.input_device.clone();
+                            device
+                        };
+                        voice::stt::start(&device);
                         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
                     }
                     // Отпустили — расшифровываем и отдаём окну как вопрос.

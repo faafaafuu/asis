@@ -204,6 +204,7 @@ pub struct VoiceSettings {
     pub engine: String,
     pub voice: String,
     pub edge_voice: String,
+    pub input_device: String,
     pub rate: f32,
     pub speak_answers: bool,
     /// Скачан ли выбранный голос. Окну нужно, чтобы показать кнопку загрузки
@@ -221,6 +222,7 @@ pub fn voice_settings(app: AppHandle, state: State<'_, AppState>) -> VoiceSettin
         engine: config.voice.engine.clone(),
         voice: config.voice.voice.clone(),
         edge_voice: config.voice.edge_voice.clone(),
+        input_device: config.voice.input_device.clone(),
         rate: config.voice.rate,
         speak_answers: config.voice.speak_answers,
         ready: crate::voice::assets::ready(&app, &config.voice.voice),
@@ -240,6 +242,7 @@ pub fn save_voice_settings(
         config.voice.engine = settings.engine;
         config.voice.voice = settings.voice;
         config.voice.edge_voice = settings.edge_voice;
+        config.voice.input_device = settings.input_device;
         config.voice.rate = settings.rate;
         config.voice.speak_answers = settings.speak_answers;
     }
@@ -312,6 +315,13 @@ pub fn speech_status(app: AppHandle) -> serde_json::Value {
         "sizeGb": if vram >= 2.0 { 2.1 } else { 1.5 },
         "gpu": vram >= 2.0,
     })
+}
+
+/// Микрофоны, которые видит система.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn input_devices() -> Vec<String> {
+    crate::voice::stt::devices()
 }
 
 /// Скачивает распознавание речи.
