@@ -262,7 +262,12 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             let language = state.config().ui.language.clone();
                             language
                         };
-                        match voice::whisper::transcribe(&app, &wav, &language) {
+                        // Поток обычный, а расшифровка ходит по сети (пусть и к
+                        // себе же) — ждём её здесь, а не занимаем задачу Tauri.
+                        let spoken = tauri::async_runtime::block_on(
+                            voice::whisper::transcribe(&app, wav, &language),
+                        );
+                        match spoken {
                             Ok(text) if !text.is_empty() => {
                                 log::info!("расшифровано: «{text}»");
                                 let _ = app.emit_to(overlay::POPUP_LABEL, "voice:question", text);

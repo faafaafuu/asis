@@ -26,11 +26,26 @@ fn root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(assets::dir(app)?.join("whisper"))
 }
 
+/// Порт, на котором живёт свой сервер расшифровки.
+///
+/// Не 8080 и не другой ходовой номер: занятый порт означал бы, что мы стучимся
+/// в чужую программу и шлём ей записи с микрофона.
+const PORT: u16 = 8642;
+
 /// Путь к программе. Имя менялось между выпусками (`main.exe` в старых,
 /// `whisper-cli.exe` в новых), поэтому ищем оба и в подпапках тоже.
 pub fn binary(app: &AppHandle) -> Option<std::path::PathBuf> {
+    exe(app, &["whisper-cli.exe", "main.exe"])
+}
+
+/// Сервер расшифровки: та же сборка, соседний файл.
+fn server_exe(app: &AppHandle) -> Option<std::path::PathBuf> {
+    exe(app, &["whisper-server.exe"])
+}
+
+fn exe(app: &AppHandle, names: &[&str]) -> Option<std::path::PathBuf> {
     let root = root(app).ok()?;
-    for name in ["whisper-cli.exe", "main.exe"] {
+    for name in names {
         let direct = root.join(name);
         if direct.exists() {
             return Some(direct);
@@ -90,37 +105,44 @@ pub async fn install(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Расшифровывает запись. На входе — готовый WAV, на выходе — текст.
-pub fn transcribe(app: &AppHandle, wav: &[u8], language: &str) -> Result<String, String> {
-    let exe = binary(app).ok_or("распознавание речи ещё не скачано")?;
+/// Отвечает ли сервер расшифровки.
+fn server_alive() -> bool {
+    std::net::TcpStream::connect_timeout(
+        &std::net::SocketAddr::from(([127, 0, 0, 1], PORT)),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok()
+}
+
+/// Поднимает сервер расшифровки, если он ещё не отвечает.
+///
+/// Сервер, а не запуск программы на каждый вопрос, — и вот почему. Модель весит
+/// полтора гигабайта, и загрузка её в видеопамять занимает около восьми секунд.
+/// Сама расшифровка при этом — доли секунды. Запуская программу каждый раз, мы
+/// платили бы эти восемь секунд за каждый вопрос; с сервером — один раз.
+///
+/// Поднимается при первом вопросе, а не при запуске программы: держать полтора
+/// гигабайта видеопамяти занятыми у того, кто голосом не пользуется, незачем.
+fn ensure_server(app: &AppHandle) -> Result<(), String> {
+    if server_alive() {
+        return Ok(());
+    }
+
+    let exe = server_exe(app).ok_or("распознавание речи ещё не скачано")?;
     let model = model(app)?;
     if !model.exists() {
         return Err("модель распознавания ещё не скачана".into());
     }
 
-    // Файл, а не поток: whisper.cpp читает именно файл. Имя со временем, чтобы
-    // две записи подряд не наступили друг на друга.
-    let path = std::env::temp_dir().join(format!(
-        "sufler-{}.wav",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0)
-    ));
-    std::fs::write(&path, wav).map_err(|err| format!("не удалось записать звук: {err}"))?;
-
     let mut command = std::process::Command::new(&exe);
     command
         .arg("-m")
         .arg(&model)
-        .arg("-f")
-        .arg(&path)
-        .arg("-l")
-        .arg(language)
-        // Без отметок времени и без служебной болтовни: нам нужен только текст.
-        .arg("-nt")
-        .arg("-np")
-        .stdout(std::process::Stdio::piped())
+        .arg("--host")
+        .arg("127.0.0.1")
+        .arg("--port")
+        .arg(PORT.to_string())
+        .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
 
     #[cfg(target_os = "windows")]
@@ -130,16 +152,59 @@ pub fn transcribe(app: &AppHandle, wav: &[u8], language: &str) -> Result<String,
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let output = command
-        .output()
-        .map_err(|err| format!("распознавание не запустилось: {err}"));
-    let _ = std::fs::remove_file(&path);
-    let output = output?;
+    command
+        .spawn()
+        .map_err(|err| format!("сервер расшифровки не запустился: {err}"))?;
+    log::info!("поднимаю сервер расшифровки");
 
-    if !output.status.success() {
-        return Err("распознавание завершилось ошибкой".into());
+    // Первый запуск на новой видеокарте дольше: драйвер компилирует ядра под
+    // неё и складывает в свой кеш. Дальше это уже секунды.
+    for _ in 0..300 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        if server_alive() {
+            log::info!("сервер расшифровки готов");
+            return Ok(());
+        }
     }
-    Ok(clean(&String::from_utf8_lossy(&output.stdout)))
+    Err("сервер расшифровки не ответил".into())
+}
+
+/// Расшифровывает запись. На входе — готовый WAV, на выходе — текст.
+pub async fn transcribe(app: &AppHandle, wav: Vec<u8>, language: &str) -> Result<String, String> {
+    ensure_server(app)?;
+
+    let form = reqwest::multipart::Form::new()
+        .text("response_format", "text")
+        .text("language", language.to_string())
+        // Имя файла обязательно: без него сервер не признаёт часть формы файлом.
+        .part(
+            "file",
+            reqwest::multipart::Part::bytes(wav)
+                .file_name("audio.wav")
+                .mime_str("audio/wav")
+                .map_err(|err| err.to_string())?,
+        );
+
+    let client = crate::net::client_builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|err| err.to_string())?;
+
+    let response = client
+        .post(format!("http://127.0.0.1:{PORT}/inference"))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|err| format!("сервер расшифровки не ответил: {err}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("расшифровка ответила {}", response.status()));
+    }
+    let text = response
+        .text()
+        .await
+        .map_err(|err| format!("ответ расшифровки не прочитался: {err}"))?;
+    Ok(clean(&text))
 }
 
 /// Приводит вывод программы к одной строке вопроса.
