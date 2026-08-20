@@ -246,6 +246,14 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                     // Зажали левый Alt с пробелом — пишем, пока держат.
                     voice::hotkey::Event::TalkStart => {
                         log::info!("Alt+пробел: слушаю");
+
+                        // Замолчать, раз с нами заговорили.
+                        //
+                        // Это не только вежливость. Микрофон пишет то, что
+                        // слышно в комнате, включая колонки: продолжай программа
+                        // говорить — она записала бы собственный голос и
+                        // прилежно расшифровала бы его как вопрос.
+                        voice::stop();
                         let device = {
                             let state = app.state::<AppState>();
                             let device = state.config().voice.input_device.clone();
