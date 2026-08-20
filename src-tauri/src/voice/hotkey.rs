@@ -124,6 +124,16 @@ unsafe extern "system" fn keyboard_proc(
         return pass(());
     }
 
+    // Если сейчас впереди наше собственное окно — пробел не наш.
+    //
+    // Человек щёлкнул в поле «Спросить ещё…» и печатает вопрос руками; забирать
+    // у него пробел означало бы, что в своём же поле ввода нельзя разделить два
+    // слова. То же и с окном настройки. Наружу, в чужие программы, это правило
+    // не распространяется: там попап фокуса не имеет и клавиша достаётся нам.
+    if foreground_is_ours() {
+        return pass(());
+    }
+
     let message = wparam.0 as u32;
     let down = message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
     let up = message == WM_KEYUP || message == WM_SYSKEYUP;
@@ -154,6 +164,24 @@ unsafe extern "system" fn keyboard_proc(
     }
 
     pass(())
+}
+
+/// Принадлежит ли окно, которое сейчас впереди, нам самим.
+#[cfg(target_os = "windows")]
+fn foreground_is_ours() -> bool {
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+
+    // SAFETY: обе функции только читают состояние системы и ничего не меняют.
+    unsafe {
+        let window = GetForegroundWindow();
+        if window.0.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(window, Some(&mut pid));
+        pid != 0 && pid == GetCurrentProcessId()
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
