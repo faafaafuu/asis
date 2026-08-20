@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru" data-theme="dark" data-surface="opaque">
+  <head>
+    <meta charset="utf-8" />
+    <title>Кадр для README</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="../../src/styles/fonts.css" />
+    <link rel="stylesheet" href="../../src/styles/tokens.css" />
+    <link rel="stylesheet" href="../../src/styles/popup.css" />
+    <link rel="stylesheet" href="../../src/styles/hud.css" />
+    <style>
+      /* Сцена — не часть программы, а подложка под неё: страница, которую
+         человек читает, когда встречает незнакомое слово. Всё остальное на
+         кадре настоящее — та же разметка, те же стили, те же шрифты. */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      body {
+        background: #14110f;
+        font-family: var(--font-ui);
+        color: #8f8779;
+        -webkit-font-smoothing: antialiased;
+      }
+      .page {
+        position: absolute;
+        inset: 0;
+        padding: 46px 56px;
+        font-size: 16.5px;
+        line-height: 1.75;
+        letter-spacing: 0.005em;
+        max-width: 760px;
+      }
+      .page b {
+        font-weight: inherit;
+        color: #b6ada0;
+      }
+      .sel {
+        background: rgba(120, 160, 255, 0);
+        border-radius: 2px;
+        padding: 1px 0;
+        color: inherit;
+        transition: none;
+      }
+      .stage {
+        position: absolute;
+        opacity: 0;
+        transform: translateY(6px) scale(0.985);
+        transform-origin: 20px 0;
+      }
+      .hudwrap {
+        position: absolute;
+        left: 50%;
+        top: 8px;
+        transform: translateX(-50%);
+        opacity: 0;
+      }
+      .caption {
+        position: absolute;
+        left: 50%;
+        top: 172px;
+        transform: translateX(-50%);
+        font-size: 15px;
+        color: #cdc5b8;
+        white-space: nowrap;
+        opacity: 0;
+      }
+      .caption i {
+        font-style: normal;
+        color: oklch(0.86 0.09 68);
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page" id="page"></div>
+    <div class="hudwrap" id="hudwrap"><canvas id="hud" width="360" height="180"></canvas></div>
+    <div class="caption" id="caption"></div>
+    <div class="stage" id="stage"></div>
+    <script type="module" src="./scene.js"></script>
+  </body>
+</html>
