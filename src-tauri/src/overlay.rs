@@ -123,6 +123,112 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
     Ok(())
 }
 
+/// Окно индикатора голосового режима.
+pub const HUD_LABEL: &str = "hud";
+
+/// Состояние, в котором индикатор сейчас находится.
+///
+/// Нужно потому, что окно создаётся не мгновенно: страница ещё не загрузилась,
+/// а состояние уже отправлено — и первое событие пропадает. Окно спрашивает его
+/// само, когда будет готово.
+#[cfg(desktop)]
+static HUD_MODE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// В каком состоянии индикатор. Для окна, которое только что загрузилось.
+#[cfg(desktop)]
+pub fn hud_mode() -> String {
+    HUD_MODE
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .clone()
+        .unwrap_or_else(|| "idle".into())
+}
+
+/// Показывает индикатор в нужном состоянии.
+///
+/// Окно отдельное, а не часть попапа, по двум причинам. Попапа может не быть
+/// вовсе — вопрос задают с закрытым окном. И место у них разное: попап стоит
+/// у выделенного слова, индикатор — всегда сверху по центру экрана, где его
+/// видно, куда бы ни смотрел человек.
+#[cfg(desktop)]
+pub fn show_hud(app: &AppHandle, mode: &str) {
+    let window = match ensure_hud_window(app) {
+        Ok(window) => window,
+        Err(err) => {
+            log::warn!("индикатор голоса не создался: {err}");
+            return;
+        }
+    };
+    *HUD_MODE.lock().unwrap_or_else(|err| err.into_inner()) = Some(mode.to_string());
+    let _ = window.emit_to(HUD_LABEL, "hud:mode", mode.to_string());
+    let _ = window.show();
+}
+
+#[cfg(desktop)]
+pub fn hide_hud(app: &AppHandle) {
+    *HUD_MODE.lock().unwrap_or_else(|err| err.into_inner()) = None;
+    if let Some(window) = app.get_webview_window(HUD_LABEL) {
+        let _ = window.hide();
+    }
+}
+
+#[cfg(desktop)]
+fn ensure_hud_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    if let Some(window) = app.get_webview_window(HUD_LABEL) {
+        return Ok(window);
+    }
+
+    let window = WebviewWindowBuilder::new(app, HUD_LABEL, WebviewUrl::App("hud.html".into()))
+        .title("Суфлёр — голос")
+        .inner_size(HUD_WIDTH, HUD_HEIGHT)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        // Не забирать фокус: индикатор появляется поверх чужой работы, и увести
+        // у человека курсор с текста, который он читает, было бы дурным тоном.
+        .focused(false)
+        .visible(false)
+        .build()?;
+
+    // Сквозь него можно щёлкать: это картинка, а не орган управления.
+    let _ = window.set_ignore_cursor_events(true);
+    place_hud(&window);
+    Ok(window)
+}
+
+/// Ставит индикатор сверху по центру того монитора, где сейчас работают.
+#[cfg(desktop)]
+fn place_hud(window: &WebviewWindow) {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else { return };
+
+    let scale = monitor.scale_factor();
+    let area = monitor.size();
+    let origin = monitor.position();
+
+    let width = (HUD_WIDTH * scale) as i32;
+    let x = origin.x + (area.width as i32 - width) / 2;
+    let y = origin.y + (HUD_TOP * scale) as i32;
+
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
+/// Размер индикатора в логических пикселях — как в макете.
+#[cfg(desktop)]
+const HUD_WIDTH: f64 = 360.0;
+#[cfg(desktop)]
+const HUD_HEIGHT: f64 = 180.0;
+/// Отступ сверху: индикатор не должен налезать на строку заголовка чужого окна.
+#[cfg(desktop)]
+const HUD_TOP: f64 = 16.0;
+
 /// Открывает попап на вопрос, заданный голосом с чистого места.
 ///
 /// Отличий от обычного открытия два: якоря выделения нет — окно встаёт у

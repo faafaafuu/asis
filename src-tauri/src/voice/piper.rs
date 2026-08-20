@@ -17,7 +17,16 @@ use super::{assets, audio};
 /// Работающий сейчас синтез. Нужен, чтобы «замолчи» останавливало не только звук,
 /// но и саму работу: Piper продолжал бы синтезировать уже ненужный текст, занимая
 /// процессор, а следующая фраза ждала бы очереди.
-static CURRENT: Mutex<Option<Child>> = Mutex::new(None);
+static CURRENT: Mutex<Option<(u64, Child)>> = Mutex::new(None);
+
+/// Номер текущего озвучивания.
+///
+/// Нужен, потому что фразы сменяют друг друга: человек нажал пробел на новом
+/// объяснении, не дослушав старое. Без номера поток, читавший предыдущую фразу,
+/// доходил до конца и убирал за собой чужого, уже нового ребёнка — а заодно
+/// вставал на `wait()` до конца новой фразы, держа замок. Со стороны это
+/// выглядело как «озвучка работает через раз».
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Сколько звука забираем за раз.
 ///
@@ -63,6 +72,7 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
     // Предыдущая фраза отменяется молча. Человек нажал «прочитай» на новом
     // объяснении — старое ему уже не нужно, и дослушивать его он не собирается.
     stop();
+    let generation = GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
 
     // Имя не `rate`: так зовётся скорость речи, и затенить её здесь означало бы
     // подставить в неё частоту дискретизации.
@@ -81,6 +91,20 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
         // Просят вдвое быстрее — значит каждый звук вдвое короче.
         .arg("--length_scale")
         .arg(format!("{:.3}", length_scale(rate)))
+        // Живость. Оба числа отвечают за разброс: первое — за интонацию в целом,
+        // второе — за длительность отдельных звуков. На умолчаниях (0.667 и 0.8)
+        // голос ровный до безжизненности: каждая фраза читается одинаково. Чуть
+        // больший разброс даёт естественные колебания темпа и высоты — то, чем
+        // живая речь отличается от диктора-автомата. Ещё выше поднимать нельзя:
+        // начинает «плыть» произношение.
+        .arg("--noise_scale")
+        .arg("0.78")
+        .arg("--noise_w")
+        .arg("0.95")
+        // Пауза между предложениями. Умолчание 0.2 с — речь звучит скороговоркой;
+        // чуть длиннее пауза читается как осмысленная, а не как заминка.
+        .arg("--sentence_silence")
+        .arg("0.35")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         // Piper подробно рассказывает о себе в поток ошибок на каждую фразу.
@@ -116,7 +140,7 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
         drop(stdin);
     });
 
-    *CURRENT.lock().unwrap_or_else(|err| err.into_inner()) = Some(child);
+    *CURRENT.lock().unwrap_or_else(|err| err.into_inner()) = Some((generation, child));
 
     std::thread::Builder::new()
         .name("sufler-tts".into())
@@ -125,6 +149,11 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
             let mut tail: Option<u8> = None;
 
             loop {
+                // Нас отменили — дальше читать нечего: звук уже никому не нужен,
+                // а лить его в общую очередь поверх новой фразы тем более.
+                if GENERATION.load(std::sync::atomic::Ordering::SeqCst) != generation {
+                    break;
+                }
                 match stdout.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(read) => {
@@ -158,13 +187,19 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
                 }
             }
 
-            // Процесс закончил говорить — снимаем его с учёта, иначе следующее
-            // «замолчи» попытается убить давно завершившегося.
+            // Снимаем с учёта только себя. Если за это время началась новая
+            // фраза, в CURRENT уже её процесс — трогать его нельзя.
             let mut current = CURRENT.lock().unwrap_or_else(|err| err.into_inner());
-            if let Some(child) = current.as_mut() {
-                let _ = child.wait();
+            let mine = current
+                .as_ref()
+                .map(|(id, _)| *id == generation)
+                .unwrap_or(false);
+            if mine {
+                if let Some((_, child)) = current.as_mut() {
+                    let _ = child.wait();
+                }
+                *current = None;
             }
-            *current = None;
         })
         .map_err(|err| format!("не удалось начать озвучивание: {err}"))?;
 
@@ -188,7 +223,9 @@ fn pcm(low: u8, high: u8) -> f32 {
 /// Прекращает и синтез, и воспроизведение.
 pub fn stop() {
     audio::stop();
-    if let Some(mut child) = CURRENT
+    // Отменяем текущее поколение: читающий поток увидит это и выйдет сам.
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if let Some((_, mut child)) = CURRENT
         .lock()
         .unwrap_or_else(|err| err.into_inner())
         .take()

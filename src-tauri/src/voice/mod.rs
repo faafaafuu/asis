@@ -46,6 +46,11 @@ pub fn speaking() -> bool {
     audio::speaking()
 }
 
+/// Короткий сигнал об окончании разговора.
+pub fn chime() {
+    audio::chime();
+}
+
 /// Замолчать: и звук, и работу, которая его готовит.
 pub fn stop() {
     piper::stop();

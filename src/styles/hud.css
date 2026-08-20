@@ -1,0 +1,26 @@
+/* Индикатор голосового режима.
+ *
+ * Окно прозрачное и сквозное для мыши, поэтому здесь только полотно и никакого
+ * фона: любой непрозрачный пиксель стал бы серым прямоугольником поверх чужой
+ * работы. Свечение рисует сам canvas.
+ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  /* Окно не должно перехватывать ни щелчки, ни выделение: оно декоративное. */
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+#hud {
+  display: block;
+  width: 360px;
+  height: 180px;
+}

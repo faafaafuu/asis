@@ -63,6 +63,22 @@ const END_OF_PHRASE_MS: u64 = 1000;
 /// Короче этого — не фраза, а кашель, щелчок мыши или скрип стула.
 const MIN_SPEECH_MS: u64 = 400;
 
+/// Сколько молчать, чтобы разговор закончился сам.
+///
+/// Разговор — это не режим, который включают и выключают, а то, что происходит,
+/// пока люди говорят. Если человек молчит шесть секунд, он уже занят другим:
+/// читает ответ, вернулся к работе, отошёл. Держать микрофон открытым в надежде,
+/// что он ещё что-то скажет, — значит слушать комнату без причины.
+const SILENCE_ENDS_TALK_MS: u64 = 6000;
+
+/// Что услышали в разговоре.
+pub enum Heard {
+    /// Человек договорил фразу — вот она, готовая к расшифровке.
+    Phrase(Vec<u8>),
+    /// Человек молчит слишком долго. Разговор пора заканчивать.
+    LongSilence,
+}
+
 enum Command {
     /// Запись удержанием клавиши. Строка — имя устройства, пусто — основное.
     Start(String),
@@ -70,7 +86,7 @@ enum Command {
     Stop(Sender<Recording>),
     /// Разговор: писать постоянно и отдавать фразы по мере того, как человек
     /// их договаривает.
-    StartTalk(String, Sender<Vec<u8>>),
+    StartTalk(String, Sender<Heard>),
     StopTalk,
 }
 
@@ -278,7 +294,7 @@ pub fn stop() -> Option<Vec<u8>> {
 /* ── Разговор без рук ─────────────────────────────────────────────────────── */
 
 /// Начинает разговор: микрофон открыт, фразы приходят в возвращённый канал.
-pub fn start_conversation(device: &str) -> Option<Receiver<Vec<u8>>> {
+pub fn start_conversation(device: &str) -> Option<Receiver<Heard>> {
     let tx = commands()?;
     let (utterances, rx) = channel();
     PAUSED.store(false, Ordering::Relaxed);
@@ -311,23 +327,30 @@ pub fn pause_conversation(paused: bool) {
 /// была бы точнее, но она весит десятки мегабайт и решает задачу, с которой
 /// здесь справляется арифметика.
 struct Segmenter {
-    sender: Sender<Vec<u8>>,
+    sender: Sender<Heard>,
     rate: u32,
     utterance: Vec<f32>,
     speaking: bool,
     silence: usize,
+    /// Сколько подряд молчим, когда фразы нет вовсе. По этому счётчику
+    /// разговор заканчивается сам.
+    quiet: usize,
+    /// Сказали ли уже, что тишина затянулась. Один раз, а не каждый кадр.
+    gave_up: bool,
     /// Оценка уровня шума. Обновляется только в тишине.
     noise: f32,
 }
 
 impl Segmenter {
-    fn new(rate: u32, sender: Sender<Vec<u8>>) -> Self {
+    fn new(rate: u32, sender: Sender<Heard>) -> Self {
         Self {
             sender,
             rate,
             utterance: Vec::new(),
             speaking: false,
             silence: 0,
+            quiet: 0,
+            gave_up: false,
             noise: 0.005,
         }
     }
@@ -343,6 +366,10 @@ impl Segmenter {
             self.utterance.clear();
             self.speaking = false;
             self.silence = 0;
+            // Пока отвечали — человек молчал не от того, что ему нечего сказать.
+            // Отсчёт тишины начинается заново с момента, когда он снова может
+            // говорить, иначе разговор обрывался бы посреди длинного ответа.
+            self.quiet = 0;
             return;
         }
 
@@ -360,6 +387,8 @@ impl Segmenter {
             if rms > threshold {
                 self.speaking = true;
                 self.silence = 0;
+                self.quiet = 0;
+                self.gave_up = false;
                 self.utterance.extend_from_slice(part);
             } else if self.speaking {
                 // Тишину внутри фразы тоже пишем: без неё слова склеились бы
@@ -368,6 +397,14 @@ impl Segmenter {
                 self.utterance.extend_from_slice(part);
                 if ms(self.silence, rate) >= END_OF_PHRASE_MS {
                     self.finish();
+                }
+            } else {
+                // Речи нет вовсе. Копим тишину: если она затянется, разговор
+                // закончится сам.
+                self.quiet += part.len();
+                if !self.gave_up && ms(self.quiet, rate) >= SILENCE_ENDS_TALK_MS {
+                    self.gave_up = true;
+                    let _ = self.sender.send(Heard::LongSilence);
                 }
             }
         }
@@ -390,7 +427,7 @@ impl Segmenter {
         }
 
         if let Some(wav) = prepare(samples, self.rate, false) {
-            let _ = self.sender.send(wav);
+            let _ = self.sender.send(Heard::Phrase(wav));
         }
     }
 }
@@ -532,7 +569,7 @@ mod tests {
         let mut segmenter = Segmenter::new(16_000, tx);
         // Секунда тишины: ни начала речи, ни фразы на выходе.
         segmenter.feed(&vec![0.0_f32; 16_000], 16_000);
-        assert!(rx.try_recv().is_err());
+        assert!(matches!(rx.try_recv(), Err(_)));
         assert!(!segmenter.speaking);
     }
 
@@ -550,6 +587,26 @@ mod tests {
 
         // Секунда тишины после неё закрывает фразу.
         segmenter.feed(&vec![0.0_f32; 16_000], 16_000);
-        assert!(rx.try_recv().is_ok(), "фраза должна была уйти в канал");
+        assert!(
+            matches!(rx.try_recv(), Ok(Heard::Phrase(_))),
+            "фраза должна была уйти в канал"
+        );
+    }
+
+    #[test]
+    fn long_silence_ends_the_talk_once() {
+        let (tx, rx) = channel();
+        let mut segmenter = Segmenter::new(16_000, tx);
+
+        // Семь секунд тишины подряд — дольше отведённых шести.
+        segmenter.feed(&vec![0.0_f32; 16_000 * 7], 16_000);
+        assert!(
+            matches!(rx.try_recv(), Ok(Heard::LongSilence)),
+            "разговор должен был закончиться сам"
+        );
+
+        // И только один раз: следующая тишина уже ничего не шлёт.
+        segmenter.feed(&vec![0.0_f32; 16_000 * 7], 16_000);
+        assert!(rx.try_recv().is_err(), "сказано должно быть один раз");
     }
 }

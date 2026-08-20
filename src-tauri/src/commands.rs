@@ -317,6 +317,14 @@ pub fn speech_status(app: AppHandle) -> serde_json::Value {
     })
 }
 
+/// В каком состоянии индикатор голоса. Спрашивает само окно индикатора,
+/// когда загрузилось: событие, отправленное до загрузки, до него не дошло бы.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn hud_mode() -> String {
+    crate::overlay::hud_mode()
+}
+
 /// Микрофоны, которые видит система.
 #[cfg(desktop)]
 #[tauri::command]

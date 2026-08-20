@@ -21,24 +21,24 @@ pub enum Command {
 
 static SENDER: OnceLock<Sender<Command>> = OnceLock::new();
 
-/// Когда в последний раз отдавали звук на воспроизведение.
+/// До какого момента звук, уже отданный на воспроизведение, будет слышен.
 ///
-/// Нужно, чтобы отличить «программа сейчас говорит» от «молчит». Спросить об
-/// этом сам проигрыватель нельзя: он живёт в своём потоке. А знать надо: если
-/// включить микрофон, пока из колонок идёт речь, он запишет её, и расшифровка
-/// приклеит к вопросу человека пару слов, сказанных программой.
-static LAST_PLAY: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+/// Не «когда отдавали в последний раз», как было раньше. Разница решающая:
+/// синтез идёт вдесятеро быстрее речи, поэтому вся минутная фраза попадает
+/// в очередь за несколько секунд. Признак «отдавали недавно» гас на середине
+/// фразы — и программа начинала слушать микрофон, пока сама ещё говорила,
+/// а потом прилежно расшифровывала собственный голос и отвечала на него.
+///
+/// Здесь копится именно длительность: каждый кусок добавляет к сроку столько,
+/// сколько он звучит.
+static PLAYS_UNTIL: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 
-/// Похоже ли, что прямо сейчас из колонок идёт наша речь.
-///
-/// Звук отдаётся кусками по трети секунды подряд, пока фраза не кончится, —
-/// поэтому «последний кусок был меньше секунды назад» означает, что речь идёт
-/// либо только что кончилась и ещё доигрывает в буфере звуковой системы.
+/// Слышен ли сейчас наш голос из колонок.
 pub fn speaking() -> bool {
-    LAST_PLAY
+    PLAYS_UNTIL
         .lock()
         .unwrap_or_else(|err| err.into_inner())
-        .map(|at| at.elapsed() < std::time::Duration::from_secs(1))
+        .map(|until| std::time::Instant::now() < until)
         .unwrap_or(false)
 }
 
@@ -98,7 +98,15 @@ pub fn sender() -> Option<&'static Sender<Command>> {
 
 /// Ставит кусок звука в очередь.
 pub fn play(samples: Vec<f32>, sample_rate: u32) {
-    *LAST_PLAY.lock().unwrap_or_else(|err| err.into_inner()) = Some(std::time::Instant::now());
+    // Срок звучания продлеваем на длительность куска. Если предыдущий ещё
+    // не доиграл — считаем от его конца, иначе от текущего момента.
+    {
+        let seconds = samples.len() as f64 / f64::from(sample_rate.max(1));
+        let mut until = PLAYS_UNTIL.lock().unwrap_or_else(|err| err.into_inner());
+        let now = std::time::Instant::now();
+        let from = until.filter(|end| *end > now).unwrap_or(now);
+        *until = Some(from + std::time::Duration::from_secs_f64(seconds));
+    }
     if let Some(tx) = sender() {
         let _ = tx.send(Command::Play {
             samples,
@@ -107,9 +115,40 @@ pub fn play(samples: Vec<f32>, sample_rate: u32) {
     }
 }
 
+/// Короткий сигнал: «голосовой помощник закончил».
+///
+/// Синтезируем, а не носим с собой файл: полтораста миллисекунд синусоиды —
+/// это двадцать строк арифметики против отдельного ресурса в установщике,
+/// который надо где-то взять, куда-то положить и не забыть про лицензию.
+///
+/// Две ноты сверху вниз с быстрым затуханием. Вниз — потому что нисходящий
+/// интервал слышится как завершение, восходящий — как начало; это не вкусовое
+/// решение, а то, как устроен слух.
+pub fn chime() {
+    const RATE: u32 = 22_050;
+    // Ми шестой октавы и си пятой: чистая кварта, звучит нейтрально-технично,
+    // без мажорной радости и минорной печали.
+    const TONES: [(f32, f32); 2] = [(1318.5, 0.07), (987.8, 0.13)];
+
+    let mut samples: Vec<f32> = Vec::new();
+    for (hz, seconds) in TONES {
+        let count = (RATE as f32 * seconds) as usize;
+        for i in 0..count {
+            let time = i as f32 / RATE as f32;
+            // Мгновенная атака щёлкает, поэтому первые пять миллисекунд —
+            // нарастание, дальше экспоненциальное затухание.
+            let attack = (time / 0.005).min(1.0);
+            let decay = (-time * 14.0).exp();
+            let wave = (time * hz * std::f32::consts::TAU).sin();
+            samples.push(wave * attack * decay * 0.22);
+        }
+    }
+    play(samples, RATE);
+}
+
 /// Обрывает воспроизведение.
 pub fn stop() {
-    *LAST_PLAY.lock().unwrap_or_else(|err| err.into_inner()) = None;
+    *PLAYS_UNTIL.lock().unwrap_or_else(|err| err.into_inner()) = None;
     if let Some(tx) = sender() {
         let _ = tx.send(Command::Stop);
     }
