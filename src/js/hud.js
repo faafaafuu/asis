@@ -29,6 +29,10 @@ let mode = "idle";
 let time = 0;
 let level = 0;
 
+/** Громкость речи, присланная из Rust, и когда она пришла. */
+let liveLevel = 0;
+let liveAt = 0;
+
 const particles = Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
   a: (i / PARTICLE_COUNT) * Math.PI * 2,
   r: 60 + Math.random() * 30,
@@ -44,9 +48,13 @@ function targetLevel() {
     case "thinking":
       // Спокойная медленная пульсация: программа ждёт, а не суетится.
       return 0.32 + Math.sin(time * 2) * 0.08;
-    case "speaking":
-      // Резкая многочастотная реакция — так это выглядит, когда говорят.
+    case "speaking": {
+      // Живая громкость, если она свежая. Полсекунды без вестей — значит поток
+      // прервался, и лучше вернуться к придуманной анимации, чем замереть.
+      const fresh = performance.now() - liveAt < 500;
+      if (fresh) return 0.3 + liveLevel * 0.95;
       return 0.55 + Math.sin(time * 3.1) * 0.25 + Math.sin(time * 7.3) * 0.12;
+    }
     default:
       return 0.12;
   }
@@ -71,7 +79,10 @@ function draw() {
   time += 0.016;
 
   // Уровень догоняет цель плавно: при смене состояния не должно быть рывка.
-  level += (targetLevel() - level) * 0.12;
+  // В речи догоняем втрое быстрее — иначе сглаживание съедает как раз то,
+  // что делает движение похожим на голос: резкие всплески на согласных.
+  const chase = mode === "speaking" ? 0.35 : 0.12;
+  level += (targetLevel() - level) * chase;
 
   const colors = PALETTE[mode] ?? PALETTE.idle;
   ctx.clearRect(0, 0, W, H);
@@ -115,7 +126,7 @@ function draw() {
           Math.sin(a * 5 - time * 2.6) * 0.3 +
           Math.sin(a * 17 + time * 6) * 0.2;
     const amount =
-      (mode === "speaking" ? 14 : mode === "listening" || mode === "thinking" ? 7 : 3) * level + 2;
+      (mode === "speaking" ? 17 : mode === "listening" || mode === "thinking" ? 7 : 3) * level + 2;
     const r = baseR + noise * amount;
     const x = cx + Math.cos(a) * r;
     const y = cy + Math.sin(a) * r;
@@ -168,6 +179,14 @@ api
   .catch(() => {
     /* окно открыто вне приложения — рисуем состояние ожидания */
   });
+
+api?.listen("hud:level", (event) => {
+  const value = Number(event.payload);
+  if (Number.isFinite(value)) {
+    liveLevel = Math.max(0, Math.min(1, value));
+    liveAt = performance.now();
+  }
+});
 
 api?.listen("hud:mode", (event) => {
   const next = String(event.payload ?? "idle");

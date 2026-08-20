@@ -44,6 +44,27 @@ if (api) {
     })
     .catch(() => {});
 
+  /** Показывает содержимое по данным из Rust. */
+  function applyOpen(payload) {
+    const { term, context, theme, errorText, dialogue, speak } = payload ?? {};
+    if (theme) applyTheme(theme);
+    if (errorText) view.errorText = errorText;
+    if (dialogue !== undefined) view.dialogue = Boolean(dialogue);
+    view.open({ term: term ?? "", context: context ?? "", speak: Boolean(speak) });
+  }
+
+  // Окно могли открыть раньше, чем эта страница загрузилась: тогда событие
+  // до нас не дошло, и Rust придержал вопрос до этого запроса. Без него первое
+  // открытие висело бы с вечным «Анализирую…».
+  api
+    .invoke("pending_open")
+    .then((payload) => {
+      if (payload) applyOpen(payload);
+    })
+    .catch(() => {
+      /* окно открыто вне приложения — показывать нечего */
+    });
+
   // Новое выделение: Rust уже сохранил якорь, нам остаётся показать содержимое.
   api.listen("popup:open", (event) => {
     const { term, context, theme, errorText, dialogue, speak } = event.payload ?? {};

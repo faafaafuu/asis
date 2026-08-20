@@ -105,6 +105,34 @@ pub async fn install(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Идёт ли сейчас запуск сервера. Чтобы не поднимать его дважды.
+static STARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Поднимает сервер заранее, не дожидаясь конца фразы.
+///
+/// Первый запуск занимает секунды: полтора гигабайта модели надо положить
+/// в видеопамять, а на новой видеокарте драйвер ещё и компилирует под неё ядра.
+/// Раньше это происходило уже после того, как человек договорил, — он ждал
+/// молча и не понимал, работает программа или нет. Теперь сервер поднимается,
+/// пока фраза ещё произносится: к моменту, когда её надо расшифровать, он готов.
+pub fn warm(app: &AppHandle) {
+    use std::sync::atomic::Ordering;
+
+    if server_alive() || STARTING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-whisper-warm".into())
+        .spawn(move || {
+            if let Err(err) = ensure_server(&app) {
+                log::warn!("сервер расшифровки не поднялся заранее: {err}");
+            }
+            STARTING.store(false, Ordering::SeqCst);
+        })
+        .ok();
+}
+
 /// Отвечает ли сервер расшифровки.
 fn server_alive() -> bool {
     std::net::TcpStream::connect_timeout(
@@ -264,9 +292,12 @@ const HALLUCINATIONS: &[&str] = &[
     "спасибо за внимание",
     "подписывайтесь",
     "подпишись",
-    "редактор",
-    "корректор",
-    "переводчик",
+    // «Редактор субтитров», «корректор» и «переводчик» встречаются в подписях
+    // к роликам, но сами по себе это обычные слова: вопрос «что такое текстовый
+    // редактор» — не выдумка. Ловим только те сочетания, которые в живой речи
+    // не встречаются.
+    "редактор субтитров",
+    "корректор а.",
     "amara.org",
     "thanks for watching",
     "thank you for watching",
@@ -282,7 +313,27 @@ fn is_hallucination(text: &str) -> bool {
     // Совсем короткое — тоже выдумка. На тишине модель любит выдавать одинокое
     // «Да.», «Ну.», «You» — вопросом это быть не может, а петлю запускает так же.
     let letters = lower.chars().filter(|c| c.is_alphabetic()).count();
-    letters < 4
+    if letters < 4 {
+        return true;
+    }
+
+    // Заклинившая модель повторяет одно слово: «Пока, пока, пока, пока».
+    // Так она ведёт себя на шуме, и вопросом это не бывает никогда — живая речь
+    // из одного слова, повторённого четырежды, не состоит.
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    if words.len() >= 4 {
+        let mut unique = words.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        if unique.len() <= 2 {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Приводит вывод программы к одной строке вопроса.
@@ -333,9 +384,15 @@ mod tests {
         assert!(is_hallucination("Продолжение следует..."));
         assert!(is_hallucination("Спасибо за просмотр!"));
         assert!(is_hallucination("Редактор субтитров А.Синецкая"));
+        // А обычные слова из тех же подписей — не повод молчать.
+        assert!(!is_hallucination("что такое текстовый редактор"));
+        assert!(!is_hallucination("кто такой переводчик в компиляторе"));
         // Короткое тоже не вопрос.
         assert!(is_hallucination("Да."));
         assert!(is_hallucination("You"));
+        // Заклинившая модель повторяет одно слово.
+        assert!(is_hallucination("Пока, пока, пока, пока, пока."));
+        assert!(is_hallucination("да да да да"));
     }
 
     #[test]

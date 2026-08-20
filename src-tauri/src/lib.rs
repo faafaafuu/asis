@@ -156,6 +156,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::runtime_config,
             commands::popup_ready,
+            commands::pending_open,
             commands::close_popup,
             commands::ai_explain,
             commands::ai_ask,
@@ -258,6 +259,7 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
 
                         log::info!("пробел: читаю вслух");
                         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:speak", ());
+                        show_speaking(&app);
                     }
                     // Зажали левый Alt с пробелом — пишем, пока держат. Работает
                     // и при закрытом окне: тогда вопрос задаётся с чистого
@@ -266,8 +268,9 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         log::info!("Alt+пробел: слушаю");
 
                         // Разговор, если он шёл, уступает клавише: человек взял
-                        // слово сам, и слушать его надо с этой секунды.
-                        stop_conversation(&app);
+                        // слово сам, и слушать его надо с этой секунды. Без
+                        // сигнала — разговор не кончился, он продолжается.
+                        end_conversation(&app, false);
 
                         // Замолчать, раз с нами заговорили. Это не только
                         // вежливость: микрофон пишет всё, что слышно в комнате,
@@ -284,6 +287,10 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             std::thread::sleep(std::time::Duration::from_millis(250));
                         }
 
+                        // Сервер расшифровки поднимается прямо сейчас, пока
+                        // человек ещё говорит: иначе первая фраза ждала бы его
+                        // запуска уже после того, как её произнесли.
+                        voice::whisper::warm(&app);
                         voice::stt::start(&input_device(&app));
                         overlay::show_hud(&app, "listening");
                         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
@@ -307,6 +314,63 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         }
                     }
                 }
+            }
+        })
+        .ok();
+}
+
+/// Шлёт индикатору громкость речи, пока она звучит.
+///
+/// Двадцать раз в секунду: чаще глаз в анимации не различит, реже — кольцо
+/// начинает отставать от голоса, и синхронность теряется.
+#[cfg(desktop)]
+fn pulse_level(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-level".into())
+        .spawn(move || {
+            while voice::speaking() {
+                let _ = app.emit_to(overlay::HUD_LABEL, "hud:level", voice::level());
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            // Ровно ноль в конце: иначе кольцо замрёт на последнем всплеске.
+            let _ = app.emit_to(overlay::HUD_LABEL, "hud:level", 0.0_f32);
+        })
+        .ok();
+}
+
+/// Показывает индикатор на время чтения вслух и убирает, когда речь кончилась.
+///
+/// Отдельным потоком: чтение длится десятки секунд, а обработчик клавиш обязан
+/// вернуться немедленно — за ним очередь из остальных нажатий.
+#[cfg(desktop)]
+fn show_speaking(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-hud".into())
+        .spawn(move || {
+            // Речь начинается не мгновенно: синтезатору нужно запуститься.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while std::time::Instant::now() < deadline && !voice::speaking() {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            if !voice::speaking() {
+                return;
+            }
+
+            overlay::show_hud(&app, "speaking");
+            pulse_level(&app);
+            while voice::speaking() {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+
+            // В разговоре индикатор не убираем — там своя очередь состояний.
+            if !CONVERSATION.load(Ordering::SeqCst) {
+                overlay::hide_hud(&app);
             }
         })
         .ok();
@@ -379,15 +443,28 @@ fn ask_aloud(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
 fn wait_until_answered(app: &tauri::AppHandle) {
     use std::time::{Duration, Instant};
 
+    // Голос выключен — ждать нечего: ответ придёт текстом, и разговор должен
+    // продолжиться сразу, а не простоять полминуты в надежде услышать речь.
+    {
+        let state = app.state::<AppState>();
+        let enabled = state.config().voice.enabled;
+        if !enabled {
+            return;
+        }
+    }
+
     // Пока модель думает, речи ещё нет. Ждём её начала, но не вечно: ответа
-    // может не быть вовсе — сеть, ошибка, выключенный голос.
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // может не быть вовсе — сеть, ошибка, ненайденный голос. Десяти секунд
+    // хватает и самой медленной модели: дольше молчит только то, что уже
+    // не заговорит.
+    let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline && !voice::speaking() {
         std::thread::sleep(Duration::from_millis(100));
     }
 
     if voice::speaking() {
         overlay::show_hud(app, "speaking");
+        pulse_level(app);
     }
 
     let deadline = Instant::now() + Duration::from_secs(300);
@@ -475,6 +552,16 @@ fn start_conversation(app: &tauri::AppHandle) {
 /// Заканчивает разговор: микрофон закрывается, клавиши работают как прежде.
 #[cfg(desktop)]
 pub(crate) fn stop_conversation(app: &tauri::AppHandle) {
+    end_conversation(app, true);
+}
+
+/// Заканчивает разговор. `signal` — звучит ли при этом сигнал.
+///
+/// Сигнал означает «разговор окончен», и звучать он должен только когда это
+/// правда. Когда человек перебивает клавишей, чтобы сказать следующее, разговор
+/// не кончается — он продолжается, просто с этой секунды слово у человека.
+#[cfg(desktop)]
+fn end_conversation(app: &tauri::AppHandle, signal: bool) {
     use std::sync::atomic::Ordering;
     use tauri::Emitter;
 
@@ -484,9 +571,11 @@ pub(crate) fn stop_conversation(app: &tauri::AppHandle) {
     voice::stt::stop_conversation();
     let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
     overlay::hide_hud(app);
-    // Короткий сигнал вместо надписи «готово»: индикатор исчезает молча, и без
-    // звука непонятно, закончился разговор или программа задумалась.
-    voice::chime();
+    if signal {
+        // Короткий сигнал вместо надписи «готово»: индикатор исчезает молча,
+        // и без звука непонятно, закончился разговор или программа задумалась.
+        voice::chime();
+    }
 }
 
 #[cfg(not(desktop))]

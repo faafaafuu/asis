@@ -53,6 +53,14 @@ const SILENCE_LEVEL: f32 = 0.02;
 /// к одной громкости — это не «улучшение звука», а выравнивание условий.
 const TARGET_PEAK: f32 = 0.85;
 
+/// Во сколько раз самое большее подтягивать громкость.
+///
+/// Без потолка усиление на границе тишины доходит до сорока раз, и шум
+/// вентилятора превращается в громкий неразборчивый звук. Для Whisper это уже
+/// не тишина, а речь, которую надо расшифровать, — и она её выдумывает. То есть
+/// выравнивание громкости кормило бы ровно ту петлю, которую мы чиним.
+const MAX_GAIN: f32 = 8.0;
+
 /// Сколько тишины считать концом фразы в разговоре.
 ///
 /// Между словами человек молчит до полусекунды — на запятой, на вдохе, подбирая
@@ -464,7 +472,7 @@ fn prepare(samples: Vec<f32>, rate: u32, complain: bool) -> Option<Vec<u8>> {
     // трогать нечем — она уже на пределе, а «прижать» её значило бы вносить
     // искажения там, где всё в порядке.
     if peak < TARGET_PEAK {
-        let gain = TARGET_PEAK / peak;
+        let gain = (TARGET_PEAK / peak).min(MAX_GAIN);
         for sample in &mut samples {
             *sample *= gain;
         }
@@ -485,7 +493,10 @@ fn prepare(samples: Vec<f32>, rate: u32, complain: bool) -> Option<Vec<u8>> {
 /// был бы отдельной зависимостью ради разницы, которой не услышит ни человек,
 /// ни распознавание.
 fn resample(input: &[f32], from: u32, to: u32) -> Vec<f32> {
-    if from == to || input.is_empty() {
+    // Нулевая частота сюда прийти не должна, но если придёт — делить на неё
+    // нельзя: длина получилась бы бесконечной, а запрос такой памяти уронил бы
+    // поток голоса.
+    if from == to || from == 0 || to == 0 || input.is_empty() {
         return input.to_vec();
     }
     let ratio = f64::from(from) / f64::from(to);
@@ -554,6 +565,13 @@ mod tests {
             i16::from_le_bytes(bytes[46..48].try_into().unwrap()),
             i16::MAX
         );
+    }
+
+    #[test]
+    fn zero_rate_does_not_blow_up() {
+        let input = vec![0.1_f32; 10];
+        assert_eq!(resample(&input, 0, 16_000).len(), 10);
+        assert_eq!(resample(&input, 16_000, 0).len(), 10);
     }
 
     #[test]

@@ -30,7 +30,17 @@ pub async fn speak(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<
     }
 
     match config.engine.as_str() {
-        "edge" => edge::speak(&config.edge_voice, &text).await,
+        "edge" => match edge::speak(&config.edge_voice, &text).await {
+            Ok(()) => Ok(()),
+            // Онлайн-голоса ещё не написаны, и выбрать их в настройках можно.
+            // Молчать из-за этого нельзя: человек просил прочитать вслух, а не
+            // выбрать способ синтеза. Читаем своим голосом и говорим об этом
+            // в журнал — чтобы «почему звучит не тот голос» было объяснимо.
+            Err(err) => {
+                log::warn!("{err}; читаю своим голосом");
+                piper::speak(app, &config.voice, config.rate, &text)
+            }
+        },
         _ => piper::speak(app, &config.voice, config.rate, &text),
     }
 }
@@ -39,6 +49,11 @@ pub async fn speak(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<
 /// торчит только то, что нужно окну настройки.
 pub fn edge_voices() -> &'static [(&'static str, &'static str)] {
     edge::VOICES
+}
+
+/// Насколько громко звучит речь прямо сейчас: от 0 до 1.
+pub fn level() -> f32 {
+    audio::level()
 }
 
 /// Идёт ли сейчас речь из колонок.

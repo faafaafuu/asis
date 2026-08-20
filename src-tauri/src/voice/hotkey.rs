@@ -124,13 +124,18 @@ unsafe extern "system" fn keyboard_proc(
         return pass(());
     }
 
-    // Если сейчас впереди наше собственное окно — пробел не наш.
+    // Если сейчас впереди наше собственное окно с полем ввода — пробел не наш.
     //
     // Человек щёлкнул в поле «Спросить ещё…» и печатает вопрос руками; забирать
     // у него пробел означало бы, что в своём же поле ввода нельзя разделить два
     // слова. То же и с окном настройки. Наружу, в чужие программы, это правило
     // не распространяется: там попап фокуса не имеет и клавиша достаётся нам.
-    if foreground_is_ours() {
+    //
+    // Индикатор голоса сюда не относится, хотя окно тоже наше. Он появляется
+    // ровно в голосовом режиме и на Windows при показе становится передним —
+    // то есть ровно тогда, когда пробел нужен нам больше всего, правило выше
+    // молча его отдавало бы, и чтение вслух переставало бы работать.
+    if foreground_is_ours() && !foreground_is_hud() {
         return pass(());
     }
 
@@ -198,6 +203,30 @@ fn foreground_is_ours() -> bool {
         let mut pid = 0u32;
         GetWindowThreadProcessId(window, Some(&mut pid));
         pid != 0 && pid == GetCurrentProcessId()
+    }
+}
+
+/// Индикатор ли сейчас впереди.
+///
+/// Отличаем по заголовку окна: обращаться из хука к состоянию приложения нельзя
+/// — обработчик обязан быть мгновенным, — а заголовок читается парой системных
+/// вызовов и у индикатора свой.
+#[cfg(target_os = "windows")]
+fn foreground_is_hud() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
+
+    // SAFETY: обе функции только читают состояние окна.
+    unsafe {
+        let window = GetForegroundWindow();
+        if window.0.is_null() {
+            return false;
+        }
+        let mut title = [0u16; 64];
+        let length = GetWindowTextW(window, &mut title);
+        if length <= 0 {
+            return false;
+        }
+        String::from_utf16_lossy(&title[..length as usize]) == crate::overlay::HUD_TITLE
     }
 }
 

@@ -22,6 +22,8 @@ const GAP: f64 = 12.0;
 const INSET: f64 = 12.0;
 
 /// Полезная нагрузка события открытия попапа.
+///
+/// `Clone` — потому что её иногда приходится придержать: см. `PENDING`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenPayload {
@@ -90,6 +92,8 @@ pub fn ensure_popup_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 /// Показывает попап для нового выделения: сохраняет якорь и отдаёт фронтенду термин.
 /// Само окно появится в `apply_geometry`, когда фронтенд сообщит свой размер.
 pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Result<()> {
+    // Узнаём до создания: окна ещё нет — значит слушателя событий тоже.
+    let fresh = app.get_webview_window(POPUP_LABEL).is_none();
     let window = ensure_popup_window(app)?;
 
     let state = app.state::<AppState>();
@@ -114,7 +118,11 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
 
     // Окно прячем перед сменой якоря: переоткрытие идёт без анимации закрытия (SPEC §8).
     let _ = window.hide();
-    window.emit_to(POPUP_LABEL, "popup:open", payload)?;
+    if fresh {
+        *PENDING.lock().unwrap_or_else(|err| err.into_inner()) = Some(payload);
+    } else {
+        window.emit_to(POPUP_LABEL, "popup:open", payload)?;
+    }
 
     // Пока попап на экране, пробел принадлежит ему. В остальное время хук
     // пропускает клавиши насквозь и ничего не трогает.
@@ -123,8 +131,28 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
     Ok(())
 }
 
+/// Вопрос, который окно попапа не успело получить.
+///
+/// Событие, отправленное только что созданному окну, до него не доходит:
+/// страница ещё не загрузилась и слушателя на нём нет. Окно при этом
+/// показывается — в своём начальном состоянии, то есть с вечным «Анализирую…»,
+/// потому что открывать его никто так и не попросил.
+///
+/// Поэтому первому открытию вопрос не отправляют, а кладут сюда: окно забирает
+/// его само, когда загрузится.
+static PENDING: std::sync::Mutex<Option<OpenPayload>> = std::sync::Mutex::new(None);
+
+/// Отдаёт придержанный вопрос ровно один раз.
+pub fn take_pending() -> Option<OpenPayload> {
+    PENDING.lock().unwrap_or_else(|err| err.into_inner()).take()
+}
+
 /// Окно индикатора голосового режима.
 pub const HUD_LABEL: &str = "hud";
+
+/// Заголовок этого окна. По нему хук отличает индикатор от остальных наших
+/// окон: у окна настройки и попапа пробел отбирать нельзя, у индикатора можно.
+pub const HUD_TITLE: &str = "Суфлёр — голос";
 
 /// Состояние, в котором индикатор сейчас находится.
 ///
@@ -159,7 +187,13 @@ pub fn show_hud(app: &AppHandle, mode: &str) {
             return;
         }
     };
-    *HUD_MODE.lock().unwrap_or_else(|err| err.into_inner()) = Some(mode.to_string());
+    {
+        let mut current = HUD_MODE.lock().unwrap_or_else(|err| err.into_inner());
+        if current.as_deref() != Some(mode) {
+            log::info!("индикатор: {mode}");
+        }
+        *current = Some(mode.to_string());
+    }
     let _ = window.emit_to(HUD_LABEL, "hud:mode", mode.to_string());
     let _ = window.show();
 }
@@ -179,7 +213,7 @@ fn ensure_hud_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     }
 
     let window = WebviewWindowBuilder::new(app, HUD_LABEL, WebviewUrl::App("hud.html".into()))
-        .title("Суфлёр — голос")
+        .title(HUD_TITLE)
         .inner_size(HUD_WIDTH, HUD_HEIGHT)
         .decorations(false)
         .transparent(true)
@@ -234,6 +268,7 @@ const HUD_TOP: f64 = 16.0;
 /// Отличий от обычного открытия два: якоря выделения нет — окно встаёт у
 /// курсора, — и ответ читается вслух, потому что и вопрос был голосом.
 pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
+    let fresh = app.get_webview_window(POPUP_LABEL).is_none();
     let window = ensure_popup_window(app)?;
 
     let state = app.state::<AppState>();
@@ -262,7 +297,11 @@ pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
     });
 
     let _ = window.hide();
-    window.emit_to(POPUP_LABEL, "popup:open", payload)?;
+    if fresh {
+        *PENDING.lock().unwrap_or_else(|err| err.into_inner()) = Some(payload);
+    } else {
+        window.emit_to(POPUP_LABEL, "popup:open", payload)?;
+    }
 
     #[cfg(desktop)]
     crate::voice::hotkey::arm(true);
