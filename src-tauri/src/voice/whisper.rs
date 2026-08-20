@@ -108,6 +108,25 @@ pub async fn install(app: AppHandle) -> Result<(), String> {
 /// Идёт ли сейчас запуск сервера. Чтобы не поднимать его дважды.
 static STARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Запущенный нами сервер. Нужен, чтобы его можно было и остановить.
+///
+/// Пока он жив, полтора гигабайта видеопамяти заняты моделью. Когда ожидание
+/// обращения выключают, держать их незачем — человек именно это и просит.
+static SERVER: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
+
+/// Останавливает сервер расшифровки и освобождает видеопамять.
+pub fn shutdown() {
+    if let Some(mut child) = SERVER
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .take()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        log::info!("сервер расшифровки остановлен, видеопамять свободна");
+    }
+}
+
 /// Поднимает сервер заранее, не дожидаясь конца фразы.
 ///
 /// Первый запуск занимает секунды: полтора гигабайта модели надо положить
@@ -197,9 +216,10 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    command
+    let child = command
         .spawn()
         .map_err(|err| format!("сервер расшифровки не запустился: {err}"))?;
+    *SERVER.lock().unwrap_or_else(|err| err.into_inner()) = Some(child);
     log::info!("поднимаю сервер расшифровки");
 
     // Первый запуск на новой видеокарте дольше: драйвер компилирует ядра под
@@ -265,11 +285,35 @@ pub async fn transcribe(
         .await
         .map_err(|err| format!("ответ расшифровки не прочитался: {err}"))?;
     let text = clean(&text);
+    if echoes_prompt(&text, prompt) {
+        // Подсказку модель иногда просто повторяет — обычно на тишине. Принять
+        // такое за сказанное нельзя: подсказка про обращение содержит и само
+        // обращение, и помощник бросался бы отвечать на собственную наводку.
+        log::debug!("расшифровка повторяет подсказку — пропускаю: «{text}»");
+        return Ok(String::new());
+    }
     if is_hallucination(&text) {
-        log::info!("расшифровка похожа на выдумку модели — пропускаю: «{text}»");
+        // Уровень отладочный: в ожидании обращения такое случается на каждый
+        // шорох, и в обычном журнале это вытесняло бы всё полезное.
+        log::debug!("расшифровка похожа на выдумку модели — пропускаю: «{text}»");
         return Ok(String::new());
     }
     Ok(text)
+}
+
+/// Не пересказала ли модель подсказку вместо услышанного.
+///
+/// Сравниваем по буквам, без знаков и регистра: повтор редко бывает дословным —
+/// модель роняет запятые и меняет регистр, оставаясь тем же текстом.
+fn echoes_prompt(text: &str, prompt: &str) -> bool {
+    if prompt.trim().is_empty() || text.trim().is_empty() {
+        return false;
+    }
+    let letters = |s: &str| -> String { s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect() };
+    let (said, hinted) = (letters(text), letters(prompt));
+    // Короткая подсказка — это выделенное слово, и услышать его в вопросе как
+    // раз ожидаемо. Отбрасываем только повтор длинной наводки целиком.
+    hinted.chars().count() > 20 && !said.is_empty() && hinted.contains(&said)
 }
 
 /// Фразы, которые модель выдумывает на тишине.
@@ -393,6 +437,17 @@ mod tests {
         // Заклинившая модель повторяет одно слово.
         assert!(is_hallucination("Пока, пока, пока, пока, пока."));
         assert!(is_hallucination("да да да да"));
+    }
+
+    #[test]
+    fn the_hint_does_not_come_back_as_speech() {
+        let hint = "Хэй, Ноа. Ноа — имя голосового помощника.";
+        assert!(echoes_prompt("Хэй, Ноа.", hint));
+        assert!(echoes_prompt("хэй ноа ноа имя голосового помощника", hint));
+        // Настоящий вопрос подсказкой не является, даже если начат обращением.
+        assert!(!echoes_prompt("Хэй, Ноа, что такое альбедо?", hint));
+        // Короткая подсказка — выделенное слово; услышать его в вопросе нормально.
+        assert!(!echoes_prompt("альбедо", "альбедо"));
     }
 
     #[test]

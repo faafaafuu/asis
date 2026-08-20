@@ -421,6 +421,19 @@ impl HttpProvider {
     }
 }
 
+/// Вычищает чужие письменности и следит, чтобы что-то осталось.
+///
+/// Пустой результат — это не «ответ без иероглифов», а «ответа не было».
+/// Показать в окне пустоту хуже, чем честную ошибку: человек будет ждать.
+fn purge(text: &str) -> Result<String, AiError> {
+    let cleaned = strip_foreign(text);
+    if cleaned.is_empty() {
+        log::warn!("после вычистки чужого письма от ответа ничего не осталось");
+        return Err(AiError::Parse);
+    }
+    Ok(cleaned)
+}
+
 /// Строка по указателю — если она там есть и не пуста.
 ///
 /// Пустую строку приравниваем к отсутствию ответа. Без этого перебор вариантов
@@ -524,15 +537,60 @@ fn normalize_explanation(value: &serde_json::Value) -> Result<Explanation, AiErr
 /// Модели, обученной на китайском, случается сорваться на него посреди русского
 /// ответа. Бывает редко и на повторе не воспроизводится — значит это не
 /// непонимание задачи, а разовый промах при выборе очередного слова.
+fn is_foreign(c: char) -> bool {
+    matches!(c as u32,
+        0x4E00..=0x9FFF   // основные иероглифы
+        | 0x3400..=0x4DBF // редкие иероглифы
+        | 0x3040..=0x30FF // японские каны
+        | 0xAC00..=0xD7AF // корейский хангыль
+        | 0x3000..=0x303F // китайская пунктуация: 。、「」
+        | 0xFF00..=0xFFEF // «широкие» латиница и знаки
+        | 0x0590..=0x05FF // иврит
+        | 0x0600..=0x06FF // арабица
+        | 0x0900..=0x097F // деванагари
+        | 0x0E00..=0x0E7F // тайское письмо
+    )
+}
+
 fn has_foreign_script(text: &str) -> bool {
-    text.chars().any(|c| {
-        matches!(c as u32,
-            0x4E00..=0x9FFF   // основные иероглифы
-            | 0x3400..=0x4DBF // редкие иероглифы
-            | 0x3040..=0x30FF // японские каны
-            | 0xAC00..=0xD7AF // корейский хангыль
-        )
-    })
+    text.chars().any(is_foreign)
+}
+
+/// Убирает из ответа всё, чего в нём быть не может.
+///
+/// Переспросить модель — половина решения: мелкие модели срываются на другой
+/// язык и во второй раз, и тогда человек видел иероглифы в конце объяснения.
+/// Вторая половина — вычистить их самим, независимо от того, какая модель
+/// подключена: правило одно и то же для своей Ollama, для облачного сервиса
+/// и для любого, который появится потом.
+///
+/// Латиницу и кириллицу не трогаем никогда: термин вполне может быть на любом
+/// из этих алфавитов, и вычищать их означало бы портить правильные ответы.
+fn strip_foreign(text: &str) -> String {
+    let cleaned: String = text
+        .chars()
+        .map(|c| if is_foreign(c) { ' ' } else { c })
+        .collect();
+
+    // Схлопываем пробелы, оставшиеся на месте вырезанного, и подчищаем хвост:
+    // после удаления часто остаётся висящая запятая или тире.
+    let mut out = String::with_capacity(cleaned.len());
+    let mut space = true;
+    for c in cleaned.chars() {
+        if c.is_whitespace() {
+            if !space {
+                out.push(' ');
+                space = true;
+            }
+        } else {
+            out.push(c);
+            space = false;
+        }
+    }
+    out.trim()
+        .trim_end_matches([' ', ',', ';', ':', '-', '—', '–'])
+        .trim()
+        .to_string()
 }
 
 #[async_trait]
@@ -564,10 +622,20 @@ impl AiProvider for HttpProvider {
         // раз с иероглифами, отдаём как есть: объяснение по существу всё же
         // лучше, чем пустое окно.
         log::warn!("ответ сорвался на другой язык — переспрашиваем");
-        match normalize_explanation(&self.send(messages()).await?) {
-            Ok(second) => Ok(second),
-            Err(_) => Ok(parsed),
-        }
+        let second = normalize_explanation(&self.send(messages()).await?).ok();
+
+        // Берём тот из двух, что чище. Если чистого нет — вычищаем сами:
+        // объяснение с обрезанным хвостом полезнее, чем с иероглифами.
+        let best = match second {
+            Some(second) if !has_foreign_script(&second.def) => second,
+            Some(second) => second,
+            None => parsed,
+        };
+        Ok(Explanation {
+            def: purge(&best.def)?,
+            simple: strip_foreign(&best.simple),
+            examples: best.examples.iter().map(|e| strip_foreign(e)).collect(),
+        })
     }
 
     async fn ask(
@@ -582,26 +650,53 @@ impl AiProvider for HttpProvider {
                 Message {
                     role: "system",
                     content: match self.language.as_str() {
+                        "en" if term.trim().is_empty() => format!(
+                            "Your name is Noa, you are a voice assistant. Answer the question \
+                             itself, briefly — two or three sentences, like in conversation. \
+                             If it calls for an estimate, estimate and name a number. \
+                             Do not restate the question. Plain text, no lists, in English."
+                        ),
                         "en" => format!(
-                            "The user is asking a follow-up about the term “{term}”. \
-                             Answer briefly, in plain text, no JSON. \
+                            "Your name is Noa. The user is asking a follow-up about the term \
+                             “{term}”. Answer briefly, in plain text, no JSON. \
                              Answer in English, even if the term itself is in another language."
                         ),
+                        // Пустой термин означает вопрос с чистого места: его
+                        // задали голосом, ничего не выделяя. Отвечать на такой
+                        // определением — не то, что просили: на «сколько раз
+                        // отжаться, чтобы устать» ждут прикидку, а не толкование
+                        // самого вопроса.
+                        _ if term.trim().is_empty() => format!(
+                            "Тебя зовут Ноа, ты голосовой помощник. Отвечай на вопрос по \
+                             существу и коротко — двумя-тремя предложениями, как в разговоре. \
+                             Если вопрос требует прикидки, прикидывай и называй число. \
+                             Не пересказывай вопрос и не объясняй, что он означает. \
+                             Обычный текст, без списков и разметки, по-русски."
+                        ),
                         _ => format!(
-                            "Пользователь уточняет ранее объяснённый термин «{term}». \
-                             Отвечай коротко, обычным текстом, без JSON. \
+                            "Тебя зовут Ноа. Пользователь уточняет ранее объяснённый термин \
+                             «{term}». Отвечай коротко, обычным текстом, без JSON. \
                              Отвечай по-русски, даже если сам термин на другом языке."
                         ),
                     },
                 },
-                Message {
+            ];
+
+            // Контекст — только когда он есть. Вопрос, заданный голосом с чистого
+            // места, приходит без выделенного текста, и раньше модель получала
+            // пустую реплику «Исходный контекст:» перед самим вопросом. Модели
+            // покрупнее её просто игнорировали, а те, что поменьше, принимали за
+            // начало разговора и отвечали «Есть вопрос?» вместо ответа — вживую
+            // так и было, на каждую фразу подряд.
+            if !context.trim().is_empty() {
+                messages.push(Message {
                     role: "user",
                     content: match self.language.as_str() {
                         "en" => format!("Original context: {context}"),
                         _ => format!("Исходный контекст: {context}"),
                     },
-                },
-            ];
+                });
+            }
             for item in thread {
                 messages.push(Message {
                     role: "user",
@@ -628,10 +723,11 @@ impl AiProvider for HttpProvider {
         // почти всегда проходит. В длинном ответе на вопрос он заметнее — там
         // модели есть где разогнаться, — так что защита нужна и здесь.
         log::warn!("ответ на вопрос сорвался на другой язык — переспрашиваем");
-        match self.answer_once(messages()).await {
-            Ok(second) => Ok(second),
-            Err(_) => Ok(answer),
-        }
+        let best = match self.answer_once(messages()).await {
+            Ok(second) => second,
+            Err(_) => answer,
+        };
+        purge(&best)
     }
 }
 
@@ -838,6 +934,7 @@ mod tests {
     #[test]
     fn foreign_script_is_noticed_only_when_it_is_there() {
         assert!(has_foreign_script("«Failed» означает 失败 в этом контексте"));
+        assert!(has_foreign_script("Ответ готов。"));
         assert!(!has_foreign_script("«Failed» означает неудачу или сбой."));
         assert!(
             !has_foreign_script("Throttling — это ограничение скорости"),
@@ -870,6 +967,29 @@ mod tests {
     fn wikipedia_picks_language_by_script() {
         assert_eq!(WikipediaProvider::host("альбедо"), "ru.wikipedia.org");
         assert_eq!(WikipediaProvider::host("albedo"), "en.wikipedia.org");
+    }
+
+    #[test]
+    fn foreign_tail_is_cut_off() {
+        // Ровно то, на что жаловались: хвост из иероглифов в конце ответа.
+        assert_eq!(
+            strip_foreign("Альбедо — доля отражённого света. 这是一个解释"),
+            "Альбедо — доля отражённого света."
+        );
+        // Висящие знаки после вырезанного тоже убираем.
+        assert_eq!(strip_foreign("Это ответ — 说明"), "Это ответ");
+        // Латиница и кириллица неприкосновенны: термин может быть любым.
+        assert_eq!(
+            strip_foreign("TCP — protocol передачи данных"),
+            "TCP — protocol передачи данных"
+        );
+    }
+
+    #[test]
+    fn nothing_left_is_an_error_not_an_empty_answer() {
+        assert!(purge("这是一个解释").is_err());
+        assert!(purge("  ").is_err());
+        assert!(purge("Нормальный ответ").is_ok());
     }
 
     #[test]

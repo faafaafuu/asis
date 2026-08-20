@@ -33,6 +33,19 @@ let level = 0;
 let liveLevel = 0;
 let liveAt = 0;
 
+/**
+ * Когда помощник начал появляться.
+ *
+ * Появление рисуется здесь, а не средствами окна: окно системное, показать его
+ * плавно нельзя — оно возникает целиком и сразу. Зато можно рисовать первые
+ * доли секунды полупрозрачно и чуть меньшего размера, и тогда возникновение
+ * читается как появление.
+ */
+let appearAt = performance.now();
+
+/** Сколько длится появление. Быстро, но не мгновенно. */
+const APPEAR_MS = 260;
+
 const particles = Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
   a: (i / PARTICLE_COUNT) * Math.PI * 2,
   r: 60 + Math.random() * 30,
@@ -78,6 +91,11 @@ function draw() {
   const cy = H / 2 + 10;
   time += 0.016;
 
+  // Плавность: прозрачность и размер догоняют единицу по замедляющейся кривой —
+  // резкий старт с мягким приходом выглядит живее равномерного.
+  const progress = Math.min((performance.now() - appearAt) / APPEAR_MS, 1);
+  const appear = 1 - Math.pow(1 - progress, 3);
+
   // Уровень догоняет цель плавно: при смене состояния не должно быть рывка.
   // В речи догоняем втрое быстрее — иначе сглаживание съедает как раз то,
   // что делает движение похожим на голос: резкие всплески на согласных.
@@ -86,6 +104,14 @@ function draw() {
 
   const colors = PALETTE[mode] ?? PALETTE.idle;
   ctx.clearRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.globalAlpha = appear;
+  // Подрастание от девяти десятых: заметно глазу, но не выглядит прыжком.
+  const scale = 0.9 + appear * 0.1;
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  ctx.translate(-cx, -cy);
 
   // Облако: мягкое свечение в центре.
   const cloudR = 70 + level * 40;
@@ -165,6 +191,7 @@ function draw() {
     ctx.stroke();
   }
 
+  ctx.restore();
   requestAnimationFrame(draw);
 }
 
@@ -179,6 +206,10 @@ api
   .catch(() => {
     /* окно открыто вне приложения — рисуем состояние ожидания */
   });
+
+api?.listen("hud:appear", () => {
+  appearAt = performance.now();
+});
 
 api?.listen("hud:level", (event) => {
   const value = Number(event.payload);

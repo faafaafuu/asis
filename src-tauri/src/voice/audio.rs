@@ -21,6 +21,9 @@ pub enum Command {
 
 static SENDER: OnceLock<Sender<Command>> = OnceLock::new();
 
+/// Молчит ли сейчас звук из-за недоступного устройства.
+static SILENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// До какого момента звук, уже отданный на воспроизведение, будет слышен.
 ///
 /// Не «когда отдавали в последний раз», как было раньше. Разница решающая:
@@ -73,18 +76,68 @@ pub fn speaking() -> bool {
         .unwrap_or(false)
 }
 
+/// Занимает звуковые устройства за долгоживущим потоком.
+///
+/// Зовётся при запуске, до всего остального звука. Смысл — в порядке: чей поток
+/// спросил про устройства первым, тот и владеет ими до конца работы.
+pub fn claim() {
+    let _ = sender();
+}
+
 /// Канал к аудиопотоку. Поток создаётся при первом обращении и живёт дальше.
 pub fn sender() -> Option<&'static Sender<Command>> {
     SENDER
         .get_or_init(|| {
             let (tx, rx) = channel::<Command>();
+            // Отсечка: пока поток не забрал устройства себе, никто другой
+            // спрашивать их не должен. Причина — ниже, у `claim_devices`.
+            let (ready, wait) = std::sync::mpsc::sync_channel::<()>(1);
             std::thread::Builder::new()
                 .name("sufler-audio".into())
-                .spawn(move || play_loop(rx))
+                .spawn(move || {
+                    claim_devices();
+                    let _ = ready.send(());
+                    play_loop(rx);
+                })
                 .ok();
+            let _ = wait.recv_timeout(std::time::Duration::from_secs(5));
             tx
         })
         .into()
+}
+
+/// Спрашивает про устройства с этого потока — и тем закрепляет их за ним.
+///
+/// Windows отдаёт устройства через COM-объект, а `cpal` создаёт его ровно один
+/// раз на весь процесс и привязывает к тому потоку, который спросил первым.
+/// Пока тот поток жив, объектом пользуются все; как только он завершится,
+/// объект становится недействительным — и звук исчезает целиком, до перезапуска
+/// программы: колонки отвечают «устройства нет», микрофон пишет тишину.
+///
+/// Ровно это и происходило. Первым про устройства спрашивало окно настройки —
+/// ему нужен список микрофонов, — а его поток живёт лишь пока строится список.
+/// Стоило заглянуть в настройки, и через минуту-другую голос пропадал.
+///
+/// Лечится порядком: спросить первыми отсюда. Этот поток живёт столько же,
+/// сколько программа, и отобрать у него владение уже некому.
+fn claim_devices() {
+    use cpal::traits::HostTrait;
+
+    let host = cpal::default_host();
+    use cpal::traits::DeviceTrait;
+
+    let out = host
+        .default_output_device()
+        .and_then(|device| device.name().ok());
+    let mic = host
+        .default_input_device()
+        .and_then(|device| device.name().ok());
+    let count = host.output_devices().map(Iterator::count).unwrap_or(0);
+    log::info!(
+        "звук закреплён: колонки — {}, микрофон — {}, всего выходов {count}",
+        out.as_deref().unwrap_or("нет"),
+        mic.as_deref().unwrap_or("нет"),
+    );
 }
 
 /// Единственное место, где открыто устройство вывода.
@@ -127,18 +180,69 @@ fn play_loop(rx: std::sync::mpsc::Receiver<Command>) {
 }
 
 fn open_output() -> Option<(rodio::OutputStream, rodio::Sink)> {
-    match rodio::OutputStreamBuilder::open_default_stream() {
-        Ok(stream) => {
+    let stream = match rodio::OutputStreamBuilder::open_default_stream() {
+        Ok(stream) => Some(stream),
+        // Устройства «по умолчанию» нет — но это ещё не значит, что нет звука.
+        //
+        // Windows называет основным то устройство, которое выбрано в системе,
+        // и в редких случаях таким оказывается отключённое: наушники выдернули,
+        // монитор с колонками ушёл в сон. Тогда правильный ответ — не молчать,
+        // а взять первое устройство, которое согласится играть.
+        Err(err) => {
+            log::debug!("основного устройства нет ({err}) — беру любое играющее");
+            first_working_device()
+        }
+    };
+
+    match stream {
+        Some(stream) => {
+            if SILENT.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                log::info!("звук снова доступен");
+            }
             let sink = rodio::Sink::connect_new(stream.mixer());
             Some((stream, sink))
         }
-        Err(err) => {
+        None => {
             // Наушники не воткнуты, устройства нет, драйвер отвалился.
             // Молча не озвучиваем — программа продолжает работать.
-            log::warn!("звук недоступен: {err}");
+            //
+            // Жалуемся один раз на всё время немоты: звук идёт кусками по
+            // полсекунды, и запись на каждый кусок превращала журнал в поток,
+            // в котором тонет всё остальное.
+            if !SILENT.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                log::warn!("звук недоступен: играющих устройств не нашлось");
+            }
             None
         }
     }
+}
+
+/// Первое устройство вывода, которое удалось открыть.
+fn first_working_device() -> Option<rodio::OutputStream> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    let host = cpal::default_host();
+    let devices = match host.output_devices() {
+        Ok(devices) => devices,
+        Err(err) => {
+            log::warn!("список устройств вывода недоступен: {err}");
+            return None;
+        }
+    };
+
+    for device in devices {
+        let name = device.name().unwrap_or_default();
+        match rodio::OutputStreamBuilder::from_device(device)
+            .and_then(|builder| builder.open_stream_or_fallback())
+        {
+            Ok(stream) => {
+                log::info!("звук идёт через «{name}»");
+                return Some(stream);
+            }
+            Err(err) => log::debug!("«{name}» не открылось: {err}"),
+        }
+    }
+    None
 }
 
 /// Ставит кусок звука в очередь.
@@ -196,6 +300,32 @@ pub fn chime() {
         Some((samples, rate)) => play(samples, rate),
         None => log::warn!("сигнал завершения не разобрался — пропускаю"),
     }
+}
+
+/// Сколько звучит встроенный сигнал.
+pub fn chime_length() -> std::time::Duration {
+    wav_samples(CHIME)
+        .map(|(samples, rate)| {
+            std::time::Duration::from_secs_f64(samples.len() as f64 / f64::from(rate.max(1)))
+        })
+        .unwrap_or(std::time::Duration::ZERO)
+}
+
+/// Тот же сигнал задом наперёд — на появление помощника.
+///
+/// Не отдельный файл, а перевёрнутый тот же: закрытие и открытие тогда слышатся
+/// как одно движение в две стороны. У обращённого звука вместо затухания
+/// получается нарастание — ровно то, что нужно на появление.
+pub fn chime_open() -> std::time::Duration {
+    let Some((mut samples, rate)) = wav_samples(CHIME) else {
+        log::warn!("сигнал появления не разобрался — пропускаю");
+        return std::time::Duration::ZERO;
+    };
+    samples.reverse();
+
+    let seconds = samples.len() as f64 / f64::from(rate.max(1));
+    play(samples, rate);
+    std::time::Duration::from_secs_f64(seconds)
 }
 
 /// Достаёт отсчёты из WAV: 16 бит, моно.

@@ -187,12 +187,22 @@ pub fn show_hud(app: &AppHandle, mode: &str) {
             return;
         }
     };
-    {
+    // Появление, а не смена состояния: звук нужен один раз, когда помощник
+    // возник на экране, а не на каждом переходе «слушаю — думаю — говорю».
+    let appearing = {
         let mut current = HUD_MODE.lock().unwrap_or_else(|err| err.into_inner());
+        let appearing = current.is_none();
         if current.as_deref() != Some(mode) {
             log::info!("индикатор: {mode}");
         }
         *current = Some(mode.to_string());
+        appearing
+    };
+    if appearing {
+        crate::voice::chime_open();
+        // Окно показывается мгновенно, а проявляется само — рисованием.
+        // Событие только сообщает, что отсчёт пошёл.
+        let _ = window.emit_to(HUD_LABEL, "hud:appear", ());
     }
     let _ = window.emit_to(HUD_LABEL, "hud:mode", mode.to_string());
     let _ = window.show();
@@ -482,6 +492,10 @@ pub fn hide_popup(app: &AppHandle) {
     // Открытый микрофон при закрытом окне — не то, чего от программы ждут.
     #[cfg(desktop)]
     crate::stop_conversation(app);
+    // И индикатор убираем всегда, а не только когда шёл разговор: он мог
+    // остаться от чтения вслух, а окна, к которому он относится, уже нет.
+    #[cfg(desktop)]
+    hide_hud(app);
 
     if let Some(window) = app.get_webview_window(POPUP_LABEL) {
         let _ = window.hide();

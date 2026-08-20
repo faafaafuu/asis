@@ -78,6 +78,7 @@ const STRINGS = {
     "capture.title": "Проверка перехвата",
     "capture.lead": "Выделите слово с левым Ctrl — строка ниже обновится сама.",
     "capture.waiting": "Жду выделения…",
+    "key.where": "Где взять ключ",
     "voice.title": "Голос",
     "voice.lead": "Пробел в открытом окне — прочитать вслух. Левый Alt с пробелом — сказать вопрос голосом.",
     "voice.enabled": "Озвучивать объяснения",
@@ -94,6 +95,8 @@ const STRINGS = {
 
     "speech.title": "Голосовые вопросы",
     "speech.lead": "Зажмите левый Alt с пробелом и говорите. Распознавание работает на этом компьютере.",
+    "speech.wake": "Отзываться на имя «Ноа»",
+    "speech.wakeHint": "Скажите «Ноа» — и помощник начнёт слушать; можно сразу с вопросом: «Ноа, что такое альбедо». Микрофон для этого слушает постоянно. Распознавание идёт на этом компьютере, наружу ничего не уходит. Ctrl + Shift + Alt + Пробел включает и выключает ожидание, не открывая настройки, — и освобождает память, когда помощник не нужен.",
     "speech.device": "Микрофон",
     "speech.deviceAuto": "Основной в системе",
     "speech.download": "Скачать распознавание",
@@ -204,6 +207,7 @@ const STRINGS = {
     "capture.title": "Selection check",
     "capture.lead": "Select a word holding the left Ctrl — the line below updates itself.",
     "capture.waiting": "Waiting for a selection…",
+    "key.where": "Where to get a key",
     "voice.title": "Voice",
     "voice.lead": "Space in the open window reads it aloud. Left Alt with Space asks by voice.",
     "voice.enabled": "Read explanations aloud",
@@ -220,6 +224,8 @@ const STRINGS = {
 
     "speech.title": "Voice questions",
     "speech.lead": "Hold left Alt with Space and speak. Recognition runs on this computer.",
+    "speech.wake": "Answer to the name “Noa”",
+    "speech.wakeHint": "Say “Noa” and the assistant starts listening; you can add the question right away: “Noa, what is albedo”. The microphone listens continuously for this. Recognition runs on this computer, nothing leaves it. Ctrl + Shift + Alt + Space turns listening on and off without opening settings, freeing memory when the assistant is not needed.",
     "speech.device": "Microphone",
     "speech.deviceAuto": "System default",
     "speech.download": "Download recognition",

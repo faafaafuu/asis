@@ -73,11 +73,69 @@ const MIN_SPEECH_MS: u64 = 400;
 
 /// Сколько молчать, чтобы разговор закончился сам.
 ///
-/// Разговор — это не режим, который включают и выключают, а то, что происходит,
-/// пока люди говорят. Если человек молчит шесть секунд, он уже занят другим:
-/// читает ответ, вернулся к работе, отошёл. Держать микрофон открытым в надежде,
-/// что он ещё что-то скажет, — значит слушать комнату без причины.
-const SILENCE_ENDS_TALK_MS: u64 = 6000;
+/// Шесть секунд оказались слишком строгими: человек читает ответ на экране,
+/// обдумывает следующий вопрос, отвлекается на секунду — и разговор обрывался
+/// у него под руками. Минута — это уже точно «ушёл и не вернулся», а не пауза
+/// в разговоре. Закрыть раньше всегда можно клавишей Esc.
+const SILENCE_ENDS_TALK_MS: u64 = 60_000;
+
+/// Зачем открыт микрофон. От этого зависит, насколько он придирчив.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Listening {
+    /// Разговор: человек обращается к программе и знает, что его слушают.
+    /// Здесь важно не пропустить тихую фразу.
+    Talk,
+    /// Ожидание обращения: программа слушает комнату часами. Здесь важно
+    /// обратное — не принимать за речь всё подряд. Каждая принятая «фраза»
+    /// это работа видеокарты, а комнатный шум её не стоит.
+    Wake,
+}
+
+impl Listening {
+    /// Во сколько раз речь должна быть громче фонового шума.
+    fn over_noise(self) -> f32 {
+        match self {
+            Listening::Talk => 4.0,
+            // Чуть строже разговора, но именно чуть. Сначала было в полтора
+            // раза строже — и зов перестал доходить: на клавишу помощник
+            // отзывался, на имя почти никогда. Отсеивать шум лучше не порогом,
+            // а тем, что в шуме не окажется имени.
+            Listening::Wake => 4.5,
+        }
+    }
+
+    /// Ниже какой громкости не считаем речью вовсе.
+    fn floor(self) -> f32 {
+        match self {
+            Listening::Talk => SILENCE_LEVEL,
+            // Обращение произносят внятно и в сторону компьютера, но микрофоны
+            // бывают тихие: на здешнем речь идёт по трети шкалы, и порог в
+            // девять сотых съедал половину зовов. Пять — это вдвое выше порога
+            // разговора и всё ещё ниже любой внятной речи.
+            Listening::Wake => 0.05,
+        }
+    }
+
+    /// Короче этого фразу даже не рассматриваем.
+    fn min_speech_ms(self) -> u64 {
+        match self {
+            Listening::Talk => MIN_SPEECH_MS,
+            // «Хэй, ноа», сказанное быстро, укладывается в полсекунды — и это
+            // законный зов, на который надо ответить. Порог выше отбрасывал
+            // ровно его: с вопросом фраза проходила, без вопроса — нет.
+            Listening::Wake => 500,
+        }
+    }
+
+    /// Писать ли в журнал про каждую услышанную фразу.
+    ///
+    /// В ожидании обращения — не писать: программа слушает часами, и журнал
+    /// из полезного превращается в поток, который сам себя вытесняет. Именно
+    /// это и случилось: настоящие ошибки терялись среди записей о шуме.
+    fn verbose(self) -> bool {
+        self == Listening::Talk
+    }
+}
 
 /// Что услышали в разговоре.
 pub enum Heard {
@@ -94,7 +152,7 @@ enum Command {
     Stop(Sender<Recording>),
     /// Разговор: писать постоянно и отдавать фразы по мере того, как человек
     /// их договаривает.
-    StartTalk(String, Sender<Heard>),
+    StartTalk(String, Listening, Sender<Heard>),
     StopTalk,
 }
 
@@ -108,6 +166,22 @@ static COMMANDS: OnceLock<Sender<Command>> = OnceLock::new();
 
 /// Разговор приостановлен: программа думает над ответом или читает его вслух.
 static PAUSED: AtomicBool = AtomicBool::new(false);
+
+/// До какого момента не слушать вовсе.
+///
+/// Ставится, пока программа говорит, и держится ещё некоторое время после.
+/// Причина в том, что тишина наступает не тогда, когда мы перестали отдавать
+/// звук: то, что уже ушло в звуковую систему, доигрывает из её буфера. Микрофон
+/// в этот момент открыт и пишет комнату — то есть конец собственной фразы.
+/// Расшифровка честно превращала его в вопрос, программа на него отвечала,
+/// ответ снова попадал в микрофон, и разговор уходил сам с собой по кругу.
+static MUTED_UNTIL: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// Сколько глухоты оставлять после собственной речи.
+///
+/// Буфер звуковой системы на Windows — сотня-другая миллисекунд; берём с запасом
+/// на медленные устройства вроде bluetooth-колонок, где задержка больше.
+const DEAF_AFTER_SPEECH_MS: u64 = 700;
 
 /// Поток, владеющий микрофоном. Создаётся при первом обращении.
 fn commands() -> Option<&'static Sender<Command>> {
@@ -156,11 +230,11 @@ fn mic_loop(rx: Receiver<Command>) {
                 };
                 let _ = reply.send(recording);
             }
-            Ok(Command::StartTalk(preferred, sender)) => {
+            Ok(Command::StartTalk(preferred, mode, sender)) => {
                 active = open(&preferred);
                 talk = active
                     .as_ref()
-                    .map(|(_, _, rate)| Segmenter::new(*rate, sender));
+                    .map(|(_, _, rate)| Segmenter::new(*rate, mode, sender));
             }
             Ok(Command::StopTalk) => {
                 active = None;
@@ -202,8 +276,7 @@ pub fn devices() -> Vec<String> {
     let host = cpal::default_host();
     host.input_devices()
         .map(|list| {
-            list.filter_map(|d| d.description().ok().map(|d| d.name().to_string()))
-                .collect()
+            list.filter_map(|d| d.name().ok()).collect()
         })
         .unwrap_or_default()
 }
@@ -219,27 +292,19 @@ fn open_input(preferred: &str) -> Option<(cpal::Stream, std::sync::Arc<Mutex<Vec
         // основное: молчать из-за пропавшего микрофона хуже, чем писать не с того.
         host.input_devices()
             .ok()?
-            .find(|d| {
-                d.description()
-                    .map(|d| d.name() == preferred)
-                    .unwrap_or(false)
-            })
+            .find(|d| d.name().map(|name| name == preferred).unwrap_or(false))
             .or_else(|| host.default_input_device())?
     };
 
-    let name = device
-        .description()
-        .map(|d| d.name().to_string())
-        .unwrap_or_else(|_| "без имени".into());
+    let name = device.name().unwrap_or_else(|_| "без имени".into());
     let config = device.default_input_config().ok()?;
     log::info!(
         "пишу с устройства «{name}»: {} Гц, каналов {}",
-        config.sample_rate(),
+        config.sample_rate().0,
         config.channels()
     );
 
-    // В cpal 0.17 частота отдаётся уже числом, без обёртки.
-    let rate = config.sample_rate();
+    let rate = config.sample_rate().0;
     let channels = config.channels() as usize;
     let limit = rate as usize * MAX_SECONDS;
 
@@ -296,17 +361,21 @@ pub fn stop() -> Option<Vec<u8>> {
     if recording.samples.len() < recording.sample_rate as usize / 4 {
         return None;
     }
-    prepare(recording.samples, recording.sample_rate, true)
+    prepare(recording.samples, recording.sample_rate, true, true)
 }
 
 /* ── Разговор без рук ─────────────────────────────────────────────────────── */
 
 /// Начинает разговор: микрофон открыт, фразы приходят в возвращённый канал.
-pub fn start_conversation(device: &str) -> Option<Receiver<Heard>> {
+pub fn start_conversation(device: &str, mode: Listening) -> Option<Receiver<Heard>> {
     let tx = commands()?;
     let (utterances, rx) = channel();
     PAUSED.store(false, Ordering::Relaxed);
-    tx.send(Command::StartTalk(device.to_string(), utterances))
+    // Разговор часто начинается сразу после того, как программа договорила
+    // или её оборвали. Первые доли секунды слушать нечего, кроме её же хвоста.
+    *MUTED_UNTIL.lock().unwrap_or_else(|err| err.into_inner()) =
+        Some(std::time::Instant::now() + std::time::Duration::from_millis(DEAF_AFTER_SPEECH_MS));
+    tx.send(Command::StartTalk(device.to_string(), mode, utterances))
         .ok()?;
     Some(rx)
 }
@@ -336,6 +405,7 @@ pub fn pause_conversation(paused: bool) {
 /// здесь справляется арифметика.
 struct Segmenter {
     sender: Sender<Heard>,
+    mode: Listening,
     rate: u32,
     utterance: Vec<f32>,
     speaking: bool,
@@ -350,9 +420,10 @@ struct Segmenter {
 }
 
 impl Segmenter {
-    fn new(rate: u32, sender: Sender<Heard>) -> Self {
+    fn new(rate: u32, mode: Listening, sender: Sender<Heard>) -> Self {
         Self {
             sender,
+            mode,
             rate,
             utterance: Vec::new(),
             speaking: false,
@@ -370,14 +441,20 @@ impl Segmenter {
 
         // Пока говорит программа — не слушаем вовсе. Иначе микрофон запишет
         // её же голос из колонок, и она задаст вопрос сама себе.
+        let now = std::time::Instant::now();
         if PAUSED.load(Ordering::Relaxed) || crate::voice::speaking() {
-            self.utterance.clear();
-            self.speaking = false;
-            self.silence = 0;
-            // Пока отвечали — человек молчал не от того, что ему нечего сказать.
-            // Отсчёт тишины начинается заново с момента, когда он снова может
-            // говорить, иначе разговор обрывался бы посреди длинного ответа.
-            self.quiet = 0;
+            // Отодвигаем глухоту на будущее: речь ещё доиграет после того, как
+            // мы перестанем её отдавать.
+            *MUTED_UNTIL.lock().unwrap_or_else(|err| err.into_inner()) =
+                Some(now + std::time::Duration::from_millis(DEAF_AFTER_SPEECH_MS));
+            self.reset();
+            return;
+        }
+
+        // Речь кончилась, но хвост её ещё звучит — молчим до конца запаса.
+        let muted = *MUTED_UNTIL.lock().unwrap_or_else(|err| err.into_inner());
+        if muted.map(|until| now < until).unwrap_or(false) {
+            self.reset();
             return;
         }
 
@@ -390,7 +467,7 @@ impl Segmenter {
                 // речь сама поднимет порог, и следующая фраза утонет.
                 self.noise = self.noise * 0.97 + rms * 0.03;
             }
-            let threshold = (self.noise * 4.0).max(SILENCE_LEVEL);
+            let threshold = (self.noise * self.mode.over_noise()).max(self.mode.floor());
 
             if rms > threshold {
                 self.speaking = true;
@@ -422,6 +499,17 @@ impl Segmenter {
         }
     }
 
+    /// Забыть всё, что успели услышать, и начать слушать заново.
+    fn reset(&mut self) {
+        self.utterance.clear();
+        self.speaking = false;
+        self.silence = 0;
+        // Пока отвечали — человек молчал не от того, что ему нечего сказать.
+        // Отсчёт тишины начинается заново с момента, когда он снова может
+        // говорить, иначе разговор обрывался бы посреди длинного ответа.
+        self.quiet = 0;
+    }
+
     fn finish(&mut self) {
         let samples = std::mem::take(&mut self.utterance);
         self.speaking = false;
@@ -430,11 +518,11 @@ impl Segmenter {
         // Из длительности вычитаем хвостовую тишину: полсекунды кашля с
         // секундой тишины после — это не фраза.
         let speech = samples.len().saturating_sub(silence);
-        if ms(speech, self.rate) < MIN_SPEECH_MS {
+        if ms(speech, self.rate) < self.mode.min_speech_ms() {
             return;
         }
 
-        if let Some(wav) = prepare(samples, self.rate, false) {
+        if let Some(wav) = prepare(samples, self.rate, false, self.mode.verbose()) {
             let _ = self.sender.send(Heard::Phrase(wav));
         }
     }
@@ -451,10 +539,14 @@ fn ms(samples: usize, rate: u32) -> u64 {
 /// `complain` — ругаться ли в журнал на пустую запись. При удержании клавиши
 /// это полезно (человек нажал и ничего не сказал), в разговоре — нет: там
 /// тишина отсеивается раньше и является нормой.
-fn prepare(samples: Vec<f32>, rate: u32, complain: bool) -> Option<Vec<u8>> {
+fn prepare(samples: Vec<f32>, rate: u32, complain: bool, verbose: bool) -> Option<Vec<u8>> {
     let peak = samples.iter().fold(0.0_f32, |max, s| max.max(s.abs()));
     let seconds = samples.len() as f32 / rate.max(1) as f32;
-    log::info!("записано {seconds:.1} с, громкость {:.0}%", peak * 100.0);
+    if verbose {
+        log::info!("записано {seconds:.1} с, громкость {:.0}%", peak * 100.0);
+    } else {
+        log::debug!("записано {seconds:.1} с, громкость {:.0}%", peak * 100.0);
+    }
 
     // Порог не «абсолютная тишина», а «ничего, кроме шума». На пустой записи
     // whisper не молчит, а выдумывает — «Продолжение следует...» и прочие титры
@@ -476,7 +568,9 @@ fn prepare(samples: Vec<f32>, rate: u32, complain: bool) -> Option<Vec<u8>> {
         for sample in &mut samples {
             *sample *= gain;
         }
-        log::info!("тихая запись — подтянул громкость в {gain:.1} раза");
+        if verbose {
+            log::info!("тихая запись — подтянул громкость в {gain:.1} раза");
+        }
     }
 
     samples.resize(
@@ -584,7 +678,7 @@ mod tests {
     #[test]
     fn silence_alone_is_not_a_phrase() {
         let (tx, rx) = channel();
-        let mut segmenter = Segmenter::new(16_000, tx);
+        let mut segmenter = Segmenter::new(16_000, Listening::Talk, tx);
         // Секунда тишины: ни начала речи, ни фразы на выходе.
         segmenter.feed(&vec![0.0_f32; 16_000], 16_000);
         assert!(matches!(rx.try_recv(), Err(_)));
@@ -594,7 +688,7 @@ mod tests {
     #[test]
     fn loud_stretch_followed_by_pause_becomes_a_phrase() {
         let (tx, rx) = channel();
-        let mut segmenter = Segmenter::new(16_000, tx);
+        let mut segmenter = Segmenter::new(16_000, Listening::Talk, tx);
 
         // Полсекунды «речи»: чередующийся сигнал заметно громче порога.
         let speech: Vec<f32> = (0..8_000)
@@ -614,17 +708,20 @@ mod tests {
     #[test]
     fn long_silence_ends_the_talk_once() {
         let (tx, rx) = channel();
-        let mut segmenter = Segmenter::new(16_000, tx);
+        let mut segmenter = Segmenter::new(16_000, Listening::Talk, tx);
 
-        // Семь секунд тишины подряд — дольше отведённых шести.
-        segmenter.feed(&vec![0.0_f32; 16_000 * 7], 16_000);
+        // Тишины ровно столько, сколько отведено, плюс секунда. Считаем от
+        // константы, а не числом: иначе тест разойдётся с кодом при первой же
+        // правке порога — что уже однажды и случилось.
+        let silence = 16_000 * (SILENCE_ENDS_TALK_MS / 1000 + 1) as usize;
+        segmenter.feed(&vec![0.0_f32; silence], 16_000);
         assert!(
             matches!(rx.try_recv(), Ok(Heard::LongSilence)),
             "разговор должен был закончиться сам"
         );
 
         // И только один раз: следующая тишина уже ничего не шлёт.
-        segmenter.feed(&vec![0.0_f32; 16_000 * 7], 16_000);
+        segmenter.feed(&vec![0.0_f32; silence], 16_000);
         assert!(rx.try_recv().is_err(), "сказано должно быть один раз");
     }
 }

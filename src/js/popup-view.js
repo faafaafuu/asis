@@ -196,8 +196,16 @@ export class PopupView {
       this.render();
     }, RESPONSE_TIMEOUT_MS);
 
-    this.client
-      .explain(term, context, { signal })
+    // Вопрос, заданный голосом с чистого места, — это вопрос, а не термин.
+    // Определение на «сколько раз отжаться, чтобы устать» звучит как толкование
+    // самого вопроса, а человек ждёт прикидку.
+    const request = this.speakOnAnswer
+      ? this.client
+          .ask("", "", [], raw, { signal })
+          .then((answer) => ({ def: answer, simple: "", examples: [] }))
+      : this.client.explain(term, context, { signal });
+
+    request
       .then((data) => {
         clearTimeout(watchdog);
         if (signal.aborted || this.state.term !== term) return;
@@ -318,6 +326,7 @@ export class PopupView {
         if (this.state.thread[index]) this.state.thread[index].a = answer;
         this.state.pending = false;
         this.render();
+        this.#scrollToLatest();
         // Спросили голосом — отвечаем голосом. Разговор не должен обрываться
         // на середине только потому, что ответ пришёл текстом.
         if (byVoice) this.onAnswer?.(answer);
@@ -365,6 +374,18 @@ export class PopupView {
   set listening(on) {
     this.ui.listening.hidden = !on;
     this.#reportGeometry();
+  }
+
+  /**
+   * Прокручивает тело окна к свежему ответу.
+   *
+   * Высота тела ограничена, и в длинном разговоре новый ответ появлялся ниже
+   * видимой части: человек спрашивал, получал ответ и смотрел на прежний текст,
+   * не понимая, ответили ему или нет.
+   */
+  #scrollToLatest() {
+    const body = this.ui.body;
+    if (body) body.scrollTop = body.scrollHeight;
   }
 
   close() {

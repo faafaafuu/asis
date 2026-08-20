@@ -36,6 +36,8 @@ pub enum Event {
     TalkStart,
     /// Отпустили: расшифровываем и отправляем вопросом.
     TalkStop,
+    /// Ctrl+Shift+Alt с пробелом: включить или выключить ожидание обращения.
+    ToggleWake,
 }
 
 /// Включает и выключает перехват. Зовётся, когда попап появляется и исчезает.
@@ -103,7 +105,9 @@ unsafe extern "system" fn keyboard_proc(
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::Foundation::LRESULT;
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LMENU, VK_SPACE};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_CONTROL, VK_LMENU, VK_SHIFT, VK_SPACE,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, HC_ACTION, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
         WM_SYSKEYUP,
@@ -145,6 +149,12 @@ unsafe extern "system" fn keyboard_proc(
 
     // Именно левый Alt: правый оставляем системе и раскладкам, где он AltGr.
     let alt = unsafe { (GetAsyncKeyState(VK_LMENU.0 as i32) as u16 & 0x8000) != 0 };
+    let ctrl = unsafe { (GetAsyncKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0 };
+    let shift = unsafe { (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0 };
+
+    // Три модификатора сразу — сочетание, которое не занято ничем: обычные
+    // Ctrl+Alt+пробел и Alt+Shift+пробел уже разобраны системой и программами.
+    let toggle = ctrl && shift && alt;
 
     // Что именно мы забираем себе.
     //
@@ -158,6 +168,7 @@ unsafe extern "system" fn keyboard_proc(
     //
     // И отпускание пробела, если мы уже пишем: клавиши могли отпустить в любом
     // порядке, а пропущенное отпускание оставило бы микрофон включённым.
+    // Переключатель отдельно не проверяем: в нём тоже зажат Alt, условие покрыто.
     let ours = ARMED.load(Ordering::Relaxed) || alt || RECORDING.load(Ordering::Relaxed);
     if !ours {
         return pass(());
@@ -168,7 +179,12 @@ unsafe extern "system" fn keyboard_proc(
             // Повтор от удержания — глотаем, но ничего не делаем.
             return LRESULT(1);
         }
-        if alt {
+        // Все три модификатора — не разговор, а переключатель ожидания
+        // обращения. Проверяется первым: иначе сочетание, в котором Alt тоже
+        // зажат, считалось бы обычным «Alt с пробелом».
+        if toggle {
+            send(Event::ToggleWake);
+        } else if alt {
             RECORDING.store(true, Ordering::Relaxed);
             send(Event::TalkStart);
         } else {

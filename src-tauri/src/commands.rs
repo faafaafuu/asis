@@ -199,8 +199,15 @@ pub fn save_ai_settings(
 
     persist(&app, &state)?;
 
-    let config = state.config();
-    state.rebuild_provider(&config.ai, &config.ui.language);
+    {
+        let config = state.config();
+        state.rebuild_provider(&config.ai, &config.ui.language);
+    }
+
+    // Новую модель греем, старую отпускаем: иначе в видеопамяти копятся все, что
+    // человек успел попробовать, и места не остаётся ни одной.
+    #[cfg(desktop)]
+    crate::wake_local_model(&app);
     Ok(())
 }
 
@@ -214,6 +221,7 @@ pub struct VoiceSettings {
     pub engine: String,
     pub voice: String,
     pub edge_voice: String,
+    pub wake_word: bool,
     pub input_device: String,
     pub rate: f32,
     pub speak_answers: bool,
@@ -232,6 +240,7 @@ pub fn voice_settings(app: AppHandle, state: State<'_, AppState>) -> VoiceSettin
         engine: config.voice.engine.clone(),
         voice: config.voice.voice.clone(),
         edge_voice: config.voice.edge_voice.clone(),
+        wake_word: config.voice.wake_word,
         input_device: config.voice.input_device.clone(),
         rate: config.voice.rate,
         speak_answers: config.voice.speak_answers,
@@ -252,11 +261,16 @@ pub fn save_voice_settings(
         config.voice.engine = settings.engine;
         config.voice.voice = settings.voice;
         config.voice.edge_voice = settings.edge_voice;
+        config.voice.wake_word = settings.wake_word;
         config.voice.input_device = settings.input_device;
         config.voice.rate = settings.rate;
         config.voice.speak_answers = settings.speak_answers;
     }
-    persist(&app, &state)
+    persist(&app, &state)?;
+    // Пробуждение включили или выключили — перестраиваем слушателя сразу,
+    // а не со следующего запуска.
+    crate::restart_wake(&app);
+    Ok(())
 }
 
 /// Голоса, между которыми можно выбирать. Оба списка сразу: окно показывает
@@ -469,6 +483,39 @@ pub fn capture_diagnostics(app: AppHandle) -> Diagnostics {
 /// Открывает каталог с журналом в проводнике. Когда попап не появляется, журнал —
 /// единственное место, где написано почему; заставлять пользователя искать путь
 /// вида `%LOCALAPPDATA%\app.sufler.popup\logs` бессмысленно.
+/// Открывает страницу, где у выбранного сервиса берут ключ.
+///
+/// Адреса заданы здесь, а не приходят из окна: команда открывает что-то во
+/// внешнем браузере, и принимать для этого произвольную строку — значит дать
+/// любому, кто доберётся до окна, открывать что угодно. Список закрытый.
+#[tauri::command]
+pub fn open_key_page(provider: String) -> Result<(), String> {
+    let url = match provider.as_str() {
+        "groq" => "https://console.groq.com/keys",
+        "google" => "https://aistudio.google.com/app/apikey",
+        "openrouter" => "https://openrouter.ai/keys",
+        other => return Err(format!("для «{other}» страницы ключей нет")),
+    };
+    open_externally(url)
+}
+
+/// Отдаёт ссылку системе — пусть открывает тем, чем человек обычно читает.
+fn open_externally(target: &str) -> Result<(), String> {
+    let opener = if cfg!(target_os = "windows") {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+
+    std::process::Command::new(opener)
+        .arg(target)
+        .spawn()
+        .map(|_| ())
+        .map_err(|err| format!("не удалось открыть {target}: {err}"))
+}
+
 #[tauri::command]
 pub fn open_logs(app: AppHandle) -> Result<(), String> {
     let dir = app

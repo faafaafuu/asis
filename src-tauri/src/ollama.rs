@@ -406,6 +406,65 @@ pub async fn preload(host: &str, model: &str) -> Result<(), String> {
         .map_err(|err| format!("Ollama ответила ошибкой на прогрев: {err}"))
 }
 
+/// Выгружает из видеопамяти все модели, кроме нужной.
+///
+/// Ollama держит в памяти каждую модель, к которой обращались, — и держит долго,
+/// мы сами её об этом просим. Пока модель одна, это ровно то, что нужно: ответ
+/// приходит за полсекунды вместо тринадцати. Но стоит человеку попробовать в
+/// настройках вторую и третью, и в видеопамяти оказываются все три разом.
+///
+/// Наблюдалось вживую: на карте с десятью гигабайтами висели qwen2.5:7b,
+/// gemma3:4b и gemma3:1b — восемь с половиной гигабайт, — а рядом просилось
+/// распознавание речи. Свободного места не осталось, и ответы, которые раньше
+/// приходили за секунду, стали идти минуту или не приходить вовсе. Со стороны
+/// это выглядит как «программа сломалась», хотя сломана была только память.
+///
+/// Поэтому: выбрали модель — остальные отпускаем. Ошибки здесь не важны, это
+/// уборка; не вышло — значит, память освободится сама по истечении срока.
+pub async fn unload_others(host: &str, keep: &str) {
+    let client = match crate::net::client_builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return,
+    };
+
+    let loaded: Vec<String> = match client.get(format!("{host}/api/ps")).send().await {
+        Ok(response) => match response.json::<serde_json::Value>().await {
+            Ok(body) => body["models"]
+                .as_array()
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|m| m["name"].as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            Err(_) => return,
+        },
+        Err(_) => return,
+    };
+
+    for name in loaded {
+        // `llama3` и `llama3:latest` — одна и та же модель.
+        if name == keep || name == format!("{keep}:latest") || keep == format!("{name}:latest") {
+            continue;
+        }
+        // Нулевой срок жизни — просьба выгрузить прямо сейчас.
+        let _ = client
+            .post(format!("{host}/api/generate"))
+            .json(&serde_json::json!({
+                "model": name,
+                "prompt": "",
+                "stream": false,
+                "keep_alive": 0,
+            }))
+            .send()
+            .await;
+        log::info!("выгружаю из памяти лишнюю модель {name}");
+    }
+}
+
 /* ── Подбор модели под машину ─────────────────────────────────────────── */
 
 /// Сколько на этой машине памяти, в гигабайтах.

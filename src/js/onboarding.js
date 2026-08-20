@@ -363,6 +363,7 @@ async function saveVoice() {
     // второй оставляем как был.
     voice: engine === "piper" ? ui.voiceName.value : undefined,
     edgeVoice: engine === "edge" ? ui.voiceName.value : undefined,
+    wakeWord: ui.wakeWord.checked,
     inputDevice: ui.speechDevice.value,
     rate: Number(ui.voiceRate.value),
     speakAnswers: false,
@@ -419,6 +420,12 @@ ui.voiceDownload.addEventListener("click", async () => {
   }
 });
 
+// Сочетание клавиш включает и выключает ожидание мимо этого окна — галочка
+// должна следовать за ним, иначе она показывает вчерашнюю правду.
+api?.listen("voice:wake", (event) => {
+  ui.wakeWord.checked = Boolean(event.payload);
+});
+
 api?.listen("voice:install", (event) => {
   const { percent, status, done, error } = event.payload ?? {};
   if (error) {
@@ -447,6 +454,7 @@ async function loadSpeech() {
       ui.speechDevice.append(option);
     }
     ui.speechDevice.value = devices.includes(chosen) ? chosen : "";
+    ui.wakeWord.checked = Boolean((await api.invoke("voice_settings")).wakeWord);
   } catch {
     /* окно открыто вне приложения */
   }
@@ -468,6 +476,7 @@ async function loadSpeech() {
 }
 
 ui.speechDevice.addEventListener("change", saveVoice);
+ui.wakeWord.addEventListener("change", saveVoice);
 
 ui.speechDownload.addEventListener("click", async () => {
   if (!api) return;
@@ -502,6 +511,14 @@ ui.launchAtLogin.addEventListener("change", async () => {
     // удалось, — врать пользователю о состоянии системы.
     ui.launchAtLogin.checked = !ui.launchAtLogin.checked;
     ui.aiStatus.textContent = `${t("startup.failed")} ${err}`;
+  }
+});
+
+ui.keyPage.addEventListener("click", async () => {
+  try {
+    await api?.invoke("open_key_page", { provider: ui.preset.value });
+  } catch (err) {
+    ui.aiStatus.textContent = String(err);
   }
 });
 
@@ -594,6 +611,9 @@ function applyPreset(name, { keepValues = false } = {}) {
   // у Википедии нет ни того, ни другого, и пустые поля там только сбивают с толку.
   ui.advancedModel.hidden = preset.provider !== "http";
   ui.keyField.hidden = !preset.key;
+  // Ссылку показываем только там, где ключ действительно где-то берут:
+  // у своего сервиса страницы ключей нет и быть не может.
+  ui.keyPage.hidden = !["groq", "google", "openrouter"].includes(name);
   ui.keyHint.textContent = preset.hintKey ? t(preset.hintKey) : "";
 
   // У Ollama модели лежат на этом же компьютере — их можно показать списком

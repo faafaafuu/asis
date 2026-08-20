@@ -137,8 +137,12 @@ pub fn run() {
                 let integration = watcher::spawn(app.handle());
                 app.manage(integration);
 
+                // Раньше микрофона и раньше окон: устройства должны достаться
+                // потоку, который живёт до конца работы.
+                voice::claim_devices();
                 wake_local_model(app.handle());
                 listen_for_voice_keys(app.handle());
+                start_wake(app.handle());
             }
 
             // На телефоне окно не создаётся нигде выше: показывать попап у экрана
@@ -169,6 +173,7 @@ pub fn run() {
             commands::save_trigger_settings,
             commands::capture_diagnostics,
             commands::open_logs,
+            commands::open_key_page,
             commands::local_models,
             commands::pull_model,
             commands::start_ollama,
@@ -252,7 +257,11 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         if voice::speaking() {
                             log::info!("пробел: обрываю чтение и слушаю");
                             voice::stop();
-                            std::thread::sleep(std::time::Duration::from_millis(250));
+                            // Звук уходит не мгновенно: то, что уже отдано
+                            // звуковой системе, доигрывает из её буфера. Включив
+                            // микрофон раньше, мы записывали бы конец собственной
+                            // фразы и отвечали сами себе.
+                            std::thread::sleep(std::time::Duration::from_millis(700));
                             start_conversation(&app);
                             continue;
                         }
@@ -261,6 +270,11 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:speak", ());
                         show_speaking(&app);
                     }
+                    // Ctrl с Alt и пробелом — включить или выключить ожидание
+                    // обращения. Отдельным сочетанием, потому что просьба была
+                    // именно такая: чтобы память не занималась впустую, когда
+                    // помощник не нужен.
+                    voice::hotkey::Event::ToggleWake => toggle_wake(&app),
                     // Зажали левый Alt с пробелом — пишем, пока держат. Работает
                     // и при закрытом окне: тогда вопрос задаётся с чистого
                     // места, а окно откроется само вместе с ответом.
@@ -271,6 +285,7 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         // слово сам, и слушать его надо с этой секунды. Без
                         // сигнала — разговор не кончился, он продолжается.
                         end_conversation(&app, false);
+                        stop_wake();
 
                         // Замолчать, раз с нами заговорили. Это не только
                         // вежливость: микрофон пишет всё, что слышно в комнате,
@@ -284,15 +299,23 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         // хвост, и в начало вопроса попало бы слово-другое,
                         // сказанное самой программой.
                         if was_speaking {
-                            std::thread::sleep(std::time::Duration::from_millis(250));
+                            std::thread::sleep(std::time::Duration::from_millis(700));
                         }
 
                         // Сервер расшифровки поднимается прямо сейчас, пока
                         // человек ещё говорит: иначе первая фраза ждала бы его
                         // запуска уже после того, как её произнесли.
                         voice::whisper::warm(&app);
-                        voice::stt::start(&input_device(&app));
+                        // Порядок важен: сперва показать помощника — вместе
+                        // с ним звучит сигнал появления, — дождаться, пока он
+                        // отзвучит, и только потом открывать микрофон. Иначе
+                        // первое, что запишется, будет собственный сигнал.
+                        //
+                        // Заодно это подсказка человеку: сигнал отзвучал —
+                        // можно говорить.
                         overlay::show_hud(&app, "listening");
+                        std::thread::sleep(voice::chime_length());
+                        voice::stt::start(&input_device(&app));
                         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
                     }
                     // Отпустили — расшифровываем, задаём вопрос и переходим
@@ -307,10 +330,18 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             continue;
                         };
 
-                        if ask_aloud(&app, wav).is_some() {
-                            start_conversation(&app);
-                        } else {
-                            overlay::hide_hud(&app);
+                        match hear(&app, wav) {
+                            // Попрощались, не начав: разговор и не начинаем.
+                            Some(text) if is_farewell(&text) => {
+                                log::info!("попрощались («{text}») — не начинаю разговор");
+                                overlay::hide_hud(&app);
+                                voice::chime();
+                            }
+                            Some(text) => {
+                                answer_aloud(&app, &text);
+                                start_conversation(&app);
+                            }
+                            None => overlay::hide_hud(&app),
                         }
                     }
                 }
@@ -391,9 +422,48 @@ fn input_device(app: &tauri::AppHandle) -> String {
 /// поверх ответа на предыдущую.
 #[cfg(desktop)]
 fn ask_aloud(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
+    let text = hear(app, wav)?;
+    answer_aloud(app, &text);
+    Some(text)
+}
+
+/// Расшифровывает запись и отдаёт услышанное.
+///
+/// Отдельно от ответа, потому что не на всё услышанное надо отвечать: на
+/// «спасибо, до связи» разговор просто заканчивается, и гонять ради этого
+/// модель, а потом ещё и читать её ответ вслух — заставлять человека ждать
+/// там, где он уже попрощался.
+#[cfg(desktop)]
+fn hear(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
+    overlay::show_hud(app, "thinking");
+    hear_quietly(app, wav)
+}
+
+/// То же, но молча: без индикатора и без жалоб в журнал.
+///
+/// Так слушается комната в ожидании обращения. Показывать «думаю» на каждую
+/// чужую фразу в комнате нельзя — помощник мигал бы весь день, а человек
+/// решил бы, что программа подслушивает и что-то делает.
+#[cfg(desktop)]
+fn hear_quietly(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
+    hear_hinted(app, wav, "")
+}
+
+/// Подсказка распознавателю на время ожидания обращения.
+///
+/// Без неё имя не выживает. «Ноа» короткое, безударное и для русской речи
+/// непривычное — распознаватель раз за разом слышит на его месте обычные слова:
+/// «эй, но», «эй, ну», «эй, на». Подсказка — это начало текста, от которого
+/// модель пляшет дальше; увидев в нём нужное написание, она выбирает его и в
+/// расшифровке.
+#[cfg(desktop)]
+const WAKE_HINT: &str = "Ноа — имя голосового помощника. Ноа, слышишь? Ноа, что это?";
+
+/// То же, но с подсказкой о том, что мы ждём услышать.
+#[cfg(desktop)]
+fn hear_hinted(app: &tauri::AppHandle, wav: Vec<u8>, hint: &str) -> Option<String> {
     use tauri::Emitter;
 
-    overlay::show_hud(app, "thinking");
 
     let (language, term) = {
         let state = app.state::<AppState>();
@@ -403,6 +473,7 @@ fn ask_aloud(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
         let term = state.selection().map(|s| s.text).unwrap_or_default();
         (language, term)
     };
+    let term = if hint.is_empty() { term } else { hint.to_string() };
 
     // Поток обычный, а расшифровка ходит по сети (пусть и к себе же) — ждём
     // её здесь, а не занимаем задачу Tauri.
@@ -423,19 +494,29 @@ fn ask_aloud(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
         }
     };
     log::info!("расшифровано: «{text}»");
+    Some(text)
+}
 
+/// Задаёт вопрос окну и ждёт, пока ответ дочитают вслух.
+///
+/// Ждать конца ответа обязательно: следующая фраза человека должна попасть
+/// в тишину, а не поверх ответа на предыдущую.
+#[cfg(desktop)]
+fn answer_aloud(app: &tauri::AppHandle, text: &str) {
+    use tauri::Emitter;
+
+    let text = text.to_string();
     if overlay::is_popup_visible(app) {
         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:question", text.clone());
     } else {
         // Окна нет — вопрос задан с чистого места, окно откроется этим вопросом.
         if let Err(err) = overlay::show_for_voice(app, text.clone()) {
             log::error!("не удалось открыть окно на голосовой вопрос: {err}");
-            return None;
+            return;
         }
     }
 
     wait_until_answered(app);
-    Some(text)
 }
 
 /// Ждёт, пока ответ начнут и закончат читать вслух.
@@ -453,11 +534,19 @@ fn wait_until_answered(app: &tauri::AppHandle) {
         }
     }
 
-    // Пока модель думает, речи ещё нет. Ждём её начала, но не вечно: ответа
-    // может не быть вовсе — сеть, ошибка, ненайденный голос. Десяти секунд
-    // хватает и самой медленной модели: дольше молчит только то, что уже
-    // не заговорит.
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // Пока модель думает, речи ещё нет. Ждём её начала — и ждать надо столько,
+    // сколько модель имеет право думать.
+    //
+    // Десяти секунд не хватало: на модели покрупнее ответ приходит позже, мы
+    // переставали ждать, снова начинали слушать — а человек в это время читал
+    // ответ и молчал. Тишина копилась, и разговор закрывался сам, не ответив
+    // ни разу. Предел берём тот же, что у самого запроса к модели.
+    let limit = {
+        let state = app.state::<AppState>();
+        let limit = state.config().ai.call_limit();
+        limit
+    };
+    let deadline = Instant::now() + limit;
     while Instant::now() < deadline && !voice::speaking() {
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -477,14 +566,337 @@ fn wait_until_answered(app: &tauri::AppHandle) {
     std::thread::sleep(Duration::from_millis(300));
 }
 
-/// Слово, которым человек заканчивает разговор.
+/// Как здороваются перед именем: «хэй», «эй», «привет».
 ///
-/// Одно и то же во всех видах вежливости: «спасибо», «понял, спасибо», «спасибо
-/// большое». Проверяем вхождение, а не совпадение целиком — живая речь редко
-/// состоит из одного слова.
+/// Вариантов много, потому что распознавание пишет одно и то же слово
+/// по-разному от раза к разу — «хэй», «хей», «эй», «хай».
+#[cfg(desktop)]
+const WAKE_GREETINGS: &[&str] = &["хэй", "хей", "эй", "хай", "привет", "hey", "hi", "окей"];
+
+/// Имя помощника — и всё, во что распознавание его превращает.
+///
+/// «Ноа» короткое и звучит непривычно для русского уха, поэтому Whisper
+/// пишет его то «Ноя», то «Ной», то латиницей. Ловим все написания: не
+/// услышать обращение хуже, чем изредка проснуться на похожее слово.
+#[cfg(desktop)]
+const WAKE_NAMES: &[&str] = &["ноа", "ноях", "ноах", "ноуа", "noa", "noah", "нова"];
+
+/// Оклик — приветствие, которым зовут, а не здороваются.
+///
+/// Список — только образцы: похожие слова узнаются сами, см. `close_enough`.
+#[cfg(desktop)]
+const WAKE_CALLS: &[&str] = &[
+    "хэй", "хей", "хай", "хэи", "хеи", "эй", "эи", "ай", "ой", "hey", "hei", "hай",
+];
+
+/// Насколько слово похоже на образец: сколько букв надо поменять.
+///
+/// Расшифровка одного и того же оклика гуляет от раза к разу — «хэй», «эй»,
+/// «ай», «хей», — и перечислять написания бесполезно: следующее всё равно
+/// окажется новым. Одна буква расхождения ловит их все и при этом не задевает
+/// обычную речь: до «хэй» на одну букву не дотягивается ни одно частое слово.
+///
+/// Считается расстояние Левенштейна с ранним выходом — слова здесь в три-четыре
+/// буквы, дороже ничего не нужно.
+#[cfg(desktop)]
+fn close_enough(word: &str, sample: &str, allowed: usize) -> bool {
+    if word == sample {
+        return true;
+    }
+    let (a, b): (Vec<char>, Vec<char>) = (word.chars().collect(), sample.chars().collect());
+    if a.len().abs_diff(b.len()) > allowed {
+        return false;
+    }
+
+    let mut previous: Vec<usize> = (0..=b.len()).collect();
+    for (i, ai) in a.iter().enumerate() {
+        let mut current = vec![i + 1];
+        for (j, bj) in b.iter().enumerate() {
+            let cost = usize::from(ai != bj);
+            current.push(
+                (previous[j] + cost)
+                    .min(previous[j + 1] + 1)
+                    .min(current[j] + 1),
+            );
+        }
+        // Вся строка хуже допуска — дальше будет только хуже.
+        if current.iter().min().copied().unwrap_or(usize::MAX) > allowed {
+            return false;
+        }
+        previous = current;
+    }
+    previous[b.len()] <= allowed
+}
+
+/// Оклик ли это — пусть и расслышанный неточно.
+#[cfg(desktop)]
+fn is_call(word: &str) -> bool {
+    // Короткие слова с допуском в букву цепляют слишком многое: «он», «а»,
+    // «эх». Поэтому образцы длиной от трёх букв сравниваем нестрого, а «эй» —
+    // только точно.
+    WAKE_CALLS.iter().any(|sample| {
+        if sample.chars().count() >= 3 {
+            close_enough(word, sample, 1)
+        } else {
+            word == *sample
+        }
+    })
+}
+
+/// Имя ли это — после того, как прозвучал оклик.
+///
+/// После оклика узнаём щедро, и вот почему это безопасно. Чтобы сюда дойти,
+/// фраза уже должна начинаться с «эй», «хэй», «ай» — с оклика, а не с обычных
+/// слов. В комнате так почти не говорят, а к программе — только так. Значит,
+/// цена ошибки здесь мала (помощник откроется зря), а цена строгости велика:
+/// именно на строгости зов и не срабатывал девять раз из десяти.
+///
+/// Поэтому считаем именем всё короткое на «н» — «но», «ну», «на», «ной», «ноу»,
+/// как бы его ни расслышали, — плюс всё, что на букву отличается от образцов.
+#[cfg(desktop)]
+fn is_name_after_call(word: &str) -> bool {
+    if WAKE_NAMES.iter().any(|sample| close_enough(word, sample, 1)) {
+        return true;
+    }
+    if WAKE_NAMES_AFTER_GREETING.contains(&word) {
+        return true;
+    }
+
+    // Три буквы — предел: «ноа» и всё, во что оно превращается, короче. Слова
+    // подлиннее («надо», «наверное», «Настя») именем уже не считаем.
+    let letters = word.chars().count();
+    letters <= 3
+        && word
+            .chars()
+            .next()
+            .map(|first| first == 'н' || first == 'n')
+            .unwrap_or(false)
+}
+
+/// Имя ли это, сказанное само по себе, без оклика.
+///
+/// Здесь строже, чем после оклика, и по понятной причине: обращением считается
+/// начало обычной фразы, а начинаются они как угодно. Поэтому точное написание
+/// принимается всегда, а близкое — только когда за именем пауза.
+///
+/// Пауза и решает дело. «Ноа, что такое альбедо» — обращение: человек назвал
+/// имя и остановился, расшифровка поставила запятую. «Ночь была тихая» — не
+/// обращение: там слово тянет за собой продолжение, и никакой паузы за ним нет.
+/// Без этой проверки пришлось бы выбирать между «зовёшь и не слышит» и
+/// «срабатывает на каждое второе слово на „но“».
+#[cfg(desktop)]
+fn is_name_alone(word: &str, paused_after: bool) -> bool {
+    if WAKE_NAMES.contains(&word) {
+        return true;
+    }
+    if !paused_after {
+        return false;
+    }
+    // Двухбуквенные «но», «ну», «на» сюда не попадают намеренно: даже с паузой
+    // они начинают слишком много обычных фраз.
+    word.chars().count() >= 3
+        && WAKE_NAMES
+            .iter()
+            .any(|sample| close_enough(word, sample, 1))
+}
+
+/// Слипшийся оклик с именем: «хэйноа», «эйноа» — распознаватель и так умеет.
+#[cfg(desktop)]
+const WAKE_GLUED: &[&str] = &["хэйноа", "хейноа", "эйноа", "хайноа", "heynoa", "хэйноя"];
+
+/// Написания, которые засчитываются только сразу после оклика.
+///
+/// «Ноа» безударное, и распознаватель постоянно подменяет его обычными словами:
+/// «эй, но», «эй, ну», «эй, на». Считать их именем где угодно нельзя — так
+/// начинается едва ли не каждая вторая фраза в комнате. Но после «эй» или «хэй»
+/// в самом начале фразы других кандидатов нет: к программе обратились.
+#[cfg(desktop)]
+const WAKE_NAMES_AFTER_GREETING: &[&str] = &[
+    "но", "ну", "на", "ной", "ноя", "нуа", "ноу", "нау", "нора", "нюа", "know", "now", "no",
+];
+
+/// Отделяет обращение от вопроса.
+///
+/// Возвращает то, что сказано после имени: «хэй ноа, что такое альбедо» даёт
+/// «что такое альбедо». Пустая строка — значит позвали и замолчали, тогда
+/// помощник просто начинает слушать.
+#[cfg(desktop)]
+fn wake_split(text: &str) -> Option<String> {
+    // Слова — для узнавания, границы — чтобы вернуть вопрос как он был сказан.
+    //
+    // Возвращать разобранные слова нельзя: обращение отрезается вместе со
+    // знаками препинания и заглавными, и модель получает «что такое альбедо»
+    // вместо «Что такое альбедо?». Разница видна в ответах — на обкромсанном
+    // вопросе они заметно беспомощнее, что вживую и наблюдалось: на клавишу
+    // помощник отвечал толково, а на зов по имени — бестолково, хотя модель
+    // и там и там одна.
+    let mut words: Vec<(String, usize)> = Vec::new();
+    let mut word = String::new();
+    for (at, letter) in text.char_indices() {
+        if letter.is_alphanumeric() {
+            word.extend(letter.to_lowercase());
+        } else if !word.is_empty() {
+            words.push((std::mem::take(&mut word), at));
+        }
+    }
+    if !word.is_empty() {
+        words.push((word, text.len()));
+    }
+    if words.is_empty() {
+        return None;
+    }
+
+    // Всё, что сказано после обращения, — слово в слово, без ведущих знаков.
+    let tail = |ends_at: usize| -> String {
+        text[ends_at..]
+            .trim_start_matches(|c: char| !c.is_alphanumeric())
+            .trim()
+            .to_string()
+    };
+
+    // Имя в самом начале — уже обращение: «Ноа, что такое альбедо».
+    // Пауза — это знак препинания или конец фразы, а не просто пробел. Пробел
+    // стоит после любого слова и ничего не значит; запятая после имени — значит.
+    let paused_after_first = text[words[0].1..]
+        .chars()
+        .next()
+        .map(|c| !c.is_alphanumeric() && !c.is_whitespace())
+        .unwrap_or(true);
+    if is_name_alone(&words[0].0, paused_after_first) {
+        return Some(tail(words[0].1));
+    }
+
+    // Оклик и имя, слипшиеся в одно слово: паузы между ними нет, и расшифровка
+    // то разделяет их, то нет.
+    if WAKE_GLUED
+        .iter()
+        .any(|sample| close_enough(&words[0].0, sample, 1))
+    {
+        return Some(tail(words[0].1));
+    }
+
+    // Иначе ищем пару «приветствие + имя», но только в начале фразы: имя,
+    // произнесённое в середине разговора о чём-то другом, обращением не является.
+    // После приветствия имя узнаём щедрее — см. `WAKE_NAMES_AFTER_GREETING`.
+    for i in 0..words.len().saturating_sub(1).min(3) {
+        let called = is_call(&words[i].0);
+        let greeted = called || WAKE_GREETINGS.contains(&words[i].0.as_str());
+        let named = WAKE_NAMES.contains(&words[i + 1].0.as_str())
+            // Спорные написания — только после оклика: «привет, ну как дела»
+            // и «окей, но зачем» обращением не являются, а «эй, ну» — является.
+            || (called && is_name_after_call(&words[i + 1].0));
+        if greeted && named {
+            return Some(tail(words[i + 1].1));
+        }
+    }
+    None
+}
+
+/// Слова, которыми разговор заканчивают, где бы они ни стояли во фразе.
+///
+/// Все они настолько однозначны, что посреди вопроса не встречаются: «до
+/// связи», «до свидания», «спасибо».
+#[cfg(desktop)]
+const FAREWELL_ANYWHERE: &[&str] = &[
+    "спасибо",
+    "до свидания",
+    "досвидания",
+    "до завтра",
+    "до встречи",
+    "до связи",
+    "до скорого",
+    "всего доброго",
+    "всего хорошего",
+    "прощай",
+    "прощаем",
+    "прощаюсь",
+    // «Давай прощаться», «пора прощаться» — намерение то же самое.
+    "прощаться",
+    "заканчиваем",
+    "заканчивай",
+    "закончим на этом",
+    "на этом всё",
+    "на этом все",
+    "бывай",
+    "удачи",
+    "спокойной ночи",
+    "хорошего дня",
+    "хорошего вечера",
+];
+
+/// Прощания, которые считаются только если ими фраза и исчерпывается.
+///
+/// «Пока» — это ещё и союз: «пока я думал», «пока не понял», «подожди, пока
+/// объяснишь». Проверка на вхождение обрывала бы разговор ровно посреди
+/// вопроса, поэтому такие слова засчитываются только когда сказано именно
+/// прощание и ничего больше.
+#[cfg(desktop)]
+const FAREWELL_ALONE: &[&str] = &["пока", "покеда", "чао", "бай", "адьос"];
+
+/// Слова, которые в прощании ничего не значат и мешают его узнать:
+/// «ну всё, пока», «ладно, пока», «ок, пока».
+#[cfg(desktop)]
+const FILLER: &[&str] = &[
+    "ну", "всё", "все", "ладно", "хорошо", "ок", "окей", "давай", "тогда", "и", "а", "так",
+];
+
+/// Прощаются ли с программой.
 #[cfg(desktop)]
 fn is_farewell(text: &str) -> bool {
-    text.to_lowercase().contains("спасибо")
+    let lower = text.to_lowercase();
+    if FAREWELL_ANYWHERE.iter().any(|word| lower.contains(word)) {
+        return true;
+    }
+
+    // Убираем знаки и незначащие слова — остаться должно только прощание.
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|w| !w.is_empty() && !FILLER.contains(w))
+        .collect();
+
+    if !words.is_empty() && words.iter().all(|w| FAREWELL_ALONE.contains(w)) {
+        return true;
+    }
+
+    closed_with_goodbye(&lower)
+}
+
+/// Стоит ли «пока» в конце мысли, а не в начале придаточного.
+///
+/// Разницу слышно по паузе, а в расшифровке она видна как знак препинания.
+/// «Давай, пока, раз всё хорошо» — прощание: после «пока» человек остановился.
+/// «Пока я думал» — не прощание: там слово тянет за собой продолжение и никакой
+/// паузы за ним нет. Без этой проверки пришлось бы выбирать между «не узнаём
+/// прощание» и «обрываем разговор посреди вопроса»; знак препинания разводит
+/// эти случаи там, где список слов бессилен.
+#[cfg(desktop)]
+fn closed_with_goodbye(lower: &str) -> bool {
+    for word in FAREWELL_ALONE {
+        let mut from = 0;
+        while let Some(at) = lower[from..].find(*word) {
+            let start = from + at;
+            let end = start + word.len();
+            from = end;
+
+            // Слово целиком, а не кусок другого: «пока» в «покажи» — не прощание.
+            let before_ok = lower[..start]
+                .chars()
+                .next_back()
+                .map_or(true, |c| !c.is_alphabetic());
+            if !before_ok {
+                continue;
+            }
+            let after = lower[end..].trim_start_matches([' ', '\u{a0}']);
+            match after.chars().next() {
+                // Фраза кончилась прощанием.
+                None => return true,
+                // За прощанием пауза — значит, мысль на нём закрыта.
+                Some(c) if !c.is_alphanumeric() => return true,
+                _ => continue,
+            }
+        }
+    }
+    false
 }
 
 /// Начинает разговор без рук: слушаем, отвечаем, снова слушаем.
@@ -496,8 +908,11 @@ fn start_conversation(app: &tauri::AppHandle) {
     if CONVERSATION.swap(true, Ordering::SeqCst) {
         return;
     }
+    // Микрофон один: фоновое слушание уступает разговору.
+    stop_wake();
 
-    let Some(phrases) = voice::stt::start_conversation(&input_device(app)) else {
+    let Some(phrases) = voice::stt::start_conversation(&input_device(app), voice::stt::Listening::Talk)
+    else {
         CONVERSATION.store(false, Ordering::SeqCst);
         overlay::hide_hud(app);
         return;
@@ -529,11 +944,13 @@ fn start_conversation(app: &tauri::AppHandle) {
                 voice::stt::pause_conversation(true);
                 let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
 
-                if let Some(text) = ask_aloud(&app, wav) {
-                    if is_farewell(&text) {
-                        log::info!("услышал «спасибо» — разговор окончен");
+                match hear(&app, wav) {
+                    Some(text) if is_farewell(&text) => {
+                        log::info!("попрощались («{text}») — разговор окончен");
                         break;
                     }
+                    Some(text) => answer_aloud(&app, &text),
+                    None => {}
                 }
 
                 if !CONVERSATION.load(Ordering::SeqCst) {
@@ -548,6 +965,162 @@ fn start_conversation(app: &tauri::AppHandle) {
         })
         .ok();
 }
+
+/// Слушаем ли комнату в ожидании обращения.
+#[cfg(desktop)]
+static WAKE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Начинает слушать комнату, чтобы услышать «хэй, ноа».
+///
+/// Не начинает, если голос выключен, обращение отключено галочкой, распознавание
+/// не скачано или прямо сейчас идёт разговор: микрофон один, и занят он может
+/// быть только чем-то одним.
+#[cfg(desktop)]
+pub(crate) fn start_wake(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+
+    let (enabled, device) = {
+        let state = app.state::<AppState>();
+        let config = state.config();
+        (
+            config.voice.enabled && config.voice.wake_word,
+            config.voice.input_device.clone(),
+        )
+    };
+    if !enabled || CONVERSATION.load(Ordering::SeqCst) || !voice::whisper::ready(app) {
+        return;
+    }
+    if WAKE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    // Распознавание понадобится на каждую фразу — поднимаем сервер заранее.
+    voice::whisper::warm(app);
+
+    let Some(phrases) = voice::stt::start_conversation(&device, voice::stt::Listening::Wake) else {
+        WAKE.store(false, Ordering::SeqCst);
+        return;
+    };
+
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-wake".into())
+        .spawn(move || {
+            log::info!("слушаю обращение по имени «Ноа»");
+
+            for heard in phrases {
+                if !WAKE.load(Ordering::SeqCst) {
+                    break;
+                }
+                // Долгая тишина в комнате — обычное дело: ждём дальше.
+                let voice::stt::Heard::Phrase(wav) = heard else {
+                    continue;
+                };
+
+                let Some(text) = hear_hinted(&app, wav, WAKE_HINT) else {
+                    continue;
+                };
+                let Some(question) = wake_split(&text) else {
+                    // Говорили не с нами — забываем и слушаем дальше.
+                    continue;
+                };
+
+                log::info!("позвали: «{text}»");
+                stop_wake();
+
+                // Показываемся немедленно, ещё до ответа. Раньше индикатор
+                // появлялся только вместе с разговором — то есть после того,
+                // как модель додумает; всё это время на зов не отзывалось
+                // ничего, и выглядело это как «не услышал».
+                overlay::show_hud(&app, "thinking");
+
+                // Вопрос сказан той же фразой — отвечаем на него сразу.
+                // Позвали и замолчали — просто слушаем дальше, вопрос впереди.
+                if question.trim().is_empty() {
+                    log::info!("позвали без вопроса — жду его");
+                } else {
+                    answer_aloud(&app, &question);
+                }
+                start_conversation(&app);
+                break;
+            }
+        })
+        .ok();
+}
+
+/// Перестаёт слушать комнату.
+#[cfg(desktop)]
+pub(crate) fn stop_wake() {
+    use std::sync::atomic::Ordering;
+
+    if !WAKE.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    voice::stt::stop_conversation();
+}
+
+/// Включает или выключает ожидание обращения — и говорит об этом.
+///
+/// Выключение не просто перестаёт слушать: оно ещё и останавливает сервер
+/// расшифровки, освобождая полтора гигабайта видеопамяти. В этом и смысл
+/// переключателя — не в том, чтобы программа молчала, а в том, чтобы она
+/// не занимала машину, когда не нужна.
+#[cfg(desktop)]
+fn toggle_wake(app: &tauri::AppHandle) {
+    let now_on = {
+        let state = app.state::<AppState>();
+        let next = !state.config().voice.wake_word;
+        state.config_mut().voice.wake_word = next;
+        next
+    };
+
+    {
+        let state = app.state::<AppState>();
+        if let Err(err) = commands::persist(app, &state) {
+            log::warn!("настройка пробуждения не сохранилась: {err}");
+        }
+    }
+
+    // Окно настройки, если оно открыто, должно показать это галочкой: человек
+    // нажал сочетание и смотрит в него — расхождение читается как «не сработало».
+    {
+        use tauri::Emitter;
+        let _ = app.emit_to(overlay::ONBOARDING_LABEL, "voice:wake", now_on);
+    }
+
+    if now_on {
+        log::info!("ожидание обращения включено");
+        start_wake(app);
+        // Тот же сигнал, что и на появление помощника: включили — он здесь.
+        voice::chime_open();
+    } else {
+        log::info!("ожидание обращения выключено");
+        stop_wake();
+        // Идущий разговор трогать нельзя: там распознавание нужно прямо сейчас.
+        // Память освободится, когда он закончится.
+        if !CONVERSATION.load(std::sync::atomic::Ordering::SeqCst) {
+            voice::release_speech();
+        }
+        voice::chime();
+    }
+}
+
+/// Перестроить слушателя после смены настроек.
+#[cfg(desktop)]
+pub(crate) fn restart_wake(app: &tauri::AppHandle) {
+    stop_wake();
+    start_wake(app);
+
+    // Выключили галочкой — освобождаем видеопамять, как и при выключении
+    // сочетанием клавиш. Разговор при этом трогать нельзя: там сервер нужен.
+    use std::sync::atomic::Ordering;
+    if !WAKE.load(Ordering::SeqCst) && !CONVERSATION.load(Ordering::SeqCst) {
+        voice::release_speech();
+    }
+}
+
+#[cfg(not(desktop))]
+pub(crate) fn restart_wake(_app: &tauri::AppHandle) {}
 
 /// Заканчивает разговор: микрофон закрывается, клавиши работают как прежде.
 #[cfg(desktop)]
@@ -576,6 +1149,24 @@ fn end_conversation(app: &tauri::AppHandle, signal: bool) {
         // и без звука непонятно, закончился разговор или программа задумалась.
         voice::chime();
     }
+
+    // И снова ждём обращения — но не раньше, чем отзвучит сигнал: иначе
+    // услышим его же.
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-wake-again".into())
+        .spawn(move || {
+            std::thread::sleep(voice::chime_length() + std::time::Duration::from_millis(400));
+            start_wake(&app);
+
+            // Ожидание выключено — значит, распознавание больше не нужно, и
+            // держать под него видеопамять после разговора незачем.
+            use std::sync::atomic::Ordering;
+            if !WAKE.load(Ordering::SeqCst) && !CONVERSATION.load(Ordering::SeqCst) {
+                voice::release_speech();
+            }
+        })
+        .ok();
 }
 
 #[cfg(not(desktop))]
@@ -620,8 +1211,17 @@ pub(crate) fn apply_autostart(_app: &tauri::AppHandle) {}
 /// Отдельным потоком: здесь и сеть, и загрузка гигабайтов с диска, а запуск
 /// программы ждать этого не должен — перехват выделения работает и без модели,
 /// просто первый ответ придёт позже.
+/// Идёт ли прямо сейчас подготовка модели.
+///
+/// Окно настройки сохраняет их по одной на каждое изменённое поле, и на смену
+/// модели прилетало три одинаковых просьбы подряд — три загрузки одного и того
+/// же и три уборки следом. Один заход за раз; если за время работы выбор успел
+/// смениться, заход повторяется уже с новым.
 #[cfg(desktop)]
-fn wake_local_model(app: &tauri::AppHandle) {
+static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(desktop)]
+pub(crate) fn wake_local_model(app: &tauri::AppHandle) {
     let (endpoint, model) = {
         let state = app.state::<AppState>();
         let config = state.config();
@@ -639,6 +1239,11 @@ fn wake_local_model(app: &tauri::AppHandle) {
     }
     let host = crate::ollama::host_from(&endpoint);
     let app = app.clone();
+
+    use std::sync::atomic::Ordering;
+    if WARMING.swap(true, Ordering::SeqCst) {
+        return;
+    }
 
     tauri::async_runtime::spawn(async move {
         /* 1. Сервер. */
@@ -719,6 +1324,17 @@ fn wake_local_model(app: &tauri::AppHandle) {
             Ok(()) => log::info!("модель {model} загружена в память и ждёт вопросов"),
             Err(err) => log::warn!("{err}"),
         }
+
+        /* 4. Уборка: в видеопамяти должна остаться одна модель — эта. */
+        crate::ollama::unload_others(&host, &model).await;
+
+        WARMING.store(false, Ordering::SeqCst);
+
+        // Пока грелись, выбор мог смениться — тогда всё сначала, уже с новым.
+        let chosen = app.state::<AppState>().config().ai.model.clone();
+        if !chosen.trim().is_empty() && chosen != model {
+            wake_local_model(&app);
+        }
     });
 }
 
@@ -772,4 +1388,125 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     .build(app)?;
 
     Ok(())
+}
+
+#[cfg(all(test, desktop))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calling_by_name_splits_off_the_question() {
+        // Вопрос возвращается как сказан — со знаками и заглавными.
+        assert_eq!(
+            wake_split("Хэй, Ноа, что такое альбедо?").as_deref(),
+            Some("что такое альбедо?")
+        );
+        assert_eq!(
+            wake_split("Хэй, Ноа. Что такое альбедо?").as_deref(),
+            Some("Что такое альбедо?")
+        );
+        // Распознавание пишет имя как придётся — ловим все написания.
+        assert_eq!(wake_split("Эй, Ной, привет").as_deref(), Some("привет"));
+        assert_eq!(wake_split("Hey Noah, what is albedo").as_deref(), Some("what is albedo"));
+        // Позвали и замолчали — вопроса нет, но обращение есть.
+        assert_eq!(wake_split("Хэй, Ноа").as_deref(), Some(""));
+        // Имя в начале — уже обращение.
+        assert_eq!(wake_split("Ноа, объясни").as_deref(), Some("объясни"));
+        // Имени одного достаточно — оклик не обязателен.
+        assert_eq!(wake_split("Ноа").as_deref(), Some(""));
+        assert_eq!(
+            wake_split("Ноа, что такое альбедо?").as_deref(),
+            Some("что такое альбедо?")
+        );
+        // Близкое написание проходит, когда за именем пауза.
+        assert_eq!(wake_split("Ноя, слышишь?").as_deref(), Some("слышишь?"));
+        // Так это слышится на самом деле — из живого разговора с программой.
+        assert_eq!(wake_split("Эй, НО, привет!").as_deref(), Some("привет!"));
+        assert_eq!(wake_split("Эй, ну привет.").as_deref(), Some("привет."));
+        // Оклик расслышан неточно — это всё равно оклик.
+        assert_eq!(wake_split("Ай, Ноа, меня слышно?").as_deref(), Some("меня слышно?"));
+        assert_eq!(wake_split("Хей Ноя, объясни").as_deref(), Some("объясни"));
+        // Всё, во что распознаватель успел превратить «хэй, ноа» вживую.
+        assert_eq!(wake_split("Эй, НО, привет").as_deref(), Some("привет"));
+        assert_eq!(wake_split("Ой, ну, что там").as_deref(), Some("что там"));
+        assert_eq!(wake_split("хэйноа что такое альбедо").as_deref(), Some("что такое альбедо"));
+        assert_eq!(wake_split("Хай, Ноу, слышишь?").as_deref(), Some("слышишь?"));
+        assert_eq!(
+            wake_split("Эй, но а ты слышишь меня?").as_deref(),
+            Some("а ты слышишь меня?")
+        );
+    }
+
+    #[test]
+    fn a_room_conversation_is_not_a_summons() {
+        assert!(wake_split("что такое альбедо").is_none());
+        assert!(wake_split("").is_none());
+        // Имя посреди чужого разговора обращением не считается.
+        assert!(wake_split("вчера я говорил с Ноа про работу").is_none());
+        assert!(wake_split("привет, как дела").is_none());
+        // Слова, которые распознаватель подсовывает вместо имени, сами по себе
+        // обращением не считаются — иначе сработает половина фраз в комнате.
+        assert!(wake_split("ну и что теперь").is_none());
+        assert!(wake_split("но это же неправда").is_none());
+        assert!(wake_split("на выходных поедем").is_none());
+        // Спорное написание идёт после обычного приветствия, а не после оклика.
+        assert!(wake_split("привет, ну как дела").is_none());
+        assert!(wake_split("окей, но зачем").is_none());
+        // Похожие на оклик обрывки обычной речи обращением не становятся.
+        assert!(wake_split("он ноутбук принёс").is_none());
+        assert!(wake_split("да нет, наверное").is_none());
+        // После оклика именем считается только короткое слово на «н».
+        assert!(wake_split("эй, наверное не стоит").is_none());
+        assert!(wake_split("эй, Настя, подожди").is_none());
+        assert!(wake_split("эй, послушай").is_none());
+        // Похожие слова без паузы за ними именем не считаются.
+        assert!(wake_split("ночь была тихая").is_none());
+        assert!(wake_split("нога болит").is_none());
+        assert!(wake_split("но это же неправда").is_none());
+        assert!(wake_split("ну ладно, поехали").is_none());
+    }
+
+    #[test]
+    fn a_goodbye_with_a_tail_still_ends_the_talk() {
+        // Живая речь редко кончается ровно на прощании — за ним тянется
+        // объяснение, и разговор всё равно закончен.
+        assert!(is_farewell("давай, пока, раз все хорошо"));
+        assert!(is_farewell("Все, прощаемся с тобой"));
+        assert!(is_farewell("ну ладно, пока!"));
+        assert!(is_farewell("удачи тебе"));
+        // Живьём сказанное — из настоящего разговора, где помощник не понял.
+        assert!(is_farewell("Давай прощаться."));
+        assert!(is_farewell("Все, заканчивай, хватит анекдотов."));
+    }
+
+    #[test]
+    fn pauseless_poka_is_a_conjunction() {
+        // То же слово без паузы за ним — союз, а не прощание.
+        assert!(!is_farewell("пока я думал, ты уже ответил"));
+        assert!(!is_farewell("подожди, пока объяснишь до конца"));
+        // И оно же внутри другого слова.
+        assert!(!is_farewell("покажи это на примере"));
+    }
+
+    #[test]
+    fn goodbyes_end_the_talk() {
+        assert!(is_farewell("Спасибо"));
+        assert!(is_farewell("понял, спасибо большое"));
+        assert!(is_farewell("До связи"));
+        assert!(is_farewell("ну всё, до завтра"));
+        assert!(is_farewell("Пока"));
+        assert!(is_farewell("ну всё, пока"));
+        assert!(is_farewell("ладно, пока-пока"));
+    }
+
+    #[test]
+    fn a_conjunction_is_not_a_goodbye() {
+        // «Пока» в середине фразы — союз, а не прощание. Обрывать на нём
+        // разговор значило бы бросать человека посреди вопроса.
+        assert!(!is_farewell("пока я думал, забыл вопрос"));
+        assert!(!is_farewell("подожди, пока объяснишь"));
+        assert!(!is_farewell("а что было пока меня не было"));
+        assert!(!is_farewell("расскажи про альбедо"));
+        assert!(!is_farewell(""));
+    }
 }

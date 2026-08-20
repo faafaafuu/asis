@@ -89,6 +89,8 @@
           <input class="ob__underline" data-el="apiKey" type="password" autocomplete="off"
                  data-i18n-ph="key.placeholder" placeholder="вставьте ключ" />
           <span class="ob__hint" data-el="keyHint"></span>
+          <button class="ob__link" type="button" data-el="keyPage" hidden
+                  data-i18n="key.where">Где взять ключ</button>
         </section>
 
         <!-- Список моделей — только для Ollama: у неё они лежат на этом же
@@ -177,6 +179,14 @@
           <p class="ob__hint" data-i18n="speech.lead">
             Зажмите левый Alt с пробелом и говорите. Распознавание работает на этом компьютере.
           </p>
+          <label class="ob__check">
+            <input type="checkbox" data-el="wakeWord" />
+            <span class="ob__check-text">
+              <span data-i18n="speech.wake">Отзываться на имя «Ноа»</span>
+              <span class="ob__hint" data-i18n="speech.wakeHint">Скажите «Ноа» — и помощник начнёт слушать; можно сразу с вопросом: «Ноа, что такое альбедо». Микрофон для этого слушает постоянно, распознавание идёт на этом компьютере, наружу ничего не уходит. Ctrl&nbsp;+&nbsp;Shift&nbsp;+&nbsp;Alt&nbsp;+&nbsp;Пробел включает и выключает ожидание, не открывая настройки, — и освобождает память, когда помощник не нужен.</span>
+            </span>
+          </label>
+
           <span class="ob__label" data-i18n="speech.device">Микрофон</span>
           <span class="ob__select">
             <select class="ob__underline" data-el="speechDevice"></select>
