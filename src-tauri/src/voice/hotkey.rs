@@ -111,7 +111,7 @@ unsafe extern "system" fn keyboard_proc(
 
     let pass = |_| unsafe { CallNextHookEx(None, code, wparam, lparam) };
 
-    if code != HC_ACTION as i32 || !ARMED.load(Ordering::Relaxed) {
+    if code != HC_ACTION as i32 {
         return pass(());
     }
 
@@ -140,6 +140,23 @@ unsafe extern "system" fn keyboard_proc(
 
     // Именно левый Alt: правый оставляем системе и раскладкам, где он AltGr.
     let alt = unsafe { (GetAsyncKeyState(VK_LMENU.0 as i32) as u16 & 0x8000) != 0 };
+
+    // Что именно мы забираем себе.
+    //
+    // Пробел — только пока попап на экране: в остальное время это обычная
+    // клавиша, и отбирать её у всей системы недопустимо.
+    //
+    // Левый Alt с пробелом — всегда, даже когда попапа нет: этим сочетанием
+    // задают вопрос голосом с чистого места, окно откроется само. Цена
+    // осознанная: в Windows Alt+Space открывает системное меню окна, и пока
+    // Суфлёр работает, оно этим сочетанием открываться не будет.
+    //
+    // И отпускание пробела, если мы уже пишем: клавиши могли отпустить в любом
+    // порядке, а пропущенное отпускание оставило бы микрофон включённым.
+    let ours = ARMED.load(Ordering::Relaxed) || alt || RECORDING.load(Ordering::Relaxed);
+    if !ours {
+        return pass(());
+    }
 
     if down {
         if SPACE_HELD.swap(true, Ordering::Relaxed) {

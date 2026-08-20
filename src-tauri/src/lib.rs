@@ -219,11 +219,15 @@ pub fn run() {
         });
 }
 
+/// Идёт ли сейчас разговор без рук.
+#[cfg(desktop)]
+static CONVERSATION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Слушает клавиши голосового режима и раздаёт работу.
 ///
 /// Хук обязан отвечать мгновенно, поэтому он только присылает сюда, что нажали,
-/// а всё остальное — чтение вслух, запись голоса — происходит здесь, в обычном
-/// потоке, где можно не торопиться.
+/// а всё остальное — чтение вслух, запись голоса, разговор — происходит здесь,
+/// в обычном потоке, где можно не торопиться.
 #[cfg(desktop)]
 fn listen_for_voice_keys(app: &tauri::AppHandle) {
     use tauri::Emitter;
@@ -243,9 +247,15 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         log::info!("пробел: читаю вслух");
                         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:speak", ());
                     }
-                    // Зажали левый Alt с пробелом — пишем, пока держат.
+                    // Зажали левый Alt с пробелом — пишем, пока держат. Работает
+                    // и при закрытом окне: тогда вопрос задаётся с чистого
+                    // места, а окно откроется само вместе с ответом.
                     voice::hotkey::Event::TalkStart => {
                         log::info!("Alt+пробел: слушаю");
+
+                        // Разговор, если он шёл, уступает клавише: человек взял
+                        // слово сам, и слушать его надо с этой секунды.
+                        stop_conversation(&app);
 
                         // Замолчать, раз с нами заговорили.
                         //
@@ -261,21 +271,15 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         // буфера, что бы мы ни делали. Включив микрофон сразу,
                         // мы записывали бы этот хвост, и в начало вопроса
                         // попадало слово-другое, сказанное самой программой.
-                        //
-                        // Ждём только если действительно говорили: молчаливый
-                        // случай — обычный, и задерживать его нечем.
                         if was_speaking {
                             std::thread::sleep(std::time::Duration::from_millis(250));
                         }
-                        let device = {
-                            let state = app.state::<AppState>();
-                            let device = state.config().voice.input_device.clone();
-                            device
-                        };
-                        voice::stt::start(&device);
+
+                        voice::stt::start(&input_device(&app));
                         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
                     }
-                    // Отпустили — расшифровываем и отдаём окну как вопрос.
+                    // Отпустили — расшифровываем, задаём вопрос и переходим
+                    // к разговору без клавиш.
                     voice::hotkey::Event::TalkStop => {
                         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
 
@@ -285,39 +289,170 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             continue;
                         };
 
-                        let (language, term) = {
-                            let state = app.state::<AppState>();
-                            let language = state.config().ui.language.clone();
-                            // Выделенное слово — подсказка распознавателю:
-                            // разговор идёт про него, и в вопросе оно прозвучит.
-                            let term = state.selection().map(|s| s.text).unwrap_or_default();
-                            (language, term)
-                        };
-                        // Поток обычный, а расшифровка ходит по сети (пусть и к
-                        // себе же) — ждём её здесь, а не занимаем задачу Tauri.
-                        let spoken = tauri::async_runtime::block_on(
-                            voice::whisper::transcribe(&app, wav, &language, &term),
-                        );
-                        match spoken {
-                            Ok(text) if !text.is_empty() => {
-                                log::info!("расшифровано: «{text}»");
-                                let _ = app.emit_to(overlay::POPUP_LABEL, "voice:question", text);
-                            }
-                            Ok(_) => log::info!("расшифровка пустая — тишина в записи"),
-                            Err(err) => {
-                                log::warn!("расшифровка не удалась: {err}");
-                                let _ = app.emit_to(
-                                    overlay::POPUP_LABEL,
-                                    "voice:error",
-                                    err.to_string(),
-                                );
-                            }
+                        if ask_aloud(&app, wav).is_some() {
+                            start_conversation(&app);
                         }
                     }
                 }
             }
         })
         .ok();
+}
+
+/// Микрофон из настроек.
+#[cfg(desktop)]
+fn input_device(app: &tauri::AppHandle) -> String {
+    let state = app.state::<AppState>();
+    let device = state.config().voice.input_device.clone();
+    device
+}
+
+/// Расшифровывает запись, задаёт вопрос и ждёт, пока ответ дочитают вслух.
+///
+/// Возвращает сказанное — или ничего, если расслышать не удалось. Ждать конца
+/// ответа обязательно: следующая фраза человека должна попасть в тишину, а не
+/// поверх ответа на предыдущую.
+#[cfg(desktop)]
+fn ask_aloud(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
+    use tauri::Emitter;
+
+    let (language, term) = {
+        let state = app.state::<AppState>();
+        let language = state.config().ui.language.clone();
+        // Выделенное слово — подсказка распознавателю: разговор идёт про него,
+        // и в вопросе оно прозвучит.
+        let term = state.selection().map(|s| s.text).unwrap_or_default();
+        (language, term)
+    };
+
+    // Поток обычный, а расшифровка ходит по сети (пусть и к себе же) — ждём
+    // её здесь, а не занимаем задачу Tauri.
+    let spoken = tauri::async_runtime::block_on(voice::whisper::transcribe(
+        app, wav, &language, &term,
+    ));
+
+    let text = match spoken {
+        Ok(text) if !text.is_empty() => text,
+        Ok(_) => {
+            log::info!("расшифровка пустая — тишина в записи");
+            return None;
+        }
+        Err(err) => {
+            log::warn!("расшифровка не удалась: {err}");
+            let _ = app.emit_to(overlay::POPUP_LABEL, "voice:error", err.to_string());
+            return None;
+        }
+    };
+    log::info!("расшифровано: «{text}»");
+
+    if overlay::is_popup_visible(app) {
+        let _ = app.emit_to(overlay::POPUP_LABEL, "voice:question", text.clone());
+    } else {
+        // Окна нет — вопрос задан с чистого места, окно откроется этим вопросом.
+        if let Err(err) = overlay::show_for_voice(app, text.clone()) {
+            log::error!("не удалось открыть окно на голосовой вопрос: {err}");
+            return None;
+        }
+    }
+
+    wait_until_answered();
+    Some(text)
+}
+
+/// Ждёт, пока ответ начнут и закончат читать вслух.
+#[cfg(desktop)]
+fn wait_until_answered() {
+    use std::time::{Duration, Instant};
+
+    // Пока модель думает, речи ещё нет. Ждём её начала, но не вечно: ответа
+    // может не быть вовсе — сеть, ошибка, выключенный голос.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline && !voice::speaking() {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(300);
+    while Instant::now() < deadline && voice::speaking() {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    // И ещё немного: последние доли секунды звука доигрывают из буфера звуковой
+    // системы уже после того, как мы перестали его туда отдавать.
+    std::thread::sleep(Duration::from_millis(400));
+}
+
+/// Слово, которым человек заканчивает разговор.
+///
+/// Одно и то же во всех видах вежливости: «спасибо», «понял, спасибо», «спасибо
+/// большое». Проверяем вхождение, а не совпадение целиком — живая речь редко
+/// состоит из одного слова.
+#[cfg(desktop)]
+fn is_farewell(text: &str) -> bool {
+    text.to_lowercase().contains("спасибо")
+}
+
+/// Начинает разговор без рук: слушаем, отвечаем, снова слушаем.
+#[cfg(desktop)]
+fn start_conversation(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    use tauri::Emitter;
+
+    if CONVERSATION.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    let Some(phrases) = voice::stt::start_conversation(&input_device(app)) else {
+        CONVERSATION.store(false, Ordering::SeqCst);
+        return;
+    };
+
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-talk".into())
+        .spawn(move || {
+            log::info!("разговор начат: клавиши больше не нужны, «спасибо» завершает");
+            let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
+
+            for wav in phrases {
+                if !CONVERSATION.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                // Пока думаем и отвечаем — не слушаем: иначе в следующую фразу
+                // попадёт собственный ответ.
+                voice::stt::pause_conversation(true);
+                let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
+
+                if let Some(text) = ask_aloud(&app, wav) {
+                    if is_farewell(&text) {
+                        log::info!("услышал «спасибо» — разговор окончен");
+                        break;
+                    }
+                }
+
+                if !CONVERSATION.load(Ordering::SeqCst) {
+                    break;
+                }
+                voice::stt::pause_conversation(false);
+                let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
+            }
+
+            stop_conversation(&app);
+        })
+        .ok();
+}
+
+/// Заканчивает разговор: микрофон закрывается, клавиши работают как прежде.
+#[cfg(desktop)]
+pub(crate) fn stop_conversation(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    use tauri::Emitter;
+
+    if !CONVERSATION.swap(false, Ordering::SeqCst) {
+        return;
+    }
+    voice::stt::stop_conversation();
+    let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
 }
 
 #[cfg(not(desktop))]

@@ -33,6 +33,11 @@ pub struct OpenPayload {
     /// при старте окна: источник меняют в настройках, а окно попапа живёт до
     /// конца сеанса и иначе показывало бы «?» по вчерашним сведениям.
     pub dialogue: bool,
+    /// Прочитать ответ вслух, как только он придёт.
+    ///
+    /// Нужно, когда окно открыли голосом: человек спросил вслух и ответа ждёт
+    /// тоже вслух, а не глазами.
+    speak: bool,
 }
 
 /// Создаёт окно попапа, если его ещё нет. Окно рождается скрытым: первым делом его
@@ -103,6 +108,7 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
         theme,
         error_text,
         dialogue,
+        speak: false,
     };
     state.set_selection(selection);
 
@@ -115,6 +121,62 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
     #[cfg(desktop)]
     crate::voice::hotkey::arm(true);
     Ok(())
+}
+
+/// Открывает попап на вопрос, заданный голосом с чистого места.
+///
+/// Отличий от обычного открытия два: якоря выделения нет — окно встаёт у
+/// курсора, — и ответ читается вслух, потому что и вопрос был голосом.
+pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
+    let window = ensure_popup_window(app)?;
+
+    let state = app.state::<AppState>();
+    let (theme, error_text, dialogue) = {
+        let config = state.config();
+        (
+            config.ui.theme.clone(),
+            config.ui.resolved_error_text(),
+            config.ai.provider != "wikipedia",
+        )
+    };
+
+    let payload = OpenPayload {
+        term: question.clone(),
+        context: String::new(),
+        theme,
+        error_text,
+        dialogue,
+        speak: true,
+    };
+    state.set_selection(Selection {
+        text: question,
+        rect: None,
+        cursor: cursor_position(),
+        context: String::new(),
+    });
+
+    let _ = window.hide();
+    window.emit_to(POPUP_LABEL, "popup:open", payload)?;
+
+    #[cfg(desktop)]
+    crate::voice::hotkey::arm(true);
+    Ok(())
+}
+
+/// Где сейчас указатель мыши. Якорь для окна, открытого без выделения.
+fn cursor_position() -> (f64, f64) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+        let mut point = POINT::default();
+        // SAFETY: функция только читает положение указателя.
+        if unsafe { GetCursorPos(&mut point) }.is_ok() {
+            return (f64::from(point.x), f64::from(point.y));
+        }
+    }
+    (0.0, 0.0)
 }
 
 /// Ставит окно по якорю и показывает его. Размер приходит из фронтенда в логических
@@ -271,6 +333,10 @@ pub fn hide_popup(app: &AppHandle) {
     crate::voice::hotkey::arm(false);
     #[cfg(desktop)]
     crate::voice::stop();
+    // Окно закрыли — разговор окончен, даже если «спасибо» не прозвучало.
+    // Открытый микрофон при закрытом окне — не то, чего от программы ждут.
+    #[cfg(desktop)]
+    crate::stop_conversation(app);
 
     if let Some(window) = app.get_webview_window(POPUP_LABEL) {
         let _ = window.hide();

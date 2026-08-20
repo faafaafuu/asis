@@ -156,8 +156,16 @@ export class PopupView {
   }
 
   /** Открытие с новым термином: полный сброс состояния, мгновенный Loading. */
-  open({ term: raw, context = "" }) {
+  /**
+   * Показывает объяснение термина.
+   *
+   * `speak: true` — прочитать ответ вслух, как только он придёт. Так окно
+   * открывается на вопрос, заданный голосом с чистого места: человек спросил
+   * вслух, ответа он ждёт тоже вслух, а не глазами.
+   */
+  open({ term: raw, context = "", speak = false }) {
     this.#abortAll();
+    this.speakOnAnswer = Boolean(speak);
     const term = normalizeTerm(raw);
     this.state = {
       term,
@@ -196,6 +204,10 @@ export class PopupView {
         this.state.data = data;
         this.state.phase = "success";
         this.render();
+        if (this.speakOnAnswer) {
+          this.speakOnAnswer = false;
+          this.onAnswer?.(data.def);
+        }
       })
       .catch((err) => {
         clearTimeout(watchdog);

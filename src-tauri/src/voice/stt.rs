@@ -1,15 +1,15 @@
-//! Распознавание речи: whisper.cpp на этом же компьютере.
+//! Запись голоса: удержанием клавиши и разговором без рук.
 //!
-//! Тот же приём, что и с озвучиванием: не библиотека, а готовая программа рядом.
-//! Собрать whisper.cpp из исходников означало бы CMake и, для видеокарты, ещё и
-//! CUDA-тулчейн — несколько гигабайт сборочного хозяйства у каждого, кто просто
-//! хочет продиктовать вопрос. Готовые сборки уже собраны и с тем и с другим.
+//! Два режима. Первый — клавишу держат, пока говорят: начало и конец фразы
+//! известны точно. Второй — разговор: микрофон открыт постоянно, а границы фраз
+//! приходится находить самим, по тишине.
 //!
 //! Запись идёт своим потоком, который владеет устройством ввода: поток cpal
 //! нельзя передавать между потоками, а начинают и заканчивают запись по нажатию
 //! клавиши, то есть откуда угодно.
 
-use std::sync::mpsc::{channel, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Mutex, OnceLock};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -19,7 +19,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 /// сто килобайт в секунду незачем.
 const WHISPER_RATE: u32 = 16_000;
 
-/// Дольше этого не пишем.
+/// Дольше этого не пишем одну фразу.
 ///
 /// Не ограничение ради ограничения: клавишу можно зажать и забыть, а память
 /// под запись растёт всё это время. Две минуты — заведомо больше любого
@@ -53,11 +53,25 @@ const SILENCE_LEVEL: f32 = 0.02;
 /// к одной громкости — это не «улучшение звука», а выравнивание условий.
 const TARGET_PEAK: f32 = 0.85;
 
+/// Сколько тишины считать концом фразы в разговоре.
+///
+/// Между словами человек молчит до полусекунды — на запятой, на вдохе, подбирая
+/// слово. Меньше секунды здесь означало бы рвать фразу посередине и отвечать на
+/// половину вопроса. Больше — заметная пауза перед каждым ответом.
+const END_OF_PHRASE_MS: u64 = 1000;
+
+/// Короче этого — не фраза, а кашель, щелчок мыши или скрип стула.
+const MIN_SPEECH_MS: u64 = 400;
+
 enum Command {
-    /// Имя устройства записи. Пусто — то, что система считает основным.
+    /// Запись удержанием клавиши. Строка — имя устройства, пусто — основное.
     Start(String),
     /// Закончить и отдать записанное.
     Stop(Sender<Recording>),
+    /// Разговор: писать постоянно и отдавать фразы по мере того, как человек
+    /// их договаривает.
+    StartTalk(String, Sender<Vec<u8>>),
+    StopTalk,
 }
 
 #[derive(Default)]
@@ -68,6 +82,9 @@ struct Recording {
 
 static COMMANDS: OnceLock<Sender<Command>> = OnceLock::new();
 
+/// Разговор приостановлен: программа думает над ответом или читает его вслух.
+static PAUSED: AtomicBool = AtomicBool::new(false);
+
 /// Поток, владеющий микрофоном. Создаётся при первом обращении.
 fn commands() -> Option<&'static Sender<Command>> {
     COMMANDS
@@ -75,63 +92,81 @@ fn commands() -> Option<&'static Sender<Command>> {
             let (tx, rx) = channel::<Command>();
             std::thread::Builder::new()
                 .name("sufler-mic".into())
-                .spawn(move || {
-                    let mut active: Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32)> =
-                        None;
-
-                    for command in rx {
-                        match command {
-                            Command::Start(preferred) => {
-                                active = open_input(&preferred).map(|(stream, buffer, rate)| {
-                                    if let Err(err) = stream.play() {
-                                        log::warn!("микрофон не запустился: {err}");
-                                    }
-                                    (stream, buffer, rate)
-                                });
-                                if active.is_none() {
-                                    log::warn!("микрофон недоступен — записывать нечем");
-                                }
-                            }
-                            Command::Stop(reply) => {
-                                let recording = match active.take() {
-                                    Some((stream, buffer, rate)) => {
-                                        // Прежде чем закрыть микрофон — подождать.
-                                        //
-                                        // Звук приходит не по одному отсчёту, а
-                                        // порциями, и последняя порция в момент
-                                        // отпускания клавиши ещё в пути. Закрывая
-                                        // устройство сразу, мы теряли хвост фразы:
-                                        // человек договаривал слово, а в записи его
-                                        // уже не было. Треть секунды с запасом
-                                        // перекрывает размер порции у любого
-                                        // разумного устройства — но не запас
-                                        // на человека: клавишу отпускают на
-                                        // последнем слоге, а то и раньше него.
-                                        std::thread::sleep(
-                                            std::time::Duration::from_millis(TAIL_MS),
-                                        );
-                                        drop(stream);
-                                        let samples = std::mem::take(
-                                            &mut *buffer
-                                                .lock()
-                                                .unwrap_or_else(|err| err.into_inner()),
-                                        );
-                                        Recording {
-                                            samples,
-                                            sample_rate: rate,
-                                        }
-                                    }
-                                    None => Recording::default(),
-                                };
-                                let _ = reply.send(recording);
-                            }
-                        }
-                    }
-                })
+                .spawn(move || mic_loop(rx))
                 .ok();
             tx
         })
         .into()
+}
+
+/// Единственное место, где живёт микрофон.
+///
+/// Команду ждём с коротким сроком, а не бесконечно: в разговоре надо ещё и
+/// регулярно разбирать накопленный звук на фразы, и делать это надо здесь же —
+/// буфер принадлежит этому потоку.
+fn mic_loop(rx: Receiver<Command>) {
+    let mut active: Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32)> = None;
+    let mut talk: Option<Segmenter> = None;
+
+    loop {
+        match rx.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(Command::Start(preferred)) => {
+                active = open(&preferred);
+            }
+            Ok(Command::Stop(reply)) => {
+                let recording = match active.take() {
+                    Some((stream, buffer, rate)) => {
+                        // Прежде чем закрыть микрофон — подождать. Звук приходит
+                        // порциями, и последняя в момент отпускания клавиши ещё
+                        // в пути; закрывая устройство сразу, мы теряли хвост.
+                        std::thread::sleep(std::time::Duration::from_millis(TAIL_MS));
+                        drop(stream);
+                        let samples =
+                            std::mem::take(&mut *buffer.lock().unwrap_or_else(|e| e.into_inner()));
+                        Recording {
+                            samples,
+                            sample_rate: rate,
+                        }
+                    }
+                    None => Recording::default(),
+                };
+                let _ = reply.send(recording);
+            }
+            Ok(Command::StartTalk(preferred, sender)) => {
+                active = open(&preferred);
+                talk = active
+                    .as_ref()
+                    .map(|(_, _, rate)| Segmenter::new(*rate, sender));
+            }
+            Ok(Command::StopTalk) => {
+                active = None;
+                talk = None;
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                if let (Some((_, buffer, rate)), Some(segmenter)) = (&active, &mut talk) {
+                    let chunk =
+                        std::mem::take(&mut *buffer.lock().unwrap_or_else(|e| e.into_inner()));
+                    segmenter.feed(&chunk, *rate);
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
+fn open(preferred: &str) -> Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32)> {
+    match open_input(preferred) {
+        Some((stream, buffer, rate)) => {
+            if let Err(err) = stream.play() {
+                log::warn!("микрофон не запустился: {err}");
+            }
+            Some((stream, buffer, rate))
+        }
+        None => {
+            log::warn!("микрофон недоступен — записывать нечем");
+            None
+        }
+    }
 }
 
 /// Какие устройства записи видит система.
@@ -142,7 +177,10 @@ fn commands() -> Option<&'static Sender<Command>> {
 pub fn devices() -> Vec<String> {
     let host = cpal::default_host();
     host.input_devices()
-        .map(|list| list.filter_map(|d| d.description().ok().map(|d| d.name().to_string())).collect())
+        .map(|list| {
+            list.filter_map(|d| d.description().ok().map(|d| d.name().to_string()))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -157,7 +195,11 @@ fn open_input(preferred: &str) -> Option<(cpal::Stream, std::sync::Arc<Mutex<Vec
         // основное: молчать из-за пропавшего микрофона хуже, чем писать не с того.
         host.input_devices()
             .ok()?
-            .find(|d| d.description().map(|d| d.name() == preferred).unwrap_or(false))
+            .find(|d| {
+                d.description()
+                    .map(|d| d.name() == preferred)
+                    .unwrap_or(false)
+            })
             .or_else(|| host.default_input_device())?
     };
 
@@ -171,6 +213,7 @@ fn open_input(preferred: &str) -> Option<(cpal::Stream, std::sync::Arc<Mutex<Vec
         config.sample_rate(),
         config.channels()
     );
+
     // В cpal 0.17 частота отдаётся уже числом, без обёртки.
     let rate = config.sample_rate();
     let channels = config.channels() as usize;
@@ -206,6 +249,8 @@ fn open_input(preferred: &str) -> Option<(cpal::Stream, std::sync::Arc<Mutex<Vec
     Some((stream, buffer, rate))
 }
 
+/* ── Запись удержанием клавиши ────────────────────────────────────────────── */
+
 /// Начать запись с названного устройства (пусто — с основного).
 pub fn start(device: &str) {
     if let Some(tx) = commands() {
@@ -223,34 +268,165 @@ pub fn stop() -> Option<Vec<u8>> {
     tx.send(Command::Stop(reply)).ok()?;
     let recording = answer.recv().ok()?;
 
-    // Громкость самого громкого места. Без неё «не расслышало» и «микрофон
-    // пишет тишину» выглядят в журнале одинаково, а чинятся по-разному.
-    let peak = recording
-        .samples
-        .iter()
-        .fold(0.0_f32, |max, s| max.max(s.abs()));
-    let seconds = recording.samples.len() as f32 / recording.sample_rate.max(1) as f32;
-    log::info!("записано {seconds:.1} с, громкость {:.0}%", peak * 100.0);
-
     // Меньше четверти секунды — это не вопрос, а случайное касание клавиши.
     if recording.samples.len() < recording.sample_rate as usize / 4 {
         return None;
     }
+    prepare(recording.samples, recording.sample_rate, true)
+}
+
+/* ── Разговор без рук ─────────────────────────────────────────────────────── */
+
+/// Начинает разговор: микрофон открыт, фразы приходят в возвращённый канал.
+pub fn start_conversation(device: &str) -> Option<Receiver<Vec<u8>>> {
+    let tx = commands()?;
+    let (utterances, rx) = channel();
+    PAUSED.store(false, Ordering::Relaxed);
+    tx.send(Command::StartTalk(device.to_string(), utterances))
+        .ok()?;
+    Some(rx)
+}
+
+pub fn stop_conversation() {
+    PAUSED.store(false, Ordering::Relaxed);
+    if let Some(tx) = commands() {
+        let _ = tx.send(Command::StopTalk);
+    }
+}
+
+/// Приостановить разговор: программа думает или говорит.
+///
+/// Не закрываем микрофон, а перестаём слушать: открытие устройства занимает
+/// сотни миллисекунд, и человек, заговоривший сразу после ответа, оказался бы
+/// не услышан.
+pub fn pause_conversation(paused: bool) {
+    PAUSED.store(paused, Ordering::Relaxed);
+}
+
+/// Находит границы фраз в непрерывном потоке звука.
+///
+/// Способ простой и старый: громкость по кадрам в 20 мс. Речь заметно громче
+/// комнатного шума, а порог берётся не из головы, а от самого шума — в тихой
+/// комнате и в шумной он получится разным. Отдельная модель определения речи
+/// была бы точнее, но она весит десятки мегабайт и решает задачу, с которой
+/// здесь справляется арифметика.
+struct Segmenter {
+    sender: Sender<Vec<u8>>,
+    rate: u32,
+    utterance: Vec<f32>,
+    speaking: bool,
+    silence: usize,
+    /// Оценка уровня шума. Обновляется только в тишине.
+    noise: f32,
+}
+
+impl Segmenter {
+    fn new(rate: u32, sender: Sender<Vec<u8>>) -> Self {
+        Self {
+            sender,
+            rate,
+            utterance: Vec::new(),
+            speaking: false,
+            silence: 0,
+            noise: 0.005,
+        }
+    }
+
+    fn feed(&mut self, chunk: &[f32], rate: u32) {
+        if chunk.is_empty() {
+            return;
+        }
+
+        // Пока говорит программа — не слушаем вовсе. Иначе микрофон запишет
+        // её же голос из колонок, и она задаст вопрос сама себе.
+        if PAUSED.load(Ordering::Relaxed) || crate::voice::speaking() {
+            self.utterance.clear();
+            self.speaking = false;
+            self.silence = 0;
+            return;
+        }
+
+        let frame = (rate / 50).max(1) as usize;
+        for part in chunk.chunks(frame) {
+            let rms = (part.iter().map(|s| s * s).sum::<f32>() / part.len() as f32).sqrt();
+
+            if !self.speaking {
+                // Шум оцениваем медленно и только пока молчим: иначе громкая
+                // речь сама поднимет порог, и следующая фраза утонет.
+                self.noise = self.noise * 0.97 + rms * 0.03;
+            }
+            let threshold = (self.noise * 4.0).max(SILENCE_LEVEL);
+
+            if rms > threshold {
+                self.speaking = true;
+                self.silence = 0;
+                self.utterance.extend_from_slice(part);
+            } else if self.speaking {
+                // Тишину внутри фразы тоже пишем: без неё слова склеились бы
+                // в одно, и расшифровка стала бы хуже, а не лучше.
+                self.silence += part.len();
+                self.utterance.extend_from_slice(part);
+                if ms(self.silence, rate) >= END_OF_PHRASE_MS {
+                    self.finish();
+                }
+            }
+        }
+
+        if self.utterance.len() > rate as usize * MAX_SECONDS {
+            self.finish();
+        }
+    }
+
+    fn finish(&mut self) {
+        let samples = std::mem::take(&mut self.utterance);
+        self.speaking = false;
+        let silence = std::mem::take(&mut self.silence);
+
+        // Из длительности вычитаем хвостовую тишину: полсекунды кашля с
+        // секундой тишины после — это не фраза.
+        let speech = samples.len().saturating_sub(silence);
+        if ms(speech, self.rate) < MIN_SPEECH_MS {
+            return;
+        }
+
+        if let Some(wav) = prepare(samples, self.rate, false) {
+            let _ = self.sender.send(wav);
+        }
+    }
+}
+
+fn ms(samples: usize, rate: u32) -> u64 {
+    samples as u64 * 1000 / rate.max(1) as u64
+}
+
+/* ── Общая подготовка записи ──────────────────────────────────────────────── */
+
+/// Приводит запись к тому виду, в котором её лучше всего разбирает whisper.
+///
+/// `complain` — ругаться ли в журнал на пустую запись. При удержании клавиши
+/// это полезно (человек нажал и ничего не сказал), в разговоре — нет: там
+/// тишина отсеивается раньше и является нормой.
+fn prepare(samples: Vec<f32>, rate: u32, complain: bool) -> Option<Vec<u8>> {
+    let peak = samples.iter().fold(0.0_f32, |max, s| max.max(s.abs()));
+    let seconds = samples.len() as f32 / rate.max(1) as f32;
+    log::info!("записано {seconds:.1} с, громкость {:.0}%", peak * 100.0);
 
     // Порог не «абсолютная тишина», а «ничего, кроме шума». На пустой записи
     // whisper не молчит, а выдумывает — «Продолжение следует...» и прочие титры
     // из роликов, на которых его учили. Лучше честно сказать, что не расслышали.
     if peak < SILENCE_LEVEL {
-        log::warn!("в записи тишина — проверьте, тот ли микрофон выбран");
+        if complain {
+            log::warn!("в записи тишина — проверьте, тот ли микрофон выбран");
+        }
         return None;
     }
 
-    let mut samples = resample(&recording.samples, recording.sample_rate, WHISPER_RATE);
+    let mut samples = resample(&samples, rate, WHISPER_RATE);
 
     // Выравниваем громкость: только вверх и только тихие записи. Громкую
     // трогать нечем — она уже на пределе, а «прижать» её значило бы вносить
     // искажения там, где всё в порядке.
-    if peak > SILENCE_LEVEL && peak < TARGET_PEAK {
+    if peak < TARGET_PEAK {
         let gain = TARGET_PEAK / peak;
         for sample in &mut samples {
             *sample *= gain;
@@ -262,7 +438,6 @@ pub fn stop() -> Option<Vec<u8>> {
         samples.len() + (WHISPER_RATE as u64 * SILENCE_TAIL_MS / 1000) as usize,
         0.0,
     );
-
     Some(wav(&samples, WHISPER_RATE))
 }
 
@@ -338,6 +513,43 @@ mod tests {
         assert_eq!(u32::from_le_bytes(bytes[40..44].try_into().unwrap()), 6);
         assert_eq!(bytes.len(), 44 + 6);
         // Единица и минус единица — края шкалы.
-        assert_eq!(i16::from_le_bytes(bytes[46..48].try_into().unwrap()), i16::MAX);
+        assert_eq!(
+            i16::from_le_bytes(bytes[46..48].try_into().unwrap()),
+            i16::MAX
+        );
+    }
+
+    #[test]
+    fn duration_is_counted_in_milliseconds() {
+        assert_eq!(ms(16_000, 16_000), 1000);
+        assert_eq!(ms(8_000, 16_000), 500);
+        assert_eq!(ms(0, 16_000), 0);
+    }
+
+    #[test]
+    fn silence_alone_is_not_a_phrase() {
+        let (tx, rx) = channel();
+        let mut segmenter = Segmenter::new(16_000, tx);
+        // Секунда тишины: ни начала речи, ни фразы на выходе.
+        segmenter.feed(&vec![0.0_f32; 16_000], 16_000);
+        assert!(rx.try_recv().is_err());
+        assert!(!segmenter.speaking);
+    }
+
+    #[test]
+    fn loud_stretch_followed_by_pause_becomes_a_phrase() {
+        let (tx, rx) = channel();
+        let mut segmenter = Segmenter::new(16_000, tx);
+
+        // Полсекунды «речи»: чередующийся сигнал заметно громче порога.
+        let speech: Vec<f32> = (0..8_000)
+            .map(|i| if i % 2 == 0 { 0.5 } else { -0.5 })
+            .collect();
+        segmenter.feed(&speech, 16_000);
+        assert!(segmenter.speaking, "громкий отрезок должен считаться речью");
+
+        // Секунда тишины после неё закрывает фразу.
+        segmenter.feed(&vec![0.0_f32; 16_000], 16_000);
+        assert!(rx.try_recv().is_ok(), "фраза должна была уйти в канал");
     }
 }
