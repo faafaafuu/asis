@@ -41,6 +41,11 @@ pub fn edge_voices() -> &'static [(&'static str, &'static str)] {
     edge::VOICES
 }
 
+/// Идёт ли сейчас речь из колонок.
+pub fn speaking() -> bool {
+    audio::speaking()
+}
+
 /// Замолчать: и звук, и работу, которая его готовит.
 pub fn stop() {
     piper::stop();

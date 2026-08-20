@@ -51,7 +51,7 @@ const TEMPLATE = `
   <div class="popup__body" data-el="body" role="status" aria-live="polite" hidden>
     <div data-el="answer"></div>
     <div class="popup__extra" data-el="extra" hidden>
-      <div class="popup__section">
+      <div class="popup__section" data-el="simpleSection">
         <span class="popup__label">Простыми словами</span>
         <span class="popup__simple" data-el="simple"></span>
       </div>
@@ -206,12 +206,20 @@ export class PopupView {
       });
   }
 
-  expand() {
-    if (this.state.expanded || !this.#canExpand()) return;
+  /**
+   * Раскрывает окно.
+   *
+   * `elaborate: false` — раскрыть, но не догружать «простыми словами». Так
+   * приходит голосовой вопрос: человек уже спросил о своём, и подсовывать ему
+   * вместо ответа пересказ определения — навязывать то, чего он не просил.
+   */
+  expand({ elaborate = true } = {}) {
+    if (this.state.expanded) return;
+    if (elaborate && !this.#canExpand()) return;
     this.state.expanded = true;
     // У Википедии развёрнутый текст уже на руках — он пришёл вместе с определением.
     // У модели его ещё нет: спрашиваем сейчас, раз человек попросил.
-    if (!this.state.data?.simple && this.dialogue) this.#elaborate();
+    if (elaborate && !this.state.data?.simple && this.dialogue) this.#elaborate();
     this.render();
   }
 
@@ -261,7 +269,7 @@ export class PopupView {
   askByVoice(text) {
     const question = String(text ?? "").trim();
     if (!question) return;
-    if (!this.state.expanded) this.expand();
+    if (!this.state.expanded) this.expand({ elaborate: false });
     this.ui.input.value = question;
     this.submitAsk({ byVoice: true });
   }
@@ -391,7 +399,10 @@ export class PopupView {
       this.ui.answer.textContent = s.data.def;
       this.ui.extra.hidden = !s.expanded;
       if (s.expanded) {
-        this.ui.simple.textContent = s.data.simple;
+        this.ui.simple.textContent = s.data.simple ?? "";
+        // Раскрыться можно и без «простыми словами» — так приходит голосовой
+        // вопрос. Заголовок над пустотой выглядел бы недогрузившимся текстом.
+        this.ui.simpleSection.hidden = !s.data.simple;
         this.ui.examplesSection.hidden = !s.data.examples?.length;
         this.#renderList(this.ui.examples, s.data.examples ?? [], (text) => {
           const row = document.createElement("span");
