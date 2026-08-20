@@ -16,6 +16,8 @@ mod overlay;
 mod secret;
 mod selection;
 mod state;
+#[cfg(desktop)]
+mod voice;
 mod watcher;
 
 use tauri::Manager;
@@ -40,6 +42,11 @@ pub fn run() {
             return;
         }
     }
+
+    // Запуск вместе с системой отличается от запуска руками ровно одним: окно
+    // настройки открывать не надо. Человек не просил его открыть — он вообще
+    // ничего не делал, он просто включил компьютер.
+    let background = std::env::args().any(|arg| arg == "--background");
 
     let builder = tauri::Builder::default().plugin(
         tauri_plugin_log::Builder::new()
@@ -67,8 +74,18 @@ pub fn run() {
     #[cfg(mobile)]
     let builder = builder.plugin(mobile::init());
 
+    // Тот же ключ передаётся системе при регистрации автозапуска: запись в
+    // автозагрузке должна поднимать программу молча, а не открывать окно.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_autostart::init(
+        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+        Some(vec!["--background"]),
+    ));
+
     builder
-        .setup(|app| {
+        // move — ради одного `background`: замыкание переживает функцию, а флаг
+        // лежит на её стеке.
+        .setup(move |app| {
             let config_dir = app.path().app_config_dir().ok();
             let config = Config::load(config_dir);
             log::info!("AI-провайдер: {}", config.ai.provider);
@@ -102,9 +119,15 @@ pub fn run() {
                 // Ярлык обязан отвечать. Работать программа продолжает в фоне, окно
                 // здесь — не главный экран, а подтверждение «я запущена» плюс
                 // настройки; закрыть его можно сразу.
-                if let Err(err) = overlay::show_onboarding(app.handle()) {
-                    log::error!("не удалось открыть окно: {err}");
+                // …кроме запуска вместе с системой: там показывать окно некому
+                // и незачем, программа просто занимает своё место в трее.
+                if !background {
+                    if let Err(err) = overlay::show_onboarding(app.handle()) {
+                        log::error!("не удалось открыть окно: {err}");
+                    }
                 }
+
+                apply_autostart(app.handle());
 
                 #[cfg(target_os = "windows")]
                 instance::listen(app.handle().clone());
@@ -115,6 +138,7 @@ pub fn run() {
                 app.manage(integration);
 
                 wake_local_model(app.handle());
+                listen_for_voice_keys(app.handle());
             }
 
             // На телефоне окно не создаётся нигде выше: показывать попап у экрана
@@ -151,47 +175,255 @@ pub fn run() {
             commands::save_appearance,
             commands::ollama_install_size,
             commands::install_ollama,
+            commands::recommended_model,
+            #[cfg(desktop)]
+            commands::voice_settings,
+            #[cfg(desktop)]
+            commands::save_voice_settings,
+            #[cfg(desktop)]
+            commands::voice_list,
+            #[cfg(desktop)]
+            commands::voice_install,
+            #[cfg(desktop)]
+            commands::voice_speak,
+            #[cfg(desktop)]
+            commands::voice_stop,
+            #[cfg(desktop)]
+            commands::speech_status,
+            #[cfg(desktop)]
+            commands::speech_install,
+            commands::startup_settings,
+            commands::save_startup_settings,
         ])
-        .run(tauri::generate_context!())
-        .expect("не удалось запустить приложение");
+        .build(tauri::generate_context!())
+        .expect("не удалось запустить приложение")
+        .run(|_app, event| {
+            // Программа живёт в трее и переживает свои окна.
+            //
+            // По умолчанию Tauri завершает приложение, когда закрылось последнее
+            // окно. Для Суфлёра это означало вот что: человек закрывал окно
+            // настройки — единственное открытое, — и вместе с ним выключался
+            // перехват выделения. Со стороны выглядело так, будто программа
+            // «сама отваливается, если ею не пользоваться».
+            //
+            // `code.is_none()` отличает этот случай от настоящего выхода: пункт
+            // «Выйти» в трее зовёт `app.exit(0)`, и там код проставлен — такой
+            // выход мы не отменяем.
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                if code.is_none() {
+                    api.prevent_exit();
+                }
+            }
+        });
 }
 
-/// Поднимает Ollama, если выбрана она, а сервер молчит.
+/// Слушает клавиши голосового режима и раздаёт работу.
 ///
-/// После перезагрузки Windows Ollama не всегда стартует сама — записи в
-/// автозапуске у неё может не быть. Человек при этом видит, что «пропали все
-/// модели» и что объяснения перестали приходить, хотя на диске всё цело.
-/// Просить его лезть в автозапуск — перекладывать на него работу программы:
-/// она знает, что ей нужен этот сервер, и знает, где он лежит.
+/// Хук обязан отвечать мгновенно, поэтому он только присылает сюда, что нажали,
+/// а всё остальное — чтение вслух, запись голоса — происходит здесь, в обычном
+/// потоке, где можно не торопиться.
+#[cfg(desktop)]
+fn listen_for_voice_keys(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+
+    let events = voice::hotkey::install();
+    let app = app.clone();
+
+    std::thread::Builder::new()
+        .name("sufler-voice".into())
+        .spawn(move || {
+            for event in events {
+                match event {
+                    // Что читать — знает окно: там и определение, и «простыми
+                    // словами», и ветка вопросов. Rust хранил бы копию того же
+                    // самого и неизбежно расходился бы с показанным.
+                    voice::hotkey::Event::Speak => {
+                        log::info!("пробел: читаю вслух");
+                        let _ = app.emit_to(overlay::POPUP_LABEL, "voice:speak", ());
+                    }
+                    // Зажали левый Alt с пробелом — пишем, пока держат.
+                    voice::hotkey::Event::TalkStart => {
+                        log::info!("Alt+пробел: слушаю");
+                        voice::stt::start();
+                        let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
+                    }
+                    // Отпустили — расшифровываем и отдаём окну как вопрос.
+                    voice::hotkey::Event::TalkStop => {
+                        let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
+
+                        let Some(wav) = voice::stt::stop() else {
+                            // Нажали и сразу отпустили или микрофона нет —
+                            // сказать нечего, и молчание тут правильный ответ.
+                            continue;
+                        };
+
+                        let language = {
+                            let state = app.state::<AppState>();
+                            let language = state.config().ui.language.clone();
+                            language
+                        };
+                        match voice::whisper::transcribe(&app, &wav, &language) {
+                            Ok(text) if !text.is_empty() => {
+                                log::info!("расшифровано: «{text}»");
+                                let _ = app.emit_to(overlay::POPUP_LABEL, "voice:question", text);
+                            }
+                            Ok(_) => log::info!("расшифровка пустая — тишина в записи"),
+                            Err(err) => {
+                                log::warn!("расшифровка не удалась: {err}");
+                                let _ = app.emit_to(
+                                    overlay::POPUP_LABEL,
+                                    "voice:error",
+                                    err.to_string(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .ok();
+}
+
+#[cfg(not(desktop))]
+fn listen_for_voice_keys(_app: &tauri::AppHandle) {}
+
+/// Приводит запись в автозагрузке в соответствие с настройкой.
 ///
-/// Отдельным потоком: проверка ходит по сети, пусть и на свой же компьютер,
-/// а запуск приложения ждать этого не должен.
+/// Сверяется при каждом запуске, а не только при изменении галочки: запись могла
+/// исчезнуть помимо программы — переустановка, чистильщик автозагрузки, перенос
+/// на другую машину. Молча не работать в таком случае хуже всего.
+#[cfg(desktop)]
+pub(crate) fn apply_autostart(app: &tauri::AppHandle) {
+    use tauri_plugin_autostart::ManagerExt;
+
+    let wanted = app.state::<AppState>().config().startup.launch_at_login;
+    let manager = app.autolaunch();
+
+    if manager.is_enabled().unwrap_or(false) == wanted {
+        return;
+    }
+
+    let result = if wanted { manager.enable() } else { manager.disable() };
+    match result {
+        Ok(()) => log::info!(
+            "автозапуск при входе в систему: {}",
+            if wanted { "включён" } else { "выключен" }
+        ),
+        Err(err) => log::warn!("не удалось изменить автозапуск: {err}"),
+    }
+}
+
+#[cfg(not(desktop))]
+pub(crate) fn apply_autostart(_app: &tauri::AppHandle) {}
+
+/// Готовит локальную модель к работе: сервер, сама модель, прогрев.
+///
+/// Всё, что раньше человеку приходилось делать руками и в правильном порядке:
+/// запустить Ollama, выбрать модель, дождаться, пока она скачается, и потерпеть
+/// ещё раз при первом вопросе, пока она грузится в память. Каждый пункт по
+/// отдельности мелочь, вместе — «включил компьютер, а оно опять не работает».
+///
+/// Отдельным потоком: здесь и сеть, и загрузка гигабайтов с диска, а запуск
+/// программы ждать этого не должен — перехват выделения работает и без модели,
+/// просто первый ответ придёт позже.
 #[cfg(desktop)]
 fn wake_local_model(app: &tauri::AppHandle) {
-    let endpoint = {
+    let (endpoint, model) = {
         let state = app.state::<AppState>();
         let config = state.config();
         // Чужой облачный сервис поднимать нечем и незачем.
         if config.ai.provider != "http" {
             return;
         }
-        config.ai.endpoint.clone()
+        (config.ai.endpoint.clone(), config.ai.model.clone())
     };
 
-    let host = crate::ollama::host_from(&endpoint);
     // host_from отдаёт местный адрес и для облачных сервисов — там будить
     // нечего, поэтому проверяем, что настроен именно свой компьютер.
-    if !endpoint.contains("localhost") && !endpoint.contains("127.0.0.1") {
+    if !crate::config::is_local(&endpoint) {
         return;
     }
+    let host = crate::ollama::host_from(&endpoint);
+    let app = app.clone();
 
     tauri::async_runtime::spawn(async move {
-        if crate::ollama::status(&host).await.running {
-            return;
+        /* 1. Сервер. */
+        let mut status = crate::ollama::status(&host).await;
+        if !status.running {
+            match crate::ollama::start() {
+                Ok(()) => log::info!("Ollama не отвечала — запустили её сами"),
+                Err(err) => {
+                    log::warn!("Ollama не отвечает и запустить не вышло: {err}");
+                    return;
+                }
+            }
+
+            // Сервер поднимается не мгновенно, а дальше без него делать нечего.
+            // Полминуты — с запасом даже для медленного диска.
+            for _ in 0..60 {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                status = crate::ollama::status(&host).await;
+                if status.running {
+                    break;
+                }
+            }
+            if !status.running {
+                log::warn!("Ollama не ответила за полминуты после запуска");
+                return;
+            }
         }
-        match crate::ollama::start() {
-            Ok(()) => log::info!("Ollama не отвечала — запустили её сами"),
-            Err(err) => log::warn!("Ollama не отвечает и запустить не вышло: {err}"),
+
+        /* 2. Модель. */
+        let model = if model.trim().is_empty() {
+            let hardware = crate::ollama::hardware();
+            let chosen = crate::ollama::pick(&hardware);
+            log::info!(
+                "модель не выбрана: {:.1} ГБ видеопамяти, {:.1} ГБ ОЗУ — берём {chosen}",
+                hardware.vram_gb,
+                hardware.ram_gb
+            );
+
+            // Записываем сразу: иначе при каждом запуске модель выбиралась бы
+            // заново, а окно настройки показывало бы пустое поле при работающей
+            // программе — и было бы непонятно, чем она вообще отвечает.
+            {
+                let state = app.state::<AppState>();
+                {
+                    let mut config = state.config_mut();
+                    config.ai.model = chosen.to_string();
+                }
+                if let Err(err) = crate::commands::persist(&app, &state) {
+                    log::warn!("выбранная модель не сохранилась: {err}");
+                }
+                let config = state.config();
+                state.rebuild_provider(&config.ai, &config.ui.language);
+            }
+
+            chosen.to_string()
+        } else {
+            model
+        };
+
+        // Ollama зовёт модели полным именем с тегом; в настройках тег могли и
+        // не написать. `llama3` и `llama3:latest` — одно и то же.
+        let installed = status
+            .installed
+            .iter()
+            .any(|m| m.name == model || m.name == format!("{model}:latest"));
+
+        if !installed {
+            log::info!("модели {model} на диске нет — скачиваем");
+            if let Err(err) = crate::ollama::pull(app.clone(), host.clone(), model.clone()).await {
+                log::warn!("не удалось скачать {model}: {err}");
+                return;
+            }
+            log::info!("модель {model} скачана");
+        }
+
+        /* 3. Прогрев. */
+        match crate::ollama::preload(&host, &model).await {
+            Ok(()) => log::info!("модель {model} загружена в память и ждёт вопросов"),
+            Err(err) => log::warn!("{err}"),
         }
     });
 }

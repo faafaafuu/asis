@@ -16,6 +16,8 @@ pub struct Config {
     pub ai: AiConfig,
     pub ui: UiConfig,
     pub trigger: TriggerConfig,
+    pub startup: StartupConfig,
+    pub voice: VoiceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,15 +53,33 @@ pub struct AiConfig {
 impl Default for AiConfig {
     fn default() -> Self {
         Self {
-            // Из коробки — Википедия: определения без ключей и регистрации, для любого
-            // слова, а не для семи терминов демо-словаря. Заглушка (`mock`) остаётся
-            // для разработки и показа состояний интерфейса.
-            provider: "wikipedia".into(),
-            endpoint: String::new(),
+            // Из коробки — своя модель на этом же компьютере: она отвечает по сути,
+            // а не первым абзацем энциклопедии, работает без ключей, регистрации и
+            // интернета и ничего не отправляет наружу. Всё остальное — Википедия,
+            // облачные сервисы по ключу — остаётся рядом как запасной вариант,
+            // выбираемый в окне настройки.
+            //
+            // Модель здесь намеренно не названа: подходящая зависит от того, сколько
+            // на машине видеопамяти, и выбирается при первом запуске (`ollama::pick`).
+            provider: "http".into(),
+            endpoint: crate::ollama::DEFAULT_ENDPOINT.into(),
             api_key: String::new(),
             model: String::new(),
             proxy: String::new(),
-            timeout_ms: 12_000,
+            // Девяносто секунд, а не двенадцать, как было.
+            //
+            // Двенадцати хватало на ответ уже загруженной модели, но не на её
+            // загрузку: холодный старт четырёхмиллиардной модели с быстрого диска
+            // занимает около тринадцати секунд, и ровно на этом первый же запрос
+            // после включения компьютера — или после паузы, за которую Ollama
+            // успела выгрузить веса, — обрывался таймаутом. Со стороны это выглядело
+            // так: «первый раз всегда ошибка, со второго работает».
+            //
+            // Само ожидание при этом никуда не делось, поэтому лечится оно не только
+            // здесь: модель прогревается при запуске программы (см. `lib.rs`) и
+            // держится в памяти дольше (см. `ai_client.rs`). Этот запас — на случай,
+            // когда прогрев не успел или модель всё же выгрузили.
+            timeout_ms: 90_000,
             retries: 1,
             retry_backoff_ms: 400,
             key_stored_plain: false,
@@ -138,6 +158,82 @@ impl Default for TriggerConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct StartupConfig {
+    /// Запускаться вместе с системой и молча уходить в трей.
+    ///
+    /// Включено по умолчанию, и это осознанно. Программа нужна не сама по себе,
+    /// а в тот момент, когда человек читает чужой текст и споткнулся о термин.
+    /// Если её в этот момент нет, он не пойдёт её искать — он просто не станет
+    /// ничего спрашивать, и инструмента как будто не существует.
+    ///
+    /// Выключается одной галочкой в окне настройки.
+    pub launch_at_login: bool,
+}
+
+impl Default for StartupConfig {
+    fn default() -> Self {
+        Self {
+            launch_at_login: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct VoiceConfig {
+    /// Озвучивать ли вообще. Выключенный голос не качает ни синтезатор, ни голоса.
+    pub enabled: bool,
+    /// `piper` — на своём компьютере, `edge` — нейроголоса Microsoft по сети.
+    pub engine: String,
+    /// Голос Piper, например `ru_RU-irina-medium`.
+    pub voice: String,
+    /// Голос Edge, например `ru-RU-SvetlanaNeural`. Отдельным полем: наборы
+    /// голосов у способов разные, и переключение туда-обратно не должно
+    /// каждый раз сбрасывать выбор.
+    pub edge_voice: String,
+    /// Скорость речи. 1.0 — как задумано голосом, 1.5 — в полтора раза быстрее,
+    /// 0.8 — медленнее. Разумные пределы 0.5..2.0: за ними речь либо тянется,
+    /// либо перестаёт разбираться на слух.
+    pub rate: f32,
+    /// Читать ответ сразу, как только он пришёл, не дожидаясь пробела.
+    /// Нужно для голосового разговора: спросил голосом — услышал ответ.
+    pub speak_answers: bool,
+}
+
+impl Default for VoiceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            engine: "piper".into(),
+            // Строкой, а не ссылкой на voice::assets: модуль голоса собирается
+            // только для настольных систем, а настройки общие для всех.
+            voice: "ru_RU-irina-medium".into(),
+            edge_voice: "ru-RU-SvetlanaNeural".into(),
+            rate: 1.0,
+            // По умолчанию выключено: озвучивать каждое объяснение, которое
+            // человек и так читает глазами, — навязчиво. Включается вместе
+            // с голосовым разговором.
+            speak_answers: false,
+        }
+    }
+}
+
+impl AiConfig {
+    /// Сколько ждать провайдера снаружи — с учётом повторов.
+    ///
+    /// Это не второй таймаут, а рубеж на случай, когда внутренний почему-то не
+    /// сработал (зависшая задача, паника). Считается от настроек, а не задан
+    /// числом: раньше здесь стояло 25 секунд, и любое увеличение таймаута
+    /// упиралось в этот предел — запрос обрывался снаружи ровно тогда же.
+    pub fn call_limit(&self) -> std::time::Duration {
+        let attempts = u64::from(self.retries) + 1;
+        let backoff: u64 = (0..self.retries).map(|n| self.retry_backoff_ms << n).sum();
+        std::time::Duration::from_millis(self.timeout_ms * attempts + backoff + 5_000)
+    }
+}
+
 impl Config {
     /// Читает конфигурацию из всех источников. Ошибки чтения не фатальны:
     /// приложение обязано запуститься даже с битым config.json, иначе пользователь
@@ -177,7 +273,30 @@ impl Config {
         config.ai.api_key = crate::secret::reveal(&config.ai.api_key);
 
         config.apply_env();
+        config.normalize();
         config
+    }
+
+    /// Правит настройки, которые остались от прежних версий и теперь мешают.
+    ///
+    /// Умолчание меняется только для тех, у кого файла настроек ещё нет. У всех
+    /// остальных в `config.json` записано прежнее значение, и оно сильнее — то
+    /// есть исправление до них не доедет вовсе, а именно они и столкнулись
+    /// с ошибкой.
+    fn normalize(&mut self) {
+        // Двенадцать секунд — прежнее умолчание. Своей модели их не хватает даже
+        // на загрузку в память (около тринадцати), и первый запрос обрывался
+        // всегда. Поднимаем только заведомо непригодные значения и только для
+        // своего компьютера: у облачного сервиса короткий таймаут осмыслен —
+        // там нечему грузиться, и долгое молчание значит, что сервис недоступен.
+        const LOCAL_FLOOR_MS: u64 = 90_000;
+        if is_local(&self.ai.endpoint) && self.ai.timeout_ms < LOCAL_FLOOR_MS {
+            log::info!(
+                "таймаут {} мс мал для своей модели — поднят до {LOCAL_FLOOR_MS} мс",
+                self.ai.timeout_ms
+            );
+            self.ai.timeout_ms = LOCAL_FLOOR_MS;
+        }
     }
 
     fn apply_env(&mut self) {
@@ -207,6 +326,12 @@ impl Config {
             self.ai.provider = "wikipedia".into();
         }
     }
+}
+
+/// Свой ли это компьютер. Одно место на всё приложение: тот же вопрос задаётся
+/// перед тем, как поднимать Ollama и прогревать модель.
+pub fn is_local(endpoint: &str) -> bool {
+    endpoint.contains("localhost") || endpoint.contains("127.0.0.1")
 }
 
 /// То, что нужно знать фронтенду попапа при старте окна.
@@ -241,5 +366,36 @@ impl From<&Config> for RuntimeConfig {
             mobile: cfg!(mobile),
             language: config.ui.language.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stale_short_timeout_is_raised_only_for_own_computer() {
+        let mut config = Config::default();
+        config.ai.endpoint = "http://localhost:11434/api/chat".into();
+        config.ai.timeout_ms = 12_000;
+        config.normalize();
+        assert_eq!(config.ai.timeout_ms, 90_000);
+
+        // У облачного сервиса короткий таймаут осмыслен — не трогаем.
+        let mut cloud = Config::default();
+        cloud.ai.endpoint = "https://api.groq.com/openai/v1/chat/completions".into();
+        cloud.ai.timeout_ms = 12_000;
+        cloud.normalize();
+        assert_eq!(cloud.ai.timeout_ms, 12_000);
+    }
+
+    #[test]
+    fn call_limit_covers_every_attempt() {
+        let mut ai = AiConfig::default();
+        ai.timeout_ms = 10_000;
+        ai.retries = 1;
+        ai.retry_backoff_ms = 400;
+        // Две попытки по 10 с, пауза 400 мс и запас 5 с.
+        assert_eq!(ai.call_limit().as_millis(), 25_400);
     }
 }

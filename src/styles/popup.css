@@ -290,12 +290,23 @@
   font-size: var(--size-example);
 }
 
-.popup__pending {
+.popup__pending,
+.popup__listening {
   display: flex;
   align-items: center;
   gap: 7px;
   color: var(--pending);
   font-size: 12.5px;
+}
+
+/* «Слушаю…» стоит под шапкой и в свёрнутом окне тоже: запись голоса начинается
+   с любого состояния, а не только из раскрытого треда. */
+.popup__listening {
+  margin-bottom: 9px;
+}
+
+.popup__listening[hidden] {
+  display: none;
 }
 
 .popup__ask {

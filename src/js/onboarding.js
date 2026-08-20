@@ -139,6 +139,11 @@ async function applyPlatform() {
   ui.note.textContent = t("note.mobile");
   // Проверка перехвата — про мышь и левый Ctrl, на телефоне проверять нечего.
   ui.captureBlock.hidden = true;
+  // «Запуск при входе в систему» — понятие настольное: на телефоне вход в
+  // систему один раз в жизни, а приложения запускает пользователь.
+  ui.startupBlock.hidden = true;
+  // Голос завязан на клавиши и на программы, которых на телефоне нет.
+  ui.voiceBlock.hidden = true;
 
   attachExplainOverlay(config);
 }
@@ -306,6 +311,176 @@ ui.clipboardFallback.addEventListener("change", async () => {
   }
 });
 
+/* ── Голос ──────────────────────────────────────────────────────────────── */
+
+// Списки голосов приходят из Rust: там же лежит и то, что скачано.
+let voiceLists = { piper: [], edge: [] };
+
+function fillVoiceList() {
+  const engine = ui.voiceEngine.value === "edge" ? "edge" : "piper";
+  const list = voiceLists[engine] ?? [];
+  const chosen = ui.voiceName.value;
+
+  ui.voiceName.replaceChildren();
+  for (const { id, label } of list) {
+    const option = document.createElement("option");
+    option.value = id;
+    option.textContent = label;
+    ui.voiceName.append(option);
+  }
+  // Сохраняем выбор, если он есть в новом списке: переключение туда-обратно
+  // не должно сбрасывать голос.
+  if (list.some((v) => v.id === chosen)) ui.voiceName.value = chosen;
+}
+
+async function loadVoice() {
+  if (!api) return;
+  try {
+    voiceLists = await api.invoke("voice_list");
+    const settings = await api.invoke("voice_settings");
+
+    ui.voiceEnabled.checked = settings.enabled;
+    ui.voiceEngine.value = settings.engine;
+    fillVoiceList();
+    ui.voiceName.value = settings.engine === "edge" ? settings.edgeVoice : settings.voice;
+    ui.voiceRate.value = String(settings.rate ?? 1);
+    ui.voiceRateValue.textContent = "×" + Number(ui.voiceRate.value).toFixed(1);
+    ui.voiceFields.hidden = !settings.enabled;
+    // Голос не скачан — предлагаем скачать, а не делаем вид, что всё готово.
+    ui.voiceDownload.hidden = settings.ready || settings.engine === "edge";
+  } catch {
+    /* окно открыто вне приложения */
+  }
+}
+
+async function saveVoice() {
+  if (!api) return;
+  const engine = ui.voiceEngine.value;
+  const settings = {
+    enabled: ui.voiceEnabled.checked,
+    engine,
+    // Голос у каждого способа свой: пишем только тот, который сейчас виден,
+    // второй оставляем как был.
+    voice: engine === "piper" ? ui.voiceName.value : undefined,
+    edgeVoice: engine === "edge" ? ui.voiceName.value : undefined,
+    rate: Number(ui.voiceRate.value),
+    speakAnswers: false,
+  };
+  try {
+    const current = await api.invoke("voice_settings");
+    settings.voice ??= current.voice;
+    settings.edgeVoice ??= current.edgeVoice;
+    settings.speakAnswers = current.speakAnswers;
+    await api.invoke("save_voice_settings", { settings });
+    ui.voiceDownload.hidden = engine === "edge" || (await api.invoke("voice_settings")).ready;
+  } catch (err) {
+    ui.voiceStatus.textContent = String(err);
+  }
+}
+
+ui.voiceEnabled.addEventListener("change", () => {
+  ui.voiceFields.hidden = !ui.voiceEnabled.checked;
+  saveVoice();
+});
+ui.voiceEngine.addEventListener("change", () => {
+  fillVoiceList();
+  saveVoice();
+});
+ui.voiceName.addEventListener("change", saveVoice);
+ui.voiceRate.addEventListener("input", () => {
+  ui.voiceRateValue.textContent = "×" + Number(ui.voiceRate.value).toFixed(1);
+});
+ui.voiceRate.addEventListener("change", saveVoice);
+
+ui.voiceTest.addEventListener("click", async () => {
+  if (!api) return;
+  ui.voiceStatus.textContent = "";
+  try {
+    await saveVoice();
+    await api.invoke("voice_speak", { text: t("voice.sample") });
+  } catch (err) {
+    ui.voiceStatus.textContent = String(err);
+  }
+});
+
+ui.voiceDownload.addEventListener("click", async () => {
+  if (!api) return;
+  ui.voiceDownload.disabled = true;
+  ui.voiceStatus.textContent = t("voice.downloading");
+  try {
+    await api.invoke("voice_install", { voice: ui.voiceName.value });
+    ui.voiceStatus.textContent = t("voice.ready");
+    ui.voiceDownload.hidden = true;
+  } catch (err) {
+    ui.voiceStatus.textContent = String(err);
+  } finally {
+    ui.voiceDownload.disabled = false;
+  }
+});
+
+api?.listen("voice:install", (event) => {
+  const { percent, status, done, error } = event.payload ?? {};
+  if (error) {
+    ui.voiceStatus.textContent = String(error);
+    return;
+  }
+  ui.voiceStatus.textContent = done ? t("voice.ready") : `${status}… ${percent}%`;
+});
+
+async function loadSpeech() {
+  if (!api) return;
+  try {
+    const status = await api.invoke("speech_status");
+    if (status.ready) {
+      ui.speechDownload.hidden = true;
+      ui.speechStatus.textContent = t("speech.ready");
+      return;
+    }
+    ui.speechDownload.hidden = false;
+    // Размер называем сразу: два гигабайта — это решение, а не мелочь.
+    ui.speechDownload.textContent = `${t("speech.download")} (${status.sizeGb} ГБ)`;
+    ui.speechStatus.textContent = status.gpu ? t("speech.gpu") : t("speech.cpu");
+  } catch {
+    /* окно открыто вне приложения */
+  }
+}
+
+ui.speechDownload.addEventListener("click", async () => {
+  if (!api) return;
+  ui.speechDownload.disabled = true;
+  try {
+    await api.invoke("speech_install");
+    await loadSpeech();
+  } catch (err) {
+    ui.speechStatus.textContent = String(err);
+  } finally {
+    ui.speechDownload.disabled = false;
+  }
+});
+
+api?.listen("speech:install", (event) => {
+  const { percent, status, done, error } = event.payload ?? {};
+  if (error) {
+    ui.speechStatus.textContent = String(error);
+    return;
+  }
+  ui.speechStatus.textContent = done ? t("speech.ready") : `${status}… ${percent}%`;
+});
+
+ui.launchAtLogin.addEventListener("change", async () => {
+  if (!api) return;
+  try {
+    await api.invoke("save_startup_settings", {
+      settings: { launchAtLogin: ui.launchAtLogin.checked },
+    });
+  } catch (err) {
+    // Возвращаем галочку как было: показывать включённой то, что включить не
+    // удалось, — врать пользователю о состоянии системы.
+    ui.launchAtLogin.checked = !ui.launchAtLogin.checked;
+    ui.aiStatus.textContent = `${t("startup.failed")} ${err}`;
+  }
+});
+
 ui.logs.addEventListener("click", async () => {
   try {
     await api?.invoke("open_logs");
@@ -323,6 +498,16 @@ async function loadTrigger() {
   } catch {
     /* окно открыто вне приложения — настроек нет */
   }
+
+  try {
+    const startup = await api.invoke("startup_settings");
+    ui.launchAtLogin.checked = startup.launchAtLogin;
+  } catch {
+    /* то же самое: без приложения показывать нечего */
+  }
+
+  await loadVoice();
+  await loadSpeech();
 }
 
 /* ── Настройка источника объяснений ─────────────────────────────────────── */
@@ -354,8 +539,13 @@ const PRESETS = {
   },
   ollama: {
     provider: "http",
-    endpoint: "http://localhost:11434/api/chat",
-    model: "qwen2.5:3b",
+    // Именно 127.0.0.1, а не localhost, и ровно та же строка, что стоит в
+    // умолчаниях приложения (ollama.rs, DEFAULT_ENDPOINT): по совпадению адреса
+    // окно узнаёт, какой источник выбран. На машинах с IPv6 localhost к тому же
+    // разрешается в ::1, где Ollama не слушает.
+    endpoint: "http://127.0.0.1:11434/api/chat",
+    // Пусто: модель подбирается под видеопамять этой машины (recommended_model).
+    model: "",
     key: false,
     hintKey: "hint.ollama",
   },
@@ -365,6 +555,10 @@ const PRESETS = {
 /** По сохранённым настройкам понимаем, какой пресет показать. */
 function presetFor(settings) {
   if (settings.provider !== "http") return settings.provider === "mock" ? "custom" : "wikipedia";
+  // Своя Ollama — по хосту, а не по строке целиком: в настройках прежних версий
+  // записан localhost, сейчас пишется 127.0.0.1, и это один и тот же сервер.
+  // Без этого у всех, кто обновился, источник показывался бы как «другой сервис».
+  if (/^https?:\/\/(localhost|127\.0\.0\.1):11434/.test(settings.endpoint || "")) return "ollama";
   const found = Object.entries(PRESETS).find(([, p]) => p.endpoint && p.endpoint === settings.endpoint);
   return found ? found[0] : "custom";
 }
@@ -388,6 +582,22 @@ function applyPreset(name, { keepValues = false } = {}) {
   if (!keepValues) {
     ui.endpoint.value = preset.endpoint;
     ui.model.value = preset.model;
+  }
+  // Для своей модели пустое поле заполняем не наугад, а тем, что подходит этой
+  // машине по видеопамяти. Тот же выбор программа делает сама при первом запуске.
+  if (local && !ui.model.value) suggestLocalModel();
+}
+
+/** Подставляет модель, подобранную под железо этой машины. */
+async function suggestLocalModel() {
+  if (!api) return;
+  try {
+    const model = await api.invoke("recommended_model");
+    // Пока ходили за ответом, человек мог выбрать модель сам или уйти на другой
+    // источник — перебивать его выбор нельзя.
+    if (model && !ui.model.value && ui.preset.value === "ollama") ui.model.value = model;
+  } catch {
+    /* не узнали — оставляем поле пустым, список моделей ниже всё равно есть */
   }
 }
 

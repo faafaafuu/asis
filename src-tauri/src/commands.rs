@@ -29,10 +29,10 @@ pub fn persist(app: &AppHandle, state: &AppState) -> Result<(), String> {
     std::fs::write(path.join("config.json"), json).map_err(|err| err.to_string())
 }
 
-/// Предел ожидания провайдера. Заведомо больше любого внутреннего таймаута
-/// (у Википедии 8 секунд, у моделей 12 плюс повтор), потому что это не второй
-/// таймаут, а рубеж на случай, когда внутренний почему-то не сработал.
-const CALL_LIMIT: Duration = Duration::from_secs(25);
+// Предел ожидания провайдера больше не задан числом: он считается из настроек
+// в `AiConfig::call_limit()`. Здесь стояло 25 секунд, и это молча обесценивало
+// любой таймаут больше двадцати пяти — запрос обрывался снаружи ровно тогда же,
+// сколько бы ни было выставлено внутри.
 
 /// Выполняет обращение к провайдеру так, чтобы окно получило ответ при любом исходе.
 ///
@@ -46,12 +46,13 @@ async fn guarded<T>(
     what: &str,
     task: impl std::future::Future<Output = Result<T, AiError>> + Send + 'static,
     fallback: String,
+    limit: Duration,
 ) -> Result<T, String>
 where
     T: Send + 'static,
 {
     let handle = tauri::async_runtime::spawn(task);
-    match tokio::time::timeout(CALL_LIMIT, handle).await {
+    match tokio::time::timeout(limit, handle).await {
         Ok(Ok(Ok(value))) => Ok(value),
         Ok(Ok(Err(err))) => {
             log::warn!("{what}: {err}");
@@ -62,7 +63,7 @@ where
             Err("Внутренняя ошибка — подробности в журнале".into())
         }
         Err(_) => {
-            log::error!("{what}: ответа нет дольше {} с", CALL_LIMIT.as_secs());
+            log::error!("{what}: ответа нет дольше {} с", limit.as_secs());
             Err("Ответ не пришёл. Проверьте соединение, а если нужен VPN — впишите прокси в настройке.".into())
         }
     }
@@ -105,11 +106,13 @@ pub async fn ai_explain(
 
     let provider = state.provider();
     let fallback = state.error_text();
+    let limit = state.config().ai.call_limit();
     let what = format!("объяснение «{term}»");
     guarded(
         &what,
         async move { provider.explain(&term, &context).await },
         fallback,
+        limit,
     )
     .await
 }
@@ -124,11 +127,13 @@ pub async fn ai_ask(
 ) -> Result<String, String> {
     let provider = state.provider();
     let fallback = state.error_text();
+    let limit = state.config().ai.call_limit();
     let what = format!("вопрос про «{term}»");
     guarded(
         &what,
         async move { provider.ask(&term, &context, &thread, &question).await },
         fallback,
+        limit,
     )
     .await
 }
@@ -186,6 +191,174 @@ pub fn save_ai_settings(
 
     let config = state.config();
     state.rebuild_provider(&config.ai, &config.ui.language);
+    Ok(())
+}
+
+/* ── Голос ───────────────────────────────────────────────────────────────── */
+
+/// Настройки голоса для окна.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceSettings {
+    pub enabled: bool,
+    pub engine: String,
+    pub voice: String,
+    pub edge_voice: String,
+    pub rate: f32,
+    pub speak_answers: bool,
+    /// Скачан ли выбранный голос. Окну нужно, чтобы показать кнопку загрузки
+    /// вместо обещания, что всё готово.
+    #[serde(default)]
+    pub ready: bool,
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn voice_settings(app: AppHandle, state: State<'_, AppState>) -> VoiceSettings {
+    let config = state.config();
+    VoiceSettings {
+        enabled: config.voice.enabled,
+        engine: config.voice.engine.clone(),
+        voice: config.voice.voice.clone(),
+        edge_voice: config.voice.edge_voice.clone(),
+        rate: config.voice.rate,
+        speak_answers: config.voice.speak_answers,
+        ready: crate::voice::assets::ready(&app, &config.voice.voice),
+    }
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn save_voice_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: VoiceSettings,
+) -> Result<(), String> {
+    {
+        let mut config = state.config_mut();
+        config.voice.enabled = settings.enabled;
+        config.voice.engine = settings.engine;
+        config.voice.voice = settings.voice;
+        config.voice.edge_voice = settings.edge_voice;
+        config.voice.rate = settings.rate;
+        config.voice.speak_answers = settings.speak_answers;
+    }
+    persist(&app, &state)
+}
+
+/// Голоса, между которыми можно выбирать. Оба списка сразу: окно показывает
+/// подходящий по выбранному способу и не ходит за вторым отдельно.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn voice_list() -> serde_json::Value {
+    let to_json = |list: &[(&str, &str)]| -> Vec<serde_json::Value> {
+        list.iter()
+            .map(|(id, label)| serde_json::json!({ "id": id, "label": label }))
+            .collect()
+    };
+    serde_json::json!({
+        "piper": to_json(crate::voice::assets::VOICES),
+        "edge": to_json(crate::voice::edge_voices()),
+    })
+}
+
+/// Скачивает синтезатор и выбранный голос.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn voice_install(app: AppHandle, voice: String) -> Result<(), String> {
+    crate::voice::assets::install(app, voice).await
+}
+
+/// Произнести текст. Возвращается сразу: речь идёт своим чередом.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn voice_speak(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<(), String> {
+    let config = state.config().voice.clone();
+    if !config.enabled {
+        log::info!("просили озвучить, но голос выключен в настройках");
+        return Err("голос выключен в настройках".into());
+    }
+    // Отметка о самом факте: без неё по журналу не отличить «пробел не дошёл»
+    // от «дошёл, но озвучивать нечем», а чинится это в разных местах.
+    log::info!("озвучиваю {} символов голосом {}", text.chars().count(), config.voice);
+    let result = crate::voice::speak(&app, &config, &text).await;
+    if let Err(err) = &result {
+        log::warn!("озвучить не вышло: {err}");
+    }
+    result
+}
+
+/// Замолчать.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn voice_stop() {
+    crate::voice::stop();
+}
+
+/// Готово ли распознавание речи и чем оно будет считать.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn speech_status(app: AppHandle) -> serde_json::Value {
+    let vram = crate::ollama::hardware().vram_gb;
+    serde_json::json!({
+        "ready": crate::voice::whisper::ready(&app),
+        // Размер загрузки зависит от того, есть ли видеокарта: со сборкой под
+        // CUDA это два гигабайта, без неё — полтора. Человеку честнее знать
+        // заранее, а не по ходу загрузки.
+        "sizeGb": if vram >= 2.0 { 2.1 } else { 1.5 },
+        "gpu": vram >= 2.0,
+    })
+}
+
+/// Скачивает распознавание речи.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn speech_install(app: AppHandle) -> Result<(), String> {
+    crate::voice::whisper::install(app).await
+}
+
+/// Какую модель стоит поставить на этой машине.
+///
+/// Нужна окну: когда человек сам выбирает «модель на этом устройстве», поле
+/// модели не должно быть пустым или заполненным наугад. То же решение, что
+/// принимает программа при первом запуске, — но показанное заранее.
+#[tauri::command]
+pub fn recommended_model() -> String {
+    crate::ollama::pick(&crate::ollama::hardware()).to_string()
+}
+
+/// Настройки запуска. Галочка одна, но раздел свой: это решение про поведение
+/// программы в системе, а не про модель и не про внешний вид.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupSettings {
+    pub launch_at_login: bool,
+}
+
+#[tauri::command]
+pub fn startup_settings(state: State<'_, AppState>) -> StartupSettings {
+    StartupSettings {
+        launch_at_login: state.config().startup.launch_at_login,
+    }
+}
+
+#[tauri::command]
+pub fn save_startup_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: StartupSettings,
+) -> Result<(), String> {
+    {
+        state.config_mut().startup.launch_at_login = settings.launch_at_login;
+    }
+    persist(&app, &state)?;
+    // Запись в автозагрузке правится сразу: галочка, которая начнёт действовать
+    // «со следующего раза», ничем не отличается от неработающей.
+    crate::apply_autostart(&app);
     Ok(())
 }
 
@@ -350,11 +523,13 @@ pub async fn pull_model(app: AppHandle, model: String) -> Result<(), String> {
 pub async fn test_ai(state: State<'_, AppState>) -> Result<String, String> {
     let provider = state.provider();
     let fallback = state.error_text();
+    let limit = state.config().ai.call_limit();
     log::info!("проверка провайдера");
     guarded(
         "проверка провайдера",
         async move { provider.explain("альбедо", "").await },
         fallback,
+        limit,
     )
     .await
     .map(|explanation| explanation.def)

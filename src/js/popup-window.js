@@ -55,6 +55,32 @@ if (api) {
     view.open({ term: term ?? "", context: context ?? "" });
   });
 
+  // Пробел: прочитать вслух. Клавишу ловит и забирает себе Rust — окно
+  // намеренно не держит фокус, и до него нажатия не доходят (SPEC §8).
+  api.listen("voice:speak", () => {
+    const text = view.spokenText();
+    if (!text) return;
+    api.invoke("voice_speak", { text }).catch(() => {
+      // Голос не скачан или выключен. Молча: попап живёт секунды, и ругаться
+      // на него поверх чужого окна незачем — состояние видно в настройках.
+    });
+  });
+
+  // Расшифрованный вопрос: кладём в тред и ждём ответа.
+  api.listen("voice:question", (event) => {
+    view.askByVoice(event.payload);
+  });
+
+  // Ответ на голосовой вопрос читаем вслух — круг замыкается.
+  view.onAnswer = (answer) => {
+    api.invoke("voice_speak", { text: answer }).catch(() => {});
+  };
+
+  // Идёт запись голоса — показываем, что слушаем.
+  api.listen("voice:listening", (event) => {
+    view.listening = Boolean(event.payload);
+  });
+
   // На мобильных вход другой: текст приходит из нативного плагина.
   attachMobileEntry(api, (term) => view.open({ term, context: "" }));
 } else {

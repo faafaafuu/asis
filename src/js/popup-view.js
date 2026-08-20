@@ -37,6 +37,10 @@ const TEMPLATE = `
     <span class="popup__mark" data-el="mark" aria-hidden="true" hidden></span>
   </div>
 
+  <span class="popup__listening" data-el="listening" role="status" hidden>
+    <span class="spinner spinner--sm" aria-hidden="true"></span>Слушаю…
+  </span>
+
   <div class="popup__loading" data-el="loading" role="status">
     <div class="popup__loading-row"><span class="spinner" aria-hidden="true"></span>Анализирую…</div>
     <div class="skeleton skeleton--1" aria-hidden="true"></div>
@@ -248,7 +252,21 @@ export class PopupView {
       });
   }
 
-  submitAsk() {
+  /**
+   * Задать вопрос голосом.
+   *
+   * Тред живёт только в раскрытом окне (SPEC §7), а голосом спрашивают из
+   * любого состояния — раскрываем сами, иначе вопрос было бы некуда положить.
+   */
+  askByVoice(text) {
+    const question = String(text ?? "").trim();
+    if (!question) return;
+    if (!this.state.expanded) this.expand();
+    this.ui.input.value = question;
+    this.submitAsk({ byVoice: true });
+  }
+
+  submitAsk({ byVoice = false } = {}) {
     const question = this.ui.input.value.trim();
     if (!question || this.state.pending) return;
 
@@ -280,6 +298,9 @@ export class PopupView {
         if (this.state.thread[index]) this.state.thread[index].a = answer;
         this.state.pending = false;
         this.render();
+        // Спросили голосом — отвечаем голосом. Разговор не должен обрываться
+        // на середине только потому, что ответ пришёл текстом.
+        if (byVoice) this.onAnswer?.(answer);
       })
       .catch((err) => {
         clearTimeout(watchdog);
@@ -289,6 +310,41 @@ export class PopupView {
         this.state.pending = false;
         this.render();
       });
+  }
+
+  /**
+   * Что читать вслух по пробелу.
+   *
+   * Не всё окно целиком, а то, что появилось последним. Так голос повторяет
+   * ход разговора: открыли — определение; нажали «?» — простыми словами
+   * и примеры; спросили — ответ. Читать каждый раз всё сначала означало бы
+   * заставлять слушать заново то, что уже прозвучало.
+   */
+  spokenText() {
+    const { phase, data, expanded, thread, errorMessage } = this.state;
+    if (phase === "error") return errorMessage || this.errorText;
+    if (phase !== "success" || !data) return "";
+
+    const answered = thread.filter((m) => m.a);
+    if (answered.length) return answered[answered.length - 1].a;
+
+    if (expanded) {
+      const parts = [];
+      if (data.simple) parts.push(data.simple);
+      if (data.examples?.length) parts.push("Примеры. " + data.examples.join(". "));
+      if (parts.length) return parts.join(" ");
+    }
+
+    return data.def || "";
+  }
+
+  /**
+   * Идёт ли запись голоса. Строка нужна не для красоты: человек держит клавишу
+   * и должен видеть, что его слышат, — иначе непонятно, говорить уже или ещё нет.
+   */
+  set listening(on) {
+    this.ui.listening.hidden = !on;
+    this.#reportGeometry();
   }
 
   close() {

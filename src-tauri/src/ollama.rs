@@ -11,7 +11,10 @@ use tauri::{AppHandle, Emitter};
 /// Именно 127.0.0.1, а не localhost: на машинах с включённым IPv6 localhost
 /// иногда разрешается в ::1, где Ollama не слушает, и получается «сервис не
 /// отвечает» при работающем сервисе.
-const DEFAULT_HOST: &str = "http://127.0.0.1:11434";
+pub const DEFAULT_HOST: &str = "http://127.0.0.1:11434";
+
+/// Полный адрес запроса к своей модели — то, что попадает в настройки по умолчанию.
+pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:11434/api/chat";
 
 /// Событие с ходом загрузки. Летит в окно настройки много раз в секунду.
 const PULL_EVENT: &str = "model:pull";
@@ -94,14 +97,20 @@ pub fn host_from(endpoint: &str) -> String {
 
 /// Путь к исполняемому файлу Ollama, если она стоит на этом компьютере.
 ///
-/// Сначала оконное приложение: на Windows именно оно поднимает сервер и живёт
-/// в трее, как это делает сам человек, запуская Ollama из меню «Пуск».
-/// Консольный `ollama` — запасной вариант, ему нужна команда `serve`.
+/// Сначала консольный `ollama.exe`, которому нужна команда `serve`, и только
+/// потом оконное `ollama app.exe`.
+///
+/// Порядок был обратным, и это была ошибка. Оконная версия поднимает не только
+/// сервер, но и своё окно со значком в трее — чужое приложение, которое человек
+/// не запускал и которое ему нечего показать. При запуске Суфлёра вместе с
+/// системой оно всплывало поверх рабочего стола при каждом входе, и закрывать
+/// его приходилось руками. Сервер нужен один и тот же, разница только в окне,
+/// поэтому берём тот, у которого окна нет вовсе.
 pub fn executable() -> Option<std::path::PathBuf> {
     #[cfg(target_os = "windows")]
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
         let dir = std::path::Path::new(&local).join("Programs").join("Ollama");
-        for name in ["ollama app.exe", "ollama.exe"] {
+        for name in ["ollama.exe", "ollama app.exe"] {
             let path = dir.join(name);
             if path.exists() {
                 return Some(path);
@@ -349,6 +358,182 @@ pub fn start() -> Result<(), String> {
         .map_err(|err| format!("не удалось запустить Ollama: {err}"))
 }
 
+/* ── Прогрев модели ───────────────────────────────────────────────────── */
+
+/// Сколько держать модель в памяти после обращения.
+///
+/// Было пять минут (умолчание Ollama), потом тридцать. И того и другого мало:
+/// человек отвлёкся на совещание, вернулся, выделил слово — и снова ждёт
+/// тринадцать секунд загрузки вместо полусекунды ответа. Рабочий день — та
+/// единица, в которой это удобно мерить: пока за компьютером работают, модель
+/// под рукой; на ночь или после перезагрузки память освобождается сама.
+pub const KEEP_ALIVE: &str = "8h";
+
+/// Просит Ollama поднять модель в память заранее.
+///
+/// Пустой prompt — не запрос, а именно просьба загрузить: модель ничего не
+/// генерирует, только раскладывает веса по видеопамяти. Вызывается при запуске
+/// программы, чтобы первое выделение после включения компьютера не пришлось на
+/// холодную загрузку — то самое «первый раз всегда ошибка».
+///
+/// `stream: false` обязателен: по умолчанию эта ручка отвечает потоком, и запрос
+/// висел бы до конца потока вместо возврата сразу после загрузки весов.
+pub async fn preload(host: &str, model: &str) -> Result<(), String> {
+    if model.trim().is_empty() {
+        return Err("модель не выбрана".into());
+    }
+
+    // Своё время ожидания, заведомо больше обычного: здесь мы именно грузим
+    // веса с диска, и десятки секунд — это норма, а не признак поломки.
+    let client = crate::net::client_builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|err| err.to_string())?;
+
+    client
+        .post(format!("{host}/api/generate"))
+        .json(&serde_json::json!({
+            "model": model,
+            "prompt": "",
+            "stream": false,
+            "keep_alive": KEEP_ALIVE,
+        }))
+        .send()
+        .await
+        .map_err(|err| format!("прогрев не удался: {err}"))?
+        .error_for_status()
+        .map(|_| ())
+        .map_err(|err| format!("Ollama ответила ошибкой на прогрев: {err}"))
+}
+
+/* ── Подбор модели под машину ─────────────────────────────────────────── */
+
+/// Сколько на этой машине памяти, в гигабайтах.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Hardware {
+    /// Видеопамять самой большой видеокарты. Ноль — не нашли или её нет.
+    pub vram_gb: f64,
+    pub ram_gb: f64,
+}
+
+/// Какую модель ставить на этой машине.
+///
+/// Выбор не «самая большая, какая влезет», а «самая большая из тех, что отвечают
+/// мгновенно». Суфлёр — не собеседник, у него одна работа: коротко объяснить
+/// выделенный термин. Модель вдвое крупнее даёт на этой работе прибавку, которую
+/// не видно, а ждать ответа заставляет заметно дольше — и вылезает из
+/// видеопамяти, начиная считать на процессоре, что медленнее в разы.
+///
+/// Отсюда потолок: берём то, что целиком помещается в видеопамять с запасом на
+/// контекст и на всё остальное, чем занята карта. Без видеокарты считать будет
+/// процессор, и там оправдана только самая маленькая модель.
+pub fn pick(hw: &Hardware) -> &'static str {
+    // Запас в пару гигабайт — под контекст, под рабочий стол и под то, что на
+    // карте уже что-то открыто. Без него модель «по размеру» упиралась бы в
+    // потолок и половину слоёв считала на процессоре.
+    let usable = hw.vram_gb - 2.0;
+
+    if usable >= 5.0 {
+        // ~4.7 ГБ. Заметно грамотнее в терминах и определениях.
+        "qwen2.5:7b"
+    } else if usable >= 3.5 {
+        // ~3.3 ГБ. Ровно то, что нужно для коротких объяснений.
+        "gemma3:4b"
+    } else if usable >= 2.0 {
+        // ~1.9 ГБ.
+        "qwen2.5:3b"
+    } else if hw.ram_gb >= 8.0 {
+        // Видеокарты нет или она мала — считать будет процессор. Здесь важен
+        // только размер: ~815 МБ отвечают за секунды, всё крупнее — минутами.
+        "gemma3:1b"
+    } else {
+        "qwen2.5:0.5b"
+    }
+}
+
+/// Сколько памяти на этой машине.
+pub fn hardware() -> Hardware {
+    Hardware {
+        vram_gb: vram_gb(),
+        ram_gb: ram_gb(),
+    }
+}
+
+/// Видеопамять по данным nvidia-smi.
+///
+/// Через утилиту, а не через системный API, и это осознанно: WMI на Windows
+/// врёт про карты больше четырёх гигабайт (поле 32-разрядное и переполняется),
+/// а разбирать DXGI ради одного числа — несоразмерно. У кого нет nvidia-smi,
+/// тот получит ноль и маленькую модель: медленнее, чем могло бы быть, но
+/// работает везде. AMD и Intel сюда попадают именно так — честный TODO.
+fn vram_gb() -> f64 {
+    let mut command = std::process::Command::new("nvidia-smi");
+    command.args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"]);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let Ok(output) = command.output() else {
+        return 0.0;
+    };
+
+    // Карт может быть несколько — берём самую большую: именно на неё Ollama и
+    // положит модель.
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<f64>().ok())
+        .fold(0.0_f64, f64::max)
+        / 1024.0
+}
+
+#[cfg(target_os = "windows")]
+fn ram_gb() -> f64 {
+    use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+
+    let mut status = MEMORYSTATUSEX {
+        dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: структура заполнена целиком, длина проставлена — этого функция и ждёт.
+    match unsafe { GlobalMemoryStatusEx(&mut status) } {
+        Ok(()) => status.ullTotalPhys as f64 / 1024.0 / 1024.0 / 1024.0,
+        Err(_) => 0.0,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ram_gb() -> f64 {
+    let Ok(text) = std::fs::read_to_string("/proc/meminfo") else {
+        return 0.0;
+    };
+    text.lines()
+        .find_map(|line| line.strip_prefix("MemTotal:"))
+        .and_then(|rest| rest.trim().trim_end_matches(" kB").trim().parse::<f64>().ok())
+        .map(|kb| kb / 1024.0 / 1024.0)
+        .unwrap_or(0.0)
+}
+
+#[cfg(target_os = "macos")]
+fn ram_gb() -> f64 {
+    std::process::Command::new("sysctl")
+        .args(["-n", "hw.memsize"])
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8_lossy(&out.stdout).trim().parse::<f64>().ok())
+        .map(|bytes| bytes / 1024.0 / 1024.0 / 1024.0)
+        .unwrap_or(0.0)
+}
+
+// Android и iOS: своей Ollama там нет и быть не может — подбирать нечего.
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+fn ram_gb() -> f64 {
+    0.0
+}
+
 /// Что сейчас установлено. Молчаливо: неответ Ollama — не ошибка, а «не
 /// запущена», и окно покажет это отдельным сообщением.
 pub async fn status(host: &str) -> Status {
@@ -495,6 +680,37 @@ fn human(status: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hw(vram: f64, ram: f64) -> Hardware {
+        Hardware {
+            vram_gb: vram,
+            ram_gb: ram,
+        }
+    }
+
+    #[test]
+    fn model_is_picked_by_video_memory() {
+        // Запас в 2 ГБ учтён: 8 ГБ карта — это 6 ГБ под модель.
+        assert_eq!(pick(&hw(12.0, 32.0)), "qwen2.5:7b");
+        assert_eq!(pick(&hw(10.0, 32.0)), "qwen2.5:7b");
+        assert_eq!(pick(&hw(6.0, 16.0)), "gemma3:4b");
+        assert_eq!(pick(&hw(4.0, 16.0)), "qwen2.5:3b");
+    }
+
+    #[test]
+    fn without_video_card_size_matters_more_than_quality() {
+        // Считать будет процессор: важен не класс модели, а то, дождётся ли
+        // человек ответа вообще.
+        assert_eq!(pick(&hw(0.0, 32.0)), "gemma3:1b");
+        assert_eq!(pick(&hw(2.0, 16.0)), "gemma3:1b");
+        assert_eq!(pick(&hw(0.0, 4.0)), "qwen2.5:0.5b");
+    }
+
+    #[test]
+    fn default_endpoint_points_at_default_host() {
+        assert!(DEFAULT_ENDPOINT.starts_with(DEFAULT_HOST));
+        assert_eq!(host_from(DEFAULT_ENDPOINT), DEFAULT_HOST);
+    }
 
     #[test]
     fn host_is_cut_before_api() {

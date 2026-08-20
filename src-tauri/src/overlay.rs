@@ -109,6 +109,11 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
     // Окно прячем перед сменой якоря: переоткрытие идёт без анимации закрытия (SPEC §8).
     let _ = window.hide();
     window.emit_to(POPUP_LABEL, "popup:open", payload)?;
+
+    // Пока попап на экране, пробел принадлежит ему. В остальное время хук
+    // пропускает клавиши насквозь и ничего не трогает.
+    #[cfg(desktop)]
+    crate::voice::hotkey::arm(true);
     Ok(())
 }
 
@@ -262,6 +267,11 @@ pub fn rebuild_popup(app: &AppHandle) {
 }
 
 pub fn hide_popup(app: &AppHandle) {
+    #[cfg(desktop)]
+    crate::voice::hotkey::arm(false);
+    #[cfg(desktop)]
+    crate::voice::stop();
+
     if let Some(window) = app.get_webview_window(POPUP_LABEL) {
         let _ = window.hide();
     }

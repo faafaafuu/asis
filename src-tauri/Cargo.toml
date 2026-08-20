@@ -1,6 +1,6 @@
 [package]
 name = "sufler"
-version = "1.2.0"
+version = "1.3.0"
 description = "Суфлёр — системный AI-попап по выделению текста"
 authors = ["Sufler"]
 edition = "2021"
@@ -72,6 +72,28 @@ reqwest = { version = "0.13", default-features = false, features = [
   "http2",
 ] }
 
+# Автозапуск вместе с системой. Официальный плагин, а не своя запись в реестре:
+# на каждой системе это делается по-своему (ключ Run в реестре, LaunchAgent на
+# macOS, .desktop в autostart на Linux), и держать три реализации ради одной
+# галочки незачем. На телефонах понятия «автозапуск при входе» нет вовсе,
+# поэтому только настольные системы.
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+tauri-plugin-autostart = "2"
+
+# Голос: синтез речи и микрофон.
+#
+# Только настольные системы. На телефоне и то и другое есть в самой ОС и делается
+# совершенно иначе, а бинарники Piper и whisper.cpp собраны не под Android.
+#
+# rodio — воспроизведение. Нужен потоковый источник: Piper отдаёт готовые куски
+#   звука по мере синтеза, и ждать конца фразы, чтобы начать говорить, незачем.
+# cpal — запись с микрофона для распознавания. rodio тянет его и сам, но зависимость
+#   объявлена явно: мы обращаемся к нему напрямую, а не через rodio.
+# zip — распаковать архив Piper после загрузки.
+rodio = "0.21"
+cpal = "0.17"
+zip = { version = "4", default-features = false, features = ["deflate"] }
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = [
   "Win32_Foundation",
@@ -81,6 +103,9 @@ windows = { version = "0.62", features = [
   "Win32_System_DataExchange",
   "Win32_System_Memory",
   "Win32_System_Threading",
+  # GlobalMemoryStatusEx — сколько на машине оперативной памяти. По этому числу
+  # и по видеопамяти подбирается модель при первом запуске (ollama::pick).
+  "Win32_System_SystemInformation",
   # CreateMutexW/CreateEventW принимают атрибуты безопасности, поэтому живут за этой
   # фичей — даже когда атрибуты не нужны и передаётся None.
   "Win32_Security",

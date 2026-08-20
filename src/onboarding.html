@@ -70,11 +70,13 @@
         <!-- Обёртка нужна ради стрелки: системную не подвинуть и не покрасить. -->
         <span class="ob__select">
           <select class="ob__underline" data-el="preset">
+            <!-- Своя модель первой: это то, чем программа работает из коробки.
+                 Остальное — запасные варианты для тех, кому она не подходит. -->
+            <option value="ollama" data-i18n="source.ollama">Своя модель на этом компьютере — без ключа и без интернета</option>
             <option value="wikipedia" data-i18n="source.wikipedia">Википедия — без ключа, только определения</option>
             <option value="groq" data-i18n="source.groq">Groq — бесплатный ключ, быстрые ответы</option>
             <option value="google" data-i18n="source.google">Google AI Studio — бесплатный ключ</option>
             <option value="openrouter" data-i18n="source.openrouter">OpenRouter — бесплатные модели</option>
-            <option value="ollama" data-i18n="source.ollama">Ollama — модель на этом устройстве</option>
             <option value="custom" data-i18n="source.custom">Другой сервис с OpenAI-совместимым API</option>
           </select>
           <span class="ob__chevron" aria-hidden="true"></span>
@@ -127,6 +129,74 @@
           <input class="ob__underline" data-el="model" type="text" spellcheck="false" />
         </section>
       </div>
+
+      <!-- Голос. Отдельным блоком, а не под спойлером: это не починка, а то,
+           чем пользуются каждый день. На телефоне скрыт (см. onboarding.js). -->
+      <section class="ob__block" data-el="voiceBlock">
+        <h2 class="ob__subtitle" data-i18n="voice.title">Голос</h2>
+        <p class="ob__lead" data-i18n="voice.lead">
+          Пробел в открытом окне — прочитать вслух. Левый Alt с пробелом — сказать вопрос голосом.
+        </p>
+
+        <label class="ob__check">
+          <input type="checkbox" data-el="voiceEnabled" />
+          <span class="ob__check-text">
+            <span data-i18n="voice.enabled">Озвучивать объяснения</span>
+          </span>
+        </label>
+
+        <div data-el="voiceFields">
+          <span class="ob__label" data-i18n="voice.engine">Чем говорить</span>
+          <span class="ob__select">
+            <select class="ob__underline" data-el="voiceEngine">
+              <option value="piper" data-i18n="voice.enginePiper">Свой голос — на этом компьютере, без интернета</option>
+              <option value="edge" data-i18n="voice.engineEdge">Нейроголоса Microsoft — по сети</option>
+            </select>
+            <span class="ob__chevron" aria-hidden="true"></span>
+          </span>
+
+          <span class="ob__label" data-i18n="voice.voice">Голос</span>
+          <span class="ob__select">
+            <select class="ob__underline" data-el="voiceName"></select>
+            <span class="ob__chevron" aria-hidden="true"></span>
+          </span>
+
+          <span class="ob__label">
+            <span data-i18n="voice.rate">Скорость</span>
+            <span data-el="voiceRateValue">×1.0</span>
+          </span>
+          <input class="ob__range" data-el="voiceRate" type="range" min="0.5" max="2" step="0.1" value="1" />
+
+          <div class="ob__actions">
+            <button class="ob__btn ob__btn--quiet" type="button" data-el="voiceTest" data-i18n="voice.test">Послушать</button>
+            <button class="ob__btn ob__btn--primary" type="button" data-el="voiceDownload" hidden data-i18n="voice.download">Скачать голос</button>
+          </div>
+          <p class="ob__hint" data-el="voiceStatus"></p>
+
+          <span class="ob__label" data-i18n="speech.title">Голосовые вопросы</span>
+          <p class="ob__hint" data-i18n="speech.lead">
+            Зажмите левый Alt с пробелом и говорите. Распознавание работает на этом компьютере.
+          </p>
+          <div class="ob__actions">
+            <button class="ob__btn ob__btn--primary" type="button" data-el="speechDownload" hidden></button>
+          </div>
+          <p class="ob__hint" data-el="speechStatus"></p>
+        </div>
+      </section>
+
+      <!-- Автозапуск — на виду, а не под спойлером «если что-то не работает».
+           Это не починка поломки, а то, как программа вообще должна жить:
+           включил компьютер — она уже ждёт выделения. На телефоне понятия
+           «запуск при входе в систему» нет, поэтому блок скрыт (см. onboarding.js). -->
+      <section class="ob__block" data-el="startupBlock">
+        <label class="ob__check">
+          <input type="checkbox" data-el="launchAtLogin" />
+          <span class="ob__check-text">
+            <span data-i18n="startup.launch">Запускать вместе с системой</span>
+            <span class="ob__hint" data-i18n="startup.launchHint">Программа появится в трее сама и будет ждать выделения. Окно при этом не открывается.</span>
+          </span>
+        </label>
+      </section>
 
       <div class="ob__actions">
         <button class="ob__btn ob__btn--primary" type="button" data-el="save" data-i18n="action.save">Сохранить</button>
