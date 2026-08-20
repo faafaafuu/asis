@@ -285,15 +285,18 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             continue;
                         };
 
-                        let language = {
+                        let (language, term) = {
                             let state = app.state::<AppState>();
                             let language = state.config().ui.language.clone();
-                            language
+                            // Выделенное слово — подсказка распознавателю:
+                            // разговор идёт про него, и в вопросе оно прозвучит.
+                            let term = state.selection().map(|s| s.text).unwrap_or_default();
+                            (language, term)
                         };
                         // Поток обычный, а расшифровка ходит по сети (пусть и к
                         // себе же) — ждём её здесь, а не занимаем задачу Tauri.
                         let spoken = tauri::async_runtime::block_on(
-                            voice::whisper::transcribe(&app, wav, &language),
+                            voice::whisper::transcribe(&app, wav, &language, &term),
                         );
                         match spoken {
                             Ok(text) if !text.is_empty() => {
