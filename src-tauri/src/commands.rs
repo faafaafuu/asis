@@ -314,6 +314,17 @@ pub async fn voice_install(app: AppHandle, voice: String) -> Result<(), String> 
     crate::voice::assets::install(app, voice).await
 }
 
+/// Окно взяли в руки: передвинули за заголовок или потянули за край.
+///
+/// Само перетаскивание делает система — окно просит её об этом само, средствами
+/// Tauri. Сюда приходит только весть о том, что случилось: дальше геометрия
+/// принадлежит человеку, и подгонять окно под содержимое мы перестаём.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn popup_taken_over(moved: bool, sized: bool) {
+    crate::overlay::take_over(moved, sized);
+}
+
 /// Окно сообщает, что с ним работают.
 ///
 /// Зовётся из попапа на движение мыши, нажатие клавиши и прокрутку — с большим

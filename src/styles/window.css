@@ -34,3 +34,120 @@ body {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+
+/* ── Окно как окно: подвинуть и растянуть ──────────────────────────────────
+
+   Рамки у попапа нет и быть не должно: он всплывает поверх чужого текста и
+   обязан выглядеть карточкой, а не окном программы. Поэтому границы для
+   растягивания — невидимые полоски по краям, шириной примерно с ту рамку,
+   которой нет. Курсор над ними меняется, и человек находит их так же, как
+   нашёл бы настоящий край окна. */
+
+.popup {
+  position: relative;
+}
+
+/* Заголовок — то место, за которое окно двигают. */
+.popup__head {
+  cursor: grab;
+}
+.popup__head:active {
+  cursor: grabbing;
+}
+.popup__head button {
+  cursor: pointer;
+}
+
+.popup__grip {
+  position: absolute;
+  z-index: 2;
+}
+
+/* Стороны. Заходят на несколько пикселей наружу — туда, где у обычного окна
+   рамка и есть. */
+.popup__grip--n,
+.popup__grip--s {
+  left: 10px;
+  right: 10px;
+  height: 7px;
+  cursor: ns-resize;
+}
+.popup__grip--n {
+  top: -4px;
+}
+.popup__grip--s {
+  bottom: -4px;
+}
+
+.popup__grip--e,
+.popup__grip--w {
+  top: 10px;
+  bottom: 10px;
+  width: 7px;
+  cursor: ew-resize;
+}
+.popup__grip--e {
+  right: -4px;
+}
+.popup__grip--w {
+  left: -4px;
+}
+
+/* Углы — поверх сторон: у угла приоритет, иначе в него не попасть. */
+.popup__grip--ne,
+.popup__grip--nw,
+.popup__grip--se,
+.popup__grip--sw {
+  width: 14px;
+  height: 14px;
+  z-index: 3;
+}
+.popup__grip--nw {
+  top: -4px;
+  left: -4px;
+  cursor: nwse-resize;
+}
+.popup__grip--se {
+  bottom: -4px;
+  right: -4px;
+  cursor: nwse-resize;
+}
+.popup__grip--ne {
+  top: -4px;
+  right: -4px;
+  cursor: nesw-resize;
+}
+.popup__grip--sw {
+  bottom: -4px;
+  left: -4px;
+  cursor: nesw-resize;
+}
+
+/* ── Окно, которое растянули ───────────────────────────────────────────────
+
+   До этого момента размер окна определяет содержимое: сколько строк в ответе,
+   такой и высоты окно. После — наоборот: размер выбрал человек, и заполнять
+   его должно содержимое. Тело ответа при этом растягивается на весь остаток
+   и прокручивается внутри, а не выталкивает поле ввода за нижний край. */
+
+:root[data-sized] .window-mount {
+  position: fixed;
+  inset: 48px;
+  width: auto;
+  padding: 0;
+}
+
+:root[data-sized] .popup,
+:root[data-sized] .popup[data-expanded="true"] {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+}
+
+:root[data-sized] .popup__body {
+  max-height: none;
+  flex: 1 1 auto;
+  min-height: 0;
+}

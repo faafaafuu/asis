@@ -73,7 +73,9 @@ pub fn ensure_popup_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
-        .resizable(false)
+        // Рамки у окна нет, но тянуть его за края можно: без этого система
+        // откажется менять размер, за что бы мы её ни просили.
+        .resizable(true)
         .shadow(false)
         // Попап не должен забирать фокус клавиатуры у приложения, из которого
         // пользователь выделил текст (SPEC §8).
@@ -94,6 +96,10 @@ pub fn ensure_popup_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Result<()> {
     // Окно появилось — отсчёт бездействия начинается отсюда.
     touch_popup();
+    #[cfg(desktop)]
+    release_control();
+    #[cfg(desktop)]
+    BY_VOICE.store(false, std::sync::atomic::Ordering::Relaxed);
 
     // Узнаём до создания: окна ещё нет — значит слушателя событий тоже.
     let fresh = app.get_webview_window(POPUP_LABEL).is_none();
@@ -283,6 +289,10 @@ const HUD_TOP: f64 = 16.0;
 pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
     // Окно появилось — отсчёт бездействия начинается отсюда.
     touch_popup();
+    #[cfg(desktop)]
+    release_control();
+    #[cfg(desktop)]
+    BY_VOICE.store(true, std::sync::atomic::Ordering::Relaxed);
 
     let fresh = app.get_webview_window(POPUP_LABEL).is_none();
     let window = ensure_popup_window(app)?;
@@ -360,10 +370,27 @@ pub fn apply_geometry(
     };
 
     let scale = window.scale_factor().unwrap_or(1.0);
-    window.set_size(LogicalSize::new(
-        width + shadow_inset * 2.0,
-        height + shadow_inset * 2.0,
-    ))?;
+    let (moved, sized) = {
+        #[cfg(desktop)]
+        {
+            use std::sync::atomic::Ordering;
+            (
+                USER_MOVED.load(Ordering::Relaxed),
+                USER_SIZED.load(Ordering::Relaxed),
+            )
+        }
+        #[cfg(not(desktop))]
+        {
+            (false, false)
+        }
+    };
+
+    if !sized {
+        window.set_size(LogicalSize::new(
+            width + shadow_inset * 2.0,
+            height + shadow_inset * 2.0,
+        ))?;
+    }
 
     let anchor = selection.anchor();
     let size_physical = (width * scale, height * scale);
@@ -373,10 +400,27 @@ pub fn apply_geometry(
     let gap = GAP * scale;
     let inset = INSET * scale;
 
-    let (x, y) = place(anchor, size_physical, (mx, my, mw, mh), gap, inset);
+    let by_voice = {
+        #[cfg(desktop)]
+        {
+            BY_VOICE.load(std::sync::atomic::Ordering::Relaxed)
+        }
+        #[cfg(not(desktop))]
+        {
+            false
+        }
+    };
 
-    let pad = (shadow_inset * scale).round() as i32;
-    window.set_position(PhysicalPosition::new(x - pad, y - pad))?;
+    let (x, y) = if by_voice {
+        centre(size_physical, (mx, my, mw, mh), inset)
+    } else {
+        place(anchor, size_physical, (mx, my, mw, mh), gap, inset)
+    };
+
+    if !moved {
+        let pad = (shadow_inset * scale).round() as i32;
+        window.set_position(PhysicalPosition::new(x - pad, y - pad))?;
+    }
     window.show()?;
     // На части оконных менеджеров always-on-top «слетает» после show — подтверждаем.
     // Понятие «поверх других окон» — тоже настольное: на телефоне окна не делят
@@ -399,6 +443,25 @@ pub fn apply_geometry(
 
 /// Чистая функция позиционирования — вынесена отдельно ради тестов.
 /// Всё в физических пикселях; `monitor` — (x, y, width, height) рабочей области.
+/// Середина экрана, чуть выше геометрического центра.
+///
+/// «Чуть выше» — не украшение. Ровно посередине окно кажется съехавшим вниз:
+/// глаз считает центром точку выше настоящей, и любое сообщение, поставленное
+/// по геометрическому центру, читается как провалившееся. Треть высоты — та
+/// самая оптическая середина.
+fn centre(size: (f64, f64), monitor: (f64, f64, f64, f64), inset: f64) -> (i32, i32) {
+    let (mx, my, mw, mh) = monitor;
+    let (w, h) = size;
+
+    let x = mx + (mw - w) / 2.0;
+    let y = my + (mh - h) * 0.32;
+
+    // Порядок важен: сначала не даём уйти вниз, потом — вверх. Окно, которое
+    // на экран не влезает целиком, должно потерять низ, а не заголовок.
+    let y = y.min(my + mh - h - inset).max(my + inset);
+    (x.round() as i32, y.round() as i32)
+}
+
 fn place(
     anchor: ScreenRect,
     size: (f64, f64),
@@ -469,6 +532,51 @@ pub fn popup_idle() -> Option<std::time::Duration> {
         .lock()
         .unwrap_or_else(|err| err.into_inner())
         .map(|at| at.elapsed())
+}
+
+/// Спросили голосом, а не выделением.
+///
+/// От этого зависит, где встанет окно. Выделение — это место на экране, куда
+/// человек смотрит, и окно должно оказаться рядом с ним. У вопроса, заданного
+/// голосом, такого места нет: человек мог смотреть куда угодно, а курсор стоит
+/// там, где его бросили. Ставить окно у случайной точки — значит заставлять
+/// искать его глазами.
+#[cfg(desktop)]
+static BY_VOICE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Человек передвинул окно сам — больше его не двигаем.
+#[cfg(desktop)]
+static USER_MOVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Человек задал размер сам — больше под содержимое не подгоняем.
+#[cfg(desktop)]
+static USER_SIZED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Отмечает, что окно взяли в руки: за заголовок или за край.
+///
+/// Дальше геометрия — забота человека, а не программы. Иначе первое же
+/// изменение содержимого (пришёл ответ, раскрыли «простыми словами») вернуло бы
+/// окно на прежнее место прежнего размера, и растянуть его было бы невозможно.
+#[cfg(desktop)]
+pub fn take_over(moved: bool, sized: bool) {
+    use std::sync::atomic::Ordering;
+
+    if moved {
+        USER_MOVED.store(true, Ordering::Relaxed);
+    }
+    if sized {
+        USER_SIZED.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Возвращает окно под управление программы. Зовётся, когда попап открывается
+/// заново: у нового вопроса своё место у нового выделения.
+#[cfg(desktop)]
+fn release_control() {
+    use std::sync::atomic::Ordering;
+
+    USER_MOVED.store(false, Ordering::Relaxed);
+    USER_SIZED.store(false, Ordering::Relaxed);
 }
 
 /// Виден ли сейчас попап.
@@ -582,6 +690,25 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn voice_window_sits_mid_screen_a_bit_high() {
+        let monitor = (0.0, 0.0, 1920.0, 1080.0);
+        let (x, y) = centre((400.0, 300.0), monitor, 12.0);
+
+        // По горизонтали — ровно посередине.
+        assert_eq!(x, (1920 - 400) / 2);
+        // По вертикали — выше середины, но не у самого края.
+        assert!(y < (1080 - 300) / 2, "окно должно стоять выше центра");
+        assert!(y > 100, "и всё же не под самой кромкой экрана");
+    }
+
+    #[test]
+    fn a_tall_window_stays_on_screen() {
+        let monitor = (0.0, 0.0, 1920.0, 1080.0);
+        let (_, y) = centre((400.0, 1060.0), monitor, 12.0);
+        assert_eq!(y, 12, "окно выше экрана прижимается к верхнему краю");
+    }
+
     use super::*;
 
     const MONITOR: (f64, f64, f64, f64) = (0.0, 0.0, 1920.0, 1080.0);

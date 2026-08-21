@@ -163,6 +163,7 @@ pub fn run() {
             commands::pending_open,
             commands::close_popup,
             commands::popup_active,
+            commands::popup_taken_over,
             commands::ai_explain,
             commands::ai_ask,
             commands::ai_settings,

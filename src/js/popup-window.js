@@ -5,7 +5,7 @@
 
 import { PopupView } from "./popup-view.js";
 import { TauriProvider, MockProvider, DEFAULT_ERROR_TEXT } from "./ai-client.js";
-import { tauri, applyTheme } from "./bridge.js";
+import { tauri, appWindow, applyTheme } from "./bridge.js";
 import { attachMobileEntry } from "./mobile-entry.js";
 
 /** Поле вокруг попапа внутри окна — под тень (SPEC §5). Должно совпадать с CSS. */
@@ -26,10 +26,68 @@ const view = new PopupView({
 });
 
 mount.append(view.el);
+attachHandles(view.el);
 
 function close() {
   view.close();
   api?.invoke("close_popup").catch(() => {});
+}
+
+/** Края и углы, за которые тянут окно, и как их называет система. */
+const EDGES = {
+  n: "North",
+  s: "South",
+  e: "East",
+  w: "West",
+  ne: "NorthEast",
+  nw: "NorthWest",
+  se: "SouthEast",
+  sw: "SouthWest",
+};
+
+/**
+ * Делает окно обычным: его можно двигать и растягивать.
+ *
+ * Рамки у окна нет — она бы всё испортила: попап всплывает поверх чужого текста
+ * и должен выглядеть карточкой, а не окном программы. Поэтому за заголовок
+ * тянем сами, а по краям кладём невидимые полоски шириной с обычную рамку.
+ *
+ * Само движение ведёт система, а не мы: она держит курсор до отпускания кнопки,
+ * знает про края экрана и прилипание. Мы только сообщаем Rust, что геометрия
+ * теперь принадлежит человеку, — иначе следующий же ответ вернул бы окно на
+ * прежнее место прежнего размера.
+ */
+function attachHandles(popup) {
+  const win = appWindow();
+  if (!win) return;
+
+  for (const edge of Object.keys(EDGES)) {
+    const grip = document.createElement("span");
+    grip.className = `popup__grip popup__grip--${edge}`;
+    grip.dataset.edge = edge;
+    grip.setAttribute("aria-hidden", "true");
+    popup.append(grip);
+  }
+
+  popup.addEventListener("pointerdown", (event) => {
+    const edge = event.target?.dataset?.edge;
+    if (!edge || event.button !== 0) return;
+    event.preventDefault();
+    // Растянутое окно перестаёт подгоняться под содержимое — значит, содержимое
+    // должно заполнять окно само. Переключает это одна пометка, остальное в CSS.
+    document.documentElement.dataset.sized = "";
+    win.startResizeDragging(EDGES[edge]);
+    api?.invoke("popup_taken_over", { moved: true, sized: true }).catch(() => {});
+  });
+
+  const head = popup.querySelector(".popup__head");
+  head?.addEventListener("pointerdown", (event) => {
+    // Кнопка «?» живёт в заголовке — за неё окно не таскают.
+    if (event.button !== 0 || event.target.closest("button")) return;
+    event.preventDefault();
+    win.startDragging();
+    api?.invoke("popup_taken_over", { moved: true, sized: false }).catch(() => {});
+  });
 }
 
 // Признак жизни окна.
@@ -68,6 +126,10 @@ if (api) {
   /** Показывает содержимое по данным из Rust. */
   function applyOpen(payload) {
     const { term, context, theme, errorText, dialogue, speak } = payload ?? {};
+    // Новый вопрос — новое окно: размер снова определяет содержимое. Rust к
+    // этому моменту уже забыл про ручную геометрию, и разметка должна забыть
+    // тоже, иначе окно осталось бы растянутым под ответ в две строки.
+    delete document.documentElement.dataset.sized;
     if (theme) applyTheme(theme);
     if (errorText) view.errorText = errorText;
     if (dialogue !== undefined) view.dialogue = Boolean(dialogue);
