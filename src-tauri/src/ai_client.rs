@@ -344,9 +344,16 @@ impl HttpProvider {
     /// Один заход за ответом на вопрос: отправить и достать текст.
     async fn answer_once(&self, messages: Vec<Message<'_>>) -> Result<String, AiError> {
         let value = self.send(messages).await?;
-        extract_text(&value)
+        let text = extract_text(&value)
+            .map(|text| strip_reasoning(&text))
             .map(|text| strip_code_fence(&text).to_string())
-            .ok_or(AiError::Parse)
+            .ok_or(AiError::Parse)?;
+
+        if is_deliberation(&text) {
+            log::warn!("модель прислала рассуждение вместо ответа — считаем это отказом");
+            return Err(AiError::Parse);
+        }
+        Ok(text)
     }
 
     async fn send(&self, messages: Vec<Message<'_>>) -> Result<serde_json::Value, AiError> {
@@ -374,6 +381,18 @@ impl HttpProvider {
             // правильно. Срок один на всё приложение: тем же значением модель
             // прогревается при запуске (см. ollama::preload).
             body["keep_alive"] = serde_json::json!(crate::ollama::KEEP_ALIVE);
+        }
+
+        // OpenRouter умеет не присылать размышление — просим его об этом.
+        //
+        // Дело не в лишнем трафике, а в том, куда уходит лимит ответа. Модель
+        // сначала думает вслух, и думает много; лимит у нас короткий, потому что
+        // объяснение должно быть в два-три предложения. Размышление съедает его
+        // целиком, и на сам ответ не остаётся ничего — сервис возвращает пустой
+        // текст. Поле нестандартное, поэтому отправляем его только тем, кто его
+        // понимает: чужие API на неизвестный ключ отвечают ошибкой.
+        if self.endpoint.contains("openrouter.ai") {
+            body["reasoning"] = serde_json::json!({ "exclude": true });
         }
 
         let mut last = AiError::Network;
@@ -462,6 +481,65 @@ fn extract_text(value: &serde_json::Value) -> Option<String> {
         // вернул 200 и текст — молчать из-за формы обёртки нельзя.
         .or_else(|| text_at(value.pointer("/choices/0/message/reasoning")))
         .or_else(|| text_at(value.pointer("/choices/0/message/reasoning_content")))
+}
+
+/// Убирает размышление, оставленное моделью прямо в тексте ответа.
+///
+/// Рассуждающие модели отделяют мысли от ответа разметкой: одни — тегом
+/// `<think>`, другие — служебными каналами формата harmony. Показывать это
+/// человеку нельзя: он спросил, что такое альбедо, а получает страницу
+/// английских рассуждений о том, как бы ему ответить.
+fn strip_reasoning(text: &str) -> String {
+    let mut out = text.to_string();
+
+    // Парные теги — вырезаем вместе с содержимым.
+    for (open, close) in [("<think>", "</think>"), ("<thinking>", "</thinking>")] {
+        while let (Some(from), Some(to)) = (out.find(open), out.find(close)) {
+            if from >= to {
+                break;
+            }
+            out.replace_range(from..to + close.len(), "");
+        }
+    }
+
+    // Формат harmony: всё до последнего «final» — черновик.
+    if let Some(at) = out.rfind("<|channel|>final<|message|>") {
+        out = out[at + "<|channel|>final<|message|>".len()..].to_string();
+    }
+    for mark in ["<|start|>", "<|end|>", "<|message|>", "<|channel|>analysis"] {
+        out = out.replace(mark, "");
+    }
+
+    out.trim().to_string()
+}
+
+/// Похоже ли на размышление модели, а не на ответ человеку.
+///
+/// Случай не выдуманный: сервис вернул 200, поле ответа пустое, а в поле
+/// размышления — «We have a conversation. The user asks…». Прежде это уходило
+/// в окно как есть. Честное «не ответила» здесь лучше: человек переспросит или
+/// сменит модель, а не будет разбирать чужой черновик.
+///
+/// Признак — обращение к себе в третьем лице на английском в самом начале.
+/// Проверяем только начало: ответ по-английски бывает законным (термин
+/// английский, разговор английский), а вот начинаться с «The user asks» он
+/// не может.
+fn is_deliberation(text: &str) -> bool {
+    const MARKS: &[&str] = &[
+        "we have a conversation",
+        "the user asks",
+        "the user wants",
+        "the user is asking",
+        "the system instructions",
+        "the developer instruction",
+        "we need to answer",
+        "let me think",
+        "i need to respond",
+        "пользователь спрашивает,",
+    ];
+
+    let head: String = text.trim().to_lowercase().chars().take(200).collect();
+    MARKS.iter().any(|mark| head.contains(mark))
 }
 
 /// Снимает обёртку ```json … ```, в которую модели любят заворачивать ответ.
@@ -955,6 +1033,31 @@ mod tests {
         let parsed = normalize_explanation(&value).unwrap();
         assert_eq!(parsed.simple, "проще");
         assert_eq!(parsed.examples.len(), 3, "примеров берём не больше трёх");
+    }
+
+    #[test]
+    fn thinking_never_reaches_the_window() {
+        assert_eq!(
+            strip_reasoning("<think>надо ответить коротко</think>Альбедо — доля отражённого света."),
+            "Альбедо — доля отражённого света."
+        );
+        assert_eq!(
+            strip_reasoning("<|channel|>analysis<|message|>думаю<|channel|>final<|message|>Ответ."),
+            "Ответ."
+        );
+        // Обычный текст не трогаем.
+        assert_eq!(strip_reasoning("  Просто ответ.  "), "Просто ответ.");
+    }
+
+    #[test]
+    fn a_draft_is_not_an_answer() {
+        // Ровно то, что пришло из OpenRouter вживую.
+        assert!(is_deliberation(
+            "We have a conversation. The user asks: «Эта модель бесплатная?»              The system instructions: You are ChatGPT"
+        ));
+        assert!(!is_deliberation("Альбедо — доля света, которую отражает поверхность."));
+        // Английский ответ по существу размышлением не считается.
+        assert!(!is_deliberation("Albedo is the share of light a surface reflects."));
     }
 
     #[test]

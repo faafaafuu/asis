@@ -147,6 +147,9 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
         .spawn(move || {
             let mut buffer = vec![0u8; CHUNK];
             let mut tail: Option<u8> = None;
+            // Дочитали ли до конца. Если нет, процесс придётся снять силой —
+            // почему, объясняется ниже, у самого снятия.
+            let mut drained = false;
 
             loop {
                 // Нас отменили — дальше читать нечего: звук уже никому не нужен,
@@ -155,7 +158,10 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
                     break;
                 }
                 match stdout.read(&mut buffer) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        drained = true;
+                        break;
+                    }
                     Ok(read) => {
                         let mut samples = Vec::with_capacity(read / 2 + 1);
                         let mut bytes = buffer[..read].iter().copied();
@@ -189,16 +195,37 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
 
             // Снимаем с учёта только себя. Если за это время началась новая
             // фраза, в CURRENT уже её процесс — трогать его нельзя.
-            let mut current = CURRENT.lock().unwrap_or_else(|err| err.into_inner());
-            let mine = current
-                .as_ref()
-                .map(|(id, _)| *id == generation)
-                .unwrap_or(false);
-            if mine {
-                if let Some((_, child)) = current.as_mut() {
-                    let _ = child.wait();
+            //
+            // Забираем процесс из-под замка и отпускаем замок сразу же. Ждать
+            // завершения, держа замок, нельзя: в это время замок спрашивает
+            // `stop()`, а он зовётся и из главного потока — и тот встаёт вместе
+            // со всем окном. Вживую это и происходило: «программа не отвечает»
+            // после нескольких фраз подряд.
+            let mut child = {
+                let mut current = CURRENT.lock().unwrap_or_else(|err| err.into_inner());
+                let mine = current
+                    .as_ref()
+                    .map(|(id, _)| *id == generation)
+                    .unwrap_or(false);
+                if mine {
+                    current.take().map(|(_, child)| child)
+                } else {
+                    None
                 }
-                *current = None;
+            };
+
+            if let Some(child) = child.as_mut() {
+                // Оборвались на середине — Piper снимаем силой.
+                //
+                // Он пишет звук в канал, который читали только мы. Перестав
+                // читать, мы оставляем канал переполненным: Piper висит на
+                // записи и сам не завершится никогда, а `wait()` будет ждать
+                // его вечно. Так и получалась мёртвая пара — этот поток ждёт
+                // процесс, главный поток ждёт этот поток.
+                if !drained {
+                    let _ = child.kill();
+                }
+                let _ = child.wait();
             }
         })
         .map_err(|err| format!("не удалось начать озвучивание: {err}"))?;
@@ -225,11 +252,15 @@ pub fn stop() {
     audio::stop();
     // Отменяем текущее поколение: читающий поток увидит это и выйдет сам.
     GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    if let Some((_, mut child)) = CURRENT
+    // Замок отпускается на закрывающей скобке блока — до `kill()`, а не после.
+    // Иначе замок держался бы всё время снятия процесса, а его в этот же миг
+    // спрашивает читающий поток.
+    let child = CURRENT
         .lock()
         .unwrap_or_else(|err| err.into_inner())
-        .take()
-    {
+        .take();
+
+    if let Some((_, mut child)) = child {
         let _ = child.kill();
         let _ = child.wait();
     }

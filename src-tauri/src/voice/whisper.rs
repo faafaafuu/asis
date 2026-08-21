@@ -115,16 +115,27 @@ static STARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 static SERVER: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
 
 /// Останавливает сервер расшифровки и освобождает видеопамять.
+///
+/// Снятие происходит в отдельном потоке, а не здесь. Зовут эту функцию в том
+/// числе из окна настройки — галочкой, — а обычные команды Tauri выполняются
+/// в главном потоке. Ждать там чужой процесс нельзя: он выгружает полтора
+/// гигабайта из видеопамяти и уходит не мгновенно, а всё это время окно
+/// не отвечает.
 pub fn shutdown() {
-    if let Some(mut child) = SERVER
+    let child = SERVER
         .lock()
         .unwrap_or_else(|err| err.into_inner())
-        .take()
-    {
-        let _ = child.kill();
-        let _ = child.wait();
-        log::info!("сервер расшифровки остановлен, видеопамять свободна");
-    }
+        .take();
+
+    let Some(mut child) = child else { return };
+    std::thread::Builder::new()
+        .name("sufler-whisper-stop".into())
+        .spawn(move || {
+            let _ = child.kill();
+            let _ = child.wait();
+            log::info!("сервер расшифровки остановлен, видеопамять свободна");
+        })
+        .ok();
 }
 
 /// Поднимает сервер заранее, не дожидаясь конца фразы.
