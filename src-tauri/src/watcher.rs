@@ -12,6 +12,23 @@ use crate::selection::{create, Capability, Diagnostics, PlatformIntegration, POL
 use crate::state::AppState;
 use crate::overlay;
 
+/// Сколько попап может простоять без единого события, прежде чем закроется сам.
+const IDLE_CLOSE: Duration = Duration::from_secs(60);
+
+/// Занята ли программа тем, что человеку сейчас важно.
+///
+/// Разговор идёт или ответ читается вслух — окно закрывать нельзя, даже если
+/// мышь неподвижна: человек как раз слушает.
+#[cfg(desktop)]
+fn busy(_app: &tauri::AppHandle) -> bool {
+    crate::in_conversation() || crate::voice::speaking()
+}
+
+#[cfg(not(desktop))]
+fn busy(_app: &tauri::AppHandle) -> bool {
+    false
+}
+
 /// Обёртка над платформенной интеграцией: кладётся в managed state, чтобы команды
 /// могли спросить у неё статус разрешений.
 pub struct Integration(Arc<dyn PlatformIntegration>);
@@ -107,6 +124,24 @@ pub fn spawn(app: &AppHandle) -> Integration {
             // по первому же щелчку означало, что окно исчезает от любого движения
             // рядом с ним, включая случайное. Esc — жест осознанный, и закрывать
             // должен он.
+            // Окно, про которое забыли, убирается само.
+            //
+            // Щелчок мимо его больше не закрывает — значит, забытое окно висело
+            // бы поверх чужой работы до перезагрузки. Минута отсчитывается не от
+            // открытия, а от последнего события: пока человек читает, водит мышью
+            // или программа говорит, окно никуда не денется.
+            if overlay::is_popup_visible(&app) && !busy(&app) {
+                if let Some(idle) = overlay::popup_idle() {
+                    if idle >= IDLE_CLOSE {
+                        log::info!("попап забыт на минуту — закрываю");
+                        let handle = app.clone();
+                        let _ = app.run_on_main_thread(move || overlay::hide_popup(&handle));
+                        std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
+                        continue;
+                    }
+                }
+            }
+
             if overlay::is_popup_visible(&app) && worker.is_escape_pressed() {
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || overlay::hide_popup(&handle));

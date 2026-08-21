@@ -162,6 +162,7 @@ pub fn run() {
             commands::popup_ready,
             commands::pending_open,
             commands::close_popup,
+            commands::popup_active,
             commands::ai_explain,
             commands::ai_ask,
             commands::ai_settings,
@@ -1109,6 +1110,12 @@ pub(crate) fn restart_wake(app: &tauri::AppHandle) {
 
 #[cfg(not(desktop))]
 pub(crate) fn restart_wake(_app: &tauri::AppHandle) {}
+
+/// Идёт ли разговор без рук.
+#[cfg(desktop)]
+pub(crate) fn in_conversation() -> bool {
+    CONVERSATION.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 /// Заканчивает разговор: микрофон закрывается, клавиши работают как прежде.
 #[cfg(desktop)]

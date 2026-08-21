@@ -92,6 +92,9 @@ pub fn ensure_popup_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 /// Показывает попап для нового выделения: сохраняет якорь и отдаёт фронтенду термин.
 /// Само окно появится в `apply_geometry`, когда фронтенд сообщит свой размер.
 pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Result<()> {
+    // Окно появилось — отсчёт бездействия начинается отсюда.
+    touch_popup();
+
     // Узнаём до создания: окна ещё нет — значит слушателя событий тоже.
     let fresh = app.get_webview_window(POPUP_LABEL).is_none();
     let window = ensure_popup_window(app)?;
@@ -278,6 +281,9 @@ const HUD_TOP: f64 = 16.0;
 /// Отличий от обычного открытия два: якоря выделения нет — окно встаёт у
 /// курсора, — и ответ читается вслух, потому что и вопрос был голосом.
 pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
+    // Окно появилось — отсчёт бездействия начинается отсюда.
+    touch_popup();
+
     let fresh = app.get_webview_window(POPUP_LABEL).is_none();
     let window = ensure_popup_window(app)?;
 
@@ -443,6 +449,28 @@ fn monitor_bounds(window: &WebviewWindow, x: f64, y: f64) -> (f64, f64, f64, f64
     monitor.unwrap_or((0.0, 0.0, 1920.0, 1080.0))
 }
 
+/// Когда с попапом последний раз что-то происходило.
+///
+/// `None` — попапа нет. Время сдвигают и действия человека (навёл мышь, набрал
+/// букву, прокрутил), и работа программы (пришёл ответ, читается вслух).
+#[cfg(desktop)]
+static ALIVE_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Отмечает, что попап не заброшен.
+#[cfg(desktop)]
+pub fn touch_popup() {
+    *ALIVE_AT.lock().unwrap_or_else(|err| err.into_inner()) = Some(std::time::Instant::now());
+}
+
+/// Сколько попап стоит без единого события. `None` — попапа нет.
+#[cfg(desktop)]
+pub fn popup_idle() -> Option<std::time::Duration> {
+    ALIVE_AT
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .map(|at| at.elapsed())
+}
+
 /// Виден ли сейчас попап.
 pub fn is_popup_visible(app: &AppHandle) -> bool {
     app.get_webview_window(POPUP_LABEL)
@@ -485,6 +513,7 @@ pub fn hide_popup(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(POPUP_LABEL) {
         let _ = window.hide();
     }
+    *ALIVE_AT.lock().unwrap_or_else(|err| err.into_inner()) = None;
     app.state::<AppState>().clear_selection();
 }
 

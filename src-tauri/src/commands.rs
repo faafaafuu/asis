@@ -109,6 +109,10 @@ pub async fn ai_explain(
     term: String,
     context: String,
 ) -> Result<Explanation, String> {
+    // Пришёл запрос из окна — окно живо, отсчёт бездействия начинается заново.
+    #[cfg(desktop)]
+    crate::overlay::touch_popup();
+
     // Отметка о самом факте вызова. Без неё по журналу нельзя отличить «запрос ушёл
     // и не вернулся» от «попап открылся, но до запроса дело не дошло», а это разные
     // поломки в разных местах.
@@ -118,13 +122,19 @@ pub async fn ai_explain(
     let fallback = state.error_text();
     let limit = state.config().ai.call_limit();
     let what = format!("объяснение «{term}»");
-    guarded(
+    let answer = guarded(
         &what,
         async move { provider.explain(&term, &context).await },
         fallback,
         limit,
     )
-    .await
+    .await;
+
+    // И по возвращении тоже: модель имеет право думать дольше минуты, а окно
+    // всё это время не должно считаться заброшенным.
+    #[cfg(desktop)]
+    crate::overlay::touch_popup();
+    answer
 }
 
 #[tauri::command]
@@ -135,17 +145,25 @@ pub async fn ai_ask(
     thread: Vec<ThreadItem>,
     question: String,
 ) -> Result<String, String> {
+    // Пришёл запрос из окна — окно живо, отсчёт бездействия начинается заново.
+    #[cfg(desktop)]
+    crate::overlay::touch_popup();
+
     let provider = state.provider();
     let fallback = state.error_text();
     let limit = state.config().ai.call_limit();
     let what = format!("вопрос про «{term}»");
-    guarded(
+    let answer = guarded(
         &what,
         async move { provider.ask(&term, &context, &thread, &question).await },
         fallback,
         limit,
     )
-    .await
+    .await;
+
+    #[cfg(desktop)]
+    crate::overlay::touch_popup();
+    answer
 }
 
 /// Настройки, которые пользователь может менять из окна: провайдер и доступ к модели.
@@ -294,6 +312,17 @@ pub fn voice_list() -> serde_json::Value {
 #[tauri::command]
 pub async fn voice_install(app: AppHandle, voice: String) -> Result<(), String> {
     crate::voice::assets::install(app, voice).await
+}
+
+/// Окно сообщает, что с ним работают.
+///
+/// Зовётся из попапа на движение мыши, нажатие клавиши и прокрутку — с большим
+/// запасом по частоте, не на каждое событие. Нужно, чтобы окно, в котором
+/// человек читает длинный ответ, не закрылось у него на глазах.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn popup_active() {
+    crate::overlay::touch_popup();
 }
 
 /// Произнести текст. Возвращается сразу: речь идёт своим чередом.
