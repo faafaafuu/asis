@@ -26,7 +26,6 @@ const view = new PopupView({
 });
 
 mount.append(view.el);
-attachHandles(view.el);
 
 function close() {
   view.close();
@@ -89,6 +88,8 @@ function attachHandles(popup) {
     api?.invoke("popup_taken_over", { moved: true, sized: false }).catch(() => {});
   });
 }
+
+attachHandles(view.el);
 
 // Признак жизни окна.
 //
