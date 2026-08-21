@@ -98,23 +98,20 @@ pub fn spawn(app: &AppHandle) -> Integration {
                 config.trigger.clone()
             };
 
-            // Закрытие попапа по Esc и по клику вне окна. Оба события ловятся здесь,
-            // а не во фронтенде: окно не забирает фокус, и клавиатурные события до
-            // него не доходят (SPEC §8).
-            if overlay::is_popup_visible(&app) {
-                let escape = worker.is_escape_pressed();
-                let outside_click = worker.is_primary_mouse_down()
-                    && worker
-                        .cursor_position()
-                        .map(|(x, y)| !overlay::is_point_inside_popup(&app, x, y))
-                        .unwrap_or(false);
-
-                if escape || outside_click {
-                    let handle = app.clone();
-                    let _ = app.run_on_main_thread(move || overlay::hide_popup(&handle));
-                    std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
-                    continue;
-                }
+            // Закрытие попапа по Esc. Ловится здесь, а не во фронтенде: окно не
+            // забирает фокус, и клавиатурные события до него не доходят (SPEC §8).
+            //
+            // Щелчок мимо окна попап не закрывает — намеренно. Окно всплывает
+            // поверх той программы, в которой человек читает, и щёлкать в ней он
+            // продолжает: поставить курсор, прокрутить, выделить дальше. Закрытие
+            // по первому же щелчку означало, что окно исчезает от любого движения
+            // рядом с ним, включая случайное. Esc — жест осознанный, и закрывать
+            // должен он.
+            if overlay::is_popup_visible(&app) && worker.is_escape_pressed() {
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || overlay::hide_popup(&handle));
+                std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
+                continue;
             }
 
             if let Some(selection) = worker.poll_trigger(&config) {

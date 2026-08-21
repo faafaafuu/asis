@@ -390,14 +390,6 @@ impl PlatformIntegration for Platform {
     fn is_escape_pressed(&self) -> bool {
         key_down(VK_ESCAPE)
     }
-
-    fn is_primary_mouse_down(&self) -> bool {
-        key_down(VK_LBUTTON)
-    }
-
-    fn cursor_position(&self) -> Option<(f64, f64)> {
-        cursor()
-    }
 }
 
 /// Обрезка для строки статуса: в диагностику попадает выделение любой длины,

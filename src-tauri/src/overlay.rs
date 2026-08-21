@@ -450,21 +450,6 @@ pub fn is_popup_visible(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-/// Попала ли точка в окно попапа. По этому решается, закрывать ли его при клике:
-/// клик внутри — это работа с попапом, клик снаружи — закрытие (SPEC §8).
-pub fn is_point_inside_popup(app: &AppHandle, x: f64, y: f64) -> bool {
-    let Some(window) = app.get_webview_window(POPUP_LABEL) else {
-        return false;
-    };
-    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
-        return false;
-    };
-    x >= pos.x as f64
-        && x <= pos.x as f64 + size.width as f64
-        && y >= pos.y as f64
-        && y <= pos.y as f64 + size.height as f64
-}
-
 /// Закрывает окно попапа, чтобы оно создалось заново при следующем выделении.
 ///
 /// Нужно после сна компьютера: окно у нас прозрачное и поверх остальных, а

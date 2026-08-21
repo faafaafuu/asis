@@ -283,14 +283,6 @@ impl PlatformIntegration for Platform {
         unsafe { CGEventSourceKeyState(HID_SYSTEM_STATE, KEY_ESCAPE) != 0 }
     }
 
-    fn is_primary_mouse_down(&self) -> bool {
-        unsafe { CGEventSourceButtonState(HID_SYSTEM_STATE, MOUSE_BUTTON_LEFT) != 0 }
-    }
-
-    fn cursor_position(&self) -> Option<(f64, f64)> {
-        cursor()
-    }
-
     fn open_permission_settings(&self) -> bool {
         std::process::Command::new("open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")

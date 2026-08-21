@@ -188,10 +188,6 @@ impl PlatformIntegration for Platform {
             context: String::new(),
         })
     }
-
-    fn cursor_position(&self) -> Option<(f64, f64)> {
-        cursor_position()
-    }
 }
 
 pub fn create() -> Box<dyn PlatformIntegration> {

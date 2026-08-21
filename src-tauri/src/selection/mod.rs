@@ -132,16 +132,6 @@ pub trait PlatformIntegration: Send + Sync {
         false
     }
 
-    /// Нажата ли сейчас левая кнопка мыши — по ней закрываем попап при клике вне окна.
-    fn is_primary_mouse_down(&self) -> bool {
-        false
-    }
-
-    /// Позиция курсора в экранных координатах.
-    fn cursor_position(&self) -> Option<(f64, f64)> {
-        None
-    }
-
     /// Открыть системные настройки, где выдаётся нужное разрешение. `false` — если
     /// на этой платформе открывать нечего.
     fn open_permission_settings(&self) -> bool {
