@@ -285,7 +285,7 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         // Разговор, если он шёл, уступает клавише: человек взял
                         // слово сам, и слушать его надо с этой секунды. Без
                         // сигнала — разговор не кончился, он продолжается.
-                        end_conversation(&app, false);
+                        end_conversation(&app, false, false);
                         stop_wake();
 
                         // Замолчать, раз с нами заговорили. Это не только
@@ -950,7 +950,7 @@ fn start_conversation(app: &tauri::AppHandle) {
                 let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
             }
 
-            stop_conversation(&app);
+            finish_conversation(&app);
         })
         .ok();
 }
@@ -1120,7 +1120,21 @@ pub(crate) fn in_conversation() -> bool {
 /// Заканчивает разговор: микрофон закрывается, клавиши работают как прежде.
 #[cfg(desktop)]
 pub(crate) fn stop_conversation(app: &tauri::AppHandle) {
-    end_conversation(app, true);
+    end_conversation(app, true, false);
+}
+
+/// Заканчивает разговор, который выдохся сам: попрощались или замолчали.
+///
+/// Отличается от `stop_conversation` тем, что убирает и окно. Разговор шёл
+/// голосом, окно при нём — не рабочее место, а расшифровка сказанного; когда
+/// попрощались, оставлять его висеть поверх чужой работы незачем.
+///
+/// Наоборот делать нельзя: окно закрывают и вручную, и тогда разговор кончается
+/// вместе с ним — если бы конец разговора в свою очередь закрывал окно, они
+/// звали бы друг друга по кругу.
+#[cfg(desktop)]
+fn finish_conversation(app: &tauri::AppHandle) {
+    end_conversation(app, true, true);
 }
 
 /// Заканчивает разговор. `signal` — звучит ли при этом сигнал.
@@ -1129,7 +1143,7 @@ pub(crate) fn stop_conversation(app: &tauri::AppHandle) {
 /// правда. Когда человек перебивает клавишей, чтобы сказать следующее, разговор
 /// не кончается — он продолжается, просто с этой секунды слово у человека.
 #[cfg(desktop)]
-fn end_conversation(app: &tauri::AppHandle, signal: bool) {
+fn end_conversation(app: &tauri::AppHandle, signal: bool, close_window: bool) {
     use std::sync::atomic::Ordering;
     use tauri::Emitter;
 
@@ -1152,6 +1166,14 @@ fn end_conversation(app: &tauri::AppHandle, signal: bool) {
         .name("sufler-wake-again".into())
         .spawn(move || {
             std::thread::sleep(voice::chime_length() + std::time::Duration::from_millis(400));
+
+            // Окно убираем после сигнала, а не вместе с ним: закрытие окна
+            // останавливает и звук, и сигнал оборвался бы на середине.
+            if close_window {
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || overlay::hide_popup(&handle));
+            }
+
             start_wake(&app);
 
             // Ожидание выключено — значит, распознавание больше не нужно, и
