@@ -390,6 +390,13 @@ pub async fn preload(host: &str, model: &str) -> Result<(), String> {
         .build()
         .map_err(|err| err.to_string())?;
 
+    {
+        let mut warmed = WARMED.lock().unwrap_or_else(|err| err.into_inner());
+        if !warmed.iter().any(|mine| same_model(mine, model)) {
+            warmed.push(model.to_string());
+        }
+    }
+
     client
         .post(format!("{host}/api/generate"))
         .json(&serde_json::json!({
@@ -406,7 +413,17 @@ pub async fn preload(host: &str, model: &str) -> Result<(), String> {
         .map_err(|err| format!("Ollama ответила ошибкой на прогрев: {err}"))
 }
 
-/// Выгружает из видеопамяти все модели, кроме нужной.
+/// Модели, которые в память загрузили мы.
+static WARMED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Одна ли это модель, как бы ни был записан тег.
+fn same_model(left: &str, right: &str) -> bool {
+    left == right
+        || left == format!("{right}:latest")
+        || right == format!("{left}:latest")
+}
+
+/// Выгружает из видеопамяти лишние модели, загруженные нами же.
 ///
 /// Ollama держит в памяти каждую модель, к которой обращались, — и держит долго,
 /// мы сами её об этом просим. Пока модель одна, это ровно то, что нужно: ответ
@@ -422,6 +439,16 @@ pub async fn preload(host: &str, model: &str) -> Result<(), String> {
 /// Поэтому: выбрали модель — остальные отпускаем. Ошибки здесь не важны, это
 /// уборка; не вышло — значит, память освободится сама по истечении срока.
 pub async fn unload_others(host: &str, keep: &str) {
+    // Выгружаем только то, что грузили сами. Ollama — общая служба: рядом может
+    // работать чужая программа или открытый `ollama run`, и выгонять их модель
+    // из памяти мы не вправе. Со стороны соседа это выглядит как внезапная
+    // задержка на десятки секунд, пока его модель грузится заново.
+    let ours: Vec<String> = WARMED
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .iter()
+        .cloned()
+        .collect();
     let client = match crate::net::client_builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -448,6 +475,9 @@ pub async fn unload_others(host: &str, keep: &str) {
     for name in loaded {
         // `llama3` и `llama3:latest` — одна и та же модель.
         if name == keep || name == format!("{keep}:latest") || keep == format!("{name}:latest") {
+            continue;
+        }
+        if !ours.iter().any(|mine| same_model(mine, &name)) {
             continue;
         }
         // Нулевой срок жизни — просьба выгрузить прямо сейчас.

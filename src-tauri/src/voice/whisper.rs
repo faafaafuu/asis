@@ -108,6 +108,9 @@ pub async fn install(app: AppHandle) -> Result<(), String> {
 /// Идёт ли сейчас запуск сервера. Чтобы не поднимать его дважды.
 static STARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Прежний сервер ещё снимается. Порт в это время открыт, но сервера уже нет.
+static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Запущенный нами сервер. Нужен, чтобы его можно было и остановить.
 ///
 /// Пока он жив, полтора гигабайта видеопамяти заняты моделью. Когда ожидание
@@ -128,14 +131,23 @@ pub fn shutdown() {
         .take();
 
     let Some(mut child) = child else { return };
-    std::thread::Builder::new()
+    // Отметка ставится здесь, а не в потоке: между этой строкой и первой
+    // строкой потока успевает вклиниться проверка «сервер жив?», и она
+    // ответила бы «жив» — порт ещё открыт.
+    STOPPING.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let started = std::thread::Builder::new()
         .name("sufler-whisper-stop".into())
         .spawn(move || {
             let _ = child.kill();
             let _ = child.wait();
+            STOPPING.store(false, std::sync::atomic::Ordering::SeqCst);
             log::info!("сервер расшифровки остановлен, видеопамять свободна");
-        })
-        .ok();
+        });
+
+    if started.is_err() {
+        STOPPING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// Поднимает сервер заранее, не дожидаясь конца фразы.
@@ -148,15 +160,27 @@ pub fn shutdown() {
 pub fn warm(app: &AppHandle) {
     use std::sync::atomic::Ordering;
 
-    if server_alive() || STARTING.swap(true, Ordering::SeqCst) {
+    if STARTING.swap(true, Ordering::SeqCst) {
         return;
     }
     let app = app.clone();
     std::thread::Builder::new()
         .name("sufler-whisper-warm".into())
         .spawn(move || {
-            if let Err(err) = ensure_server(&app) {
-                log::warn!("сервер расшифровки не поднялся заранее: {err}");
+            // Прежний сервер могли только что попросить уйти. Пока он уходит,
+            // порт открыт, и проверка «жив ли» соврала бы: мы решили бы, что
+            // поднимать нечего, а через мгновение сервера не стало бы.
+            for _ in 0..100 {
+                if !STOPPING.load(Ordering::SeqCst) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+
+            if !server_alive() {
+                if let Err(err) = ensure_server(&app) {
+                    log::warn!("сервер расшифровки не поднялся заранее: {err}");
+                }
             }
             STARTING.store(false, Ordering::SeqCst);
         })
@@ -322,9 +346,12 @@ fn echoes_prompt(text: &str, prompt: &str) -> bool {
     }
     let letters = |s: &str| -> String { s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect() };
     let (said, hinted) = (letters(text), letters(prompt));
-    // Короткая подсказка — это выделенное слово, и услышать его в вопросе как
-    // раз ожидаемо. Отбрасываем только повтор длинной наводки целиком.
-    hinted.chars().count() > 20 && !said.is_empty() && hinted.contains(&said)
+
+    // Сказанное должно быть длинным само по себе, а не просто попадать внутрь
+    // подсказки. Иначе под правило попадает зов по имени: «Ноа» есть и в
+    // подсказке, и в том, что человек произнёс, — и обращение отбрасывалось
+    // как эхо, отчего помощник переставал отзываться на короткое имя.
+    said.chars().count() >= 20 && hinted.chars().count() > 20 && hinted.contains(&said)
 }
 
 /// Фразы, которые модель выдумывает на тишине.
@@ -453,8 +480,10 @@ mod tests {
     #[test]
     fn the_hint_does_not_come_back_as_speech() {
         let hint = "Хэй, Ноа. Ноа — имя голосового помощника.";
-        assert!(echoes_prompt("Хэй, Ноа.", hint));
         assert!(echoes_prompt("хэй ноа ноа имя голосового помощника", hint));
+        // Короткий зов по имени — не эхо, даже если имя есть и в подсказке.
+        assert!(!echoes_prompt("Ноа.", hint));
+        assert!(!echoes_prompt("Ноа, слышишь?", hint));
         // Настоящий вопрос подсказкой не является, даже если начат обращением.
         assert!(!echoes_prompt("Хэй, Ноа, что такое альбедо?", hint));
         // Короткая подсказка — выделенное слово; услышать его в вопросе нормально.

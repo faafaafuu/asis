@@ -99,6 +99,8 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
     #[cfg(desktop)]
     release_control();
     #[cfg(desktop)]
+    OPENS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(desktop)]
     BY_VOICE.store(false, std::sync::atomic::Ordering::Relaxed);
 
     // Узнаём до создания: окна ещё нет — значит слушателя событий тоже.
@@ -291,6 +293,8 @@ pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
     touch_popup();
     #[cfg(desktop)]
     release_control();
+    #[cfg(desktop)]
+    OPENS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     #[cfg(desktop)]
     BY_VOICE.store(true, std::sync::atomic::Ordering::Relaxed);
 
@@ -543,6 +547,29 @@ pub fn popup_idle() -> Option<std::time::Duration> {
 /// искать его глазами.
 #[cfg(desktop)]
 static BY_VOICE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Сколько раз попап открывали. Служит окну именем: по нему видно, то ли это
+/// окно, о котором шла речь, или его успели закрыть и открыть заново.
+#[cfg(desktop)]
+static OPENS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Какой попап открыт сейчас.
+#[cfg(desktop)]
+pub fn popup_generation() -> u64 {
+    OPENS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Закрывает попап, если это всё ещё тот самый.
+///
+/// Отложенные закрытия — по концу разговора, по бездействию — принимают решение
+/// заранее, а выполняют его спустя время. За это время человек мог выделить
+/// новое слово, и закрывать пришлось бы уже чужое окно.
+#[cfg(desktop)]
+pub fn hide_popup_if(app: &AppHandle, generation: u64) {
+    if popup_generation() == generation {
+        hide_popup(app);
+    }
+}
 
 /// Человек передвинул окно сам — больше его не двигаем.
 #[cfg(desktop)]

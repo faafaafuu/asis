@@ -1162,6 +1162,7 @@ fn end_conversation(app: &tauri::AppHandle, signal: bool, close_window: bool) {
 
     // И снова ждём обращения — но не раньше, чем отзвучит сигнал: иначе
     // услышим его же.
+    let generation = overlay::popup_generation();
     let app = app.clone();
     std::thread::Builder::new()
         .name("sufler-wake-again".into())
@@ -1172,7 +1173,8 @@ fn end_conversation(app: &tauri::AppHandle, signal: bool, close_window: bool) {
             // останавливает и звук, и сигнал оборвался бы на середине.
             if close_window {
                 let handle = app.clone();
-                let _ = app.run_on_main_thread(move || overlay::hide_popup(&handle));
+                let _ =
+                    app.run_on_main_thread(move || overlay::hide_popup_if(&handle, generation));
             }
 
             start_wake(&app);
