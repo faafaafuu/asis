@@ -111,6 +111,9 @@ static STARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 /// Прежний сервер ещё снимается. Порт в это время открыт, но сервера уже нет.
 static STOPPING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Запуск сервера — по одному за раз. Почему, объяснено в `ensure_server`.
+static SPAWNING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Запущенный нами сервер. Нужен, чтобы его можно было и остановить.
 ///
 /// Пока он жив, полтора гигабайта видеопамяти заняты моделью. Когда ожидание
@@ -210,6 +213,27 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    // Поднимать сервер имеет право только один поток за раз.
+    //
+    // Проверка «жив ли» и запуск — два разных действия, и между ними успевает
+    // вклиниться второй поток: расшифровка фразы и прогрев легко случаются
+    // одновременно. Оба видели, что сервера нет, и оба его запускали. Второй
+    // не мог занять порт, но модель в видеопамять успевал загрузить — полтора
+    // гигабайта на процесс, и так до полного заполнения карты.
+    let _spawning = SPAWNING.lock().unwrap_or_else(|err| err.into_inner());
+    if server_alive() {
+        return Ok(());
+    }
+
+    // Прежний процесс, если он остался в учёте, уже мёртв или умирает: сервер
+    // не отвечает. Дожать его и убрать из учёта, иначе дескриптор потеряется
+    // вместе с возможностью когда-либо его снять.
+    let stale = SERVER.lock().unwrap_or_else(|err| err.into_inner()).take();
+    if let Some(mut stale) = stale {
+        let _ = stale.kill();
+        let _ = stale.wait();
+    }
+
     let exe = server_exe(app).ok_or("распознавание речи ещё не скачано")?;
     let model = model(app)?;
     if !model.exists() {
@@ -254,6 +278,8 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
     let child = command
         .spawn()
         .map_err(|err| format!("сервер расшифровки не запустился: {err}"))?;
+    // Сервер уходит вместе с программой, как бы её ни закрыли.
+    crate::jobs::adopt(&child);
     *SERVER.lock().unwrap_or_else(|err| err.into_inner()) = Some(child);
     log::info!("поднимаю сервер расшифровки");
 

@@ -12,6 +12,7 @@ mod instance;
 mod mobile;
 mod net;
 mod ollama;
+mod jobs;
 mod overlay;
 mod secret;
 mod selection;

@@ -140,6 +140,7 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
         drop(stdin);
     });
 
+    crate::jobs::adopt(&child);
     *CURRENT.lock().unwrap_or_else(|err| err.into_inner()) = Some((generation, child));
 
     std::thread::Builder::new()

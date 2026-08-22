@@ -115,6 +115,9 @@ windows = { version = "0.62", features = [
   "Win32_System_DataExchange",
   "Win32_System_Memory",
   "Win32_System_Threading",
+  # Задания (job objects): дочерние процессы должны уходить вместе с нами,
+  # в том числе когда программу снимают из диспетчера задач.
+  "Win32_System_JobObjects",
   # GlobalMemoryStatusEx — сколько на машине оперативной памяти. По этому числу
   # и по видеопамяти подбирается модель при первом запуске (ollama::pick).
   "Win32_System_SystemInformation",
