@@ -544,7 +544,7 @@ pub fn open_key_page(provider: String) -> Result<(), String> {
 }
 
 /// Отдаёт ссылку системе — пусть открывает тем, чем человек обычно читает.
-fn open_externally(target: &str) -> Result<(), String> {
+pub(crate) fn open_externally(target: &str) -> Result<(), String> {
     let opener = if cfg!(target_os = "windows") {
         "explorer"
     } else if cfg!(target_os = "macos") {
@@ -699,6 +699,18 @@ pub struct TaskView {
     pub due: Option<String>,
     pub done: bool,
     pub overdue: bool,
+    pub steps: Vec<StepView>,
+    pub advice: Option<String>,
+    /// Сколько раз переносили. Три и больше — окно показывает это отдельно.
+    pub postponed: u32,
+    /// Уехало ли дело в календарь.
+    pub in_calendar: bool,
+}
+
+#[derive(serde::Serialize)]
+pub struct StepView {
+    pub title: String,
+    pub done: bool,
 }
 
 fn view(task: &crate::tasks::Task, now: chrono::DateTime<chrono::Local>) -> TaskView {
@@ -708,6 +720,17 @@ fn view(task: &crate::tasks::Task, now: chrono::DateTime<chrono::Local>) -> Task
         due: task.due.map(|due| due.to_rfc3339()),
         done: task.done_at.is_some(),
         overdue: task.overdue(now),
+        steps: task
+            .steps
+            .iter()
+            .map(|step| StepView {
+                title: step.title.clone(),
+                done: step.done,
+            })
+            .collect(),
+        advice: task.advice.clone(),
+        postponed: task.postponed,
+        in_calendar: task.event_id.is_some(),
     }
 }
 
@@ -786,4 +809,140 @@ fn parse_due(raw: Option<&str>) -> Result<Option<chrono::DateTime<chrono::Local>
 fn changed(app: &AppHandle) {
     use tauri::Emitter;
     let _ = app.emit("tasks:changed", ());
+}
+
+/* ── Календарь и разбор дня ──────────────────────────────────────────────── */
+
+/// Настройки календаря для окна. Секрет и ключ наружу не отдаются целиком.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarSettings {
+    pub client_id: String,
+    pub client_secret: String,
+    pub calendar_id: String,
+    pub enabled: bool,
+    /// Подключён ли аккаунт. Само значение ключа окну незачем.
+    pub connected: bool,
+}
+
+#[tauri::command]
+pub fn calendar_settings(state: State<'_, AppState>) -> CalendarSettings {
+    let config = state.config();
+    CalendarSettings {
+        client_id: config.calendar.client_id.clone(),
+        // Секрет показываем замаскированным — как и ключ от модели.
+        client_secret: if config.calendar.client_secret.is_empty() {
+            String::new()
+        } else {
+            "••••••••".into()
+        },
+        calendar_id: config.calendar.calendar_id.clone(),
+        enabled: config.calendar.enabled,
+        connected: !config.calendar.refresh_token.is_empty(),
+    }
+}
+
+#[tauri::command]
+pub fn save_calendar_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: CalendarSettings,
+) -> Result<(), String> {
+    {
+        let mut config = state.config_mut();
+        config.calendar.client_id = settings.client_id.trim().to_string();
+        // Точки означают «не менять»: наружу секрет уходил замаскированным.
+        if !settings.client_secret.is_empty() && !settings.client_secret.starts_with('•') {
+            config.calendar.client_secret = settings.client_secret.trim().to_string();
+        }
+        config.calendar.calendar_id = match settings.calendar_id.trim() {
+            "" => "primary".into(),
+            named => named.to_string(),
+        };
+        config.calendar.enabled = settings.enabled;
+    }
+    persist(&app, &state)
+}
+
+/// Проводит через согласие Google и запоминает ключ.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn calendar_connect(app: AppHandle) -> Result<(), String> {
+    let token = crate::calendar::connect(&app).await?;
+
+    let state = app.state::<AppState>();
+    {
+        let mut config = state.config_mut();
+        config.calendar.refresh_token = token;
+        // Подключили — значит, собирались пользоваться.
+        config.calendar.enabled = true;
+    }
+    persist(&app, &state)?;
+    log::info!("календарь подключён");
+    Ok(())
+}
+
+/// Отключает календарь: ключ забывается.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn calendar_forget(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    {
+        let mut config = state.config_mut();
+        config.calendar.refresh_token.clear();
+        config.calendar.enabled = false;
+    }
+    persist(&app, &state)
+}
+
+/// Настройки вечернего разбора.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewSettings {
+    pub enabled: bool,
+    pub hour: u32,
+    pub minute: u32,
+}
+
+#[tauri::command]
+pub fn review_settings(state: State<'_, AppState>) -> ReviewSettings {
+    let config = state.config();
+    ReviewSettings {
+        enabled: config.review.enabled,
+        hour: config.review.hour,
+        minute: config.review.minute,
+    }
+}
+
+#[tauri::command]
+pub fn save_review_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: ReviewSettings,
+) -> Result<(), String> {
+    {
+        let mut config = state.config_mut();
+        config.review.enabled = settings.enabled;
+        // Часы и минуты приходят из поля времени, но файл настроек правят и
+        // руками: значение вне суток превратило бы разбор в никогда.
+        config.review.hour = settings.hour.min(23);
+        config.review.minute = settings.minute.min(59);
+    }
+    persist(&app, &state)
+}
+
+/// Отмечает шаг задачи сделанным.
+#[tauri::command]
+pub fn task_step(app: AppHandle, id: String, at: usize, done: bool) -> Option<TaskView> {
+    let task = crate::tasks::set_step_done(&id, at, done)?;
+    changed(&app);
+    Some(view(&task, chrono::Local::now()))
+}
+
+/// Просит модель разбить задачу на шаги.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn task_plan(app: AppHandle, id: String) -> Result<Option<TaskView>, String> {
+    let task = crate::planner::plan_task(&app, &id).await?;
+    changed(&app);
+    Ok(task.map(|task| view(&task, chrono::Local::now())))
 }

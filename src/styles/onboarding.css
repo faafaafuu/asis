@@ -575,3 +575,10 @@ body {
   margin: 2px 0 4px;
   accent-color: var(--accent);
 }
+
+/* Строка состояния рядом с кнопками подключения календаря. */
+.ob__status {
+  align-self: center;
+  font-size: 13px;
+  color: var(--text-muted);
+}

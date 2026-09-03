@@ -4,6 +4,7 @@
 //! где точкой входа становится `run()` через `tauri::mobile_entry_point`.
 
 mod ai_client;
+mod calendar;
 mod commands;
 mod config;
 #[cfg(target_os = "windows")]
@@ -15,6 +16,7 @@ mod ollama;
 mod jobs;
 mod overlay;
 mod planner;
+mod review;
 mod secret;
 mod tasks;
 mod selection;
@@ -150,6 +152,7 @@ pub fn run() {
                 wake_local_model(app.handle());
                 listen_for_voice_keys(app.handle());
                 watch_reminders(app.handle());
+                review::watch(app.handle());
                 start_wake(app.handle());
             }
 
@@ -179,6 +182,14 @@ pub fn run() {
             commands::task_done,
             commands::task_edit,
             commands::task_remove,
+            commands::task_step,
+            commands::task_plan,
+            commands::calendar_settings,
+            commands::save_calendar_settings,
+            commands::calendar_connect,
+            commands::calendar_forget,
+            commands::review_settings,
+            commands::save_review_settings,
             commands::ai_explain,
             commands::ai_ask,
             commands::ai_settings,
@@ -912,7 +923,7 @@ fn closed_with_goodbye(lower: &str) -> bool {
 
 /// Начинает разговор без рук: слушаем, отвечаем, снова слушаем.
 #[cfg(desktop)]
-fn start_conversation(app: &tauri::AppHandle) {
+pub(crate) fn start_conversation(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
     use tauri::Emitter;
 
@@ -1176,7 +1187,7 @@ fn remind(app: &tauri::AppHandle, task: &tasks::Task) {
 /// `wait` — дождаться конца речи. Нужно в разговоре: следующая фраза человека
 /// должна попасть в тишину, а не поверх ответа.
 #[cfg(desktop)]
-fn announce(app: &tauri::AppHandle, text: String, wait: bool) {
+pub(crate) fn announce(app: &tauri::AppHandle, text: String, wait: bool) {
     if let Err(err) = overlay::show_for_reminder(app, text.clone()) {
         log::warn!("окно сообщения не открылось: {err}");
     }
@@ -1216,6 +1227,16 @@ fn announce(app: &tauri::AppHandle, text: String, wait: bool) {
 /// про неё модель уже не нужно.
 #[cfg(desktop)]
 fn handled_as_task(app: &tauri::AppHandle, text: &str) -> bool {
+    // Вечерний разбор идёт вопрос-ответом, и пока он не кончился, каждая фраза
+    // человека — ответ на заданный вопрос, а не новое распоряжение.
+    if let Some(reply) = review::answer(app, text) {
+        log::info!("разбор дня: «{text}» → «{reply}»");
+        if !reply.is_empty() {
+            announce(app, reply, true);
+        }
+        return true;
+    }
+
     let Some(reply) = tauri::async_runtime::block_on(planner::handle(app, text)) else {
         return false;
     };
@@ -1268,6 +1289,7 @@ fn end_conversation(app: &tauri::AppHandle, signal: bool, close_window: bool) {
     // кончился — ждать больше нечего, иначе следующая же фраза через час была
     // бы принята за срок.
     planner::forget_pending();
+    review::stop();
     let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
     overlay::hide_hud(app);
     if signal {

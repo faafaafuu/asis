@@ -1,128 +1,59 @@
-//! Задачи голосом: «Ноа, напомни завтра в три позвонить в банк».
+//! Задачи в разговоре.
 //!
-//! Распоряжение узнаётся в два приёма. Сначала по словам решается, о задачах
-//! ли вообще речь: это дёшево и не требует ничего, кроме самой фразы. И только
-//! если да — фраза уходит в модель, чтобы та достала из неё название и срок.
+//! Что человек имел в виду, решает модель, а не список слов. Прежде здесь
+//! стояло угадывание по основам («напомни», «задача», «сделал»), и оно
+//! проваливалось на обычной живой речи: «добавь на сегодня доделать резюме
+//! задача» и «какие у меня задачи на сегодня» мимо него проходили. Список слов
+//! в принципе не может покрыть язык — можно лишь бесконечно его дополнять,
+//! каждый раз узнавая о новой формулировке от человека, у которого не сработало.
 //!
-//! Порядок именно такой, потому что фраз в разговоре много, а распоряжений
-//! мало. Гонять модель на каждое сказанное слово ради разбора, который почти
-//! всегда окажется ненужным, — значит платить задержкой за каждый обычный
-//! вопрос.
+//! Поэтому каждая реплика разговора разбирается одним обращением к модели,
+//! которое отвечает строгим JSON: что это было и о каком деле речь. Цена —
+//! примерно секунда на реплику; она окупается тем, что распоряжение понимается
+//! так, как оно сказано, а не так, как заранее угадали.
+//!
+//! Открытые дела перечисляются в самом запросе, поэтому «отметь резюме» и
+//! «перенеси банк на завтра» указывают на конкретную задачу по номеру, а не
+//! через сравнение слов.
 
-use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDateTime, TimeZone};
 use tauri::{AppHandle, Manager};
 
 use crate::state::AppState;
-use crate::tasks;
+use crate::tasks::{self, Task};
 
-/// О чём человек распорядился.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Что человек имел в виду.
+#[derive(Clone, Debug, PartialEq)]
 pub enum Intent {
-    /// Завести задачу.
-    Add,
+    /// Обычный вопрос или разговор — задачи ни при чём.
+    Chat,
+    /// Завести дело.
+    Add {
+        title: String,
+        due: Option<DateTime<Local>>,
+        /// Просил именно в календарь, а не просто напомнить.
+        calendar: bool,
+    },
     /// Перечислить, что предстоит.
     List,
-    /// Отметить сделанной.
-    Done,
+    /// Отметить сделанным.
+    Done { task: Option<String> },
+    /// Перенести на другой срок.
+    Postpone {
+        task: Option<String>,
+        due: Option<DateTime<Local>>,
+    },
+    /// Помочь: разложить дело на шаги и подсказать, с чего начать.
+    Breakdown { task: Option<String> },
 }
 
-// Основы слов, по которым узнаётся распоряжение.
-//
-// Именно основы, а не слова целиком: «задача», «задачу», «задачи», «задачам» —
-// одно и то же, и перечислять формы бесполезно. Точные сочетания вроде
-// «добавь задачу» тоже не годятся: в живой речи слова расходятся —
-// «добавь на сегодня доделать резюме задача», «какие у меня задачи на сегодня».
-// Поэтому ищем не порядок слов, а их наличие.
-
-/// О самих задачах: «задача», «дела», «список», «напоминание».
-const TASK_WORDS: &[&str] = &["задач", "дела", "делам", "список", "напоминан", "планы", "планах"];
-
-/// Просьба показать: «какие», «покажи», «открой», «сколько».
-const ASK_WORDS: &[&str] = &[
-    "какие", "какая", "какие-то", "покажи", "открой", "сколько", "перечисли", "список", "что",
-];
-
-/// Завести задачу. Первые сами по себе означают её и без слова «задача».
-const ADD_STRONG: &[&str] = &["напомн", "запланир", "запомн"];
-
-/// Тоже завести — но эти слова слишком общие: «добавь громкости», «запиши
-/// разговор». Считаются распоряжением, только если рядом сказано про задачу
-/// или про срок.
-const ADD_WEAK: &[&str] = &["добав", "запиш", "постав", "завед", "внеси", "созда"];
-
-/// Отметить сделанной.
-const DONE_STRONG: &[&str] = &["сделал", "выполнил", "доделал", "закончил", "сдал"];
-
-/// Тоже отметить, но только рядом со словом о задаче: «закрой» и «убери»
-/// говорят и про окна.
-const DONE_WEAK: &[&str] = &["отметь", "закрой", "убери", "вычеркни"];
-
-/// Слова о времени. Нужны, чтобы отличить «добавь на сегодня доделать резюме»
-/// от «добавь громкости».
-const TIME_WORDS: &[&str] = &[
-    "сегодня",
-    "завтра",
-    "послезавтра",
-    "вечер",
-    "утро",
-    "утром",
-    "днём",
-    "ночью",
-    "через",
-    "понедельник",
-    "вторник",
-    "среду",
-    "четверг",
-    "пятницу",
-    "субботу",
-    "воскресенье",
-    "числа",
-    "часов",
-    "минут",
-];
-
-/// Есть ли во фразе слово с одной из основ.
-fn any_of(lower: &str, stems: &[&str]) -> bool {
-    stems.iter().any(|stem| lower.contains(stem))
-}
-
-/// Распоряжение ли это и какое.
+/// Название дела, которому не хватает срока.
 ///
-/// Порядок проверки не случаен. Сначала перечисление: «какие у меня задачи на
-/// сегодня» содержит и слова показа, и слово о времени, и по одному только
-/// времени сошло бы за просьбу завести задачу. Потом отметка о выполнении:
-/// «я доделал резюме» тоже похоже на заведение новой. И только потом заведение.
-pub fn intent(text: &str) -> Option<Intent> {
-    let lower = text.to_lowercase();
-    let about_tasks = any_of(&lower, TASK_WORDS);
-
-    // «Что у меня на сегодня» — про задачи, хотя слова «задача» в нём нет.
-    if about_tasks && any_of(&lower, ASK_WORDS) || lower.contains("что у меня") {
-        return Some(Intent::List);
-    }
-
-    if any_of(&lower, DONE_STRONG) || (about_tasks && any_of(&lower, DONE_WEAK)) {
-        return Some(Intent::Done);
-    }
-
-    if any_of(&lower, ADD_STRONG) {
-        return Some(Intent::Add);
-    }
-    if any_of(&lower, ADD_WEAK) && (about_tasks || any_of(&lower, TIME_WORDS)) {
-        return Some(Intent::Add);
-    }
-
-    None
-}
-
-/// Название задачи, которой не хватает срока.
-///
-/// Между «напомни позвонить в банк» и «завтра в три» проходит целый круг
-/// разговора, и название надо где-то держать. Одно на всю программу: человек
-/// заводит задачи по одной.
+/// Между «напомни доделать резюме» и «завтра к обеду» проходит целый круг
+/// разговора, и название надо где-то держать.
 static AWAITING_TIME: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-/// Ждём ли сейчас, что человек назовёт срок.
+/// Ждём ли, что человек назовёт срок.
 pub fn awaiting_time() -> bool {
     AWAITING_TIME
         .lock()
@@ -130,56 +61,182 @@ pub fn awaiting_time() -> bool {
         .is_some()
 }
 
-/// Забывает недоспрошенную задачу. Зовётся, когда разговор кончается.
+/// Забывает недоспрошенное дело. Зовётся, когда разговор кончается.
 pub fn forget_pending() {
     *AWAITING_TIME.lock().unwrap_or_else(|err| err.into_inner()) = None;
 }
 
-/// Выполняет распоряжение и отдаёт то, что нужно сказать человеку вслух.
+/// Выполняет распоряжение и отдаёт то, что сказать вслух.
 ///
-/// `None` означает «это было не про задачи» — фразу надо обработать как
-/// обычный вопрос.
+/// `None` означает «это был обычный вопрос» — фразу надо обработать как всегда.
 pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
-    // Задача ждёт срока — значит, сказанное сейчас и есть срок.
+    // Дело ждёт срока — значит, сказанное сейчас и есть срок.
     if awaiting_time() {
         return Some(finish_pending(app, said).await);
     }
 
-    match intent(said)? {
-        Intent::Add => Some(add(app, said).await),
+    let open = open_tasks();
+    match read_intent(app, said, &open).await {
+        Intent::Chat => None,
+        Intent::Add {
+            title,
+            due,
+            calendar,
+        } => Some(add(app, title, due, calendar)),
         Intent::List => {
             // Заодно показываем окно: список из пяти дел на слух запоминается
-            // плохо, а глазами он читается сразу весь.
+            // плохо, а глазами читается сразу весь.
             if let Err(err) = crate::overlay::show_tasks(app) {
                 log::warn!("окно задач не открылось: {err}");
             }
             Some(list())
         }
-        Intent::Done => Some(done(said)),
+        Intent::Done { task } => Some(done(app, task.as_deref(), &open)),
+        Intent::Postpone { task, due } => Some(postpone(app, task.as_deref(), due, &open)),
+        Intent::Breakdown { task } => Some(breakdown(app, task.as_deref(), &open).await),
     }
 }
 
-/* ── Завести задачу ──────────────────────────────────────────────────────── */
+/// Незакрытые дела — те, о которых может идти речь.
+fn open_tasks() -> Vec<Task> {
+    let mut open: Vec<Task> = tasks::all()
+        .into_iter()
+        .filter(|task| task.done_at.is_none())
+        .collect();
+    // Ближайшие сверху: о них и говорят чаще всего.
+    open.sort_by_key(|task| task.due);
+    open.truncate(20);
+    open
+}
 
-async fn add(app: &AppHandle, said: &str) -> String {
-    let Some(parsed) = interpret(app, &add_rules(), said).await else {
-        return "Не разобрал задачу. Повторите, пожалуйста.".into();
+/* ── Разбор реплики ──────────────────────────────────────────────────────── */
+
+async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
+    let Some(parsed) = interpret(app, &intent_rules(open), said).await else {
+        // Не разобрали — считаем обычным вопросом. Промолчать в ответ на
+        // вопрос хуже, чем не завести задачу: задачу человек повторит.
+        return Intent::Chat;
     };
 
-    let title = parsed["title"].as_str().unwrap_or_default().trim().to_string();
-    if title.is_empty() {
-        return "Не понял, что нужно сделать.".into();
-    }
+    let text = |key: &str| {
+        parsed[key]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_string()
+    };
+    let due = parse_due(&text("due"));
+    let task = pick_task(&parsed, open);
 
-    let due = parse_due(parsed["due"].as_str().unwrap_or_default());
+    match text("intent").as_str() {
+        "add" => {
+            let title = text("title");
+            if title.is_empty() {
+                Intent::Chat
+            } else {
+                Intent::Add {
+                    title,
+                    due,
+                    calendar: parsed["calendar"].as_bool().unwrap_or(false),
+                }
+            }
+        }
+        "list" => Intent::List,
+        "done" => Intent::Done { task },
+        "postpone" => Intent::Postpone { task, due },
+        "breakdown" => Intent::Breakdown { task },
+        _ => Intent::Chat,
+    }
+}
+
+/// Какое дело имелось в виду: модель называет его номером в переданном списке.
+fn pick_task(parsed: &serde_json::Value, open: &[Task]) -> Option<String> {
+    let number = parsed["task"].as_i64()?;
+    if number < 1 {
+        return None;
+    }
+    open.get((number - 1) as usize).map(|task| task.id.clone())
+}
+
+fn intent_rules(open: &[Task]) -> String {
+    let list = if open.is_empty() {
+        "Открытых дел нет.".to_string()
+    } else {
+        let lines: Vec<String> = open
+            .iter()
+            .enumerate()
+            .map(|(at, task)| format!("[{}] {}", at + 1, task.title))
+            .collect();
+        format!("Открытые дела:\n{}", lines.join("\n"))
+    };
+
+    format!(
+        "Ты — Ноа, голосовой помощник. Определи, чего хочет человек, и ответь \
+         одним объектом JSON без пояснений.\n\
+         \n\
+         Поле intent — одно из:\n\
+         chat — обычный вопрос, разговор, просьба что-то объяснить;\n\
+         add — просит завести дело, напомнить о чём-то, записать, запланировать \
+         встречу или добавить в календарь;\n\
+         list — спрашивает, что у него запланировано, какие дела, что на сегодня;\n\
+         done — сообщает, что уже что-то сделал;\n\
+         postpone — просит перенести дело на другое время;\n\
+         breakdown — просит помощи с делом: как за него взяться, с чего начать, \
+         разбить на шаги.\n\
+         \n\
+         Остальные поля:\n\
+         title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
+         due — срок в виде ГГГГ-ММ-ДДTЧЧ:ММ или пустая строка, если не назван;\n\
+         task — номер дела из списка ниже для done, postpone и breakdown, иначе 0;\n\
+         calendar — true, если человек прямо просил в календарь.\n\
+         \n\
+         Если назван день без времени — ставь 18:00. Полночь никому не нужна: \
+         напоминание в это время человек не услышит.\n\
+         \n\
+         {}\n\
+         \n\
+         {}\n\
+         \n\
+         {}",
+        now_line(),
+        list,
+        EXAMPLES
+    )
+}
+
+/// Разобранные примеры.
+///
+/// Небольшие модели держат формат по образцу заметно лучше, чем по описанию.
+/// Здесь же видно главное: обычный вопрос — это chat, и заводить по нему дело
+/// не надо.
+const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, четверг, 3 сентября».\n\
+     «что такое альбедо» → {\"intent\":\"chat\",\"title\":\"\",\"due\":\"\",\"task\":0,\"calendar\":false}\n\
+     «добавь на сегодня доделать резюме задача» → \
+     {\"intent\":\"add\",\"title\":\"доделать резюме\",\"due\":\"2026-09-03T18:00\",\"task\":0,\"calendar\":false}\n\
+     «напомни завтра в три позвонить в банк» → \
+     {\"intent\":\"add\",\"title\":\"позвонить в банк\",\"due\":\"2026-09-04T15:00\",\"task\":0,\"calendar\":false}\n\
+     «поставь в календарь встречу с юристом в понедельник в десять» → \
+     {\"intent\":\"add\",\"title\":\"встреча с юристом\",\"due\":\"2026-09-07T10:00\",\"task\":0,\"calendar\":true}\n\
+     «какие у меня задачи на сегодня» → {\"intent\":\"list\",\"title\":\"\",\"due\":\"\",\"task\":0,\"calendar\":false}\n\
+     «я доделал резюме» → {\"intent\":\"done\",\"title\":\"\",\"due\":\"\",\"task\":1,\"calendar\":false}\n\
+     «перенеси банк на завтра» → \
+     {\"intent\":\"postpone\",\"title\":\"\",\"due\":\"2026-09-04T15:00\",\"task\":2,\"calendar\":false}\n\
+     «помоги мне с резюме, с чего начать» → \
+     {\"intent\":\"breakdown\",\"title\":\"\",\"due\":\"\",\"task\":1,\"calendar\":false}";
+
+/* ── Завести ─────────────────────────────────────────────────────────────── */
+
+fn add(app: &AppHandle, title: String, due: Option<DateTime<Local>>, calendar: bool) -> String {
     if due.is_none() {
-        // Срок не назван — спрашиваем, а не назначаем сами. Задача без срока
-        // не напомнит о себе, и человек узнает об этом слишком поздно.
+        // Срок не назван — спрашиваем, а не назначаем сами. Дело без срока не
+        // напомнит о себе, и человек узнает об этом слишком поздно.
         *AWAITING_TIME.lock().unwrap_or_else(|err| err.into_inner()) = Some(title.clone());
         return format!("Записал: {title}. На когда?");
     }
 
     let task = tasks::add(title, due, None);
+    log::info!("заведено дело «{}» на {:?}", task.title, task.due);
+    crate::calendar::sync_task(app, &task, calendar);
     changed(app);
     format!("Записал: {}, {}.", task.title, spoken_due(task.due))
 }
@@ -192,8 +249,6 @@ async fn finish_pending(app: &AppHandle, said: &str) -> String {
         .take()
         .unwrap_or_default();
 
-    // «Не надо», «потом», «без срока» — законный ответ: задача остаётся в
-    // списке, просто молча.
     if refuses_time(said) {
         let task = tasks::add(title, None, None);
         changed(app);
@@ -206,6 +261,7 @@ async fn finish_pending(app: &AppHandle, said: &str) -> String {
     };
 
     let task = tasks::add(title, due, None);
+    crate::calendar::sync_task(app, &task, false);
     changed(app);
     match task.due {
         Some(_) => format!("Записал: {}, {}.", task.title, spoken_due(task.due)),
@@ -216,9 +272,17 @@ async fn finish_pending(app: &AppHandle, said: &str) -> String {
 /// Отказ называть срок.
 fn refuses_time(said: &str) -> bool {
     let lower = said.to_lowercase();
-    ["не надо", "без срока", "потом", "когда-нибудь", "неважно", "не знаю"]
-        .iter()
-        .any(|mark| lower.contains(mark))
+    [
+        "не надо",
+        "без срока",
+        "потом",
+        "когда-нибудь",
+        "неважно",
+        "не знаю",
+        "не важно",
+    ]
+    .iter()
+    .any(|mark| lower.contains(mark))
 }
 
 /* ── Перечислить ─────────────────────────────────────────────────────────── */
@@ -257,60 +321,168 @@ fn headline(total: usize, overdue: usize) -> String {
     }
 }
 
-/* ── Отметить сделанной ──────────────────────────────────────────────────── */
+/* ── Отметить сделанным ──────────────────────────────────────────────────── */
 
-fn done(said: &str) -> String {
-    let now = Local::now();
-    let open: Vec<tasks::Task> = tasks::all()
-        .into_iter()
-        .filter(|task| task.done_at.is_none())
-        .collect();
-
-    if open.is_empty() {
-        return "Незакрытых задач нет.".into();
-    }
-
-    // Ищем ту, о которой речь, по общим словам. Модель здесь не нужна: список
-    // короткий, а совпадение слова из названия — признак надёжный.
-    let words = significant(said);
-    let best = open
-        .iter()
-        .map(|task| (task, overlap(&words, &significant(&task.title))))
-        .filter(|(_, score)| *score > 0)
-        .max_by_key(|(_, score)| *score);
-
-    let Some((task, _)) = best else {
-        // Одна незакрытая задача — понятно, о чём речь, даже если слова разные.
-        if open.len() == 1 {
-            tasks::set_done(&open[0].id, true);
-            return format!("Отметил сделанной: {}.", open[0].title);
-        }
-        return "Не понял, какую задачу закрыть.".into();
+fn done(app: &AppHandle, id: Option<&str>, open: &[Task]) -> String {
+    let Some(task) = only_one_or(id, open) else {
+        return "Не понял, какое дело закрыть.".into();
     };
 
-    tasks::set_done(&task.id, true);
-    let left = tasks::today(now).len();
+    let Some(closed) = tasks::set_done(&task.id, true) else {
+        return "Такого дела в списке нет.".into();
+    };
+    crate::calendar::forget_task(app, &closed);
+    changed(app);
+
+    let left = tasks::today(Local::now()).len();
     match left {
-        0 => format!("Отметил: {}. На сегодня всё.", task.title),
-        _ => format!("Отметил: {}. Осталось {left}.", task.title),
+        0 => format!("Отметил: {}. На сегодня всё.", closed.title),
+        _ => format!("Отметил: {}. Осталось {left}.", closed.title),
     }
 }
 
-/// Слова, по которым имеет смысл сравнивать: длиной от четырёх букв.
-///
-/// Короткие — предлоги и частицы, они совпадают у любых двух фраз и только
-/// мешают: «в», «на», «уже» есть везде.
-fn significant(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|word| word.chars().count() >= 4)
-        // Сравниваем по основе: «позвонить» и «позвонил» — одно и то же дело.
-        .map(|word| word.chars().take(5).collect())
-        .collect()
+/* ── Перенести ───────────────────────────────────────────────────────────── */
+
+fn postpone(
+    app: &AppHandle,
+    id: Option<&str>,
+    due: Option<DateTime<Local>>,
+    open: &[Task],
+) -> String {
+    let Some(task) = only_one_or(id, open) else {
+        return "Не понял, какое дело перенести.".into();
+    };
+
+    // Срок не назвали — переносим на завтра в то же время. Это самое частое
+    // намерение, и переспрашивать ради него — лишний круг разговора.
+    let to = due.unwrap_or_else(|| {
+        task.due
+            .map(|due| due + Duration::days(1))
+            .unwrap_or_else(|| Local::now() + Duration::days(1))
+    });
+
+    let Some(moved) = tasks::postpone(&task.id, to) else {
+        return "Такого дела в списке нет.".into();
+    };
+    crate::calendar::sync_task(app, &moved, false);
+    changed(app);
+
+    if moved.postponed >= 3 {
+        return format!(
+            "Перенёс: {}, {}. Это уже {}-й перенос — может, разбить его на шаги?",
+            moved.title,
+            spoken_due(moved.due),
+            moved.postponed
+        );
+    }
+    format!("Перенёс: {}, {}.", moved.title, spoken_due(moved.due))
 }
 
-fn overlap(left: &[String], right: &[String]) -> usize {
-    left.iter().filter(|word| right.contains(word)).count()
+/* ── Помочь с делом ──────────────────────────────────────────────────────── */
+
+async fn breakdown(app: &AppHandle, id: Option<&str>, open: &[Task]) -> String {
+    let Some(task) = only_one_or(id, open) else {
+        return "Не понял, с каким делом помочь.".into();
+    };
+
+    let Some(parsed) = interpret(app, PLAN_RULES, &task.title).await else {
+        return "Не смог придумать план. Повторите, пожалуйста.".into();
+    };
+
+    let steps: Vec<String> = parsed["steps"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|step| step.as_str())
+                .map(|step| step.trim().to_string())
+                .filter(|step| !step.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if steps.is_empty() {
+        return "Не смог разбить это на шаги.".into();
+    }
+
+    let advice = parsed["advice"]
+        .as_str()
+        .map(str::trim)
+        .filter(|advice| !advice.is_empty())
+        .map(str::to_string);
+
+    tasks::set_plan(&task.id, steps.clone(), advice.clone());
+    if let Err(err) = crate::overlay::show_tasks(app) {
+        log::warn!("окно задач не открылось: {err}");
+    }
+    changed(app);
+
+    let spoken = steps
+        .iter()
+        .enumerate()
+        .map(|(at, step)| format!("{}. {step}", at + 1))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    match advice {
+        Some(advice) => format!("Разбил на шаги. {spoken} {advice}"),
+        None => format!("Разбил на шаги. {spoken}"),
+    }
+}
+
+/// Разбивает названную задачу на шаги. Зовётся из окна кнопкой.
+pub async fn plan_task(app: &AppHandle, id: &str) -> Result<Option<Task>, String> {
+    let Some(task) = tasks::all().into_iter().find(|task| task.id == id) else {
+        return Ok(None);
+    };
+
+    let Some(parsed) = interpret(app, PLAN_RULES, &task.title).await else {
+        return Err("модель не ответила".into());
+    };
+
+    let steps: Vec<String> = parsed["steps"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|step| step.as_str())
+                .map(|step| step.trim().to_string())
+                .filter(|step| !step.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if steps.is_empty() {
+        return Err("не вышло разбить это на шаги".into());
+    }
+
+    let advice = parsed["advice"]
+        .as_str()
+        .map(str::trim)
+        .filter(|advice| !advice.is_empty())
+        .map(str::to_string);
+
+    Ok(tasks::set_plan(&task.id, steps, advice))
+}
+
+const PLAN_RULES: &str = "Разбей дело на 3–5 понятных шагов и дай один короткий совет, \
+     с чего начать. Ответь одним объектом JSON без пояснений:\n\
+     {\"steps\": [\"…\", \"…\"], \"advice\": \"…\"}\n\
+     Шаги — в неопределённой форме, каждый на одно действие, не длиннее семи слов.\n\
+     Совет — одно предложение.\n\
+     Пример для дела «разослать резюме»:\n\
+     {\"steps\":[\"обновить опыт за последний год\",\"собрать список из десяти вакансий\",\
+     \"написать сопроводительное письмо\",\"отправить и записать даты\"],\
+     \"advice\":\"Начните со списка вакансий — он покажет, что править в резюме.\"}";
+
+/// Дело, о котором речь: названное моделью или единственное открытое.
+fn only_one_or<'a>(id: Option<&str>, open: &'a [Task]) -> Option<&'a Task> {
+    if let Some(id) = id {
+        return open.iter().find(|task| task.id == id);
+    }
+    // Открыто ровно одно — понятно, о чём речь, даже если не назвали.
+    match open {
+        [single] => Some(single),
+        _ => None,
+    }
 }
 
 /* ── Разговор с моделью ──────────────────────────────────────────────────── */
@@ -320,13 +492,13 @@ async fn interpret(app: &AppHandle, rules: &str, said: &str) -> Option<serde_jso
     let raw = match provider.interpret(rules, said).await {
         Ok(raw) => raw,
         Err(err) => {
-            log::warn!("разбор распоряжения не удался: {err}");
+            log::warn!("разбор реплики не удался: {err}");
             return None;
         }
     };
 
     // Модель охотно добавляет пояснения вокруг ответа. Берём то, что между
-    // первой и последней фигурной скобкой, — этого достаточно.
+    // первой и последней фигурной скобкой.
     let Some((from, to)) = raw.find('{').zip(raw.rfind('}')) else {
         log::warn!("в ответе разбора нет JSON: «{raw}»");
         return None;
@@ -343,46 +515,21 @@ async fn interpret(app: &AppHandle, rules: &str, said: &str) -> Option<serde_jso
     }
 }
 
-fn add_rules() -> String {
-    format!(
-        "Ты разбираешь распоряжение о задаче. {}
-         Ответь одним объектом JSON и ничем больше: ни приветствия, ни пояснений.
-         title — что сделать, коротко и без слов «напомни», «запиши», «не забудь».
-         due — срок в виде ГГГГ-ММ-ДДTЧЧ:ММ по местному времени,          либо пустая строка, если срок не назван.
-         Если названо только время без дня — возьми ближайший день, когда оно ещё не прошло.
-         {}",
-        now_line(),
-        EXAMPLE_TASK
-    )
-}
-
 fn time_rules() -> String {
     format!(
-        "Человек называет срок задачи. {}
-         Ответь одним объектом JSON и ничем больше: ни приветствия, ни пояснений.
-         due — ГГГГ-ММ-ДДTЧЧ:ММ по местному времени, либо пустая строка, если срок не назван.
-         Если названо только время без дня — возьми ближайший день, когда оно ещё не прошло.
-         {}",
-        now_line(),
-        EXAMPLE_TIME
+        "Человек называет срок дела. {}\n\
+         Ответь одним объектом JSON и ничем больше: ни приветствия, ни пояснений.\n\
+         due — ГГГГ-ММ-ДДTЧЧ:ММ по местному времени, либо пустая строка, если срок не назван.\n\
+         Если названо только время без дня — возьми ближайший день, когда оно ещё не прошло.\n\
+         Пример при «Сейчас 2026-09-03 11:00, четверг».\n\
+         Сказано: завтра утром\n\
+         Ответ: {{\"due\": \"2026-09-04T09:00\"}}",
+        now_line()
     )
 }
 
-/// Разобранный пример стоит десятка указаний.
-///
-/// Небольшие модели держат формат по образцу заметно лучше, чем по описанию, и
-/// заодно перестают терять «завтра»: в примере видно, что от него дата
-/// сдвигается на день, а не остаётся сегодняшней.
-const EXAMPLE_TASK: &str = "Пример при «Сейчас 2026-09-03 11:00, четверг».
-     Сказано: напомни завтра в три позвонить в банк
-     Ответ: {\"title\": \"позвонить в банк\", \"due\": \"2026-09-04T15:00\"}";
-
-const EXAMPLE_TIME: &str = "Пример при «Сейчас 2026-09-03 11:00, четверг».
-     Сказано: завтра утром
-     Ответ: {\"due\": \"2026-09-04T09:00\"}";
-
 /// Точка отсчёта для модели: без неё «завтра» не во что превратить.
-fn now_line() -> String {
+pub fn now_line() -> String {
     let now = Local::now();
     format!(
         "Сейчас {}, {}, {}.",
@@ -419,23 +566,18 @@ fn month_day(now: DateTime<Local>) -> String {
         "ноября",
         "декабря",
     ];
-    format!(
-        "{} {}",
-        now.day(),
-        MONTHS[(now.month0() as usize).min(11)]
-    )
+    format!("{} {}", now.day(), MONTHS[(now.month0() as usize).min(11)])
 }
 
 /* ── Сроки ───────────────────────────────────────────────────────────────── */
 
 /// Превращает то, что вернула модель, в срок.
-fn parse_due(raw: &str) -> Option<DateTime<Local>> {
+pub fn parse_due(raw: &str) -> Option<DateTime<Local>> {
     let raw = raw.trim();
     if raw.is_empty() {
         return None;
     }
 
-    // Сначала полный вид с поясом — вдруг модель добавила его сама.
     if let Ok(exact) = DateTime::parse_from_rfc3339(raw) {
         return Some(exact.with_timezone(&Local));
     }
@@ -455,13 +597,16 @@ fn parse_due(raw: &str) -> Option<DateTime<Local>> {
 }
 
 /// Срок словами — так, как его произносят.
-fn spoken_due(due: Option<DateTime<Local>>) -> String {
+pub fn spoken_due(due: Option<DateTime<Local>>) -> String {
     let Some(due) = due else {
         return "без срока".into();
     };
 
     let now = Local::now();
-    let days = due.date_naive().signed_duration_since(now.date_naive()).num_days();
+    let days = due
+        .date_naive()
+        .signed_duration_since(now.date_naive())
+        .num_days();
     let time = due.format("%H:%M").to_string();
 
     match days {
@@ -473,7 +618,7 @@ fn spoken_due(due: Option<DateTime<Local>>) -> String {
 }
 
 /// Сообщает окнам, что список изменился.
-fn changed(app: &AppHandle) {
+pub fn changed(app: &AppHandle) {
     use tauri::Emitter;
     let _ = app.emit("tasks:changed", ());
 }
@@ -482,67 +627,73 @@ fn changed(app: &AppHandle) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn orders_are_told_apart_from_questions() {
-        assert_eq!(intent("напомни завтра позвонить в банк"), Some(Intent::Add));
-        assert_eq!(intent("что у меня на сегодня"), Some(Intent::List));
-        assert_eq!(intent("я сделал отчёт"), Some(Intent::Done));
-
-        // Обычные вопросы задачами не становятся.
-        assert_eq!(intent("что такое альбедо"), None);
-        assert_eq!(intent("расскажи анекдот"), None);
-        assert_eq!(intent("добавь громкости"), None);
-        assert_eq!(intent("закрой окно"), None);
-    }
-
-    /// Живые фразы, на которых прежнее узнавание молчало.
-    ///
-    /// Все три сказаны вслух и записаны из журнала. Прежняя проверка искала
-    /// точные сочетания — «добавь задачу», «какие задачи», — а в речи слова
-    /// расходятся, и ни одна из этих фраз под них не подходила.
-    #[test]
-    fn words_may_stand_apart() {
-        assert_eq!(
-            intent("добавь на сегодня доделать резюме задача"),
-            Some(Intent::Add)
-        );
-        assert_eq!(
-            intent("Какие у меня задачи на сегодня?"),
-            Some(Intent::List)
-        );
-        assert_eq!(
-            intent("Добавь задачу на сегодня, собеседование."),
-            Some(Intent::Add)
-        );
-    }
-
-    #[test]
-    fn listing_wins_over_adding() {
-        // Во фразе есть и «что у меня», и слово, похожее на добавление.
-        assert_eq!(
-            intent("что у меня запланировано на сегодня"),
-            Some(Intent::List)
-        );
-        // И просьба открыть список — это тоже перечисление.
-        assert_eq!(intent("открой задачи"), Some(Intent::List));
-        assert_eq!(intent("покажи список дел"), Some(Intent::List));
+    fn task(id: &str, title: &str) -> Task {
+        Task {
+            id: id.into(),
+            title: title.into(),
+            due: None,
+            remind_at: None,
+            done_at: None,
+            created_at: Local::now(),
+            reminded: false,
+            event_id: None,
+            steps: Vec::new(),
+            advice: None,
+            postponed: 0,
+        }
     }
 
     #[test]
     fn a_deadline_is_read_in_local_time() {
         let parsed = parse_due("2026-08-25T15:30").expect("срок разобран");
-        assert_eq!(parsed.format("%Y-%m-%d %H:%M").to_string(), "2026-08-25 15:30");
+        assert_eq!(
+            parsed.format("%Y-%m-%d %H:%M").to_string(),
+            "2026-08-25 15:30"
+        );
+        // Модель иногда добавляет секунды или пробел вместо T.
+        assert!(parse_due("2026-08-25 15:30").is_some());
+        assert!(parse_due("2026-08-25T15:30:00").is_some());
+
         assert!(parse_due("").is_none());
         assert!(parse_due("когда-нибудь").is_none());
     }
 
     #[test]
-    fn a_task_is_matched_by_meaningful_words() {
-        let said = significant("я сделал отчёт за август");
-        let task = significant("Отправить отчёт за август");
-        assert!(overlap(&said, &task) > 0, "общие слова должны находиться");
+    fn a_task_is_chosen_by_its_number() {
+        let open = vec![task("a", "позвонить в банк"), task("b", "доделать резюме")];
 
-        let other = significant("Позвонить в банк");
-        assert_eq!(overlap(&said, &other), 0, "чужая задача не совпадает");
+        let parsed: serde_json::Value = serde_json::from_str(r#"{"task": 2}"#).unwrap();
+        assert_eq!(pick_task(&parsed, &open).as_deref(), Some("b"));
+
+        // Ноль означает «дело не названо».
+        let none: serde_json::Value = serde_json::from_str(r#"{"task": 0}"#).unwrap();
+        assert!(pick_task(&none, &open).is_none());
+
+        // Номер за пределами списка не должен выбирать наугад.
+        let far: serde_json::Value = serde_json::from_str(r#"{"task": 9}"#).unwrap();
+        assert!(pick_task(&far, &open).is_none());
+    }
+
+    #[test]
+    fn the_only_open_task_needs_no_naming() {
+        let single = vec![task("a", "позвонить в банк")];
+        assert_eq!(
+            only_one_or(None, &single).map(|task| task.id.as_str()),
+            Some("a"),
+            "когда дело одно, называть его незачем"
+        );
+
+        let many = vec![task("a", "первое"), task("b", "второе")];
+        assert!(
+            only_one_or(None, &many).is_none(),
+            "из двух дел наугад выбирать нельзя"
+        );
+    }
+
+    #[test]
+    fn refusing_a_deadline_is_understood() {
+        assert!(refuses_time("да не надо срока"));
+        assert!(refuses_time("потом решу"));
+        assert!(!refuses_time("завтра в три"));
     }
 }

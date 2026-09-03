@@ -160,6 +160,65 @@ function renderTask(task) {
     text.append(due);
   }
 
+  // Шаги показываются под названием: у них свои отметки, но своего срока нет —
+  // это части одного дела, а не соседние с ним.
+  if (task.steps?.length) {
+    const steps = document.createElement("div");
+    steps.className = "task__steps";
+    task.steps.forEach((step, at) => {
+      const row = document.createElement("label");
+      row.className = "step" + (step.done ? " step--done" : "");
+
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.className = "step__box";
+      box.checked = step.done;
+      box.addEventListener("change", async () => {
+        await api?.invoke("task_step", { id: task.id, at, done: box.checked });
+        refresh();
+      });
+
+      const name = document.createElement("span");
+      name.textContent = step.title;
+      row.append(box, name);
+      steps.append(row);
+    });
+    text.append(steps);
+  }
+
+  if (task.advice) {
+    const advice = document.createElement("span");
+    advice.className = "task__advice";
+    advice.textContent = task.advice;
+    text.append(advice);
+  }
+
+  if (task.postponed >= 3) {
+    const warn = document.createElement("span");
+    warn.className = "task__warn";
+    warn.textContent = `Переносили ${task.postponed} раза`;
+    text.append(warn);
+  }
+
+  // Кнопка помощи: просит модель разложить дело на шаги. Показывается только
+  // там, где шагов ещё нет, — второй раз разбивать уже разбитое незачем.
+  const plan = document.createElement("button");
+  plan.className = "task__plan";
+  plan.type = "button";
+  plan.textContent = "⋯";
+  plan.title = "Разбить на шаги";
+  plan.setAttribute("aria-label", `Разбить на шаги: ${task.title}`);
+  plan.addEventListener("click", async () => {
+    plan.disabled = true;
+    plan.textContent = "…";
+    try {
+      await api?.invoke("task_plan", { id: task.id });
+    } catch (err) {
+      console.error("не вышло разбить на шаги", err);
+    }
+    refresh();
+  });
+
   const drop = document.createElement("button");
   drop.className = "task__drop";
   drop.type = "button";
@@ -171,7 +230,9 @@ function renderTask(task) {
     refresh();
   });
 
-  row.append(mark, text, drop);
+  row.append(mark, text);
+  if (!task.done && !task.steps?.length) row.append(plan);
+  row.append(drop);
   return row;
 }
 

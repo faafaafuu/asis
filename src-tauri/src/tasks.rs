@@ -13,6 +13,20 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+/// Шаг внутри задачи.
+///
+/// Появляется, когда человек просит помочь: большое дело разбивается на
+/// понятные куски, и каждый отмечается отдельно. Отдельной задачей шаг не
+/// делается намеренно — у него нет своего срока и он не должен засорять
+/// список: это часть одного дела, а не соседнее с ним.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Step {
+    pub title: String,
+    #[serde(default)]
+    pub done: bool,
+}
+
 /// Одна задача.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +49,16 @@ pub struct Task {
     /// Событие в Google-календаре, если задача туда уехала.
     #[serde(default)]
     pub event_id: Option<String>,
+    /// Шаги, на которые разбито дело.
+    #[serde(default)]
+    pub steps: Vec<Step>,
+    /// Совет, как это дело лучше сделать. Пишется, когда о нём просят.
+    #[serde(default)]
+    pub advice: Option<String>,
+    /// Сколько раз задачу переносили. Видно в окне: три переноса подряд —
+    /// повод не переносить в четвёртый, а разобраться, почему дело стоит.
+    #[serde(default)]
+    pub postponed: u32,
 }
 
 impl Task {
@@ -137,6 +161,9 @@ pub fn add(title: String, due: Option<DateTime<Local>>, remind_at: Option<DateTi
         created_at: now,
         reminded: false,
         event_id: None,
+        steps: Vec::new(),
+        advice: None,
+        postponed: 0,
     };
 
     let copy = task.clone();
@@ -220,6 +247,88 @@ pub fn take_due(now: DateTime<Local>) -> Vec<Task> {
     .unwrap_or_default()
 }
 
+/// Запоминает событие календаря, созданное для задачи.
+pub fn set_event(id: &str, event_id: Option<String>) {
+    with(|store| {
+        let found = store.tasks.iter_mut().find(|task| task.id == id);
+        let Some(task) = found else {
+            return ((), false);
+        };
+        task.event_id = event_id;
+        ((), true)
+    });
+}
+
+/// Записывает шаги и совет, полученные от модели.
+pub fn set_plan(id: &str, steps: Vec<String>, advice: Option<String>) -> Option<Task> {
+    with(|store| {
+        let found = store.tasks.iter_mut().find(|task| task.id == id);
+        let Some(task) = found else {
+            return (None, false);
+        };
+        task.steps = steps
+            .into_iter()
+            .map(|title| Step { title, done: false })
+            .collect();
+        if advice.is_some() {
+            task.advice = advice;
+        }
+        (Some(task.clone()), true)
+    })
+    .flatten()
+}
+
+/// Отмечает шаг сделанным или наоборот.
+pub fn set_step_done(id: &str, at: usize, done: bool) -> Option<Task> {
+    with(|store| {
+        let found = store.tasks.iter_mut().find(|task| task.id == id);
+        let Some(task) = found else {
+            return (None, false);
+        };
+        let Some(step) = task.steps.get_mut(at) else {
+            return (None, false);
+        };
+        step.done = done;
+
+        // Все шаги пройдены — дело сделано. Требовать отдельной отметки после
+        // того, как человек закрыл последний шаг, значит просить его сказать
+        // одно и то же дважды.
+        if task.steps.iter().all(|step| step.done) && task.done_at.is_none() {
+            task.done_at = Some(Local::now());
+        }
+        (Some(task.clone()), true)
+    })
+    .flatten()
+}
+
+/// Переносит задачу на другой срок и считает перенос.
+pub fn postpone(id: &str, to: DateTime<Local>) -> Option<Task> {
+    with(|store| {
+        let found = store.tasks.iter_mut().find(|task| task.id == id);
+        let Some(task) = found else {
+            return (None, false);
+        };
+        task.due = Some(to);
+        task.remind_at = Some(to);
+        task.reminded = false;
+        task.postponed = task.postponed.saturating_add(1);
+        (Some(task.clone()), true)
+    })
+    .flatten()
+}
+
+/// Незакрытые дела, чей срок наступил или прошёл.
+///
+/// То, о чём имеет смысл спросить вечером: «это сделал?». Задачи без срока и
+/// задачи на будущее сюда не попадают — спрашивать про них нечего.
+pub fn unfinished_by(now: DateTime<Local>) -> Vec<Task> {
+    all()
+        .into_iter()
+        .filter(|task| task.done_at.is_none())
+        .filter(|task| task.due.map(|due| due <= now).unwrap_or(false))
+        .collect()
+}
+
 /// Ближайшее, что человеку стоит сказать вслух: сколько дел на сегодня.
 pub fn today(now: DateTime<Local>) -> Vec<Task> {
     let end = now.date_naive().and_hms_opt(23, 59, 59);
@@ -253,6 +362,11 @@ fn new_id(now: DateTime<Local>) -> String {
 mod tests {
     use super::*;
 
+    /// Список один на всю программу, поэтому тесты, которые его открывают,
+    /// нельзя пускать одновременно: второй `load` подменяет файл под первым.
+    /// Очередь тут дешевле, чем городить внедрение зависимостей ради тестов.
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
     fn at(hour: u32, minute: u32) -> DateTime<Local> {
         Local::now()
             .date_naive()
@@ -269,6 +383,7 @@ mod tests {
     /// напоминания.
     #[test]
     fn a_task_survives_a_restart() {
+        let _queue = ONE_AT_A_TIME.lock().unwrap_or_else(|err| err.into_inner());
         let dir = std::env::temp_dir().join(format!("sufler-tasks-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("временный каталог создан");
@@ -294,6 +409,29 @@ mod tests {
     }
 
     #[test]
+    fn finishing_every_step_finishes_the_task() {
+        let _queue = ONE_AT_A_TIME.lock().unwrap_or_else(|err| err.into_inner());
+        let dir = std::env::temp_dir().join(format!("sufler-steps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("временный каталог создан");
+        load(dir.clone());
+
+        let task = add("собрать отчёт".into(), None, None);
+        set_plan(&task.id, vec!["собрать цифры".into(), "написать текст".into()], None);
+
+        let after_first = set_step_done(&task.id, 0, true).expect("шаг найден");
+        assert!(after_first.done_at.is_none(), "одного шага мало");
+
+        let after_last = set_step_done(&task.id, 1, true).expect("шаг найден");
+        assert!(
+            after_last.done_at.is_some(),
+            "последний шаг закрывает и саму задачу"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn overdue_is_only_about_unfinished_work() {
         let now = at(12, 0);
         let mut task = Task {
@@ -305,6 +443,9 @@ mod tests {
             created_at: at(8, 0),
             reminded: false,
             event_id: None,
+            steps: Vec::new(),
+            advice: None,
+            postponed: 0,
         };
         assert!(task.overdue(now), "срок прошёл, а дело не сделано");
 

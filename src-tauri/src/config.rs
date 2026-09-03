@@ -18,6 +18,75 @@ pub struct Config {
     pub trigger: TriggerConfig,
     pub startup: StartupConfig,
     pub voice: VoiceConfig,
+    pub calendar: CalendarConfig,
+    pub review: ReviewConfig,
+}
+
+/// Связь с Google-календарём.
+///
+/// Ключ заводит сам человек: Google пускает к календарю только программы,
+/// зарегистрированные у него в облаке, а регистрация от нашего имени означала
+/// бы для каждого пользователя экран «приложение не проверено» и потолок в сто
+/// человек. Свой ключ снимает и то и другое: человек в этом случае сам себе
+/// разработчик.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct CalendarConfig {
+    /// Идентификатор клиента из Google Cloud.
+    pub client_id: String,
+    /// Секрет клиента. Для настольных программ Google не считает его тайной,
+    /// но хранится он так же, как ключ от модели.
+    pub client_secret: String,
+    /// Долгоживущий ключ, полученный после согласия. Пусто — не подключён.
+    pub refresh_token: String,
+    /// В какой календарь писать. `primary` — основной календарь человека.
+    pub calendar_id: String,
+    /// Отправлять ли дела в календарь. Выключено — работает только список.
+    pub enabled: bool,
+}
+
+impl Default for CalendarConfig {
+    fn default() -> Self {
+        Self {
+            client_id: String::new(),
+            client_secret: String::new(),
+            refresh_token: String::new(),
+            calendar_id: "primary".into(),
+            enabled: false,
+        }
+    }
+}
+
+impl CalendarConfig {
+    /// Готов ли календарь принимать записи.
+    pub fn ready(&self) -> bool {
+        self.enabled
+            && !self.client_id.trim().is_empty()
+            && !self.refresh_token.trim().is_empty()
+    }
+}
+
+/// Вечерний разбор дня.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ReviewConfig {
+    /// Спрашивать ли вечером, что сделано.
+    pub enabled: bool,
+    /// Во сколько спрашивать: часы и минуты по местному времени.
+    pub hour: u32,
+    pub minute: u32,
+}
+
+impl Default for ReviewConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            // Вечер, но не ночь: в девять человек ещё за компьютером, и
+            // перенести несделанное на завтра ещё имеет смысл.
+            hour: 20,
+            minute: 30,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

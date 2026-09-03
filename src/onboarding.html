@@ -222,6 +222,46 @@
 
       <!-- Всё, что нужно раз в жизни, — под спойлером. Раздел сам раскроется,
            если жест перестанет срабатывать, — см. refreshCapture. -->
+      <!-- Задачи: вечерний разбор и связь с календарём. -->
+      <div class="ob__block">
+        <h2 class="ob__subtitle" data-i18n="tasks.title">Задачи</h2>
+
+        <label class="ob__check">
+          <input type="checkbox" data-el="reviewEnabled" />
+          <span class="ob__check-text">
+            <span data-i18n="tasks.review">Спрашивать вечером, что успел</span>
+            <span class="ob__hint" data-i18n="tasks.reviewHint">Ноа пройдёт по несделанным делам и предложит перенести то, до чего руки не дошли.</span>
+          </span>
+        </label>
+
+        <span class="ob__label" data-i18n="tasks.reviewAt">Во сколько спрашивать</span>
+        <input class="ob__underline" data-el="reviewAt" type="time" />
+
+        <label class="ob__check">
+          <input type="checkbox" data-el="calendarEnabled" />
+          <span class="ob__check-text">
+            <span data-i18n="tasks.calendar">Отправлять дела в Google-календарь</span>
+            <span class="ob__hint" data-i18n="tasks.calendarHint">Нужен свой ключ: Google пускает к календарю только программы, зарегистрированные у него в облаке. Заведите проект в Google Cloud, включите Calendar API, создайте клиент типа «Desktop app» и впишите его сюда.</span>
+          </span>
+        </label>
+
+        <span class="ob__label" data-i18n="tasks.clientId">Идентификатор клиента</span>
+        <input class="ob__underline" data-el="calendarClientId" type="text" autocomplete="off"
+               spellcheck="false" placeholder="…apps.googleusercontent.com" />
+
+        <span class="ob__label" data-i18n="tasks.clientSecret">Секрет клиента</span>
+        <input class="ob__underline" data-el="calendarSecret" type="password" autocomplete="off"
+               spellcheck="false" />
+
+        <div class="ob__row">
+          <button class="ob__btn ob__btn--primary" data-el="calendarConnect" type="button"
+                  data-i18n="tasks.connect">Подключить</button>
+          <button class="ob__btn ob__btn--quiet" data-el="calendarForget" type="button"
+                  data-i18n="tasks.forget">Отключить</button>
+          <span class="ob__status" data-el="calendarStatus"></span>
+        </div>
+      </div>
+
       <details class="ob__more" data-el="advanced">
         <summary class="ob__more-head">
           <span class="ob__chevron ob__chevron--right" aria-hidden="true"></span>
