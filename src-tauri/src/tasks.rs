@@ -80,6 +80,7 @@ pub fn load(dir: PathBuf) {
         Err(_) => Store::default(),
     };
 
+    log::info!("список задач: {}", path.display());
     *STATE.lock().unwrap_or_else(|err| err.into_inner()) = Some(State { path, store });
 }
 

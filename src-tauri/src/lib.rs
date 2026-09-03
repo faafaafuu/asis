@@ -354,6 +354,12 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                                 overlay::hide_hud(&app);
                                 voice::chime();
                             }
+                            // Распоряжение о задачах выполняется здесь же:
+                            // «напомни завтра позвонить» — не вопрос, и
+                            // объяснение в ответ было бы нелепо.
+                            Some(text) if handled_as_task(&app, &text) => {
+                                start_conversation(&app);
+                            }
                             Some(text) => {
                                 answer_aloud(&app, &text);
                                 start_conversation(&app);
