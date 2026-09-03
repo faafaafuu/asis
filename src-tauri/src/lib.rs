@@ -14,7 +14,9 @@ mod net;
 mod ollama;
 mod jobs;
 mod overlay;
+mod planner;
 mod secret;
+mod tasks;
 mod selection;
 mod state;
 #[cfg(desktop)]
@@ -88,6 +90,10 @@ pub fn run() {
         // лежит на её стеке.
         .setup(move |app| {
             let config_dir = app.path().app_config_dir().ok();
+            // Список задач лежит рядом с настройками и читается один раз.
+            if let Some(dir) = config_dir.clone() {
+                tasks::load(dir);
+            }
             let config = Config::load(config_dir);
             log::info!("AI-провайдер: {}", config.ai.provider);
             let key_stored_plain = config.ai.key_stored_plain;
@@ -143,6 +149,7 @@ pub fn run() {
                 voice::claim_devices();
                 wake_local_model(app.handle());
                 listen_for_voice_keys(app.handle());
+                watch_reminders(app.handle());
                 start_wake(app.handle());
             }
 
@@ -165,6 +172,13 @@ pub fn run() {
             commands::close_popup,
             commands::popup_active,
             commands::popup_taken_over,
+            commands::open_tasks,
+            commands::close_tasks,
+            commands::task_list,
+            commands::task_add,
+            commands::task_done,
+            commands::task_edit,
+            commands::task_remove,
             commands::ai_explain,
             commands::ai_ask,
             commands::ai_settings,
@@ -940,6 +954,10 @@ fn start_conversation(app: &tauri::AppHandle) {
                         log::info!("попрощались («{text}») — разговор окончен");
                         break;
                     }
+                    // Распоряжение о задачах выполняется здесь же и до модели:
+                    // «напомни завтра позвонить» — не вопрос, отвечать на него
+                    // объяснением было бы нелепо.
+                    Some(text) if handled_as_task(&app, &text) => {}
                     Some(text) => answer_aloud(&app, &text),
                     None => {}
                 }
@@ -1029,7 +1047,7 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
                 // Позвали и замолчали — просто слушаем дальше, вопрос впереди.
                 if question.trim().is_empty() {
                     log::info!("позвали без вопроса — жду его");
-                } else {
+                } else if !handled_as_task(&app, &question) {
                     answer_aloud(&app, &question);
                 }
                 start_conversation(&app);
@@ -1113,6 +1131,93 @@ pub(crate) fn restart_wake(app: &tauri::AppHandle) {
 #[cfg(not(desktop))]
 pub(crate) fn restart_wake(_app: &tauri::AppHandle) {}
 
+/// Как часто проверять, не пора ли о чём-то напомнить.
+///
+/// Полминуты хватает: сроки человек ставит с точностью до минуты, и опоздание
+/// на полминуты незаметно. Чаще — впустую будить процессор, реже — заметно.
+#[cfg(desktop)]
+const REMINDER_STEP: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Следит за сроками задач и напоминает о них.
+#[cfg(desktop)]
+fn watch_reminders(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-reminders".into())
+        .spawn(move || loop {
+            std::thread::sleep(REMINDER_STEP);
+            for task in tasks::take_due(chrono::Local::now()) {
+                remind(&app, &task);
+            }
+        })
+        .ok();
+}
+
+/// Напоминает об одной задаче.
+#[cfg(desktop)]
+fn remind(app: &tauri::AppHandle, task: &tasks::Task) {
+    log::info!("напоминаю: «{}»", task.title);
+    announce(app, format!("Напоминаю: {}", task.title), false);
+}
+
+/// Говорит готовую фразу: показывает её окном и произносит вслух.
+///
+/// Готовую — то есть ту, которую не надо ни у кого спрашивать: напоминание о
+/// задаче или ответ на распоряжение. Окно показывается всегда, речь — только
+/// если голос включён: сообщение, которое нельзя ни увидеть, ни услышать,
+/// ничем не отличается от забытого.
+///
+/// `wait` — дождаться конца речи. Нужно в разговоре: следующая фраза человека
+/// должна попасть в тишину, а не поверх ответа.
+#[cfg(desktop)]
+fn announce(app: &tauri::AppHandle, text: String, wait: bool) {
+    if let Err(err) = overlay::show_for_reminder(app, text.clone()) {
+        log::warn!("окно сообщения не открылось: {err}");
+    }
+
+    if !app.state::<AppState>().config().voice.enabled {
+        return;
+    }
+
+    let handle = app.clone();
+    let speaking = move || {
+        let config = handle.state::<AppState>().config().voice.clone();
+        overlay::show_hud(&handle, "speaking");
+        if let Err(err) = tauri::async_runtime::block_on(voice::speak(&handle, &config, &text)) {
+            log::warn!("сказать не вышло: {err}");
+        }
+        // Индикатор относится к речи, а не к окну, которое человек читает
+        // дальше, — убираем его, когда речь отзвучит.
+        while voice::speaking() {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        }
+        overlay::hide_hud(&handle);
+    };
+
+    if wait {
+        speaking();
+    } else {
+        std::thread::Builder::new()
+            .name("sufler-say".into())
+            .spawn(speaking)
+            .ok();
+    }
+}
+
+/// Не распоряжение ли это о задачах. Если да — выполняет и отвечает вслух.
+///
+/// Возвращает `true`, когда фраза была распоряжением и обработана: спрашивать
+/// про неё модель уже не нужно.
+#[cfg(desktop)]
+fn handled_as_task(app: &tauri::AppHandle, text: &str) -> bool {
+    let Some(reply) = tauri::async_runtime::block_on(planner::handle(app, text)) else {
+        return false;
+    };
+    log::info!("распоряжение о задачах: «{text}» → «{reply}»");
+    announce(app, reply, true);
+    true
+}
+
 /// Идёт ли разговор без рук.
 #[cfg(desktop)]
 pub(crate) fn in_conversation() -> bool {
@@ -1153,6 +1258,10 @@ fn end_conversation(app: &tauri::AppHandle, signal: bool, close_window: bool) {
         return;
     }
     voice::stt::stop_conversation();
+    // Задача, которой не назвали срок, ждала ответа в этом разговоре. Разговор
+    // кончился — ждать больше нечего, иначе следующая же фраза через час была
+    // бы принята за срок.
+    planner::forget_pending();
     let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
     overlay::hide_hud(app);
     if signal {
@@ -1367,9 +1476,10 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
+    let tasks = MenuItem::with_id(app, "tasks", "Задачи", true, None::<&str>)?;
     let onboarding = MenuItem::with_id(app, "onboarding", "Настройка и проверка…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&onboarding, &quit])?;
+    let menu = Menu::with_items(app, &[&tasks, &onboarding, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("sufler-tray")
         .tooltip("Суфлёр")
@@ -1384,6 +1494,11 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     }
 
     tray.on_menu_event(|app, event| match event.id().as_ref() {
+        "tasks" => {
+            if let Err(err) = overlay::show_tasks(app) {
+                log::error!("не удалось открыть окно задач: {err}");
+            }
+        }
         "onboarding" => {
             if let Err(err) = overlay::show_onboarding(app) {
                 log::error!("не удалось открыть окно настройки: {err}");

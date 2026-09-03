@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Права для окон попапа, мини-меню, онбординга и индикатора голоса. Размер и место окна выбирает Rust; из окна разрешено только начать перетаскивание за заголовок и за край — само движение дальше ведёт система. Окно без прав не получает ни событий, ни ответов на вызовы — молча и без ошибок, поэтому каждое новое окно надо перечислять здесь.",
-  "windows": ["popup", "menu", "onboarding", "hud"],
+  "windows": ["popup", "menu", "onboarding", "hud", "tasks"],
   "permissions": [
     "core:default",
     "core:event:default",

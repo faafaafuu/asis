@@ -126,7 +126,7 @@ if (api) {
 
   /** Показывает содержимое по данным из Rust. */
   function applyOpen(payload) {
-    const { term, context, theme, errorText, dialogue, speak } = payload ?? {};
+    const { term, context, theme, errorText, dialogue, speak, answer } = payload ?? {};
     // Новый вопрос — новое окно: размер снова определяет содержимое. Rust к
     // этому моменту уже забыл про ручную геометрию, и разметка должна забыть
     // тоже, иначе окно осталось бы растянутым под ответ в две строки.
@@ -134,6 +134,11 @@ if (api) {
     if (theme) applyTheme(theme);
     if (errorText) view.errorText = errorText;
     if (dialogue !== undefined) view.dialogue = Boolean(dialogue);
+    // Готовый текст показываем как есть, ничего не спрашивая.
+    if (answer) {
+      view.announce(answer);
+      return;
+    }
     view.open({ term: term ?? "", context: context ?? "", speak: Boolean(speak) });
   }
 

@@ -40,6 +40,12 @@ pub struct OpenPayload {
     /// Нужно, когда окно открыли голосом: человек спросил вслух и ответа ждёт
     /// тоже вслух, а не глазами.
     speak: bool,
+    /// Готовый текст вместо вопроса к модели.
+    ///
+    /// Так приходит напоминание о задаче: спрашивать про него нечего, оно уже
+    /// написано. Пустое поле означает обычное открытие с вопросом.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
 }
 
 /// Создаёт окно попапа, если его ещё нет. Окно рождается скрытым: первым делом его
@@ -124,6 +130,7 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
         error_text,
         dialogue,
         speak: false,
+        answer: None,
     };
     state.set_selection(selection);
 
@@ -318,6 +325,7 @@ pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
         error_text,
         dialogue,
         speak: true,
+        answer: None,
     };
     state.set_selection(Selection {
         text: question,
@@ -335,6 +343,55 @@ pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
 
     #[cfg(desktop)]
     crate::voice::hotkey::arm(true);
+    Ok(())
+}
+
+/// Показывает напоминание о задаче.
+///
+/// Это тот же попап, что и у голосового вопроса: посреди экрана, с текстом
+/// вместо ответа. Отдельного окна ему не нужно — напоминание живёт секунды,
+/// а человек уже знает, как это окно закрывается.
+pub fn show_for_reminder(app: &AppHandle, text: String) -> tauri::Result<()> {
+    touch_popup();
+    #[cfg(desktop)]
+    {
+        BY_VOICE.store(true, std::sync::atomic::Ordering::Relaxed);
+        release_control();
+        OPENS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    let fresh = app.get_webview_window(POPUP_LABEL).is_none();
+    let window = ensure_popup_window(app)?;
+
+    let state = app.state::<AppState>();
+    let (theme, error_text) = {
+        let config = state.config();
+        (config.ui.theme.clone(), config.ui.resolved_error_text())
+    };
+
+    let payload = OpenPayload {
+        term: String::new(),
+        context: String::new(),
+        theme,
+        error_text,
+        dialogue: false,
+        speak: false,
+        // Напоминание — готовый текст: спрашивать про него модель нечего.
+        answer: Some(text.clone()),
+    };
+    state.set_selection(Selection {
+        text,
+        rect: None,
+        cursor: cursor_position(),
+        context: String::new(),
+    });
+
+    let _ = window.hide();
+    if fresh {
+        *PENDING.lock().unwrap_or_else(|err| err.into_inner()) = Some(payload);
+    } else {
+        window.emit_to(POPUP_LABEL, "popup:open", payload)?;
+    }
     Ok(())
 }
 
@@ -684,6 +741,68 @@ fn theme_script(app: &AppHandle) -> String {
 
 /// Окно онбординга: объясняет, какого разрешения не хватает, и как его выдать
 /// (SPEC §9.2, §14 — «понятный экран с инструкцией, а не тихий отказ»).
+/// Окно списка задач.
+pub const TASKS_LABEL: &str = "tasks";
+
+/// Показывает список задач. Если окно уже есть — поднимает его наверх.
+pub fn show_tasks(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(TASKS_LABEL) {
+        window.show()?;
+        window.set_focus()?;
+        return Ok(());
+    }
+
+    let window =
+        WebviewWindowBuilder::new(app, TASKS_LABEL, WebviewUrl::App("tasks.html".into()))
+            // Тема — до первого кадра, как и у остальных окон.
+            .initialization_script(&theme_script(app))
+            .title("Суфлёр — задачи")
+            .inner_size(400.0, 560.0)
+            .min_inner_size(320.0, 320.0)
+            .resizable(true)
+            // Рамки нет: окно должно читаться как карточка, а не как программа.
+            // Двигают его за заголовок — см. tasks.js.
+            .decorations(false)
+            .skip_taskbar(true)
+            .build()?;
+
+    // У правого края экрана, ближе к верху: список задач смотрят краем глаза,
+    // не отрываясь от работы, и середина экрана ему не место.
+    let (x, y) = tasks_corner(&window);
+    window.set_position(PhysicalPosition::new(x, y))?;
+    Ok(())
+}
+
+/// Правый верхний угол рабочего стола с отступом.
+fn tasks_corner(window: &WebviewWindow) -> (i32, i32) {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+
+    let Some(monitor) = monitor else {
+        return (120, 120);
+    };
+    let scale = monitor.scale_factor();
+    let area = monitor.size();
+    let at = monitor.position();
+    let size = window.outer_size().unwrap_or_default();
+    let margin = (INSET * 3.0 * scale).round() as i32;
+
+    (
+        at.x + area.width as i32 - size.width as i32 - margin,
+        at.y + margin,
+    )
+}
+
+/// Прячет окно задач.
+pub fn hide_tasks(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(TASKS_LABEL) {
+        let _ = window.hide();
+    }
+}
+
 pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(ONBOARDING_LABEL) {
         window.show()?;

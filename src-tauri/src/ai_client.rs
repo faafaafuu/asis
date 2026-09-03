@@ -78,6 +78,20 @@ pub trait AiProvider: Send + Sync {
         thread: &[ThreadItem],
         question: &str,
     ) -> Result<String, AiError>;
+
+    /// Разбирает сказанное по заданным правилам и отдаёт ответ как есть.
+    ///
+    /// Нужно там, где от модели ждут не объяснение человеку, а разобранные
+    /// данные: во что превратить «напомни завтра в три позвонить в банк».
+    /// Обычные `explain` и `ask` для этого не годятся — они обязаны отвечать
+    /// связным текстом по-русски, и любая просьба ответить иначе спорит с их
+    /// собственными указаниями.
+    ///
+    /// Умеют не все источники: Википедия ничего не разбирает. Поэтому у метода
+    /// есть общий отказ, а переопределяют его те, кто может.
+    async fn interpret(&self, _rules: &str, _said: &str) -> Result<String, AiError> {
+        Err(AiError::Parse)
+    }
 }
 
 /// Навешивает прокси на клиент, если он задан.
@@ -673,6 +687,20 @@ fn strip_foreign(text: &str) -> String {
 
 #[async_trait]
 impl AiProvider for HttpProvider {
+    async fn interpret(&self, rules: &str, said: &str) -> Result<String, AiError> {
+        self.answer_once(vec![
+            Message {
+                role: "system",
+                content: rules.to_string(),
+            },
+            Message {
+                role: "user",
+                content: said.to_string(),
+            },
+        ])
+        .await
+    }
+
     async fn explain(&self, term: &str, context: &str) -> Result<Explanation, AiError> {
         let messages = || {
             vec![

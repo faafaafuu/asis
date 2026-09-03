@@ -673,3 +673,117 @@ pub fn open_permission_settings(app: AppHandle) -> bool {
         .map(|integration| integration.open_permission_settings())
         .unwrap_or(false)
 }
+
+/* ── Задачи ──────────────────────────────────────────────────────────────── */
+
+/// Открывает окно со списком задач.
+#[tauri::command]
+pub fn open_tasks(app: AppHandle) -> Result<(), String> {
+    crate::overlay::show_tasks(&app).map_err(|err| err.to_string())
+}
+
+/// Закрывает окно со списком задач.
+#[tauri::command]
+pub fn close_tasks(app: AppHandle) {
+    crate::overlay::hide_tasks(&app);
+}
+
+/// Задача в том виде, в каком её показывает окно.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskView {
+    pub id: String,
+    pub title: String,
+    /// Срок в ISO 8601 с часовым поясом. Форматирует его окно: там знают язык
+    /// интерфейса и умеют писать «сегодня в 15:00» вместо полной даты.
+    pub due: Option<String>,
+    pub done: bool,
+    pub overdue: bool,
+}
+
+fn view(task: &crate::tasks::Task, now: chrono::DateTime<chrono::Local>) -> TaskView {
+    TaskView {
+        id: task.id.clone(),
+        title: task.title.clone(),
+        due: task.due.map(|due| due.to_rfc3339()),
+        done: task.done_at.is_some(),
+        overdue: task.overdue(now),
+    }
+}
+
+/// Весь список задач для окна.
+#[tauri::command]
+pub fn task_list() -> Vec<TaskView> {
+    let now = chrono::Local::now();
+    crate::tasks::all().iter().map(|task| view(task, now)).collect()
+}
+
+/// Добавляет задачу. `due` — ISO 8601 или пусто.
+#[tauri::command]
+pub fn task_add(app: AppHandle, title: String, due: Option<String>) -> Result<TaskView, String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("у задачи должно быть название".into());
+    }
+
+    let due = parse_due(due.as_deref())?;
+    let task = crate::tasks::add(title, due, None);
+    log::info!("задача добавлена: «{}»", task.title);
+    changed(&app);
+    Ok(view(&task, chrono::Local::now()))
+}
+
+/// Отмечает сделанной или возвращает в работу.
+#[tauri::command]
+pub fn task_done(app: AppHandle, id: String, done: bool) -> Option<TaskView> {
+    let task = crate::tasks::set_done(&id, done)?;
+    changed(&app);
+    Some(view(&task, chrono::Local::now()))
+}
+
+/// Меняет название и срок.
+#[tauri::command]
+pub fn task_edit(
+    app: AppHandle,
+    id: String,
+    title: Option<String>,
+    due: Option<String>,
+) -> Result<Option<TaskView>, String> {
+    // Пустая строка в сроке означает «убрать срок», отсутствие поля — «не трогать».
+    let due = match due {
+        Some(raw) if raw.trim().is_empty() => Some(None),
+        Some(raw) => Some(parse_due(Some(&raw))?),
+        None => None,
+    };
+    let task = crate::tasks::edit(&id, title, due);
+    if task.is_some() {
+        changed(&app);
+    }
+    Ok(task.map(|task| view(&task, chrono::Local::now())))
+}
+
+/// Удаляет задачу.
+#[tauri::command]
+pub fn task_remove(app: AppHandle, id: String) -> bool {
+    let removed = crate::tasks::remove(&id).is_some();
+    if removed {
+        changed(&app);
+    }
+    removed
+}
+
+/// Разбирает срок, присланный окном.
+fn parse_due(raw: Option<&str>) -> Result<Option<chrono::DateTime<chrono::Local>>, String> {
+    let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
+        return Ok(None);
+    };
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|parsed| Some(parsed.with_timezone(&chrono::Local)))
+        .map_err(|err| format!("не понял срок «{raw}»: {err}"))
+}
+
+/// Сообщает всем окнам, что список изменился.
+fn changed(app: &AppHandle) {
+    use tauri::Emitter;
+    let _ = app.emit("tasks:changed", ());
+}

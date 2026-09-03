@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Суфлёр — задачи</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/tasks.css" />
+  </head>
+  <body>
+    <header class="head" data-el="head">
+      <h1 class="head__title">Задачи</h1>
+      <span class="head__count" data-el="count"></span>
+    </header>
+
+    <form class="add" data-el="form">
+      <input
+        class="add__title"
+        data-el="title"
+        type="text"
+        placeholder="Что нужно сделать…"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <input class="add__due" data-el="due" type="datetime-local" aria-label="Срок" />
+      <button class="add__send" data-el="send" type="submit" title="Добавить" aria-label="Добавить задачу">
+        +
+      </button>
+    </form>
+
+    <main class="list" data-el="list" aria-live="polite"></main>
+
+    <p class="empty" data-el="empty" hidden>
+      Пока пусто. Скажите «Ноа, напомни завтра в десять позвонить в банк» — или
+      впишите сюда.
+    </p>
+
+    <script type="module" src="./js/tasks.js"></script>
+  </body>
+</html>

@@ -155,6 +155,26 @@ export class PopupView {
     });
   }
 
+  /**
+   * Показывает готовый текст вместо ответа модели.
+   *
+   * Так приходит напоминание о задаче: спрашивать про него нечего — оно уже
+   * написано человеком, когда он эту задачу заводил.
+   */
+  announce(text) {
+    this.state = {
+      ...this.state,
+      term: "",
+      context: "",
+      phase: "success",
+      data: { def: text, simple: "", examples: [] },
+      expanded: false,
+      thread: [],
+      pending: false,
+    };
+    this.render();
+  }
+
   /** Открытие с новым термином: полный сброс состояния, мгновенный Loading. */
   /**
    * Показывает объяснение термина.

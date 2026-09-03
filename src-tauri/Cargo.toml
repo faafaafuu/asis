@@ -1,6 +1,6 @@
 [package]
 name = "sufler"
-version = "1.3.1"
+version = "1.4.0"
 description = "Суфлёр — системный AI-попап по выделению текста"
 authors = ["Sufler"]
 edition = "2021"
@@ -23,6 +23,9 @@ tauri = { version = "2.11", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-log = "2.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# chrono — сроки задач. Нужны разбор и сложение дат с учётом часового пояса
+# и високосных лет: «завтра в три» и «через неделю» вручную не считаются.
+chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 log = "0.4"
 async-trait = "0.1"
