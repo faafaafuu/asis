@@ -6,9 +6,24 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use chrono::Local;
 use serde::{Deserialize, Serialize};
 
 use crate::config::AiConfig;
+
+/// Сегодняшняя дата строкой для системного промпта.
+///
+/// Без неё модель не знает, какой сейчас год, и отвечает исходя из того, на
+/// каких данных её обучили, — а это может быть год-два-три назад. Формат
+/// нарочно другой, чем в `planner::now_line`: там нужны день недели и минуты
+/// ради разбора «завтра» и «через час», здесь достаточно одной даты.
+fn today_line(language: &str) -> String {
+    let today = Local::now().format("%Y-%m-%d");
+    match language {
+        "en" => format!("Today's date is {today}."),
+        _ => format!("Сегодняшняя дата: {today}."),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Explanation {
@@ -706,7 +721,7 @@ impl AiProvider for HttpProvider {
             vec![
                 Message {
                     role: "system",
-                    content: system_prompt(&self.language).to_string(),
+                    content: format!("{} {}", system_prompt(&self.language), today_line(&self.language)),
                 },
                 Message {
                     role: "user",
@@ -755,7 +770,8 @@ impl AiProvider for HttpProvider {
             let mut messages = vec![
                 Message {
                     role: "system",
-                    content: match self.language.as_str() {
+                    content: {
+                        let persona = match self.language.as_str() {
                         "en" if term.trim().is_empty() => format!(
                             "Your name is Noa, you are a voice assistant. Answer the question \
                              itself, briefly — two or three sentences, like in conversation. \
@@ -784,6 +800,8 @@ impl AiProvider for HttpProvider {
                              «{term}». Отвечай коротко, обычным текстом, без JSON. \
                              Отвечай по-русски, даже если сам термин на другом языке."
                         ),
+                        };
+                        format!("{persona} {}", today_line(&self.language))
                     },
                 },
             ];
