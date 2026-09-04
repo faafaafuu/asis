@@ -228,7 +228,7 @@ pub async fn add_to_cart(app: &AppHandle, products: &[Product]) -> Result<CartRe
 
     let response = client()
         .post(format!(
-            "{}/store-adapters/browser-sessions/vkusvill/cart",
+            "{}/store-adapters/browser-session/vkusvill/cart",
             config.endpoint.trim_end_matches('/')
         ))
         .json(&serde_json::json!({ "sessionId": config.session_id, "items": items }))
