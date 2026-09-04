@@ -47,6 +47,8 @@ pub enum Intent {
     Breakdown { task: Option<String> },
     /// Заказать еду. Названия блюд, как их знает FoodPilot.
     Order { dishes: Vec<String> },
+    /// Спрашивает, что с заказом: что набрано и на каком оно шаге.
+    OrderStatus,
 }
 
 /// Название дела, которому не хватает срока.
@@ -97,6 +99,42 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         Intent::Postpone { task, due } => Some(postpone(app, task.as_deref(), due, &open)),
         Intent::Breakdown { task } => Some(breakdown(app, task.as_deref(), &open).await),
         Intent::Order { dishes } => Some(order(app, &dishes).await),
+        Intent::OrderStatus => Some(order_status(app)),
+    }
+}
+
+/// Рассказывает, что с заказом, и показывает его окном.
+///
+/// Вслух — коротко: сколько набрано и на сколько. Построчно человек смотрит в
+/// окне, потому что список из пяти позиций с ценами на слух не удерживается.
+fn order_status(app: &AppHandle) -> String {
+    let Some(order) = crate::order::current() else {
+        return "Заказа сейчас нет.".into();
+    };
+
+    if let Err(err) = crate::overlay::show_order(app) {
+        log::warn!("окно заказа не открылось: {err}");
+    }
+
+    let in_cart = order.lines.iter().filter(|line| line.in_cart).count();
+    let head = match order.stage {
+        crate::order::Stage::Picking => format!("Ищу. Пока нашёл {}.", order.lines.len()),
+        crate::order::Stage::Picked => {
+            format!("Подобрано {} на {} рублей.", order.lines.len(), order.total)
+        }
+        crate::order::Stage::InCart => {
+            format!("В корзине {in_cart} на {} рублей.", order.total)
+        }
+        crate::order::Stage::TooExpensive => format!(
+            "Набрано на {} рублей — дороже потолка в {}.",
+            order.total, order.max_order
+        ),
+        crate::order::Stage::Failed => "С заказом не вышло.".into(),
+    };
+
+    match order.note.is_empty() {
+        true => head,
+        false => format!("{head} {}", order.note),
     }
 }
 
@@ -119,7 +157,35 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
 
     // Сначала настоящие цены: что в магазине есть и почём. Без этого нечего
     // ни называть вслух, ни сверять с потолком.
-    let quote = match crate::food::quote(app, dishes).await {
+    // Найденное показывается по мере поиска, а не в конце: пять товаров — это
+    // пять походов на страницу магазина, и молчать всё это время нельзя.
+    let asked = dishes.len();
+    let quote = match crate::food::quote_reporting(app, dishes, |so_far| {
+        crate::order::set(
+            app,
+            crate::order::Order {
+                stage: crate::order::Stage::Picking,
+                lines: so_far
+                    .found
+                    .iter()
+                    .map(|item| crate::order::Line {
+                        name: item.name.clone(),
+                        price: item.price,
+                        in_cart: false,
+                    })
+                    .collect(),
+                missing: so_far.missing.clone(),
+                total: so_far.total,
+                note: format!(
+                    "Ищу: {} из {asked}",
+                    so_far.found.len() + so_far.missing.len()
+                ),
+                ..crate::order::Order::default()
+            },
+        );
+    })
+    .await
+    {
         Ok(quote) => quote,
         Err(err) => {
             log::warn!("не удалось узнать цены: {err}");
@@ -320,6 +386,7 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
                 Intent::Order { dishes }
             }
         }
+        "orderStatus" => Intent::OrderStatus,
         _ => Intent::Chat,
     }
 }
@@ -358,7 +425,9 @@ fn intent_rules(open: &[Task]) -> String {
          postpone — просит перенести дело на другое время;\n\
          breakdown — просит помощи с делом: как за него взяться, с чего начать, \
          разбить на шаги;\n\
-         order — просит заказать еду или продукты, купить их, оформить доставку.\n\
+         order — просит заказать еду или продукты, купить их, оформить доставку;\n\
+         orderStatus — спрашивает, что с заказом: что набрано, на сколько, \
+         на каком он шаге.\n\
          \n\
          Остальные поля:\n\
          title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
@@ -402,7 +471,9 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      {\"intent\":\"breakdown\",\"title\":\"\",\"due\":\"\",\"task\":1,\"calendar\":false}\n\
      «закажи ленивые голубцы и свекольник» → \
      {\"intent\":\"order\",\"title\":\"\",\"due\":\"\",\"task\":0,\"calendar\":false,\
-     \"dishes\":[\"ленивые голубцы\",\"свекольник\"]}";
+     \"dishes\":[\"ленивые голубцы\",\"свекольник\"]}\n\
+     «что там с заказом» → \
+     {\"intent\":\"orderStatus\",\"title\":\"\",\"due\":\"\",\"task\":0,\"calendar\":false}";
 
 /* ── Завести ─────────────────────────────────────────────────────────────── */
 

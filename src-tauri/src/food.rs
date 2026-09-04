@@ -132,8 +132,17 @@ impl Quote {
     }
 }
 
-/// Ищет всё, что просили, и считает сумму по настоящим ценам.
-pub async fn quote(app: &AppHandle, items: &[String]) -> Result<Quote, String> {
+/// Ищет всё, что просили, рассказывая о найденном по ходу дела.
+///
+/// Поиск идёт по одному товару, и каждый — это поход на страницу магазина, то
+/// есть секунда-другая. На пяти товарах человек ждёт молча почти десять секунд
+/// и всё это время не знает, работает ли программа. Поэтому найденное отдаётся
+/// сразу, а не в конце: в окне товары появляются по одному, с ценами.
+pub async fn quote_reporting(
+    app: &AppHandle,
+    items: &[String],
+    mut progress: impl FnMut(&Quote),
+) -> Result<Quote, String> {
     let mut result = Quote::default();
 
     for item in items {
@@ -150,6 +159,7 @@ pub async fn quote(app: &AppHandle, items: &[String]) -> Result<Quote, String> {
                 result.missing.push(item.clone());
             }
         }
+        progress(&result);
     }
 
     Ok(result)
