@@ -2,24 +2,22 @@
 //!
 //! Ноа здесь только голос и решение: что человек имел в виду, разбирает
 //! `planner`, а что из этого следует искать — знает FoodPilot. Он ходит на
-//! страницу магазина и отдаёт настоящие товары с настоящими ценами.
+//! страницы магазинов и отдаёт настоящие товары с настоящими ценами.
 //!
-//! Заказа и оплаты здесь нет намеренно. Их не выбросили из осторожности —
-//! их нечем сделать: у FoodPilot автоматизации магазинов фактически не
-//! существует. Драйвер браузера умеет открыть страницу логина и на этом
-//! кончается, план автоматизации возвращается текстовым описанием шагов, а
-//! оплата закрыта на стороне сервера: запрос с `allowPayment` отклоняется, и
-//! разрешение платить захардкожено выключенным.
+//! Магазинов несколько, и спрашиваются они разом. По одной полке не видно,
+//! дорого это или дёшево: «молоко за сто пятьдесят» — это много или мало,
+//! понятно только рядом с другой ценой. Вторая причина проще: магазины падают
+//! поодиночке, и пока один недостижим, заказ можно собрать в другом.
 //!
-//! Здесь был написан код корзины и оплаты под тренировочный магазин
-//! `mock-store` — он удалён. Работать он всё равно не мог, а выглядел рабочим
-//! заказом с оплатой, и это хуже, чем его отсутствие: следующий читатель
-//! построил бы на нём план, которого сервер не поддержит. История правок его
-//! помнит, если тренировочный путь понадобится снова.
+//! Собирается заказ всё равно в одном магазине. Корзина у каждого своя, и
+//! набор, разложенный по трём магазинам, — это три доставки и три оформления,
+//! то есть не экономия, а трата. Поэтому полки сравниваются целиком, и
+//! выбирается магазин, а не отдельный товар: см. `best_store`.
 //!
-//! Настоящий заказ — отдельная работа, и объём в ней не в правилах, а в
-//! живых селекторах: под каждый магазин нужны свои поиск, сопоставление
-//! товаров, корзина и оформление, плюс обход антибота.
+//! Складывать корзину Ноа умеет пока только во ВкусВилле — там разобраны
+//! кнопки и проверен вход. В остальных магазинах он доводит дело до подбора с
+//! ценами и на этом честно останавливается: показать цены и промолчать про то,
+//! что заказ не оформлен, было бы хуже, чем не искать там вовсе.
 
 mod pick;
 
@@ -40,9 +38,58 @@ pub struct Product {
     pub url: String,
 }
 
+/// Как магазин называется вслух.
+///
+/// Коды magnit и metro человеку ничего не говорят, а слышать он должен то же
+/// слово, которым сам магазин называется на вывеске.
+pub fn store_name(code: &str) -> &str {
+    match code {
+        "vkusvill" => "ВкусВилл",
+        "magnit" => "Магнит",
+        "metro" => "Метро",
+        other => other,
+    }
+}
+
+/// Название магазина в форме «в …».
+///
+/// Ноа отвечает голосом, и «набрал в Магнит» — это слышимая ошибка, из тех, по
+/// которым сразу понятно, что говорит программа. Падеж дешевле хранить рядом с
+/// названием, чем склонять: магазинов единицы, и добавляются они по одному.
+pub fn store_in(code: &str) -> &str {
+    match code {
+        "vkusvill" => "во ВкусВилле",
+        "magnit" => "в Магните",
+        "metro" => "в Метро",
+        other => other,
+    }
+}
+
+/// Умеет ли Ноа складывать корзину в этом магазине.
+///
+/// Поиск по магазину — это чтение страницы, и он одинаков для всех. Корзина —
+/// это нажатие настоящих кнопок в браузере, где человек вошёл, и каждая кнопка
+/// своя. Поэтому магазинов для поиска больше, чем для заказа, и разницу надо
+/// проговаривать, а не прятать.
+pub fn cart_supported(code: &str) -> bool {
+    code == "vkusvill"
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SearchResponse {
+struct MultiSearchResponse {
+    #[serde(default)]
+    stores: Vec<ShelfResponse>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ShelfResponse {
+    provider: String,
+    /// Дошёл ли запрос до магазина. Пустая полка и молчащий магазин выглядят
+    /// одинаково, но означают разное: попросить другое или попробовать позже.
+    #[serde(default)]
+    reachable: bool,
     #[serde(default)]
     products: Vec<SearchProduct>,
 }
@@ -60,18 +107,26 @@ struct SearchProduct {
     available: bool,
 }
 
-/// Ищет товар в настоящем магазине.
+/// Что один магазин ответил про один товар.
+pub struct Shelf {
+    pub store: String,
+    pub reachable: bool,
+    /// Лучшее с этой полки. `None` — товара нет или полка пуста.
+    pub best: Option<Product>,
+}
+
+/// Ищет товар во всех магазинах разом.
 ///
-/// ВкусВилл, а не `mock-store`: цены живые, со страницы поиска. Из дюжины
-/// вариантов выбирается один — тот, что дешевле за литр или килограмм, а не
-/// просто дешевле; почему именно так, объяснено в `pick`.
-pub async fn search(app: &AppHandle, query: &str) -> Result<Option<Product>, String> {
+/// Из дюжины вариантов на каждой полке выбирается один — тот, что дешевле за
+/// литр или килограмм, а не просто дешевле; почему именно так, объяснено в
+/// `pick`.
+pub async fn search(app: &AppHandle, query: &str) -> Result<Vec<Shelf>, String> {
     let config = food_config(app)?;
     // Запрос кодируется вручную: reqwest здесь собран без фичи, дающей
     // `query()`, а тянуть её ради одного параметра незачем — тем же способом
     // собираются адреса в `calendar`.
     let url = format!(
-        "{}/store-adapters/page/vkusvill/search?query={}",
+        "{}/store-adapters/page/search?query={}",
         config.endpoint.trim_end_matches('/'),
         urlencode(query)
     );
@@ -80,40 +135,52 @@ pub async fn search(app: &AppHandle, query: &str) -> Result<Option<Product>, Str
         .get(&url)
         .send()
         .await
-        .map_err(|err| format!("магазин не ответил: {err}"))?;
+        .map_err(|err| format!("FoodPilot не ответил: {err}"))?;
 
     if !response.status().is_success() {
-        return Err(format!("магазин отказал: {}", response.status()));
+        return Err(format!("поиск отказал: {}", response.status()));
     }
 
-    let parsed: SearchResponse = response
+    let parsed: MultiSearchResponse = response
         .json()
         .await
-        .map_err(|err| format!("не разобрать ответ магазина: {err}"))?;
+        .map_err(|err| format!("не разобрать ответ поиска: {err}"))?;
 
-    let shelf: Vec<pick::Candidate> = parsed
-        .products
+    Ok(parsed
+        .stores
         .into_iter()
-        .map(|item| pick::Candidate {
-            name: item.name,
-            // Копейки в рубли: вслух «триста восемьдесят рублей», а не
-            // «тридцать восемь тысяч копеек».
-            price: item.price_cents.map(|cents| cents / 100),
-            available: item.available,
-            url: item.product_url,
-        })
-        .collect();
+        .map(|shelf| {
+            let candidates: Vec<pick::Candidate> = shelf
+                .products
+                .into_iter()
+                .map(|item| pick::Candidate {
+                    name: item.name,
+                    // Копейки в рубли: вслух «триста восемьдесят рублей», а не
+                    // «тридцать восемь тысяч копеек».
+                    price: item.price_cents.map(|cents| cents / 100),
+                    available: item.available,
+                    url: item.product_url,
+                })
+                .collect();
 
-    Ok(pick::best(&shelf).map(|chosen| Product {
-        name: chosen.name.clone(),
-        price: chosen.price,
-        url: chosen.url.clone(),
-    }))
+            Shelf {
+                store: shelf.provider,
+                reachable: shelf.reachable,
+                best: pick::best(&candidates).map(|chosen| Product {
+                    name: chosen.name.clone(),
+                    price: chosen.price,
+                    url: chosen.url.clone(),
+                }),
+            }
+        })
+        .collect())
 }
 
-/// Что удалось набрать по запросу человека.
-#[derive(Debug, Default)]
-pub struct Quote {
+/// Что удалось набрать по запросу человека в одном магазине.
+#[derive(Debug, Default, Clone)]
+pub struct StoreQuote {
+    /// Код магазина: `vkusvill`, `magnit`, `metro`.
+    pub store: String,
     /// Найденное: название из магазина и цена.
     pub found: Vec<Product>,
     /// Чего в магазине не нашлось — об этом надо сказать, а не умолчать.
@@ -129,7 +196,7 @@ pub struct Quote {
     pub unreachable: usize,
 }
 
-impl Quote {
+impl StoreQuote {
     /// Сколько не хватает до бесплатной доставки. `None` — уже бесплатно.
     pub fn until_free_delivery(&self, threshold: u32) -> Option<u32> {
         if threshold == 0 || self.total >= threshold {
@@ -137,43 +204,95 @@ impl Quote {
         }
         Some(threshold - self.total)
     }
+
+    /// Как магазин называется вслух.
+    pub fn store_name(&self) -> &str {
+        store_name(&self.store)
+    }
+
+    /// Название магазина в форме «в …».
+    pub fn store_in(&self) -> &str {
+        store_in(&self.store)
+    }
+}
+
+/// В каком магазине брать.
+///
+/// Сначала полнота, потом цена. Магазин, где нашлось четыре позиции из пяти,
+/// лучше магазина с двумя, даже если те две дешевле: недостающее придётся
+/// докупать отдельно, и вторая доставка съест разницу. При равной полноте
+/// выигрывает сумма.
+///
+/// Магазины, где не нашлось ничего, не участвуют: в них нечего заказывать.
+pub fn best_store(quotes: &[StoreQuote]) -> Option<&StoreQuote> {
+    quotes
+        .iter()
+        .filter(|quote| !quote.found.is_empty())
+        .min_by_key(|quote| (std::cmp::Reverse(quote.found.len()), quote.total))
 }
 
 /// Ищет всё, что просили, рассказывая о найденном по ходу дела.
 ///
-/// Поиск идёт по одному товару, и каждый — это поход на страницу магазина, то
+/// Поиск идёт по одному товару, и каждый — это поход на страницы магазинов, то
 /// есть секунда-другая. На пяти товарах человек ждёт молча почти десять секунд
 /// и всё это время не знает, работает ли программа. Поэтому найденное отдаётся
 /// сразу, а не в конце: в окне товары появляются по одному, с ценами.
+///
+/// Показывается по ходу дела лучший на текущий момент магазин. Показывать все
+/// три полки разом значило бы показывать втрое больше строк, из которых две
+/// трети человеку не пригодятся.
 pub async fn quote_reporting(
     app: &AppHandle,
     items: &[String],
-    mut progress: impl FnMut(&Quote),
-) -> Result<Quote, String> {
-    let mut result = Quote::default();
+    mut progress: impl FnMut(&StoreQuote),
+) -> Result<Vec<StoreQuote>, String> {
+    let mut quotes: Vec<StoreQuote> = Vec::new();
 
     for item in items {
-        match search(app, item).await {
-            Ok(Some(product)) => {
-                result.total += product.price.unwrap_or(0);
-                result.found.push(product);
+        let shelves = match search(app, item).await {
+            Ok(shelves) => shelves,
+            // Отказал не магазин, а сам FoodPilot: спрашивать про остальные
+            // товары нечего, отвечать будет некому.
+            Err(err) => return Err(err),
+        };
+
+        for shelf in shelves {
+            let quote = match quotes.iter_mut().find(|quote| quote.store == shelf.store) {
+                Some(quote) => quote,
+                None => {
+                    quotes.push(StoreQuote {
+                        store: shelf.store.clone(),
+                        ..StoreQuote::default()
+                    });
+                    quotes.last_mut().expect("только что добавили")
+                }
+            };
+
+            if !shelf.reachable {
+                log::warn!("магазин {} не ответил про «{item}»", shelf.store);
+                quote.missing.push(item.clone());
+                quote.unreachable += 1;
+                continue;
             }
-            // Товара нет в продаже или парсер его не увидел — для человека
-            // это одно и то же: заказать не выйдет.
-            Ok(None) => result.missing.push(item.clone()),
-            Err(err) => {
-                log::warn!("поиск «{item}» не удался: {err}");
-                result.missing.push(item.clone());
-                result.unreachable += 1;
+
+            match shelf.best {
+                Some(product) => {
+                    quote.total += product.price.unwrap_or(0);
+                    quote.found.push(product);
+                }
+                // Товара нет в продаже или парсер его не увидел — для человека
+                // это одно и то же: заказать не выйдет.
+                None => quote.missing.push(item.clone()),
             }
         }
-        progress(&result);
+
+        if let Some(leading) = best_store(&quotes) {
+            progress(leading);
+        }
     }
 
-    Ok(result)
+    Ok(quotes)
 }
-
-
 
 /// Что получилось положить в корзину.
 #[derive(Debug, Default)]
@@ -306,4 +425,98 @@ fn urlencode(raw: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn product(name: &str, price: u32) -> Product {
+        Product {
+            name: name.into(),
+            price: Some(price),
+            url: format!("https://example.test/{name}"),
+        }
+    }
+
+    fn quote(store: &str, found: &[(&str, u32)], missing: usize) -> StoreQuote {
+        StoreQuote {
+            store: store.into(),
+            found: found.iter().map(|(name, price)| product(name, *price)).collect(),
+            missing: (0..missing).map(|i| format!("нет-{i}")).collect(),
+            total: found.iter().map(|(_, price)| price).sum(),
+            unreachable: 0,
+        }
+    }
+
+    #[test]
+    fn a_fuller_basket_beats_a_cheaper_one() {
+        // Магазин с четырьмя позициями выигрывает у магазина с двумя, даже
+        // когда те две дешевле: за недостающим придётся ехать отдельно.
+        let quotes = vec![
+            quote("magnit", &[("молоко", 80), ("хлеб", 50)], 2),
+            quote(
+                "metro",
+                &[("молоко", 90), ("хлеб", 60), ("яйца", 120), ("сыр", 300)],
+                0,
+            ),
+        ];
+
+        assert_eq!(best_store(&quotes).map(|best| best.store.as_str()), Some("metro"));
+    }
+
+    #[test]
+    fn at_equal_fullness_the_cheaper_store_wins() {
+        let quotes = vec![
+            quote("magnit", &[("молоко", 80), ("хлеб", 50)], 0),
+            quote("metro", &[("молоко", 90), ("хлеб", 60)], 0),
+        ];
+
+        assert_eq!(best_store(&quotes).map(|best| best.store.as_str()), Some("magnit"));
+    }
+
+    #[test]
+    fn a_store_with_nothing_is_not_a_choice() {
+        // Пустой магазин дешевле любого непустого, и без отбора он побеждал бы
+        // всегда, оставляя человека с заказом из ничего.
+        let quotes = vec![
+            quote("vkusvill", &[], 3),
+            quote("magnit", &[("молоко", 80)], 2),
+        ];
+
+        assert_eq!(
+            best_store(&quotes).map(|best| best.store.as_str()),
+            Some("magnit")
+        );
+    }
+
+    #[test]
+    fn nowhere_to_order_is_an_answer_too() {
+        let quotes = vec![quote("vkusvill", &[], 2), quote("magnit", &[], 2)];
+
+        assert!(best_store(&quotes).is_none());
+    }
+
+    #[test]
+    fn stores_are_named_the_way_they_are_spoken() {
+        assert_eq!(store_name("magnit"), "Магнит");
+        assert_eq!(store_name("metro"), "Метро");
+        assert_eq!(store_name("vkusvill"), "ВкусВилл");
+        // Незнакомый код лучше показать как есть, чем потерять.
+        assert_eq!(store_name("lenta"), "lenta");
+    }
+
+    #[test]
+    fn stores_are_declined_for_the_voice() {
+        assert_eq!(store_in("magnit"), "в Магните");
+        assert_eq!(store_in("vkusvill"), "во ВкусВилле");
+        assert_eq!(store_in("metro"), "в Метро");
+    }
+
+    #[test]
+    fn the_cart_is_only_promised_where_it_works() {
+        assert!(cart_supported("vkusvill"));
+        assert!(!cart_supported("magnit"));
+        assert!(!cart_supported("metro"));
+    }
 }

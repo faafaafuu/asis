@@ -50,6 +50,12 @@ pub struct Line {
 #[serde(rename_all = "camelCase")]
 pub struct Order {
     pub stage: Stage,
+    /// В каком магазине набрано, человеческим именем: «Магнит», «ВкусВилл».
+    ///
+    /// Магазин выбирается сравнением полок и от заказа к заказу меняется.
+    /// Не назвать его — значит показать цены, по которым непонятно, где это
+    /// лежит и куда идти оформлять.
+    pub store: String,
     pub lines: Vec<Line>,
     /// Чего в магазине не нашлось.
     pub missing: Vec<String>,
@@ -68,6 +74,7 @@ impl Default for Order {
     fn default() -> Self {
         Self {
             stage: Stage::Picked,
+            store: String::new(),
             lines: Vec::new(),
             missing: Vec::new(),
             total: 0,

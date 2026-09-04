@@ -30,8 +30,14 @@ async function refresh() {
     ui.lines.replaceChildren();
     ui.stage.textContent = "";
     ui.note.textContent = "";
+    ui.store.hidden = true;
     return;
   }
+
+  // Магазин показывается, только когда он уже выбран: в начале поиска полки
+  // ещё сравниваются, и мелькающее название сбивало бы с толку.
+  ui.store.hidden = !order.store;
+  ui.store.textContent = order.store ?? "";
 
   ui.stage.textContent = STAGES[order.stage] ?? order.stage;
   ui.stage.dataset.stage = order.stage;

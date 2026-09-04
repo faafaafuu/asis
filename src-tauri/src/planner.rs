@@ -160,11 +160,12 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
     // Найденное показывается по мере поиска, а не в конце: пять товаров — это
     // пять походов на страницу магазина, и молчать всё это время нельзя.
     let asked = dishes.len();
-    let quote = match crate::food::quote_reporting(app, dishes, |so_far| {
+    let quotes = match crate::food::quote_reporting(app, dishes, |so_far| {
         crate::order::set(
             app,
             crate::order::Order {
                 stage: crate::order::Stage::Picking,
+                store: so_far.store_name().into(),
                 lines: so_far
                     .found
                     .iter()
@@ -186,48 +187,52 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
     })
     .await
     {
-        Ok(quote) => quote,
+        Ok(quotes) => quotes,
         Err(err) => {
             log::warn!("не удалось узнать цены: {err}");
             crate::order::set(
                 app,
                 crate::order::Order {
                     stage: crate::order::Stage::Failed,
-                    note: format!("Магазин не ответил: {err}"),
+                    note: format!("Поиск не ответил: {err}"),
                     ..crate::order::Order::default()
                 },
             );
-            return "Магазин не отвечает.".into();
+            return "Поиск по магазинам не отвечает.".into();
         }
     };
 
-    if quote.found.is_empty() {
-        // Магазин не ответил ни разу — это не «нет такого товара», а «магазин
-        // лежит». Разница для человека решающая: в первом случае он назовёт
-        // другое, во втором — попробует позже. Спутать их значит отправить его
-        // переформулировать просьбу, с которой всё в порядке.
-        let note = if quote.unreachable >= dishes.len() {
-            "Магазин не отвечает — попробуйте позже."
-        } else {
-            "Ничего из этого в магазине не нашёл."
+    let Some(quote) = crate::food::best_store(&quotes) else {
+        // Магазины не ответили ни разу — это не «нет такого товара», а
+        // «магазины лежат». Разница для человека решающая: в первом случае он
+        // назовёт другое, во втором — попробует позже. Спутать их значит
+        // отправить его переформулировать просьбу, с которой всё в порядке.
+        let all_silent = !quotes.is_empty()
+            && quotes
+                .iter()
+                .all(|quote| quote.unreachable >= dishes.len());
+        let note = match all_silent {
+            true => "Магазины не отвечают — попробуйте позже.",
+            false => "Ничего из этого не нашёл ни в одном магазине.",
         };
         crate::order::set(
             app,
             crate::order::Order {
                 stage: crate::order::Stage::Failed,
-                missing: quote.missing.clone(),
+                missing: dishes.to_vec(),
                 note: note.into(),
                 ..crate::order::Order::default()
             },
         );
         return note.into();
-    }
+    };
 
     let food = app.state::<AppState>().config().food.clone();
 
     // То, что нашлось, — в окно. Дальше состояние только уточняется.
     let mut shown = crate::order::Order {
         stage: crate::order::Stage::Picked,
+        store: quote.store_name().into(),
         lines: quote
             .found
             .iter()
@@ -241,7 +246,10 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
         total: quote.total,
         until_free_delivery: quote.until_free_delivery(food.free_delivery_from),
         max_order: food.max_order,
-        note: "Подобрано. Кладу в корзину.".into(),
+        note: match crate::food::cart_supported(&quote.store) {
+            true => "Подобрано. Кладу в корзину.".into(),
+            false => "Подобрано. Корзину в этом магазине Ноа пока не собирает.".into(),
+        },
         ..crate::order::Order::default()
     };
     crate::order::set(app, shown.clone());
@@ -249,7 +257,8 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
     // Что набралось — вслух: название из магазина, а не то, как это назвал
     // человек. «Фарш» он просил, а кладётся «Фарш из индейки, 400 г».
     let mut spoken = format!(
-        "Набрал: {}. Итого {} рублей.",
+        "Набрал {}: {}. Итого {} рублей.",
+        quote.store_in(),
         quote
             .found
             .iter()
@@ -264,6 +273,14 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
 
     if !quote.missing.is_empty() {
         spoken.push_str(&format!(" Не нашёл: {}.", quote.missing.join(", ")));
+    }
+
+    // Ради чего вообще смотрели несколько полок: без второй цены первая ничего
+    // не говорит. Сравнение называется только когда оно осмысленно — при
+    // одинаковой полноте набора; иначе «дешевле на сто рублей» означало бы лишь
+    // то, что в том магазине половины товаров нет.
+    if let Some(instead) = runner_up(&quotes, quote) {
+        spoken.push_str(&instead);
     }
 
     if let Some(short) = quote.until_free_delivery(food.free_delivery_from) {
@@ -296,6 +313,16 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
     // определено выше — такой набор в корзину не идёт, — а вопрос остался про
     // слова: называть ли его целиком, как сейчас, или честнее сразу сказать
     // про потолок, не перечисляя того, что всё равно не купится.
+
+    // Корзину Ноа собирает не везде. Поиск читает страницу и одинаков для всех
+    // магазинов, а корзина — это нажатие настоящих кнопок в браузере, где
+    // человек вошёл, и кнопки у каждого магазина свои. Промолчать здесь нельзя:
+    // услышав «набрал», человек решит, что заказ оформлен, и станет ждать.
+    if !crate::food::cart_supported(&quote.store) {
+        spoken.push_str(" Корзину в этом магазине я пока не собираю — сложить и оформить надо самому.");
+        crate::order::set(app, shown);
+        return spoken;
+    }
 
     match crate::food::add_to_cart(app, &quote.found).await {
         Ok(cart) => {
@@ -335,6 +362,34 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
     }
 
     spoken
+}
+
+/// Насколько выбранный магазин выгоднее следующего.
+///
+/// Сравниваются только магазины с таким же полным набором. Цена набора из двух
+/// позиций ничего не говорит о цене набора из четырёх: «дешевле на сто рублей»
+/// в этом случае значило бы лишь, что половины товаров там нет.
+///
+/// Название стоит первым словом намеренно — «Магнит дороже на …» верно в любом
+/// падеже, тогда как «в Магнит дороже» требует склонения на каждое имя.
+fn runner_up(
+    quotes: &[crate::food::StoreQuote],
+    chosen: &crate::food::StoreQuote,
+) -> Option<String> {
+    let dearest = quotes
+        .iter()
+        .filter(|quote| quote.store != chosen.store && quote.found.len() == chosen.found.len())
+        .max_by_key(|quote| quote.total)?;
+
+    if dearest.total <= chosen.total {
+        return None;
+    }
+
+    Some(format!(
+        " {} — то же самое на {} рублей дороже.",
+        dearest.store_name(),
+        dearest.total - chosen.total
+    ))
 }
 
 /// Незакрытые дела — те, о которых может идти речь.
