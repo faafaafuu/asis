@@ -202,7 +202,25 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
     };
 
     if quote.found.is_empty() {
-        return "Ничего из этого в магазине не нашёл.".into();
+        // Магазин не ответил ни разу — это не «нет такого товара», а «магазин
+        // лежит». Разница для человека решающая: в первом случае он назовёт
+        // другое, во втором — попробует позже. Спутать их значит отправить его
+        // переформулировать просьбу, с которой всё в порядке.
+        let note = if quote.unreachable >= dishes.len() {
+            "Магазин не отвечает — попробуйте позже."
+        } else {
+            "Ничего из этого в магазине не нашёл."
+        };
+        crate::order::set(
+            app,
+            crate::order::Order {
+                stage: crate::order::Stage::Failed,
+                missing: quote.missing.clone(),
+                note: note.into(),
+                ..crate::order::Order::default()
+            },
+        );
+        return note.into();
     }
 
     let food = app.state::<AppState>().config().food.clone();

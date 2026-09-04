@@ -38,10 +38,6 @@ pub struct Config {
 pub struct FoodConfig {
     /// Адрес API FoodPilot. Пусто — заказ выключен.
     pub endpoint: String,
-    /// Чей профиль спрашивать: вкусы, нелюбимые продукты, лимит калорий.
-    pub user_id: String,
-    /// Код магазина в FoodPilot. `mock-store` — тренировочный, без денег.
-    pub store_code: String,
     /// Потолок суммы одного заказа в рублях. Дороже — Ноа не оформляет сам.
     pub max_order: u32,
     /// С какой суммы магазин везёт бесплатно. 0 — порога нет.
@@ -63,15 +59,10 @@ impl Default for FoodConfig {
     fn default() -> Self {
         Self {
             endpoint: "http://127.0.0.1:3001".into(),
-            user_id: String::new(),
-            // Тренировочный магазин, а не боевой: сначала проверяется вся
-            // цепочка целиком, и только потом решается, пускать ли её к
-            // настоящим деньгам.
-            store_code: "mock-store".into(),
             max_order: 3000,
+            session_id: String::new(),
             // Порог ВкусВилла на осень 2026. Магазины его меняют, поэтому
             // значение вынесено в настройки, а не зашито в код.
-            session_id: String::new(),
             free_delivery_from: 2000,
             enabled: false,
         }
@@ -80,8 +71,14 @@ impl Default for FoodConfig {
 
 impl FoodConfig {
     /// Готов ли заказ работать.
+    ///
+    /// Нужен только адрес FoodPilot: подбор товаров ходит по нему и больше
+    /// ничего не спрашивает. Раньше сюда входил ещё и профиль пользователя —
+    /// он требовался корзине, которую собирал сам FoodPilot. Той корзины
+    /// больше нет, а проверка осталась и молча выключала весь заказ: человек
+    /// слышал «ничего не нашёл», хотя магазин никто и не спрашивал.
     pub fn ready(&self) -> bool {
-        self.enabled && !self.endpoint.trim().is_empty() && !self.user_id.trim().is_empty()
+        self.enabled && !self.endpoint.trim().is_empty()
     }
 }
 
