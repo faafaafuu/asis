@@ -21,6 +21,8 @@
 //! живых селекторах: под каждый магазин нужны свои поиск, сопоставление
 //! товаров, корзина и оформление, плюс обход антибота.
 
+mod pick;
+
 use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 
@@ -55,9 +57,9 @@ struct SearchProduct {
 
 /// Ищет товар в настоящем магазине.
 ///
-/// ВкусВилл, а не `mock-store`: цены живые, со страницы поиска. Берётся первый
-/// доступный товар — выбирать лучший из двенадцати вариантов на слух человеку
-/// негде, а показать их все голосом нельзя.
+/// ВкусВилл, а не `mock-store`: цены живые, со страницы поиска. Из дюжины
+/// вариантов выбирается один — тот, что дешевле за литр или килограмм, а не
+/// просто дешевле; почему именно так, объяснено в `pick`.
 pub async fn search(app: &AppHandle, query: &str) -> Result<Option<Product>, String> {
     let config = food_config(app)?;
     // Запрос кодируется вручную: reqwest здесь собран без фичи, дающей
@@ -84,16 +86,22 @@ pub async fn search(app: &AppHandle, query: &str) -> Result<Option<Product>, Str
         .await
         .map_err(|err| format!("не разобрать ответ магазина: {err}"))?;
 
-    Ok(parsed
+    let shelf: Vec<pick::Candidate> = parsed
         .products
         .into_iter()
-        .find(|item| item.available)
-        .map(|item| Product {
+        .map(|item| pick::Candidate {
             name: item.name,
             // Копейки в рубли: вслух «триста восемьдесят рублей», а не
             // «тридцать восемь тысяч копеек».
             price: item.price_cents.map(|cents| cents / 100),
-        }))
+            available: item.available,
+        })
+        .collect();
+
+    Ok(pick::best(&shelf).map(|chosen| Product {
+        name: chosen.name.clone(),
+        price: chosen.price,
+    }))
 }
 
 /// Что удалось набрать по запросу человека.
