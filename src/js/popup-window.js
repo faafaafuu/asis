@@ -154,15 +154,12 @@ if (api) {
       /* окно открыто вне приложения — показывать нечего */
     });
 
-  // Новое выделение: Rust уже сохранил якорь, нам остаётся показать содержимое.
+  // Новое выделение или напоминание: Rust уже сохранил якорь, нам остаётся
+  // показать содержимое — той же функцией, что и первое открытие, иначе
+  // готовый текст напоминания (payload.answer) снова уйдёт мимо и вместо
+  // него попап отправит модели пустой term.
   api.listen("popup:open", (event) => {
-    const { term, context, theme, errorText, dialogue, speak } = event.payload ?? {};
-    if (theme) applyTheme(theme);
-    if (errorText) view.errorText = errorText;
-    // Источник могли сменить в настройках, пока окно жило: сведения о том, есть
-    // ли кому отвечать на «?», приходят с каждым открытием.
-    if (dialogue !== undefined) view.dialogue = Boolean(dialogue);
-    view.open({ term: term ?? "", context: context ?? "", speak: Boolean(speak) });
+    applyOpen(event.payload);
   });
 
   // Пробел: прочитать вслух. Клавишу ловит и забирает себе Rust — окно
