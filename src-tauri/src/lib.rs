@@ -7,6 +7,7 @@ mod ai_client;
 mod calendar;
 mod commands;
 mod config;
+mod food;
 #[cfg(target_os = "windows")]
 mod instance;
 #[cfg(mobile)]

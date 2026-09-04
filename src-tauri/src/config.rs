@@ -20,6 +20,62 @@ pub struct Config {
     pub voice: VoiceConfig,
     pub calendar: CalendarConfig,
     pub review: ReviewConfig,
+    pub food: FoodConfig,
+}
+
+/// Заказ продуктов через FoodPilot.
+///
+/// Своего понимания еды у Ноа нет: что из чего готовится, сколько в этом
+/// калорий и чего человек не ест — знает FoodPilot, и спрашивать об этом
+/// нужно его, а не модель.
+///
+/// `max_order` — предохранитель вместо подтверждения человеком. FoodPilot
+/// по своей архитектуре требует подтверждать каждый заказ вручную; здесь это
+/// подтверждение снято ради голосового заказа, и единственное, что стоит
+/// между оговоркой и деньгами, — этот потолок.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FoodConfig {
+    /// Адрес API FoodPilot. Пусто — заказ выключен.
+    pub endpoint: String,
+    /// Чей профиль спрашивать: вкусы, нелюбимые продукты, лимит калорий.
+    pub user_id: String,
+    /// Код магазина в FoodPilot. `mock-store` — тренировочный, без денег.
+    pub store_code: String,
+    /// Потолок суммы одного заказа в рублях. Дороже — Ноа не оформляет сам.
+    pub max_order: u32,
+    /// С какой суммы магазин везёт бесплатно. 0 — порога нет.
+    ///
+    /// Нужно, чтобы Ноа говорил «до бесплатной доставки не хватает трёхсот
+    /// рублей»: человек у плиты не считает это в уме, а разница ощутимая.
+    pub free_delivery_from: u32,
+    /// Заказывать ли вообще. Выключено — Ноа отвечает, что не умеет.
+    pub enabled: bool,
+}
+
+impl Default for FoodConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: "http://127.0.0.1:3001".into(),
+            user_id: String::new(),
+            // Тренировочный магазин, а не боевой: сначала проверяется вся
+            // цепочка целиком, и только потом решается, пускать ли её к
+            // настоящим деньгам.
+            store_code: "mock-store".into(),
+            max_order: 3000,
+            // Порог ВкусВилла на осень 2026. Магазины его меняют, поэтому
+            // значение вынесено в настройки, а не зашито в код.
+            free_delivery_from: 2000,
+            enabled: false,
+        }
+    }
+}
+
+impl FoodConfig {
+    /// Готов ли заказ работать.
+    pub fn ready(&self) -> bool {
+        self.enabled && !self.endpoint.trim().is_empty() && !self.user_id.trim().is_empty()
+    }
 }
 
 /// Связь с Google-календарём.

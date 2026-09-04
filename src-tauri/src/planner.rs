@@ -45,6 +45,8 @@ pub enum Intent {
     },
     /// Помочь: разложить дело на шаги и подсказать, с чего начать.
     Breakdown { task: Option<String> },
+    /// Заказать еду. Названия блюд, как их знает FoodPilot.
+    Order { dishes: Vec<String> },
 }
 
 /// Название дела, которому не хватает срока.
@@ -94,7 +96,76 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         Intent::Done { task } => Some(done(app, task.as_deref(), &open)),
         Intent::Postpone { task, due } => Some(postpone(app, task.as_deref(), due, &open)),
         Intent::Breakdown { task } => Some(breakdown(app, task.as_deref(), &open).await),
+        Intent::Order { dishes } => Some(order(app, &dishes).await),
     }
+}
+
+/// Заказывает еду и отдаёт то, что сказать вслух.
+///
+/// Единственная преграда между оговоркой и деньгами — потолок суммы: у
+/// FoodPilot подтверждение человеком здесь снято намеренно, ради голосового
+/// заказа (см. `crate::food`).
+async fn order(app: &AppHandle, dishes: &[String]) -> String {
+    if dishes.is_empty() {
+        return "Не понял, что заказать.".into();
+    }
+
+    // Сначала настоящие цены: что в магазине есть и почём. Без этого нечего
+    // ни называть вслух, ни сверять с потолком.
+    let quote = match crate::food::quote(app, dishes).await {
+        Ok(quote) => quote,
+        Err(err) => {
+            log::warn!("не удалось узнать цены: {err}");
+            return "Магазин не отвечает.".into();
+        }
+    };
+
+    if quote.found.is_empty() {
+        return "Ничего из этого в магазине не нашёл.".into();
+    }
+
+    let food = app.state::<AppState>().config().food.clone();
+
+    // Что набралось — вслух: название из магазина, а не то, как это назвал
+    // человек. «Фарш» он просил, а кладётся «Фарш из индейки, 400 г».
+    let mut spoken = format!(
+        "Набрал: {}. Итого {} рублей.",
+        quote
+            .found
+            .iter()
+            .map(|item| match item.price {
+                Some(price) => format!("{} за {} рублей", item.name, price),
+                None => item.name.clone(),
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+        quote.total
+    );
+
+    if !quote.missing.is_empty() {
+        spoken.push_str(&format!(" Не нашёл: {}.", quote.missing.join(", ")));
+    }
+
+    if let Some(short) = quote.until_free_delivery(food.free_delivery_from) {
+        spoken.push_str(&format!(
+            " До бесплатной доставки не хватает {short} рублей."
+        ));
+    }
+
+    // Оформить заказ в настоящем магазине пока нельзя: у FoodPilot драйвер
+    // браузера умеет только открыть страницу входа, а поиска, корзины и
+    // кнопки «заказать» в нём нет. Поэтому дальше цены дело не идёт — и
+    // молчать об этом нельзя, иначе человек будет ждать курьера.
+    spoken.push_str(" Оформить пока не могу, только подобрал.");
+
+    // TODO(human): решить, что делать с набором дороже потолка (`food.max_order`).
+    // Сумма известна — `quote.total`. Когда оформление заказа появится, именно
+    // здесь стоит развилка: дешёвый набор оформляется молча, дорогой — нет,
+    // ради этого потолок и заводился. Сейчас же вопрос уже, что говорить
+    // человеку: стоит ли вообще называть набор, который всё равно окажется
+    // дороже разрешённого, или честнее сразу сказать про потолок.
+
+    spoken
 }
 
 /// Незакрытые дела — те, о которых может идти речь.
@@ -145,6 +216,25 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
         "done" => Intent::Done { task },
         "postpone" => Intent::Postpone { task, due },
         "breakdown" => Intent::Breakdown { task },
+        "order" => {
+            let dishes: Vec<String> = parsed["dishes"]
+                .as_array()
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|item| item.as_str())
+                        .map(|name| name.trim().to_string())
+                        .filter(|name| !name.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            // Без блюд заказывать нечего, а молчаливый пустой заказ выглядел бы
+            // как поломка. Пусть лучше ответит как на обычную фразу.
+            if dishes.is_empty() {
+                Intent::Chat
+            } else {
+                Intent::Order { dishes }
+            }
+        }
         _ => Intent::Chat,
     }
 }
@@ -182,13 +272,15 @@ fn intent_rules(open: &[Task]) -> String {
          done — сообщает, что уже что-то сделал;\n\
          postpone — просит перенести дело на другое время;\n\
          breakdown — просит помощи с делом: как за него взяться, с чего начать, \
-         разбить на шаги.\n\
+         разбить на шаги;\n\
+         order — просит заказать еду или продукты, купить их, оформить доставку.\n\
          \n\
          Остальные поля:\n\
          title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
          due — срок в виде ГГГГ-ММ-ДДTЧЧ:ММ или пустая строка, если не назван;\n\
          task — номер дела из списка ниже для done, postpone и breakdown, иначе 0;\n\
-         calendar — true, если человек прямо просил в календарь.\n\
+         calendar — true, если человек прямо просил в календарь;\n\
+         dishes — для order список блюд, которые просят заказать, иначе пустой.\n\
          \n\
          Если назван день без времени — ставь 18:00. Полночь никому не нужна: \
          напоминание в это время человек не услышит.\n\
@@ -222,7 +314,10 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      «перенеси банк на завтра» → \
      {\"intent\":\"postpone\",\"title\":\"\",\"due\":\"2026-09-04T15:00\",\"task\":2,\"calendar\":false}\n\
      «помоги мне с резюме, с чего начать» → \
-     {\"intent\":\"breakdown\",\"title\":\"\",\"due\":\"\",\"task\":1,\"calendar\":false}";
+     {\"intent\":\"breakdown\",\"title\":\"\",\"due\":\"\",\"task\":1,\"calendar\":false}\n\
+     «закажи ленивые голубцы и свекольник» → \
+     {\"intent\":\"order\",\"title\":\"\",\"due\":\"\",\"task\":0,\"calendar\":false,\
+     \"dishes\":[\"ленивые голубцы\",\"свекольник\"]}";
 
 /* ── Завести ─────────────────────────────────────────────────────────────── */
 

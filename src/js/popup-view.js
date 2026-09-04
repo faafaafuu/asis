@@ -309,6 +309,10 @@ export class PopupView {
   askByVoice(text) {
     const question = String(text ?? "").trim();
     if (!question) return;
+    // TODO(human): окно может показывать готовое сообщение — напоминание о
+    // задаче. У него нет термина (`announce` обнуляет `state.term`), и вопрос
+    // уходит модели как «объясни пустоту»: она отвечает «уточните, какой
+    // термин нужно объяснить». Решить, что делать в этом случае.
     if (!this.state.expanded) this.expand({ elaborate: false });
     this.ui.input.value = question;
     this.submitAsk({ byVoice: true });
