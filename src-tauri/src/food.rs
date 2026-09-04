@@ -30,11 +30,14 @@ use crate::config::FoodConfig;
 use crate::state::AppState;
 
 /// Найденный в магазине товар с настоящей ценой.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Product {
     pub name: String,
     /// Рубли. `None` — цену со страницы вытащить не удалось.
     pub price: Option<u32>,
+    /// Адрес карточки. По нему товар кладётся в корзину: класть можно только
+    /// то, на что есть ссылка, а не то, что удалось назвать.
+    pub url: String,
 }
 
 #[derive(Deserialize)]
@@ -48,6 +51,8 @@ struct SearchResponse {
 #[serde(rename_all = "camelCase")]
 struct SearchProduct {
     name: String,
+    #[serde(default)]
+    product_url: String,
     /// Копейки: так отдаёт FoodPilot, чтобы не терять на дробях.
     #[serde(default)]
     price_cents: Option<u32>,
@@ -95,12 +100,14 @@ pub async fn search(app: &AppHandle, query: &str) -> Result<Option<Product>, Str
             // «тридцать восемь тысяч копеек».
             price: item.price_cents.map(|cents| cents / 100),
             available: item.available,
+            url: item.product_url,
         })
         .collect();
 
     Ok(pick::best(&shelf).map(|chosen| Product {
         name: chosen.name.clone(),
         price: chosen.price,
+        url: chosen.url.clone(),
     }))
 }
 
@@ -149,6 +156,111 @@ pub async fn quote(app: &AppHandle, items: &[String]) -> Result<Quote, String> {
 }
 
 
+
+/// Что получилось положить в корзину.
+#[derive(Debug, Default)]
+pub struct CartResult {
+    /// Названия того, что легло.
+    pub added: Vec<String>,
+    /// Что не легло и почему — об этом надо сказать, а не умолчать.
+    pub failed: Vec<String>,
+    /// Итог корзины по данным самого магазина. `None` — прочитать не удалось.
+    pub total: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CartResponse {
+    #[serde(default)]
+    items: Vec<CartItemResult>,
+    #[serde(default)]
+    cart: CartSnapshot,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CartItemResult {
+    #[serde(default)]
+    product_url: String,
+    #[serde(default)]
+    ok: bool,
+    #[serde(default)]
+    problem: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct CartSnapshot {
+    #[serde(default)]
+    total_rub: Option<u32>,
+}
+
+/// Кладёт подобранное в настоящую корзину магазина.
+///
+/// Требует сессии браузера, в которой человек уже вошёл: без входа магазин
+/// уводит нажатие на страницу логина, и товар не добавляется. Поэтому
+/// отсутствие сессии — это не ошибка, а отказ с внятной причиной.
+pub async fn add_to_cart(app: &AppHandle, products: &[Product]) -> Result<CartResult, String> {
+    let config = food_config(app)?;
+    if config.session_id.trim().is_empty() {
+        return Err("не в какую корзину класть: сессия браузера не настроена".into());
+    }
+
+    let items: Vec<serde_json::Value> = products
+        .iter()
+        .filter(|product| !product.url.is_empty())
+        .map(|product| serde_json::json!({ "productUrl": product.url, "quantity": 1 }))
+        .collect();
+
+    if items.is_empty() {
+        return Err("у подобранного нет адресов карточек".into());
+    }
+
+    let response = client()
+        .post(format!(
+            "{}/store-adapters/browser-sessions/vkusvill/cart",
+            config.endpoint.trim_end_matches('/')
+        ))
+        .json(&serde_json::json!({ "sessionId": config.session_id, "items": items }))
+        .send()
+        .await
+        .map_err(|err| format!("FoodPilot не ответил: {err}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("корзина отказала: {}", response.status()));
+    }
+
+    let parsed: CartResponse = response
+        .json()
+        .await
+        .map_err(|err| format!("не разобрать ответ корзины: {err}"))?;
+
+    // Названия берём свои: магазин возвращает адреса, а вслух нужно то, как
+    // товар называется.
+    let name_of = |url: &str| {
+        products
+            .iter()
+            .find(|product| product.url == url)
+            .map(|product| product.name.clone())
+            .unwrap_or_else(|| url.to_string())
+    };
+
+    let mut result = CartResult {
+        total: parsed.cart.total_rub,
+        ..CartResult::default()
+    };
+    for item in parsed.items {
+        if item.ok {
+            result.added.push(name_of(&item.product_url));
+        } else {
+            let why = item.problem.unwrap_or_else(|| "без объяснения".into());
+            result
+                .failed
+                .push(format!("{} ({why})", name_of(&item.product_url)));
+        }
+    }
+    Ok(result)
+}
 
 /// Настройки заказа, если он вообще включён.
 fn food_config(app: &AppHandle) -> Result<FoodConfig, String> {

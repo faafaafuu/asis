@@ -22,6 +22,8 @@ pub struct Candidate {
     /// Рубли. `None` — цену со страницы вытащить не удалось.
     pub price: Option<u32>,
     pub available: bool,
+    /// Адрес карточки — по нему товар потом кладётся в корзину.
+    pub url: String,
 }
 
 /// Сколько товара в упаковке, приведённое к общей мере.
@@ -188,6 +190,7 @@ mod tests {
             name: name.into(),
             price: Some(price),
             available: true,
+            url: String::new(),
         }
     }
 
@@ -293,6 +296,7 @@ mod tests {
                 name: "Молоко 3,2%, 1 л".into(),
                 price: Some(50),
                 available: false,
+                url: String::new(),
             },
             item("Молоко 2,5%, 1 л", 93),
         ];
