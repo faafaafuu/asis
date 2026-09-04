@@ -1,0 +1,173 @@
+/* Окно заказа. Язык тот же, что у попапа и задач: тёплый фон, антиква в
+   заголовке, один акцентный цвет. Токены общие — см. tokens.css. */
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-solid);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--size-ui);
+  line-height: var(--line-ui);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Заголовок и шаг ───────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 18px 20px 8px;
+  /* Окно без рамки: заголовок — то место, за которое его двигают. */
+  cursor: grab;
+}
+.head:active {
+  cursor: grabbing;
+}
+
+.head__title {
+  margin: 0;
+  font-family: var(--font-term);
+  font-size: 26px;
+  font-weight: var(--term-weight);
+  line-height: 1;
+  color: var(--accent);
+}
+
+/* Шаг — единственное место, где цвет что-то значит: зелёного в палитре нет,
+   поэтому «в корзине» показывается акцентом, а неудача — тревожным. */
+.head__stage {
+  font-size: var(--size-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--label);
+}
+.head__stage[data-stage="inCart"] {
+  color: var(--accent);
+}
+.head__stage[data-stage="failed"],
+.head__stage[data-stage="tooExpensive"] {
+  color: var(--error);
+}
+
+.note {
+  margin: 0;
+  padding: 0 20px 12px;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}
+
+/* ── Строки ────────────────────────────────────────────────────────────── */
+
+.lines {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+.lines::-webkit-scrollbar {
+  width: 6px;
+}
+.lines::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 3px;
+}
+
+.line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--divider);
+}
+.line:last-child {
+  border-bottom: 0;
+}
+
+/* Точка слева: закрашенная — товар лежит в корзине, пустая — только найден.
+   Разница важная, и словами её на каждой строке не напишешь. */
+.line__mark {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border: 1px solid var(--btn-border);
+  border-radius: 50%;
+}
+.line--in-cart .line__mark {
+  border-color: var(--accent-dim);
+  background: var(--accent-dim);
+}
+
+.line__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.line__price {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-body);
+}
+.line__price--unknown {
+  color: var(--text-muted);
+}
+
+/* Ненайденное показывается тем же списком, но приглушённо и зачёркнуто:
+   это часть просьбы, о которой нельзя умолчать. */
+.line--missing .line__name {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-muted);
+}
+
+/* ── Итог ──────────────────────────────────────────────────────────────── */
+
+.sum {
+  padding: 12px 20px 18px;
+  border-top: 1px solid var(--divider);
+}
+
+.sum__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.sum__total {
+  font-family: var(--font-term);
+  font-size: 22px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.sum__delivery,
+.sum__ceiling {
+  margin-top: 6px;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}
+.sum__ceiling {
+  color: var(--error-text);
+}
+
+.empty {
+  margin: 0;
+  padding: 4px 20px 22px;
+  color: var(--text-muted);
+  font-size: var(--size-secondary);
+}

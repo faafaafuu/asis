@@ -15,6 +15,7 @@ mod mobile;
 mod net;
 mod ollama;
 mod jobs;
+mod order;
 mod overlay;
 mod planner;
 mod review;
@@ -178,6 +179,9 @@ pub fn run() {
             commands::popup_taken_over,
             commands::open_tasks,
             commands::close_tasks,
+            commands::open_order,
+            commands::close_order,
+            commands::order_state,
             commands::task_list,
             commands::task_add,
             commands::task_done,
@@ -1506,9 +1510,10 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
     let tasks = MenuItem::with_id(app, "tasks", "Задачи", true, None::<&str>)?;
+    let order = MenuItem::with_id(app, "order", "Заказ", true, None::<&str>)?;
     let onboarding = MenuItem::with_id(app, "onboarding", "Настройка и проверка…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&tasks, &onboarding, &quit])?;
+    let menu = Menu::with_items(app, &[&tasks, &order, &onboarding, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("sufler-tray")
         .tooltip("Суфлёр")
@@ -1526,6 +1531,11 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         "tasks" => {
             if let Err(err) = overlay::show_tasks(app) {
                 log::error!("не удалось открыть окно задач: {err}");
+            }
+        }
+        "order" => {
+            if let Err(err) = overlay::show_order(app) {
+                log::error!("не удалось открыть окно заказа: {err}");
             }
         }
         "onboarding" => {

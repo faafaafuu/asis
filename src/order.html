@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Суфлёр — заказ</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/order.css" />
+  </head>
+  <body>
+    <header class="head" data-el="head">
+      <h1 class="head__title">Заказ</h1>
+      <span class="head__stage" data-el="stage"></span>
+    </header>
+
+    <p class="note" data-el="note"></p>
+
+    <main class="lines" data-el="lines" aria-live="polite"></main>
+
+    <footer class="sum" data-el="sum" hidden>
+      <div class="sum__row">
+        <span>Итого</span>
+        <span class="sum__total" data-el="total"></span>
+      </div>
+      <div class="sum__delivery" data-el="delivery" hidden></div>
+      <div class="sum__ceiling" data-el="ceiling" hidden></div>
+    </footer>
+
+    <p class="empty" data-el="empty">
+      Заказа пока нет. Скажите «Ноа, закажи молоко и хлеб» — и здесь будет
+      видно, что набирается и почём.
+    </p>
+
+    <script type="module" src="./js/order.js"></script>
+  </body>
+</html>

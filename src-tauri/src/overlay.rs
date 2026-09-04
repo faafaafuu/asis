@@ -796,6 +796,42 @@ fn tasks_corner(window: &WebviewWindow) -> (i32, i32) {
     )
 }
 
+/// Окно заказа продуктов.
+pub const ORDER_LABEL: &str = "order";
+
+/// Показывает, что сейчас с заказом.
+pub fn show_order(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(ORDER_LABEL) {
+        window.show()?;
+        window.set_focus()?;
+        return Ok(());
+    }
+
+    let window =
+        WebviewWindowBuilder::new(app, ORDER_LABEL, WebviewUrl::App("order.html".into()))
+            .initialization_script(&theme_script(app))
+            .title("Суфлёр — заказ")
+            .inner_size(400.0, 520.0)
+            .min_inner_size(320.0, 300.0)
+            .resizable(true)
+            .decorations(false)
+            .skip_taskbar(true)
+            .build()?;
+
+    // Там же, где список задач: у правого края, ближе к верху. Оба окна —
+    // про то, что человек попросил, и искать их логично в одном месте.
+    let (x, y) = tasks_corner(&window);
+    window.set_position(PhysicalPosition::new(x, y))?;
+    Ok(())
+}
+
+/// Прячет окно заказа.
+pub fn hide_order(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(ORDER_LABEL) {
+        let _ = window.hide();
+    }
+}
+
 /// Прячет окно задач.
 pub fn hide_tasks(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(TASKS_LABEL) {

@@ -110,12 +110,27 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
         return "Не понял, что заказать.".into();
     }
 
+    // Окно открывается до похода в магазин: поиск идёт секундами, и всё это
+    // время человеку надо видеть, что его услышали.
+    crate::order::start(app, dishes);
+    if let Err(err) = crate::overlay::show_order(app) {
+        log::warn!("окно заказа не открылось: {err}");
+    }
+
     // Сначала настоящие цены: что в магазине есть и почём. Без этого нечего
     // ни называть вслух, ни сверять с потолком.
     let quote = match crate::food::quote(app, dishes).await {
         Ok(quote) => quote,
         Err(err) => {
             log::warn!("не удалось узнать цены: {err}");
+            crate::order::set(
+                app,
+                crate::order::Order {
+                    stage: crate::order::Stage::Failed,
+                    note: format!("Магазин не ответил: {err}"),
+                    ..crate::order::Order::default()
+                },
+            );
             return "Магазин не отвечает.".into();
         }
     };
@@ -125,6 +140,27 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
     }
 
     let food = app.state::<AppState>().config().food.clone();
+
+    // То, что нашлось, — в окно. Дальше состояние только уточняется.
+    let mut shown = crate::order::Order {
+        stage: crate::order::Stage::Picked,
+        lines: quote
+            .found
+            .iter()
+            .map(|item| crate::order::Line {
+                name: item.name.clone(),
+                price: item.price,
+                in_cart: false,
+            })
+            .collect(),
+        missing: quote.missing.clone(),
+        total: quote.total,
+        until_free_delivery: quote.until_free_delivery(food.free_delivery_from),
+        max_order: food.max_order,
+        note: "Подобрано. Кладу в корзину.".into(),
+        ..crate::order::Order::default()
+    };
+    crate::order::set(app, shown.clone());
 
     // Что набралось — вслух: название из магазина, а не то, как это назвал
     // человек. «Фарш» он просил, а кладётся «Фарш из индейки, 400 г».
@@ -163,6 +199,12 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
             " В корзину не кладу: это дороже вашего потолка в {} рублей.",
             food.max_order
         ));
+        shown.stage = crate::order::Stage::TooExpensive;
+        shown.note = format!(
+            "Дороже потолка в {} рублей — в корзину не положил.",
+            food.max_order
+        );
+        crate::order::set(app, shown);
         return spoken;
     }
 
@@ -181,12 +223,30 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
                 spoken.push_str(&format!(" В корзине на {total} рублей."));
             }
             spoken.push_str(" Оформить и оплатить — за вами.");
+
+            // В окне отмечаем построчно, что именно легло: «положил три из
+            // пяти» без имён не даёт понять, чего не хватает.
+            for line in &mut shown.lines {
+                line.in_cart = cart.added.contains(&line.name);
+            }
+            shown.stage = crate::order::Stage::InCart;
+            if let Some(total) = cart.total {
+                shown.total = total;
+            }
+            shown.note = match cart.failed.is_empty() {
+                true => "В корзине магазина. Оформление и оплата за вами.".into(),
+                false => format!("Не легло: {}.", cart.failed.join(", ")),
+            };
+            crate::order::set(app, shown);
         }
         Err(err) => {
             // Не сложилось — говорим прямо. Молчание здесь хуже всего: человек
             // решит, что продукты заказаны, и станет ждать курьера.
             log::warn!("корзина не наполнилась: {err}");
             spoken.push_str(&format!(" В корзину положить не вышло: {err}."));
+            shown.stage = crate::order::Stage::Failed;
+            shown.note = format!("В корзину не легло: {err}");
+            crate::order::set(app, shown);
         }
     }
 

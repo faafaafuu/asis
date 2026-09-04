@@ -688,6 +688,24 @@ pub fn close_tasks(app: AppHandle) {
     crate::overlay::hide_tasks(&app);
 }
 
+/// Открывает окно заказа.
+#[tauri::command]
+pub fn open_order(app: AppHandle) -> Result<(), String> {
+    crate::overlay::show_order(&app).map_err(|err| err.to_string())
+}
+
+/// Закрывает окно заказа.
+#[tauri::command]
+pub fn close_order(app: AppHandle) {
+    crate::overlay::hide_order(&app);
+}
+
+/// Что сейчас с заказом. `null` — заказа ещё не было.
+#[tauri::command]
+pub fn order_state() -> Option<crate::order::Order> {
+    crate::order::current()
+}
+
 /// Задача в том виде, в каком её показывает окно.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
