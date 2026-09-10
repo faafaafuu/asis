@@ -28,8 +28,14 @@ const server = createServer(async (req, res) => {
   if (rel === "/") rel = "/demo.html";
 
   // Не выпускаем запрос за пределы src/ (простейшая защита от ../).
+  //
+  // Корень сравнивается строкой, а не регулярным выражением: на Windows
+  // разделитель — обратная косая черта, и `new RegExp("\\$")` ищет знак
+  // доллара, а не её. Проверка проваливалась на каждом запросе, и сервер
+  // отвечал 403 на всё.
   const path = normalize(join(ROOT, rel));
-  if (!path.startsWith(ROOT.replace(new RegExp(`${sep}$`), "") + sep)) {
+  const base = ROOT.endsWith(sep) ? ROOT : ROOT + sep;
+  if (!path.startsWith(base)) {
     res.writeHead(403).end("403");
     return;
   }
