@@ -41,8 +41,10 @@ pub struct Line {
     /// Название из магазина, а не то, как это назвал человек: просил «фарш»,
     /// кладётся «Фарш из индейки, 400 г», и знать надо второе.
     pub name: String,
-    /// Рубли. `None` — цену со страницы вытащить не удалось.
+    /// Рубли за штуку. `None` — цену со страницы вытащить не удалось.
     pub price: Option<u32>,
+    /// Сколько штук или упаковок.
+    pub quantity: u32,
     /// Легло ли в корзину. `false` — нашли, но положить не вышло.
     pub in_cart: bool,
 }
@@ -58,6 +60,11 @@ pub struct Order {
     /// Не назвать его — значит показать цены, по которым непонятно, где это
     /// лежит и куда идти оформлять.
     pub store: String,
+    /// Что просил человек — его словами и с количеством.
+    ///
+    /// Нужно разбору следующей реплики: «пять штук» и «нет, полосатые» — это
+    /// уточнение этого заказа, а понять это можно, только зная, что в нём.
+    pub asked: Vec<crate::food::Wanted>,
     pub lines: Vec<Line>,
     /// Чего в магазине не нашлось.
     pub missing: Vec<String>,
@@ -82,6 +89,7 @@ impl Default for Order {
         Self {
             stage: Stage::Picked,
             store: String::new(),
+            asked: Vec::new(),
             lines: Vec::new(),
             missing: Vec::new(),
             total: 0,
@@ -109,7 +117,16 @@ pub fn set(app: &tauri::AppHandle, mut order: Order) {
     use tauri::Emitter;
 
     order.updated_at = chrono::Local::now().to_rfc3339();
-    *CURRENT.lock().unwrap_or_else(|err| err.into_inner()) = Some(order);
+    let mut current = CURRENT.lock().unwrap_or_else(|err| err.into_inner());
+    // Шаги заказа пишутся с чистого листа и о просьбе не знают — она переходит
+    // от предыдущего состояния, иначе терялась бы на первом же шаге.
+    if order.asked.is_empty() {
+        if let Some(previous) = current.as_ref() {
+            order.asked = previous.asked.clone();
+        }
+    }
+    *current = Some(order);
+    drop(current);
 
     let _ = app.emit("order:changed", ());
 }
@@ -117,12 +134,21 @@ pub fn set(app: &tauri::AppHandle, mut order: Order) {
 /// Отмечает, что подбор начался. Окно показывает это сразу, не дожидаясь цен:
 /// поиск по магазину идёт секундами, и всё это время человеку надо видеть, что
 /// его услышали.
-pub fn start(app: &tauri::AppHandle, asked: &[String]) {
+pub fn start(app: &tauri::AppHandle, asked: &[crate::food::Wanted]) {
+    let listed = asked
+        .iter()
+        .map(|item| match item.quantity {
+            1 => item.name.clone(),
+            many => format!("{} × {many}", item.name),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
     set(
         app,
         Order {
             stage: Stage::Picking,
-            note: format!("Ищу в магазине: {}", asked.join(", ")),
+            asked: asked.to_vec(),
+            note: format!("Ищу в магазине: {listed}"),
             ..Order::default()
         },
     )

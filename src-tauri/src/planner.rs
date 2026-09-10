@@ -47,7 +47,7 @@ pub enum Intent {
     Breakdown { task: Option<String> },
     /// Заказать еду. Названия блюд, как их знает FoodPilot, и магазин, если
     /// человек его назвал.
-    Order { dishes: Vec<String>, store: String },
+    Order { items: Vec<crate::food::Wanted>, store: String },
     /// Спрашивает, что с заказом: что набрано и на каком оно шаге.
     OrderStatus,
     /// Открыть программу, окно или игру. `sandbox` — в песочнице Sandboxie.
@@ -117,7 +117,7 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         Intent::Done { task } => Some(done(app, task.as_deref(), &open)),
         Intent::Postpone { task, due } => Some(postpone(app, task.as_deref(), due, &open)),
         Intent::Breakdown { task } => Some(breakdown(app, task.as_deref(), &open).await),
-        Intent::Order { dishes, store } => Some(order(app, &dishes, &store).await),
+        Intent::Order { items, store } => Some(order(app, &items, &store).await),
         Intent::OrderStatus => Some(order_status(app)),
         // Поиск программы читает меню «Пуск» и диски — это блокирующая
         // работа, и занимать ею асинхронную задачу нельзя.
@@ -185,14 +185,24 @@ fn order_status(app: &AppHandle) -> String {
 /// Единственная преграда между оговоркой и деньгами — потолок суммы: у
 /// FoodPilot подтверждение человеком здесь снято намеренно, ради голосового
 /// заказа (см. `crate::food`).
-async fn order(app: &AppHandle, dishes: &[String], wanted_store: &str) -> String {
-    if dishes.is_empty() {
+async fn order(app: &AppHandle, items: &[crate::food::Wanted], wanted_store: &str) -> String {
+    if items.is_empty() {
         return "Не понял, что заказать.".into();
+    }
+
+    // Названный магазин, которого Ноа не знает, — не повод молча собрать в
+    // другом: человек просил именно его. Говорим прямо и называем, где можем.
+    if !wanted_store.trim().is_empty() && crate::food::store_code(wanted_store).is_none() {
+        return format!(
+            "Магазин «{}» я пока не подключил: его сайт не пускает программы. \
+             Могу во ВкусВилле, в Магните или в Метро.",
+            wanted_store.trim()
+        );
     }
 
     // Окно открывается до похода в магазин: поиск идёт секундами, и всё это
     // время человеку надо видеть, что его услышали.
-    crate::order::start(app, dishes);
+    crate::order::start(app, items);
     if let Err(err) = crate::overlay::show_order(app) {
         log::warn!("окно заказа не открылось: {err}");
     }
@@ -201,8 +211,8 @@ async fn order(app: &AppHandle, dishes: &[String], wanted_store: &str) -> String
     // ни называть вслух, ни сверять с потолком.
     // Найденное показывается по мере поиска, а не в конце: пять товаров — это
     // пять походов на страницу магазина, и молчать всё это время нельзя.
-    let asked = dishes.len();
-    let quotes = match crate::food::quote_reporting(app, dishes, |so_far| {
+    let asked = items.len();
+    let quotes = match crate::food::quote_reporting(app, items, |so_far| {
         crate::order::set(
             app,
             crate::order::Order {
@@ -214,6 +224,7 @@ async fn order(app: &AppHandle, dishes: &[String], wanted_store: &str) -> String
                     .map(|item| crate::order::Line {
                         name: item.name.clone(),
                         price: item.price,
+                        quantity: item.quantity,
                         in_cart: false,
                     })
                     .collect(),
@@ -257,7 +268,7 @@ async fn order(app: &AppHandle, dishes: &[String], wanted_store: &str) -> String
             Some(code) => {
                 let silent = quotes
                     .iter()
-                    .any(|quote| quote.store == code && quote.unreachable >= dishes.len());
+                    .any(|quote| quote.store == code && quote.unreachable >= items.len());
                 if silent {
                     format!("{} не отвечает — попробуйте позже.", crate::food::store_name(code))
                 } else {
@@ -268,7 +279,7 @@ async fn order(app: &AppHandle, dishes: &[String], wanted_store: &str) -> String
                 let all_silent = !quotes.is_empty()
                     && quotes
                         .iter()
-                        .all(|quote| quote.unreachable >= dishes.len());
+                        .all(|quote| quote.unreachable >= items.len());
                 match all_silent {
                     true => "Магазины не отвечают — попробуйте позже.".into(),
                     false => "Ничего из этого не нашёл ни в одном магазине.".into(),
@@ -279,7 +290,7 @@ async fn order(app: &AppHandle, dishes: &[String], wanted_store: &str) -> String
             app,
             crate::order::Order {
                 stage: crate::order::Stage::Failed,
-                missing: dishes.to_vec(),
+                missing: items.iter().map(|item| item.name.clone()).collect(),
                 note: note.clone(),
                 ..crate::order::Order::default()
             },
@@ -299,6 +310,7 @@ async fn order(app: &AppHandle, dishes: &[String], wanted_store: &str) -> String
             .map(|item| crate::order::Line {
                 name: item.name.clone(),
                 price: item.price,
+                quantity: item.quantity,
                 in_cart: false,
             })
             .collect(),
@@ -350,9 +362,38 @@ async fn order(app: &AppHandle, dishes: &[String], wanted_store: &str) -> String
     if !crate::food::cart_supported(&quote.store) {
         shown.note = "Подобрано. Корзину в этом магазине Ноа пока не собирает.".into();
         crate::order::set(app, shown);
+        // Магазин назвал сам человек — просто говорим, что оформить придётся
+        // самому. Выбрали мы, потому что там выгоднее, — называем цену и
+        // предлагаем, где корзину собрать можно: «во ВкусВилле» следующей
+        // фразой её соберёт, заказ помнит, о чём речь.
+        if wanted.is_some() {
+            return format!(
+                "Подобрал {} на {} ₽, но корзину там собрать не могу — оформите сами.{missing}",
+                quote.store_in(),
+                quote.total
+            );
+        }
+        let alternative = match crate::food::orderable_alternative(&quotes, quote) {
+            Some(other) if other.found.len() == quote.found.len() => format!(
+                " {} — {} ₽; скажите «{}», и соберу там.",
+                capitalized(other.store_in()),
+                other.total,
+                other.store_in()
+            ),
+            Some(other) => format!(
+                " {} нашлось {} из {} на {} ₽; скажите «{}», и соберу там.",
+                capitalized(other.store_in()),
+                other.found.len(),
+                items.len(),
+                other.total,
+                other.store_in()
+            ),
+            None => " Оформить там можно только самому.".into(),
+        };
         return format!(
-            "Подобрал {}, но корзину там собрать не могу — оформите сами.{missing}",
-            quote.store_in()
+            "Дешевле всего {}: {} ₽, но корзину там собрать не могу.{alternative}{missing}",
+            quote.store_in(),
+            quote.total
         );
     }
 
@@ -531,23 +572,14 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
         "postpone" => Intent::Postpone { task, due },
         "breakdown" => Intent::Breakdown { task },
         "order" => {
-            let dishes: Vec<String> = parsed["dishes"]
-                .as_array()
-                .map(|list| {
-                    list.iter()
-                        .filter_map(|item| item.as_str())
-                        .map(|name| name.trim().to_string())
-                        .filter(|name| !name.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default();
-            // Без блюд заказывать нечего, а молчаливый пустой заказ выглядел бы
-            // как поломка. Пусть лучше ответит как на обычную фразу.
-            if dishes.is_empty() {
+            let items = wanted_items(&parsed);
+            // Без товаров заказывать нечего, а молчаливый пустой заказ выглядел
+            // бы как поломка. Пусть лучше ответит как на обычную фразу.
+            if items.is_empty() {
                 Intent::Chat
             } else {
                 Intent::Order {
-                    dishes,
+                    items,
                     store: text("store"),
                 }
             }
@@ -594,6 +626,75 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             None => Intent::Chat,
         },
         _ => Intent::Chat,
+    }
+}
+
+/// Товары из разбора: `items` с количеством, а у старого вида — `dishes`.
+///
+/// Количество приходит как угодно — числом, строкой, дробью, — и держится в
+/// разумных пределах: ноль значит «одну», а сорок — потолок, выше которого
+/// корзина магазина всё равно не примет.
+fn wanted_items(parsed: &serde_json::Value) -> Vec<crate::food::Wanted> {
+    let quantity = |value: &serde_json::Value| -> u32 {
+        let raw = value
+            .as_u64()
+            .or_else(|| value.as_f64().map(|number| number.round() as u64))
+            .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
+            .unwrap_or(1);
+        raw.clamp(1, 40) as u32
+    };
+
+    let from = |list: &serde_json::Value| -> Vec<crate::food::Wanted> {
+        list.as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| {
+                        let (name, count) = match item {
+                            serde_json::Value::String(name) => (name.as_str(), 1),
+                            object => (object["name"].as_str()?, quantity(&object["quantity"])),
+                        };
+                        let name = name.trim();
+                        (!name.is_empty()).then(|| crate::food::Wanted {
+                            name: name.to_string(),
+                            quantity: count,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+
+    match from(&parsed["items"]) {
+        items if !items.is_empty() => items,
+        _ => from(&parsed["dishes"]),
+    }
+}
+
+/// Строка для разбора реплики: что сейчас в заказе.
+///
+/// Без неё «пять штук» и «нет, полосатые» разбирались как новый заказ — и Ноа
+/// искал в магазине «пять штук». Заказ старше получаса в расчёт не идёт: к
+/// тому времени человек говорит уже о другом.
+fn order_line() -> String {
+    let Some(order) = crate::order::current() else {
+        return String::new();
+    };
+    let fresh = DateTime::parse_from_rfc3339(&order.updated_at)
+        .map(|at| Local::now().signed_duration_since(at) < Duration::minutes(30))
+        .unwrap_or(false);
+    if !fresh || order.asked.is_empty() {
+        return String::new();
+    }
+    let items = order
+        .asked
+        .iter()
+        .map(|item| format!("{} ×{}", item.name, item.quantity))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match order.store.is_empty() {
+        true => format!("Текущий заказ: {items}."),
+        false => format!("Текущий заказ: {items}, магазин {}.", order.store),
     }
 }
 
@@ -693,7 +794,9 @@ fn intent_rules(open: &[Task]) -> String {
          due — срок в виде ГГГГ-ММ-ДДTЧЧ:ММ или пустая строка, если не назван;\n\
          task — номер дела из списка ниже для done, postpone и breakdown, иначе 0;\n\
          calendar — true, если человек прямо просил в календарь;\n\
-         dishes — для order список блюд, которые просят заказать, иначе пустой;\n\
+         items — для order список товаров: name — что именно, со всеми \
+         уточнениями («полосатые семечки», а не «семечки»), quantity — сколько \
+         штук или упаковок, по умолчанию 1;\n\
          app — для launch и close название программы или окна, как его назвал \
          человек, без слов «открой», «запусти», «закрой»;\n\
          sandbox — true, если просил запустить в песочнице;\n\
@@ -712,6 +815,9 @@ fn intent_rules(open: &[Task]) -> String {
          breakdown только про дела из списка ниже.\n\
          Команды — только когда человек прямо просит что-то сделать. Рассказ о \
          том, что происходит, вопрос или обрывок фразы — это chat.\n\
+         Если человек уточняет текущий заказ — сколько штук, какой именно \
+         товар, в каком магазине, — верни order со всем заказом целиком, уже с \
+         уточнением; товары, которых он не касался, оставь как были.\n\
          \n\
          Если назван день без времени — ставь 18:00. Полночь никому не нужна: \
          напоминание в это время человек не услышит.\n\
@@ -721,7 +827,7 @@ fn intent_rules(open: &[Task]) -> String {
          {}\n\
          \n\
          {}",
-        [now_line(), crate::web::site_line()].join(" "),
+        [now_line(), crate::web::site_line(), order_line()].join(" "),
         list,
         EXAMPLES
     )
@@ -748,7 +854,7 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      {\"intent\":\"breakdown\",\"title\":\"\",\"due\":\"\",\"task\":1,\"calendar\":false}\n\
      «закажи ленивые голубцы и свекольник» → \
      {\"intent\":\"order\",\"title\":\"\",\"due\":\"\",\"task\":0,\"calendar\":false,\
-     \"dishes\":[\"ленивые голубцы\",\"свекольник\"]}\n\
+     \"items\":[{\"name\":\"ленивые голубцы\",\"quantity\":1},{\"name\":\"свекольник\",\"quantity\":1}]}\n\
      «что там с заказом» → \
      {\"intent\":\"orderStatus\",\"title\":\"\",\"due\":\"\",\"task\":0,\"calendar\":false}\n\
      «открой диспетчер устройств» → \
@@ -765,7 +871,11 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      «открой параметры bluetooth» → \
      {\"intent\":\"launch\",\"app\":\"bluetooth\",\"sandbox\":false,\"box\":\"\"}\n\
      «закажи семечки во вкусвилле» → \
-     {\"intent\":\"order\",\"dishes\":[\"семечки\"],\"store\":\"вкусвилл\"}\n\
+     {\"intent\":\"order\",\"items\":[{\"name\":\"семечки\",\"quantity\":1}],\"store\":\"вкусвилл\"}\n\
+     «закажи пять пачек полосатых семечек» → \
+     {\"intent\":\"order\",\"items\":[{\"name\":\"полосатые семечки\",\"quantity\":5}],\"store\":\"\"}\n\
+     при «Текущий заказ: семечки ×1» — «нет, полосатые, и пять штук» → \
+     {\"intent\":\"order\",\"items\":[{\"name\":\"полосатые семечки\",\"quantity\":5}],\"store\":\"\"}\n\
      «открой вайлдберриз» → {\"intent\":\"web\",\"site\":\"вайлдберриз\",\"query\":\"\"}\n\
      «давай посмотрим чехлы для айфона 14» → \
      {\"intent\":\"web\",\"site\":\"\",\"query\":\"чехлы для айфона 14\"}\n\

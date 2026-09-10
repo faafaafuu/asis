@@ -51,12 +51,31 @@ impl Amount {
     }
 }
 
-/// Выбирает лучший товар: дешевле всего за единицу меры.
+/// Выбирает лучший товар: сначала тот, что просили, потом — дешевле за меру.
+///
+/// Цена за литр решает только среди того, что совпало с просьбой. Просили
+/// «полосатые семечки» — а на полке рядом с полосатыми лежат обычные, и за
+/// килограмм они дешевле. Сравнивать одни только цены значило подсунуть
+/// обычные: так и происходило, человек уточнял, а получал «самые дефолтные».
+/// Поэтому сперва остаются товары, в названии которых совпало больше всего
+/// слов запроса, и уже среди них ищется выгодный.
 ///
 /// Возвращает `None`, когда выбирать не из чего — все варианты недоступны или
 /// список пуст.
-pub fn best(candidates: &[Candidate]) -> Option<&Candidate> {
+pub fn best<'a>(query: &str, candidates: &'a [Candidate]) -> Option<&'a Candidate> {
     let available: Vec<&Candidate> = candidates.iter().filter(|item| item.available).collect();
+    let stems = stems_of(query);
+    let most = available
+        .iter()
+        .map(|item| matched(&stems, &item.name))
+        .max()
+        .unwrap_or(0);
+    // Ни одно слово не совпало ни у кого — судить о близости не по чему,
+    // решает цена по всей полке.
+    let available: Vec<&Candidate> = available
+        .into_iter()
+        .filter(|item| most == 0 || matched(&stems, &item.name) == most)
+        .collect();
     let (first, _) = available.split_first()?;
 
     // Мера берётся у первого товара с распознанным объёмом. Выдача по одному
@@ -91,6 +110,39 @@ pub fn best(candidates: &[Candidate]) -> Option<&Candidate> {
         .map(|(item, _)| item)
         // Ни у кого не вышло посчитать цену за меру — отдаём первый доступный.
         .or(Some(first))
+}
+
+/// Слова, которые говорят о количестве, а не о товаре: «пять пачек».
+const NOT_GOODS: &[&str] = &[
+    "пачк", "пачек", "упаков", "штук", "штуч", "бутыл", "банк", "коробк", "кило", "грамм",
+    "литр", "один", "одну", "пару", "двух", "трёх", "трех", "четыр", "пять", "шест",
+    "восем", "девят", "десят",
+];
+
+/// Основы значимых слов запроса: «полосатые семечки» — «полосат», «семеч».
+///
+/// Окончание срезается, чтобы «полосатые» совпадали с «полосатых», а
+/// «жареные» — с «обжаренные». Короткие слова («с», «без», «для») и числа
+/// ничего не различают и в расчёт не идут.
+fn stems_of(query: &str) -> Vec<String> {
+    query
+        .to_lowercase()
+        .replace('ё', "е")
+        .split(|ch: char| !ch.is_alphabetic())
+        .filter(|word| word.chars().count() >= 4)
+        .filter(|word| !NOT_GOODS.iter().any(|skip| word.starts_with(skip)))
+        .map(|word| {
+            let letters: Vec<char> = word.chars().collect();
+            let keep = if letters.len() >= 6 { letters.len() - 2 } else { letters.len() };
+            letters[..keep].iter().collect()
+        })
+        .collect()
+}
+
+/// Сколько основ запроса нашлось в названии товара.
+fn matched(stems: &[String], name: &str) -> usize {
+    let name = name.to_lowercase().replace('ё', "е");
+    stems.iter().filter(|stem| name.contains(stem.as_str())).count()
 }
 
 /// Достаёт объём из названия товара.
@@ -229,7 +281,7 @@ mod tests {
             item("Молоко 3,2% в бутылке, 450 мл", 89),
         ];
 
-        let picked = best(&shelf).expect("выбор сделан");
+        let picked = best("", &shelf).expect("выбор сделан");
         assert_eq!(
             picked.name, "Молоко 3,2%, 1 л",
             "литр за 93 выгоднее, чем 450 мл за 89"
@@ -269,7 +321,7 @@ mod tests {
             item("Молоко Parmalat ультрапастеризованное 1,8% 1 л", 169),
         ];
 
-        let picked = best(&shelf).expect("выбор сделан");
+        let picked = best("", &shelf).expect("выбор сделан");
         assert_eq!(
             picked.name, "Молоко 3,2%, 1 л",
             "литр за 93 рубля — 93 рубля за литр, дешевле всех на полке"
@@ -300,10 +352,36 @@ mod tests {
             },
             item("Молоко 2,5%, 1 л", 93),
         ];
-        assert_eq!(best(&shelf).map(|item| item.name.as_str()), Some("Молоко 2,5%, 1 л"));
+        assert_eq!(best("", &shelf).map(|item| item.name.as_str()), Some("Молоко 2,5%, 1 л"));
 
         let empty: Vec<Candidate> = Vec::new();
-        assert!(best(&empty).is_none(), "выбирать не из чего");
+        assert!(best("", &empty).is_none(), "выбирать не из чего");
+    }
+
+    #[test]
+    fn what_was_asked_beats_what_is_cheaper() {
+        // Живая выдача ВкусВилла на «полосатые семечки». Обычные дешевле за
+        // килограмм — 735 ₽ против 787 ₽, — но просили полосатые.
+        let shelf = [
+            item("Семечки полосатые жареные соленые, 150 г", 118),
+            item("Семечки ассорти подсолнечника жареное соленое, 100 г", 82),
+            item("Семечки обжаренные отборные, 200 г", 147),
+        ];
+        assert_eq!(
+            best("полосатые семечки", &shelf).map(|item| item.name.as_str()),
+            Some("Семечки полосатые жареные соленые, 150 г")
+        );
+        // Без уточнения решает выгода за килограмм.
+        assert_eq!(
+            best("семечки", &shelf).map(|item| item.name.as_str()),
+            Some("Семечки обжаренные отборные, 200 г")
+        );
+    }
+
+    #[test]
+    fn quantity_words_are_not_part_of_the_goods() {
+        assert_eq!(stems_of("пять пачек полосатых семечек"), vec!["полосат", "семеч"]);
+        assert_eq!(stems_of("молоко"), vec!["моло"]);
     }
 
     #[test]
@@ -311,7 +389,7 @@ mod tests {
         // Ни у кого нет меры — сравнивать не по чему, остаётся цена.
         let shelf = [item("Хлеб бородинский", 80), item("Хлеб дарницкий", 65)];
         assert_eq!(
-            best(&shelf).map(|item| item.name.as_str()),
+            best("", &shelf).map(|item| item.name.as_str()),
             Some("Хлеб дарницкий")
         );
     }
@@ -326,7 +404,7 @@ mod tests {
             item("Молоко 2,5%, 900 мл", 100),
         ];
         assert_eq!(
-            best(&shelf).map(|item| item.name.as_str()),
+            best("", &shelf).map(|item| item.name.as_str()),
             Some("Молоко 3,2%, 1 л")
         );
     }

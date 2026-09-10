@@ -204,3 +204,21 @@ body {
 .sum__link:hover {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
+
+/* Крестик закрытия. У окна нет рамки, а значит, и системного крестика. */
+.head__close {
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.head__close:hover {
+  color: var(--text);
+  background: var(--btn-hover-bg);
+}

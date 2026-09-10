@@ -84,11 +84,14 @@ function renderLine(line) {
 
   const name = document.createElement("span");
   name.className = "line__name";
-  name.textContent = line.name;
+  // Количество — рядом с названием, сумма — за всё количество: «× 5» и
+  // цена за одну пачку вместе читались бы как пять пачек по цене одной.
+  const count = line.quantity > 1 ? line.quantity : 1;
+  name.textContent = count > 1 ? `${line.name} × ${count}` : line.name;
 
   const price = document.createElement("span");
   price.className = "line__price" + (line.price === null ? " line__price--unknown" : "");
-  price.textContent = line.price === null ? "цена неизвестна" : `${line.price} ₽`;
+  price.textContent = line.price === null ? "цена неизвестна" : `${line.price * count} ₽`;
 
   row.append(mark, name, price);
   return row;
@@ -117,7 +120,8 @@ function renderMissing(name) {
 
 const win = appWindow();
 ui.head.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0) return;
+  // Крестик живёт в заголовке — за него окно не таскают.
+  if (event.button !== 0 || event.target.closest("button")) return;
   event.preventDefault();
   win?.startDragging();
 });
@@ -128,6 +132,12 @@ document.addEventListener("keydown", (event) => {
 
 api?.invoke("runtime_config").then((config) => applyTheme(config?.theme));
 api?.listen("order:changed", refresh);
+
+// Рамки у окна нет, а значит, и системного крестика: без своего окно
+// закрывалось только клавишей Esc.
+ui.close.addEventListener("click", () => {
+  api?.invoke("close_order").catch(() => {});
+});
 
 ui.link.addEventListener("click", () => {
   api?.invoke("open_order_link").catch(() => {});
