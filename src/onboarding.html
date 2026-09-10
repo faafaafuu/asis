@@ -289,6 +289,17 @@
           <input type="checkbox" data-el="storeMetro" />
           <span class="ob__check-text"><span>Метро — поиск и цены</span></span>
         </label>
+        <label class="ob__check">
+          <input type="checkbox" data-el="storePyaterochka" />
+          <span class="ob__check-text">
+            <span>Пятёрочка — поиск и цены</span>
+            <span class="ob__hint">Сама Пятёрочка программам не отвечает; её каталог читает сервис parse.bot по вашему ключу — бесплатно двести запросов в месяц, один запрос на товар.</span>
+          </span>
+        </label>
+
+        <span class="ob__label">Ключ parse.bot</span>
+        <input class="ob__underline" data-el="foodParseKey" type="password" autocomplete="off"
+               spellcheck="false" placeholder="ключ с parse.bot — для Пятёрочки" />
 
         <label class="ob__check">
           <input type="checkbox" data-el="foodAutoPay" />

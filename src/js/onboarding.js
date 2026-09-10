@@ -496,7 +496,12 @@ loadTasksSettings();
 /* ── Заказы ──────────────────────────────────────────────────────────────── */
 
 /** Код магазина — галочка в разметке. */
-const FOOD_STORES = { vkusvill: "storeVkusvill", magnit: "storeMagnit", metro: "storeMetro" };
+const FOOD_STORES = {
+  vkusvill: "storeVkusvill",
+  magnit: "storeMagnit",
+  metro: "storeMetro",
+  pyaterochka: "storePyaterochka",
+};
 
 async function loadFood() {
   const food = await api?.invoke("food_settings").catch(() => null);
@@ -511,6 +516,7 @@ async function loadFood() {
   ui.foodPerDay.value = food.perDay;
   ui.foodFreeDelivery.value = food.freeDeliveryFrom;
   ui.foodEndpoint.value = food.endpoint;
+  ui.foodParseKey.value = food.parseKey ?? "";
   ui.foodSpent.textContent =
     food.perDay > 0
       ? `Оплачено без подтверждения за сутки: ${food.spentToday} из ${food.perDay} ₽`
@@ -537,6 +543,7 @@ async function saveFood() {
         perOrder: amount(ui.foodPerOrder, 3000),
         perDay: amount(ui.foodPerDay, 5000),
         freeDeliveryFrom: amount(ui.foodFreeDelivery, 0),
+        parseKey: ui.foodParseKey.value,
         spentToday: 0,
         signedIn: false,
       },
@@ -553,6 +560,8 @@ for (const el of [
   ui.storeVkusvill,
   ui.storeMagnit,
   ui.storeMetro,
+  ui.storePyaterochka,
+  ui.foodParseKey,
   ui.foodAutoPay,
   ui.foodPerOrder,
   ui.foodPerDay,

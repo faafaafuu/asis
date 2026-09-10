@@ -65,8 +65,15 @@ pub struct FoodConfig {
     /// таких заказов за последние сутки. Всё сверх — только с подтверждением.
     /// `0` — дневного предела нет. См. `crate::spend`.
     pub daily_limit: u32,
-    /// Магазины, в которых не искать: коды `vkusvill`, `magnit`, `metro`.
+    /// Магазины, в которых не искать: коды `vkusvill`, `magnit`, `metro`,
+    /// `pyaterochka`.
     pub disabled_stores: Vec<String>,
+    /// Ключ parse.bot — с ним в поиск входит Пятёрочка.
+    ///
+    /// Сама Пятёрочка программам не отвечает, а parse.bot читает её каталог и
+    /// отдаёт по ключу. Ключ человек заводит сам: у сервиса бесплатный тариф
+    /// на двести запросов в месяц, и тратить их должен тот, чей он.
+    pub parse_key: String,
     /// Заказывать ли вообще. Выключено — Ноа отвечает, что не умеет.
     pub enabled: bool,
 }
@@ -85,6 +92,7 @@ impl Default for FoodConfig {
             auto_pay: false,
             daily_limit: 5000,
             disabled_stores: Vec::new(),
+            parse_key: String::new(),
             enabled: false,
         }
     }

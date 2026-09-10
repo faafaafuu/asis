@@ -350,7 +350,7 @@ pub fn popup_space() {
 /* ── Заказы: настройки, вход, оплата кнопкой ────────────────────────────── */
 
 /// Магазины, между которыми можно выбирать, — их коды.
-const FOOD_STORES: &[&str] = &["vkusvill", "magnit", "metro"];
+const FOOD_STORES: &[&str] = &["vkusvill", "magnit", "metro", "pyaterochka"];
 
 /// Настройки заказов для окна.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -367,6 +367,9 @@ pub struct FoodSettings {
     /// Предел за сутки, ₽.
     pub per_day: u32,
     pub free_delivery_from: u32,
+    /// Ключ parse.bot. Наружу уходит замаскированным, как ключ от модели.
+    #[serde(default)]
+    pub parse_key: String,
     /// Сколько оплачено без подтверждения за последние сутки. Только для показа.
     #[serde(default)]
     pub spent_today: u32,
@@ -390,6 +393,11 @@ pub fn food_settings(state: State<'_, AppState>) -> FoodSettings {
         per_order: food.max_order,
         per_day: food.daily_limit,
         free_delivery_from: food.free_delivery_from,
+        parse_key: if food.parse_key.is_empty() {
+            String::new()
+        } else {
+            "••••••••".into()
+        },
         spent_today: crate::spend::spent_today(),
         signed_in: !food.session_id.trim().is_empty(),
     }
@@ -418,6 +426,10 @@ pub fn save_food_settings(
         food.max_order = settings.per_order;
         food.daily_limit = settings.per_day;
         food.free_delivery_from = settings.free_delivery_from;
+        // Точки означают «не менять»: наружу ключ уходил замаскированным.
+        if !settings.parse_key.starts_with('•') {
+            food.parse_key = settings.parse_key.trim().to_string();
+        }
     }
     persist(&app, &state)
 }

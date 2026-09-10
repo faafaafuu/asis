@@ -69,6 +69,7 @@ pub fn store_name(code: &str) -> &str {
         "vkusvill" => "ВкусВилл",
         "magnit" => "Магнит",
         "metro" => "Метро",
+        "pyaterochka" => "Пятёрочка",
         other => other,
     }
 }
@@ -83,6 +84,7 @@ pub fn store_in(code: &str) -> &str {
         "vkusvill" => "во ВкусВилле",
         "magnit" => "в Магните",
         "metro" => "в Метро",
+        "pyaterochka" => "в Пятёрочке",
         other => other,
     }
 }
@@ -155,8 +157,12 @@ pub async fn search(app: &AppHandle, query: &str) -> Result<Vec<Shelf>, String> 
         urlencode(query)
     );
 
-    let response = client()
-        .get(&url)
+    let mut request = client().get(&url);
+    // Ключ parse.bot — с ним FoodPilot спрашивает и Пятёрочку.
+    if !config.parse_key.trim().is_empty() {
+        request = request.header("X-Parse-Key", config.parse_key.trim());
+    }
+    let response = request
         .send()
         .await
         .map_err(|err| format!("FoodPilot не ответил: {err}"))?;
@@ -507,6 +513,12 @@ pub fn store_code(said: &str) -> Option<&'static str> {
         Some("magnit")
     } else if said.contains("метро") || said.contains("metro") {
         Some("metro")
+    } else if said.contains("пятёр")
+        || said.contains("пятер")
+        || said.contains("5ка")
+        || said.contains("pyater")
+    {
+        Some("pyaterochka")
     } else {
         None
     }
@@ -857,7 +869,9 @@ mod tests {
         assert_eq!(store_code("магнит"), Some("magnit"));
         assert_eq!(store_code("в метро"), Some("metro"));
         assert_eq!(store_code(""), None);
-        assert_eq!(store_code("пятёрочка"), None);
+        assert_eq!(store_code("пятёрочка"), Some("pyaterochka"));
+        assert_eq!(store_code("в Пятерочке"), Some("pyaterochka"));
+        assert_eq!(store_code("лента"), None);
     }
 
     #[test]

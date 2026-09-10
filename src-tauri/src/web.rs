@@ -209,6 +209,16 @@ pub fn open_site(site: &str, query: &str) -> String {
     }
 }
 
+/// Открывает поиск на известном сайте, если это он. `None` — сайт незнакомый.
+///
+/// Нужна заказу: «закажи чехол на вайлдберриз» разбор иногда принимает за
+/// заказ продуктов в магазине «wildberries». Заказать там Ноа не может, но
+/// открыть поиск на самом сайте — может, и это ровно то, чего человек ждёт.
+pub fn open_known(site: &str, query: &str) -> Option<String> {
+    find_site(site)?;
+    Some(open_site(site, query))
+}
+
 /// Проценты вместо небезопасных байтов; пробел — `%20`.
 fn encode(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len() * 3);
