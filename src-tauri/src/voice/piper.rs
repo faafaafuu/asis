@@ -39,8 +39,14 @@ static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 static ACTIVE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Идёт ли ещё синтез: фраза не кончилась, даже если прямо сейчас тихо.
+///
+/// Отметка сверяется с номером текущей фразы. Отметка от фразы, которую уже
+/// сменила новая или оборвала «замолчи», синтезом не считается: иначе одна
+/// потерянная отметка навсегда оставила бы программу «говорящей», а пока она
+/// говорит, микрофон не слушает — и на зов по имени она бы не отзывалась.
 pub fn busy() -> bool {
-    ACTIVE.load(std::sync::atomic::Ordering::SeqCst) != 0
+    let active = ACTIVE.load(std::sync::atomic::Ordering::SeqCst);
+    active != 0 && active == GENERATION.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Сколько звука забираем за раз.
@@ -88,7 +94,6 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
     // объяснении — старое ему уже не нужно, и дослушивать его он не собирается.
     stop();
     let generation = GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-    ACTIVE.store(generation, std::sync::atomic::Ordering::SeqCst);
 
     // Имя не `rate`: так зовётся скорость речи, и затенить её здесь означало бы
     // подставить в неё частоту дискретизации.
@@ -158,6 +163,11 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
 
     crate::jobs::adopt(&child);
     *CURRENT.lock().unwrap_or_else(|err| err.into_inner()) = Some((generation, child));
+
+    // Отметка «синтез идёт» ставится только теперь, когда синтезатор запущен и
+    // его вывод есть кому читать. Поставленная раньше, она оставалась бы
+    // навсегда при любой неудаче запуска выше: снять её некому.
+    ACTIVE.store(generation, std::sync::atomic::Ordering::SeqCst);
 
     std::thread::Builder::new()
         .name("sufler-tts".into())
@@ -254,7 +264,15 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
                 let _ = child.wait();
             }
         })
-        .map_err(|err| format!("не удалось начать озвучивание: {err}"))?;
+        .map_err(|err| {
+            let _ = ACTIVE.compare_exchange(
+                generation,
+                0,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            );
+            format!("не удалось начать озвучивание: {err}")
+        })?;
 
     Ok(())
 }

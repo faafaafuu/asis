@@ -396,6 +396,37 @@ pub fn pause_conversation(paused: bool) {
     PAUSED.store(paused, Ordering::Relaxed);
 }
 
+/// Первая сводка — вскоре после начала: по ней сразу видно, слышно ли что-то.
+const FIRST_REPORT: std::time::Duration = std::time::Duration::from_secs(20);
+/// Дальше — раз в несколько минут: слушают часами, и журнал не должен тонуть.
+const REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Что было слышно с прошлой сводки.
+///
+/// Ожидание имени работает молча: каждая фраза в журнал не пишется. И когда
+/// оно перестаёт отзываться, по журналу было не понять почему — звук не
+/// доходит, голос тише порога или программа считает, что говорит сама, и
+/// поэтому не слушает. Сводка отвечает на это одной строкой.
+#[derive(Default)]
+struct Stats {
+    /// С какого момента копим.
+    since: Option<std::time::Instant>,
+    /// Была ли уже первая сводка.
+    reported: bool,
+    /// Сколько отсчётов разобрали.
+    heard: usize,
+    /// Сколько пропустили, пока «говорили сами».
+    deaf_speaking: usize,
+    /// Сколько пропустили на паузе разговора.
+    deaf_paused: usize,
+    /// Сколько пропустили в хвосте после собственной речи.
+    deaf_muted: usize,
+    /// Самый громкий кадр.
+    loudest: f32,
+    /// Сколько фраз отдали на расшифровку.
+    phrases: usize,
+}
+
 /// Находит границы фраз в непрерывном потоке звука.
 ///
 /// Способ простой и старый: громкость по кадрам в 20 мс. Речь заметно громче
@@ -417,6 +448,8 @@ struct Segmenter {
     gave_up: bool,
     /// Оценка уровня шума. Обновляется только в тишине.
     noise: f32,
+    /// Сводка для журнала. См. `Stats`.
+    stats: Stats,
 }
 
 impl Segmenter {
@@ -431,6 +464,7 @@ impl Segmenter {
             quiet: 0,
             gave_up: false,
             noise: 0.005,
+            stats: Stats::default(),
         }
     }
 
@@ -439,28 +473,41 @@ impl Segmenter {
             return;
         }
 
+        let now = std::time::Instant::now();
+        self.stats.since.get_or_insert(now);
+
         // Пока говорит программа — не слушаем вовсе. Иначе микрофон запишет
         // её же голос из колонок, и она задаст вопрос сама себе.
-        let now = std::time::Instant::now();
-        if PAUSED.load(Ordering::Relaxed) || crate::voice::speaking() {
+        let paused = PAUSED.load(Ordering::Relaxed);
+        if paused || crate::voice::speaking() {
+            if paused {
+                self.stats.deaf_paused += chunk.len();
+            } else {
+                self.stats.deaf_speaking += chunk.len();
+            }
             // Отодвигаем глухоту на будущее: речь ещё доиграет после того, как
             // мы перестанем её отдавать.
             *MUTED_UNTIL.lock().unwrap_or_else(|err| err.into_inner()) =
                 Some(now + std::time::Duration::from_millis(DEAF_AFTER_SPEECH_MS));
             self.reset();
+            self.report(rate);
             return;
         }
 
         // Речь кончилась, но хвост её ещё звучит — молчим до конца запаса.
         let muted = *MUTED_UNTIL.lock().unwrap_or_else(|err| err.into_inner());
         if muted.map(|until| now < until).unwrap_or(false) {
+            self.stats.deaf_muted += chunk.len();
             self.reset();
+            self.report(rate);
             return;
         }
+        self.stats.heard += chunk.len();
 
         let frame = (rate / 50).max(1) as usize;
         for part in chunk.chunks(frame) {
             let rms = (part.iter().map(|s| s * s).sum::<f32>() / part.len() as f32).sqrt();
+            self.stats.loudest = self.stats.loudest.max(rms);
 
             if !self.speaking {
                 // Шум оцениваем медленно и только пока молчим: иначе громкая
@@ -497,6 +544,39 @@ impl Segmenter {
         if self.utterance.len() > rate as usize * MAX_SECONDS {
             self.finish();
         }
+        self.report(rate);
+    }
+
+    /// Пишет сводку, если подошёл срок.
+    fn report(&mut self, rate: u32) {
+        let Some(since) = self.stats.since else { return };
+        let every = if self.stats.reported { REPORT_EVERY } else { FIRST_REPORT };
+        if since.elapsed() < every {
+            return;
+        }
+
+        let seconds = |samples: usize| samples as f32 / rate.max(1) as f32;
+        let threshold = (self.noise * self.mode.over_noise()).max(self.mode.floor());
+        let (playing, synthesizing) = crate::voice::speech_state();
+        log::info!(
+            "слушаю ({}): разобрано {:.0} с; глухо: своя речь {:.0} с, пауза {:.0} с, \
+             хвост {:.0} с; громче всего {:.3}, шум {:.3}, порог {:.3}; фраз {}; \
+             сейчас звук {playing}, синтез {synthesizing}",
+            if self.mode == Listening::Wake { "обращение" } else { "разговор" },
+            seconds(self.stats.heard),
+            seconds(self.stats.deaf_speaking),
+            seconds(self.stats.deaf_paused),
+            seconds(self.stats.deaf_muted),
+            self.stats.loudest,
+            self.noise,
+            threshold,
+            self.stats.phrases,
+        );
+        self.stats = Stats {
+            since: Some(std::time::Instant::now()),
+            reported: true,
+            ..Stats::default()
+        };
     }
 
     /// Забыть всё, что успели услышать, и начать слушать заново.
@@ -523,6 +603,7 @@ impl Segmenter {
         }
 
         if let Some(wav) = prepare(samples, self.rate, false, self.mode.verbose()) {
+            self.stats.phrases += 1;
             let _ = self.sender.send(Heard::Phrase(wav));
         }
     }
