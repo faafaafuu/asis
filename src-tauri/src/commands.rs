@@ -988,3 +988,51 @@ pub async fn task_plan(app: AppHandle, id: String) -> Result<Option<TaskView>, S
     changed(&app);
     Ok(task.map(|task| view(&task, chrono::Local::now())))
 }
+
+/// Переносит задачу на новый срок. `due` — ISO 8601.
+///
+/// Перенос считается — так же, как голосом: дело, которое переносят раз за
+/// разом, окно отмечает отдельно.
+#[tauri::command]
+pub fn task_postpone(app: AppHandle, id: String, due: String) -> Result<Option<TaskView>, String> {
+    let Some(due) = parse_due(Some(&due))? else {
+        return Err("срок не указан".into());
+    };
+    let task = crate::tasks::postpone(&id, due);
+    if task.is_some() {
+        changed(&app);
+    }
+    Ok(task.map(|task| view(&task, chrono::Local::now())))
+}
+
+/// Убирает шаг задачи.
+#[tauri::command]
+pub fn task_step_remove(app: AppHandle, id: String, at: usize) -> Option<TaskView> {
+    let task = crate::tasks::remove_step(&id, at)?;
+    changed(&app);
+    Some(view(&task, chrono::Local::now()))
+}
+
+/// Добавляет шаг задаче.
+#[tauri::command]
+pub fn task_step_add(app: AppHandle, id: String, title: String) -> Result<Option<TaskView>, String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("у шага должно быть название".into());
+    }
+    let task = crate::tasks::add_step(&id, title);
+    if task.is_some() {
+        changed(&app);
+    }
+    Ok(task.map(|task| view(&task, chrono::Local::now())))
+}
+
+/// Убирает все сделанные задачи. Отдаёт, сколько убрано.
+#[tauri::command]
+pub fn task_clear_done(app: AppHandle) -> usize {
+    let removed = crate::tasks::clear_done().len();
+    if removed > 0 {
+        changed(&app);
+    }
+    removed
+}

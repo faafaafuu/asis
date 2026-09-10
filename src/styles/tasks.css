@@ -314,3 +314,230 @@ body {
   cursor: default;
   opacity: 1;
 }
+
+/* ── Кнопка закрытия ───────────────────────────────────────────────────────
+
+   Рамки у окна нет, а значит, нет и системного крестика. Без своей кнопки окно
+   закрывалось только клавишей Esc, о которой никто не знал. */
+
+.head__close {
+  margin-left: auto;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.head__close:hover {
+  color: var(--text);
+  background: var(--btn-hover-bg);
+}
+
+/* ── Действия с задачей ────────────────────────────────────────────────────
+
+   Кнопки видны при наведении, а не всегда: в списке из десяти дел постоянные
+   значки у каждого превращают список в панель инструментов. Для клавиатуры —
+   видны и при фокусе внутри строки. */
+
+.task__actions {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.task:hover .task__actions,
+.task:focus-within .task__actions {
+  opacity: 1;
+}
+
+.task__act {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.task__act:hover {
+  color: var(--accent);
+  background: var(--btn-hover-bg);
+}
+.task__act--drop:hover,
+.task__act--drop.is-armed {
+  color: var(--error);
+}
+.task__act.is-armed {
+  font-size: var(--size-label);
+  background: var(--btn-hover-bg);
+}
+.task__act:disabled {
+  cursor: default;
+}
+
+/* Срок — кнопка переноса, но выглядит как подпись: иначе строка задачи
+   рябила бы рамками. */
+button.task__due {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.task__due:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.task__title {
+  cursor: text;
+}
+
+.task__title-input,
+.step__new,
+.later__pick {
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--btn-hover-border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--input-color);
+  font-family: inherit;
+  font-size: var(--size-ui);
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.task__title-input {
+  width: 100%;
+}
+.step__new {
+  width: 100%;
+  margin-top: 4px;
+  font-size: var(--size-secondary);
+}
+
+/* ── Перенос ───────────────────────────────────────────────────────────── */
+
+.later {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 8px 27px;
+}
+
+.later__option {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--btn-border);
+  border-radius: 14px;
+  background: var(--btn-bg);
+  color: var(--btn-color);
+  font-family: inherit;
+  font-size: var(--size-secondary);
+  cursor: pointer;
+}
+.later__option:hover {
+  border-color: var(--btn-hover-border);
+  color: var(--btn-hover-color);
+  background: var(--btn-hover-bg);
+}
+.later__option--quiet {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.later__pick {
+  width: 180px;
+  color-scheme: dark light;
+  font-size: var(--size-secondary);
+}
+
+/* ── Шаги: убрать шаг ──────────────────────────────────────────────────── */
+
+.step {
+  justify-content: space-between;
+}
+
+/* Зачёркнуто только название сделанного шага: зачёркивание на всей строке
+   перечёркивало заодно и крестик «убрать», и он читался как неактивный. */
+.step--done {
+  text-decoration: none;
+}
+.step--done .step__label {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-muted);
+}
+
+.task__act svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+  margin: 0 auto;
+}
+.step__label {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  cursor: pointer;
+}
+.step__drop {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+.step:hover .step__drop {
+  opacity: 1;
+}
+.step__drop:hover {
+  color: var(--error);
+  background: var(--btn-hover-bg);
+}
+
+/* ── Группы: «очистить» у сделанного ───────────────────────────────────── */
+
+.group__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.group__head .group__name {
+  margin-bottom: 8px;
+}
+.group__clear {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--size-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.group__clear:hover,
+.group__clear.is-armed {
+  color: var(--error);
+}

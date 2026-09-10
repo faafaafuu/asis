@@ -301,6 +301,54 @@ pub fn set_step_done(id: &str, at: usize, done: bool) -> Option<Task> {
     .flatten()
 }
 
+/// Убирает шаг. Отдаёт задачу после правки.
+pub fn remove_step(id: &str, at: usize) -> Option<Task> {
+    with(|store| {
+        let found = store.tasks.iter_mut().find(|task| task.id == id);
+        let Some(task) = found else {
+            return (None, false);
+        };
+        if at >= task.steps.len() {
+            return (None, false);
+        }
+        task.steps.remove(at);
+        (Some(task.clone()), true)
+    })
+    .flatten()
+}
+
+/// Добавляет шаг в конец.
+///
+/// Новый шаг ещё не сделан — значит, не сделано и всё дело: если его уже
+/// отметили, отметка снимается. Иначе в «Сделано» лежало бы дело с
+/// невыполненным шагом.
+pub fn add_step(id: &str, title: String) -> Option<Task> {
+    with(|store| {
+        let found = store.tasks.iter_mut().find(|task| task.id == id);
+        let Some(task) = found else {
+            return (None, false);
+        };
+        task.steps.push(Step { title, done: false });
+        task.done_at = None;
+        (Some(task.clone()), true)
+    })
+    .flatten()
+}
+
+/// Убирает все сделанные задачи и отдаёт их.
+pub fn clear_done() -> Vec<Task> {
+    with(|store| {
+        let (done, open): (Vec<Task>, Vec<Task>) = store
+            .tasks
+            .drain(..)
+            .partition(|task| task.done_at.is_some());
+        store.tasks = open;
+        let changed = !done.is_empty();
+        (done, changed)
+    })
+    .unwrap_or_default()
+}
+
 /// Переносит задачу на другой срок и считает перенос.
 pub fn postpone(id: &str, to: DateTime<Local>) -> Option<Task> {
     with(|store| {
