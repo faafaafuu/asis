@@ -19,6 +19,7 @@ mod order;
 mod overlay;
 mod planner;
 mod pc;
+mod web;
 mod review;
 mod secret;
 mod tasks;
@@ -154,6 +155,9 @@ pub fn run() {
                 voice::claim_devices();
                 wake_local_model(app.handle());
                 listen_for_voice_keys(app.handle());
+                // Список программ собирается заранее, в фоне: иначе первое
+                // «открой блокнот» ждало бы, пока прочитается меню «Пуск».
+                pc::start();
                 watch_reminders(app.handle());
                 review::watch(app.handle());
                 start_wake(app.handle());
@@ -192,6 +196,10 @@ pub fn run() {
             commands::task_remove,
             commands::task_step,
             commands::task_plan,
+            commands::task_postpone,
+            commands::task_step_remove,
+            commands::task_step_add,
+            commands::task_clear_done,
             commands::calendar_settings,
             commands::save_calendar_settings,
             commands::calendar_connect,

@@ -15,6 +15,7 @@ const STAGES = {
   picking: "ищу в магазине",
   picked: "подобрано",
   inCart: "в корзине",
+  placed: "оформлен",
   tooExpensive: "дороже потолка",
   failed: "не вышло",
 };

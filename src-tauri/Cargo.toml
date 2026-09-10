@@ -147,6 +147,13 @@ windows = { version = "0.62", features = [
   "Win32_System_Power",
   # LockWorkStation — заблокировать экран голосом.
   "Win32_System_Shutdown",
+  # GetLogicalDrives/GetDriveTypeW — искать игры только на несъёмных дисках:
+  # обращение к отключённому сетевому диску или пустому кардридеру висит
+  # секундами, а поиск программы идёт, пока человек ждёт ответа.
+  "Win32_Storage_FileSystem",
+  # Снимок процессов — закрыть программу, свёрнутую в трей: окон у неё нет, и
+  # найти её можно только среди процессов.
+  "Win32_System_Diagnostics_ToolHelp",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

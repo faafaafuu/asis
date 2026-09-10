@@ -464,6 +464,108 @@ pub async fn cart_link(app: &AppHandle, products: &[Product]) -> Result<String, 
     Ok(parsed.link)
 }
 
+/// Магазин по тому, как его назвал человек. `None` — не назван или незнаком.
+///
+/// Разбор реплики отдаёт название, как его произнесли: «вкусвилл», «во
+/// вкусвилле», «магнит». Трёх магазинов хватает на прямое сравнение по корню
+/// слова, и оно надёжнее сравнения на слух: «во» и «в» перед названием
+/// сбивали бы подсчёт совпавших слов.
+pub fn store_code(said: &str) -> Option<&'static str> {
+    let said = said.to_lowercase();
+    if said.contains("вкус") || said.contains("vkus") {
+        Some("vkusvill")
+    } else if said.contains("магнит") || said.contains("magnit") {
+        Some("magnit")
+    } else if said.contains("метро") || said.contains("metro") {
+        Some("metro")
+    } else {
+        None
+    }
+}
+
+/// В каком магазине собирать заказ.
+///
+/// Назван магазин — только он, даже если в другом дешевле. Человек, который
+/// просит семечки во ВкусВилле, выбрал магазин сам, и подсунуть ему Магнит
+/// значит сделать не то, о чём просили. Чего в названном магазине нет, то
+/// называется ненайденным, а не докупается в соседнем: заказ собирается в
+/// одном магазине.
+///
+/// Не назван — среди магазинов, где Ноа умеет собрать корзину. Сравнение с
+/// остальными полезно, но заказать там всё равно нельзя, а просьба «закажи»
+/// ждёт корзины, а не таблицы цен. Только если заказать негде вовсе, выбор
+/// идёт среди всех — чтобы хотя бы показать, почём это.
+pub fn choose_store<'a>(quotes: &'a [StoreQuote], named: Option<&str>) -> Option<&'a StoreQuote> {
+    if let Some(code) = named {
+        return quotes
+            .iter()
+            .find(|quote| quote.store == code && !quote.found.is_empty());
+    }
+    quotes
+        .iter()
+        .filter(|quote| cart_supported(&quote.store) && !quote.found.is_empty())
+        .min_by_key(|quote| (std::cmp::Reverse(quote.found.len()), quote.total))
+        .or_else(|| best_store(quotes))
+}
+
+/// Чем кончилось оформление.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Checkout {
+    /// Заказ оформлен и оплачен.
+    #[serde(default)]
+    pub placed: bool,
+    /// Сумма, на которую оформлено.
+    #[serde(default)]
+    pub total_rub: Option<u32>,
+    /// Что сказал магазин — причина, если не оформилось.
+    #[serde(default)]
+    pub message: String,
+}
+
+/// Оформляет и оплачивает заказ способом, сохранённым в самом магазине.
+///
+/// Только в сессии браузера, где человек вошёл: карта или СБП лежат в его
+/// аккаунте ВкусВилла, и платёжных данных здесь нет и не бывает.
+///
+/// `expected_total` — сумма корзины, которую только что показал сам магазин.
+/// FoodPilot нажимает «оформить», только если на последнем шаге сумма та же:
+/// другая сумма значит, что оформляется не то, что проверено потолком.
+pub async fn checkout(app: &AppHandle, expected_total: u32) -> Result<Checkout, String> {
+    let config = food_config(app)?;
+    if config.session_id.trim().is_empty() {
+        return Err("сессия браузера не настроена".into());
+    }
+
+    let response = client()
+        .post(format!(
+            "{}/store-adapters/browser-session/vkusvill/checkout/confirm",
+            config.endpoint.trim_end_matches('/')
+        ))
+        .json(&serde_json::json!({
+            "sessionId": config.session_id,
+            "expectedTotalRub": expected_total,
+        }))
+        .send()
+        .await
+        .map_err(|err| format!("FoodPilot не ответил: {err}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        let reason = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|value| value["message"].as_str().map(str::to_string))
+            .unwrap_or(body);
+        return Err(format!("магазин отказал ({status}): {reason}"));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|err| format!("не разобрать ответ оформления: {err}"))
+}
+
 /// Настроена ли сессия браузера, в которой человек вошёл во ВкусВилл.
 ///
 /// От неё зависит, как собирается корзина: в сессии — прямо в корзине
@@ -587,6 +689,59 @@ mod tests {
         assert_eq!(store_in("magnit"), "в Магните");
         assert_eq!(store_in("vkusvill"), "во ВкусВилле");
         assert_eq!(store_in("metro"), "в Метро");
+    }
+
+    #[test]
+    fn a_named_store_is_kept_even_when_another_is_cheaper() {
+        let quotes = vec![
+            quote("magnit", &[("семечки", 60)], 0),
+            quote("vkusvill", &[("семечки", 120)], 0),
+        ];
+        assert_eq!(
+            choose_store(&quotes, Some("vkusvill")).map(|q| q.store.as_str()),
+            Some("vkusvill")
+        );
+    }
+
+    #[test]
+    fn a_named_store_without_the_goods_is_not_swapped_for_another() {
+        let quotes = vec![
+            quote("vkusvill", &[], 1),
+            quote("magnit", &[("семечки", 60)], 0),
+        ];
+        assert!(choose_store(&quotes, Some("vkusvill")).is_none());
+    }
+
+    #[test]
+    fn without_a_name_the_basket_goes_where_it_can_be_ordered() {
+        // Магнит полнее и дешевле, но собрать корзину можно только во ВкусВилле.
+        let quotes = vec![
+            quote("magnit", &[("молоко", 80), ("хлеб", 50)], 0),
+            quote("vkusvill", &[("молоко", 100)], 1),
+        ];
+        assert_eq!(
+            choose_store(&quotes, None).map(|q| q.store.as_str()),
+            Some("vkusvill")
+        );
+    }
+
+    #[test]
+    fn with_nowhere_to_order_the_prices_are_still_shown() {
+        let quotes = vec![quote("vkusvill", &[], 2), quote("magnit", &[("молоко", 80)], 1)];
+        assert_eq!(
+            choose_store(&quotes, None).map(|q| q.store.as_str()),
+            Some("magnit")
+        );
+    }
+
+    #[test]
+    fn stores_are_recognised_as_said() {
+        assert_eq!(store_code("вкусвилл"), Some("vkusvill"));
+        assert_eq!(store_code("во Вкусвилле"), Some("vkusvill"));
+        assert_eq!(store_code("магнит"), Some("magnit"));
+        assert_eq!(store_code("в метро"), Some("metro"));
+        assert_eq!(store_code(""), None);
+        assert_eq!(store_code("пятёрочка"), None);
     }
 
     #[test]

@@ -45,8 +45,9 @@ pub enum Intent {
     },
     /// Помочь: разложить дело на шаги и подсказать, с чего начать.
     Breakdown { task: Option<String> },
-    /// Заказать еду. Названия блюд, как их знает FoodPilot.
-    Order { dishes: Vec<String> },
+    /// Заказать еду. Названия блюд, как их знает FoodPilot, и магазин, если
+    /// человек его назвал.
+    Order { dishes: Vec<String>, store: String },
     /// Спрашивает, что с заказом: что набрано и на каком оно шаге.
     OrderStatus,
     /// Открыть программу, окно или игру. `sandbox` — в песочнице Sandboxie.
@@ -59,6 +60,14 @@ pub enum Intent {
     Close { program: String },
     /// Что-то сделать с самим компьютером: сон, выключение, блокировка.
     Power { action: crate::pc::Power },
+    /// Открыть сайт или поискать на нём.
+    Web { site: String, query: String },
+    /// Посмотреть в интернете и ответить голосом.
+    Lookup { query: String },
+    /// Включить или выключить VPN.
+    Vpn { on: bool },
+    /// Полистать страницу, вернуться назад, закрыть вкладку.
+    Nav { action: crate::pc::Nav },
 }
 
 /// Название дела, которому не хватает срока.
@@ -108,7 +117,7 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         Intent::Done { task } => Some(done(app, task.as_deref(), &open)),
         Intent::Postpone { task, due } => Some(postpone(app, task.as_deref(), due, &open)),
         Intent::Breakdown { task } => Some(breakdown(app, task.as_deref(), &open).await),
-        Intent::Order { dishes } => Some(order(app, &dishes).await),
+        Intent::Order { dishes, store } => Some(order(app, &dishes, &store).await),
         Intent::OrderStatus => Some(order_status(app)),
         // Поиск программы читает меню «Пуск» и диски — это блокирующая
         // работа, и занимать ею асинхронную задачу нельзя.
@@ -119,6 +128,12 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         } => Some(blocking(move || crate::pc::launch(&program, sandbox, &sandbox_box)).await),
         Intent::Close { program } => Some(blocking(move || crate::pc::close(&program)).await),
         Intent::Power { action } => Some(crate::pc::power(action)),
+        Intent::Web { site, query } => {
+            Some(blocking(move || crate::web::open_site(&site, &query)).await)
+        }
+        Intent::Lookup { query } => Some(crate::web::lookup(app, &query).await),
+        Intent::Vpn { on } => Some(blocking(move || crate::pc::vpn(on)).await),
+        Intent::Nav { action } => Some(blocking(move || crate::pc::navigate(action)).await),
     }
 }
 
@@ -155,6 +170,7 @@ fn order_status(app: &AppHandle) -> String {
             "Набрано на {} рублей — дороже потолка в {}.",
             order.total, order.max_order
         ),
+        crate::order::Stage::Placed => format!("Заказ оформлен на {} рублей.", order.total),
         crate::order::Stage::Failed => "С заказом не вышло.".into(),
     };
 
@@ -169,7 +185,7 @@ fn order_status(app: &AppHandle) -> String {
 /// Единственная преграда между оговоркой и деньгами — потолок суммы: у
 /// FoodPilot подтверждение человеком здесь снято намеренно, ради голосового
 /// заказа (см. `crate::food`).
-async fn order(app: &AppHandle, dishes: &[String]) -> String {
+async fn order(app: &AppHandle, dishes: &[String], wanted_store: &str) -> String {
     if dishes.is_empty() {
         return "Не понял, что заказать.".into();
     }
@@ -228,29 +244,47 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
         }
     };
 
-    let Some(quote) = crate::food::best_store(&quotes) else {
+    let wanted = crate::food::store_code(wanted_store);
+    let Some(quote) = crate::food::choose_store(&quotes, wanted) else {
+        // Назвали магазин, а в нём ничего не нашлось, — говорим именно про
+        // него: человек просил ВкусВилл, и молча собрать в Магните значило бы
+        // сделать не то, о чём просили.
+        //
         // Магазины не ответили ни разу — это не «нет такого товара», а
         // «магазины лежат». Разница для человека решающая: в первом случае он
-        // назовёт другое, во втором — попробует позже. Спутать их значит
-        // отправить его переформулировать просьбу, с которой всё в порядке.
-        let all_silent = !quotes.is_empty()
-            && quotes
-                .iter()
-                .all(|quote| quote.unreachable >= dishes.len());
-        let note = match all_silent {
-            true => "Магазины не отвечают — попробуйте позже.",
-            false => "Ничего из этого не нашёл ни в одном магазине.",
+        // назовёт другое, во втором — попробует позже.
+        let note = match wanted {
+            Some(code) => {
+                let silent = quotes
+                    .iter()
+                    .any(|quote| quote.store == code && quote.unreachable >= dishes.len());
+                if silent {
+                    format!("{} не отвечает — попробуйте позже.", crate::food::store_name(code))
+                } else {
+                    format!("{} ничего из этого не нашёл.", capitalized(crate::food::store_in(code)))
+                }
+            }
+            None => {
+                let all_silent = !quotes.is_empty()
+                    && quotes
+                        .iter()
+                        .all(|quote| quote.unreachable >= dishes.len());
+                match all_silent {
+                    true => "Магазины не отвечают — попробуйте позже.".into(),
+                    false => "Ничего из этого не нашёл ни в одном магазине.".into(),
+                }
+            }
         };
         crate::order::set(
             app,
             crate::order::Order {
                 stage: crate::order::Stage::Failed,
                 missing: dishes.to_vec(),
-                note: note.into(),
+                note: note.clone(),
                 ..crate::order::Order::default()
             },
         );
-        return note.into();
+        return note;
     };
 
     let food = app.state::<AppState>().config().food.clone();
@@ -272,67 +306,37 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
         total: quote.total,
         until_free_delivery: quote.until_free_delivery(food.free_delivery_from),
         max_order: food.max_order,
-        note: match crate::food::cart_supported(&quote.store) {
-            true => "Подобрано. Кладу в корзину.".into(),
-            false => "Подобрано. Корзину в этом магазине Ноа пока не собирает.".into(),
-        },
+        note: "Подобрано. Собираю корзину.".into(),
         ..crate::order::Order::default()
     };
     crate::order::set(app, shown.clone());
 
-    // Что набралось — вслух: название из магазина, а не то, как это назвал
-    // человек. «Фарш» он просил, а кладётся «Фарш из индейки, 400 г».
-    let mut spoken = format!(
-        "Набрал {}: {}. Итого {} рублей.",
-        quote.store_in(),
-        quote
-            .found
-            .iter()
-            .map(|item| match item.price {
-                Some(price) => format!("{} за {} рублей", item.name, price),
-                None => item.name.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join(", "),
-        quote.total
-    );
-
-    if !quote.missing.is_empty() {
-        spoken.push_str(&format!(" Не нашёл: {}.", quote.missing.join(", ")));
-    }
-
-    // Ради чего вообще смотрели несколько полок: без второй цены первая ничего
-    // не говорит. Сравнение называется только когда оно осмысленно — при
-    // одинаковой полноте набора; иначе «дешевле на сто рублей» означало бы лишь
-    // то, что в том магазине половины товаров нет.
-    if let Some(instead) = runner_up(&quotes, quote) {
-        spoken.push_str(&instead);
-    }
-
-    if let Some(short) = quote.until_free_delivery(food.free_delivery_from) {
-        spoken.push_str(&format!(
-            " До бесплатной доставки не хватает {short} рублей."
-        ));
-    }
+    // Вслух — коротко: итог и то, что пошло не так.
+    //
+    // Перечень набранного с ценами на слух не удерживается, а человеку и не
+    // нужен: построчно он видит его в окне заказа. Промолчать можно обо всём,
+    // кроме ненайденного — о нём человек должен узнать, иначе будет ждать то,
+    // что не приедет.
+    let missing = match quote.missing.is_empty() {
+        true => String::new(),
+        false => format!(" Не нашёл: {}.", quote.missing.join(", ")),
+    };
 
     // Дороже разрешённого — в корзину не складываем.
     //
     // Это то, ради чего потолок и заводился: набор кладётся в настоящую
     // корзину настоящего магазина, и ошибка подбора на этой сумме стоит денег.
-    // Сам подбор при этом называется вслух — человек должен видеть, из чего
-    // сложилась сумма, иначе «дорого» звучит как отказ без объяснения.
     if food.max_order > 0 && quote.total > food.max_order {
-        spoken.push_str(&format!(
-            " В корзину не кладу: это дороже вашего потолка в {} рублей.",
-            food.max_order
-        ));
         shown.stage = crate::order::Stage::TooExpensive;
         shown.note = format!(
             "Дороже потолка в {} рублей — в корзину не положил.",
             food.max_order
         );
         crate::order::set(app, shown);
-        return spoken;
+        return format!(
+            "Вышло {} рублей — дороже вашего потолка в {}, в корзину не кладу.{missing}",
+            quote.total, food.max_order
+        );
     }
 
     // TODO(human): решить, что говорить про набор дороже потолка. Поведение
@@ -340,25 +344,26 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
     // слова: называть ли его целиком, как сейчас, или честнее сразу сказать
     // про потолок, не перечисляя того, что всё равно не купится.
 
-    // Корзину Ноа собирает не везде. Поиск читает страницу и одинаков для всех
-    // магазинов, а корзина — это нажатие настоящих кнопок в браузере, где
-    // человек вошёл, и кнопки у каждого магазина свои. Промолчать здесь нельзя:
-    // услышав «набрал», человек решит, что заказ оформлен, и станет ждать.
+    // Корзину Ноа собирает не везде. Сюда доходит магазин, названный
+    // человеком, — промолчать о том, что заказ не собран, нельзя: услышав
+    // «готово», человек станет ждать курьера.
     if !crate::food::cart_supported(&quote.store) {
-        spoken.push_str(" Корзину в этом магазине я пока не собираю — сложить и оформить надо самому.");
+        shown.note = "Подобрано. Корзину в этом магазине Ноа пока не собирает.".into();
         crate::order::set(app, shown);
-        return spoken;
+        return format!(
+            "Подобрал {}, но корзину там собрать не могу — оформите сами.{missing}",
+            quote.store_in()
+        );
     }
 
     // Входа в браузере нет — корзина собирается ссылкой через MCP магазина.
     //
-    // Это путь по умолчанию: ему не нужны ни браузер под управлением, ни вход,
-    // ни даже то, чтобы витрина открывалась с этой машины, — MCP живёт на своём
-    // адресе. Корзина открывается в браузере уже набранной, и человеку остаются
-    // доставка и оплата. Сессия браузера нужна тому, кто хочет, чтобы Ноа
-    // складывал в корзину его учётной записи.
+    // Ему не нужны ни браузер под управлением, ни вход, ни даже то, чтобы
+    // витрина открывалась с этой машины, — MCP живёт на своём адресе. Корзина
+    // открывается в браузере уже набранной, и человеку остаются доставка и
+    // оплата. Оплатить сам Ноа может только в сессии браузера — см. ниже.
     if !crate::food::has_browser_session(app) {
-        match crate::food::cart_link(app, &quote.found).await {
+        return match crate::food::cart_link(app, &quote.found).await {
             Ok(link) => {
                 if let Err(err) = crate::pc::open(&link) {
                     log::warn!("ссылка на корзину не открылась: {err}");
@@ -370,88 +375,105 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
                 }
                 shown.stage = crate::order::Stage::InCart;
                 shown.link = Some(link);
-                shown.note = "Корзина собрана и открыта в браузере. Доставка и оплата — там.".into();
-                spoken.push_str(
-                    " Собрал корзину и открыл её в браузере — осталось выбрать доставку и оплатить.",
-                );
+                shown.note = "Корзина открыта в браузере. Доставка и оплата — там.".into();
+                crate::order::set(app, shown);
+                format!("Готово, корзина открыта в браузере.{missing}")
             }
             Err(err) => {
                 log::warn!("ссылка на корзину не собралась: {err}");
                 shown.stage = crate::order::Stage::Failed;
                 shown.note = format!("Корзину собрать не вышло: {err}");
-                spoken.push_str(&format!(" Корзину собрать не вышло: {err}."));
+                crate::order::set(app, shown);
+                format!("Корзину собрать не вышло: {err}.")
             }
-        }
-        crate::order::set(app, shown);
-        return spoken;
+        };
     }
 
-    match crate::food::add_to_cart(app, &quote.found).await {
-        Ok(cart) => {
-            spoken.push_str(&format!(" Положил в корзину: {}.", cart.added.len()));
-            if !cart.failed.is_empty() {
-                spoken.push_str(&format!(" Не легло: {}.", cart.failed.join(", ")));
-            }
-            if let Some(total) = cart.total {
-                spoken.push_str(&format!(" В корзине на {total} рублей."));
-            }
-            spoken.push_str(" Оформить и оплатить — за вами.");
-
-            // В окне отмечаем построчно, что именно легло: «положил три из
-            // пяти» без имён не даёт понять, чего не хватает.
-            for line in &mut shown.lines {
-                line.in_cart = cart.added.contains(&line.name);
-            }
-            shown.stage = crate::order::Stage::InCart;
-            if let Some(total) = cart.total {
-                shown.total = total;
-            }
-            shown.note = match cart.failed.is_empty() {
-                true => "В корзине магазина. Оформление и оплата за вами.".into(),
-                false => format!("Не легло: {}.", cart.failed.join(", ")),
-            };
-            crate::order::set(app, shown);
-        }
+    let cart = match crate::food::add_to_cart(app, &quote.found).await {
+        Ok(cart) => cart,
         Err(err) => {
             // Не сложилось — говорим прямо. Молчание здесь хуже всего: человек
             // решит, что продукты заказаны, и станет ждать курьера.
             log::warn!("корзина не наполнилась: {err}");
-            spoken.push_str(&format!(" В корзину положить не вышло: {err}."));
             shown.stage = crate::order::Stage::Failed;
             shown.note = format!("В корзину не легло: {err}");
             crate::order::set(app, shown);
+            return format!("В корзину положить не вышло: {err}.");
+        }
+    };
+
+    // В окне отмечаем построчно, что именно легло: «положил три из пяти» без
+    // имён не даёт понять, чего не хватает.
+    for line in &mut shown.lines {
+        line.in_cart = cart.added.contains(&line.name);
+    }
+    shown.stage = crate::order::Stage::InCart;
+    if let Some(total) = cart.total {
+        shown.total = total;
+    }
+    let failed = match cart.failed.is_empty() {
+        true => String::new(),
+        false => format!(" Не легло: {}.", cart.failed.join(", ")),
+    };
+
+    // Оплата без участия человека.
+    //
+    // Только когда он её включил и задан потолок, и только на сумму, которую
+    // показала сама корзина магазина: не на подсчитанную нами по ценам поиска,
+    // которые могли измениться. Сумма, превышающая потолок, не оплачивается —
+    // даже если подбор в него укладывался.
+    if !(food.auto_pay && food.max_order > 0) {
+        shown.note = format!("В корзине магазина.{failed} Оформление и оплата за вами.")
+            .trim()
+            .to_string();
+        crate::order::set(app, shown);
+        return format!("Готово, корзина собрана.{missing}{failed}");
+    }
+    let Some(total) = cart.total else {
+        shown.note = "Сумму корзины прочитать не удалось — платить вслепую не стал.".into();
+        crate::order::set(app, shown);
+        return format!("Корзина собрана, но сумму прочитать не вышло — оплату не запускаю.{missing}");
+    };
+    if total > food.max_order {
+        shown.note = format!("В корзине {total} рублей — дороже потолка, не оплачено.");
+        crate::order::set(app, shown);
+        return format!(
+            "В корзине {total} рублей — дороже потолка в {}, оплату не запускаю.",
+            food.max_order
+        );
+    }
+
+    match crate::food::checkout(app, total).await {
+        Ok(done) if done.placed => {
+            let paid = done.total_rub.unwrap_or(total);
+            shown.stage = crate::order::Stage::Placed;
+            shown.total = paid;
+            shown.note = "Заказ оформлен и оплачен.".into();
+            crate::order::set(app, shown);
+            // Сумму называем всегда: это деньги, списанные без вопроса.
+            format!("Готово, заказ оформлен и оплачен на {paid} рублей.{missing}{failed}")
+        }
+        Ok(done) => {
+            shown.note = format!("Не оформлено: {}", done.message);
+            crate::order::set(app, shown);
+            format!("Корзина собрана, а оформить не вышло: {}.", done.message)
+        }
+        Err(err) => {
+            log::warn!("оформление не удалось: {err}");
+            shown.note = format!("Не оплачено: {err}");
+            crate::order::set(app, shown);
+            format!("Корзина собрана, а оплатить не вышло: {err}.")
         }
     }
-
-    spoken
 }
 
-/// Насколько выбранный магазин выгоднее следующего.
-///
-/// Сравниваются только магазины с таким же полным набором. Цена набора из двух
-/// позиций ничего не говорит о цене набора из четырёх: «дешевле на сто рублей»
-/// в этом случае значило бы лишь, что половины товаров там нет.
-///
-/// Название стоит первым словом намеренно — «Магнит дороже на …» верно в любом
-/// падеже, тогда как «в Магнит дороже» требует склонения на каждое имя.
-fn runner_up(
-    quotes: &[crate::food::StoreQuote],
-    chosen: &crate::food::StoreQuote,
-) -> Option<String> {
-    let dearest = quotes
-        .iter()
-        .filter(|quote| quote.store != chosen.store && quote.found.len() == chosen.found.len())
-        .max_by_key(|quote| quote.total)?;
-
-    if dearest.total <= chosen.total {
-        return None;
+/// Первая буква — заглавная: «во ВкусВилле» в начале фразы.
+fn capitalized(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
     }
-
-    Some(format!(
-        " {} — то же самое на {} рублей дороже.",
-        dearest.store_name(),
-        dearest.total - chosen.total
-    ))
 }
 
 /// Незакрытые дела — те, о которых может идти речь.
@@ -485,7 +507,13 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
     let due = parse_due(&text("due"));
     let task = pick_task(&parsed, open);
 
-    match text("intent").as_str() {
+    let intent = text("intent");
+    if !asked_for(&intent, said) {
+        log::info!("«{said}» разобрано как {intent}, но просьбы в нём нет — считаю разговором");
+        return Intent::Chat;
+    }
+
+    match intent.as_str() {
         "add" => {
             let title = text("title");
             if title.is_empty() {
@@ -518,7 +546,10 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             if dishes.is_empty() {
                 Intent::Chat
             } else {
-                Intent::Order { dishes }
+                Intent::Order {
+                    dishes,
+                    store: text("store"),
+                }
             }
         }
         "orderStatus" => Intent::OrderStatus,
@@ -538,8 +569,73 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             Some(action) => Intent::Power { action },
             None => Intent::Chat,
         },
+        "web" => {
+            let (site, query) = (text("site"), text("query"));
+            if site.is_empty() && query.is_empty() {
+                Intent::Chat
+            } else {
+                Intent::Web { site, query }
+            }
+        }
+        // Без запроса ищем сказанное целиком: вопрос и есть запрос.
+        "lookup" => Intent::Lookup {
+            query: match text("query") {
+                query if query.is_empty() => said.to_string(),
+                query => query,
+            },
+        },
+        "vpn" => match text("action").as_str() {
+            "on" => Intent::Vpn { on: true },
+            "off" => Intent::Vpn { on: false },
+            _ => Intent::Chat,
+        },
+        "nav" => match crate::pc::Nav::parse(&text("action")) {
+            Some(action) => Intent::Nav { action },
+            None => Intent::Chat,
+        },
         _ => Intent::Chat,
     }
+}
+
+/// Есть ли в сказанном сама просьба.
+///
+/// Разбор реплики делает небольшая модель, и она охотно достраивает команду
+/// из любой фразы: «звучит музыка» — открыть музыку, «программа сейчас
+/// запущена» — открыть папку ProgramData, «всё по-прежнему открыто» — показать
+/// список дел. Микрофон в разговоре слышит и комнату, так что таких фраз много.
+/// Поэтому действие выполняется, только если в сказанном есть глагол этого
+/// действия; иначе это разговор. Переспросить дешевле, чем открыть не то.
+fn asked_for(intent: &str, said: &str) -> bool {
+    let said = said.to_lowercase();
+    let stems: &[&str] = match intent {
+        "launch" => &[
+            "открой", "откро", "открыть", "открывай", "запусти", "запуст", "включи", "включить",
+            "вруби", "покажи", "зайди", "перейди", "стартани", "open", "launch", "run", "start",
+        ],
+        "close" => &[
+            "закрой", "закро", "закрыть", "закрывай", "выключи", "выключить", "выруби",
+            "заверши", "завершить", "убей", "убить", "сними", "снять", "останови",
+            "остановить", "выйди", "close", "kill", "quit", "exit",
+        ],
+        "list" => &[
+            "дел", "задач", "план", "напомин", "распис", "на сегодня", "на завтра", "на неделю",
+        ],
+        "web" => &[
+            "открой", "откро", "зайди", "перейди", "найди", "поищи", "ищи", "посмотр", "покажи",
+            "сайт",
+        ],
+        "nav" => &[
+            "лист", "прокрут", "мотни", "мотай", "назад", "вперёд", "вперед", "вниз", "вверх",
+            "вкладк", "обнови", "обновить", "сверни", "рабочий стол", "в начало", "в конец",
+        ],
+        "vpn" => &["впн", "vpn", "вэпээн", "випиэн", "ви пи эн"],
+        "power" => &[
+            "выключ", "перезагр", "перезапуст", "усыпи", "спящ", "сон", "заблокир", "блокир",
+            "отмени", "отмена", "гибернац",
+        ],
+        _ => return true,
+    };
+    stems.iter().any(|stem| said.contains(stem))
 }
 
 /// Какое дело имелось в виду: модель называет его номером в переданном списке.
@@ -583,7 +679,14 @@ fn intent_rules(open: &[Task]) -> String {
          системную настройку;\n\
          close — просит закрыть или выключить программу или окно (не компьютер);\n\
          power — про сам компьютер: усыпить, выключить, перезагрузить, \
-         заблокировать или отменить выключение.\n\
+         заблокировать или отменить выключение;\n\
+         web — просит открыть сайт или поискать что-то на сайте, в том числе \
+         на уже открытом: «давай посмотрим чехлы»;\n\
+         lookup — спрашивает то, что надо посмотреть в интернете прямо сейчас: \
+         часы работы, адрес, телефон, цены, расписание, новости, погоду, курс;\n\
+         vpn — просит включить или выключить VPN;\n\
+         nav — просит полистать страницу, вернуться назад или вперёд, закрыть \
+         вкладку, обновить страницу или свернуть все окна.\n\
          \n\
          Остальные поля:\n\
          title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
@@ -595,7 +698,20 @@ fn intent_rules(open: &[Task]) -> String {
          человек, без слов «открой», «запусти», «закрой»;\n\
          sandbox — true, если просил запустить в песочнице;\n\
          box — имя песочницы, если названо, иначе пустая строка;\n\
-         action — для power одно из: sleep, shutdown, restart, lock, cancel.\n\
+         action — для power одно из: sleep, shutdown, restart, lock, cancel; \
+         для vpn — on или off; для nav — down, up, top, bottom, back, forward, \
+         close_tab, reload или desktop;\n\
+         store — для order магазин, если человек его назвал (вкусвилл, магнит, \
+         метро), иначе пустая строка;\n\
+         site — для web сайт, как его назвали, иначе пустая строка;\n\
+         query — для web что искать на сайте, для lookup короткий запрос для \
+         поисковика, иначе пустая строка.\n\
+         \n\
+         Про программы и процессы — «сними задачу», «заверши процесс», «убей \
+         программу», «закрой окно» — это close, а не дела: done, postpone и \
+         breakdown только про дела из списка ниже.\n\
+         Команды — только когда человек прямо просит что-то сделать. Рассказ о \
+         том, что происходит, вопрос или обрывок фразы — это chat.\n\
          \n\
          Если назван день без времени — ставь 18:00. Полночь никому не нужна: \
          напоминание в это время человек не услышит.\n\
@@ -605,7 +721,7 @@ fn intent_rules(open: &[Task]) -> String {
          {}\n\
          \n\
          {}",
-        now_line(),
+        [now_line(), crate::web::site_line()].join(" "),
         list,
         EXAMPLES
     )
@@ -643,7 +759,25 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      «выключи телеграм» → {\"intent\":\"close\",\"app\":\"телеграм\"}\n\
      «переведи компьютер в спящий режим» → {\"intent\":\"power\",\"action\":\"sleep\"}\n\
      «выключи компьютер» → {\"intent\":\"power\",\"action\":\"shutdown\"}\n\
-     «отмени выключение» → {\"intent\":\"power\",\"action\":\"cancel\"}";
+     «отмени выключение» → {\"intent\":\"power\",\"action\":\"cancel\"}\n\
+     «сними задачу телеграм» → {\"intent\":\"close\",\"app\":\"телеграм\"}\n\
+     «заверши программу квинчат» → {\"intent\":\"close\",\"app\":\"квинчат\"}\n\
+     «открой параметры bluetooth» → \
+     {\"intent\":\"launch\",\"app\":\"bluetooth\",\"sandbox\":false,\"box\":\"\"}\n\
+     «закажи семечки во вкусвилле» → \
+     {\"intent\":\"order\",\"dishes\":[\"семечки\"],\"store\":\"вкусвилл\"}\n\
+     «открой вайлдберриз» → {\"intent\":\"web\",\"site\":\"вайлдберриз\",\"query\":\"\"}\n\
+     «давай посмотрим чехлы для айфона 14» → \
+     {\"intent\":\"web\",\"site\":\"\",\"query\":\"чехлы для айфона 14\"}\n\
+     «до скольки работает кафе уют на сивцевом вражке» → \
+     {\"intent\":\"lookup\",\"query\":\"кафе Уют Сивцев Вражек часы работы\"}\n\
+     «выключи впн» → {\"intent\":\"vpn\",\"action\":\"off\"}\n\
+     «полистай вниз» → {\"intent\":\"nav\",\"action\":\"down\"}\n\
+     «вернись назад» → {\"intent\":\"nav\",\"action\":\"back\"}\n\
+     «сверни все окна» → {\"intent\":\"nav\",\"action\":\"desktop\"}\n\
+     «звучит музыка» → {\"intent\":\"chat\"}\n\
+     «а что сейчас открыто» → {\"intent\":\"chat\"}\n\
+     «программа сейчас запущена» → {\"intent\":\"chat\"}";
 
 /* ── Завести ─────────────────────────────────────────────────────────────── */
 
@@ -1047,6 +1181,22 @@ pub fn changed(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn statements_are_not_commands() {
+        // Всё это модель однажды разобрала как команды.
+        assert!(!asked_for("launch", "Звучит музыка."));
+        assert!(!asked_for("launch", "Программа сейчас запущена."));
+        assert!(!asked_for("launch", "А что сейчас открыто?"));
+        assert!(!asked_for("list", "Но всё по-прежнему открыто."));
+        assert!(asked_for("launch", "Ноа, открой телеграм"));
+        assert!(asked_for("launch", "запусти мортал шелл в песочнице"));
+        assert!(asked_for("close", "Сними задачу с Квинчат"));
+        assert!(asked_for("list", "какие у меня задачи на сегодня"));
+        assert!(asked_for("nav", "полистай вниз"));
+        // Остальные намерения фильтр не трогает.
+        assert!(asked_for("chat", "что угодно"));
+    }
 
     fn task(id: &str, title: &str) -> Task {
         Task {
