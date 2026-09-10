@@ -14,10 +14,13 @@
 //! то есть не экономия, а трата. Поэтому полки сравниваются целиком, и
 //! выбирается магазин, а не отдельный товар: см. `best_store`.
 //!
-//! Складывать корзину Ноа умеет пока только во ВкусВилле — там разобраны
-//! кнопки и проверен вход. В остальных магазинах он доводит дело до подбора с
-//! ценами и на этом честно останавливается: показать цены и промолчать про то,
-//! что заказ не оформлен, было бы хуже, чем не искать там вовсе.
+//! Корзину Ноа собирает пока только во ВкусВилле. Там это возможно без входа:
+//! официальный MCP-сервер магазина по списку товаров отдаёт ссылку на уже
+//! набранную корзину, и человеку остаются доставка и оплата на сайте. Если же
+//! настроена сессия браузера, где человек вошёл, корзина наполняется прямо в
+//! ней. В остальных магазинах Ноа доводит дело до подбора с ценами и на этом
+//! честно останавливается: показать цены и промолчать про то, что заказ не
+//! оформлен, было бы хуже, чем не искать там вовсе.
 
 mod pick;
 
@@ -36,6 +39,9 @@ pub struct Product {
     /// Адрес карточки. По нему товар кладётся в корзину: класть можно только
     /// то, на что есть ссылка, а не то, что удалось назвать.
     pub url: String,
+    /// Номер товара в магазине. У ВкусВилла это `xml_id` — по нему собирается
+    /// ссылка на корзину. Пусто, если магазин номера не отдал.
+    pub external_id: String,
 }
 
 /// Как магазин называется вслух.
@@ -100,6 +106,8 @@ struct SearchProduct {
     name: String,
     #[serde(default)]
     product_url: String,
+    #[serde(default)]
+    external_id: String,
     /// Копейки: так отдаёт FoodPilot, чтобы не терять на дробях.
     #[serde(default)]
     price_cents: Option<u32>,
@@ -150,6 +158,13 @@ pub async fn search(app: &AppHandle, query: &str) -> Result<Vec<Shelf>, String> 
         .stores
         .into_iter()
         .map(|shelf| {
+            // Номер товара нужен корзине, а подбору — нет, поэтому в `pick`
+            // он не идёт: его находим по адресу выбранной карточки.
+            let numbers: Vec<(String, String)> = shelf
+                .products
+                .iter()
+                .map(|item| (item.product_url.clone(), item.external_id.clone()))
+                .collect();
             let candidates: Vec<pick::Candidate> = shelf
                 .products
                 .into_iter()
@@ -170,6 +185,11 @@ pub async fn search(app: &AppHandle, query: &str) -> Result<Vec<Shelf>, String> 
                     name: chosen.name.clone(),
                     price: chosen.price,
                     url: chosen.url.clone(),
+                    external_id: numbers
+                        .iter()
+                        .find(|(url, _)| *url == chosen.url)
+                        .map(|(_, number)| number.clone())
+                        .unwrap_or_default(),
                 }),
             }
         })
@@ -399,6 +419,61 @@ pub async fn add_to_cart(app: &AppHandle, products: &[Product]) -> Result<CartRe
     Ok(result)
 }
 
+#[derive(Deserialize)]
+struct CartLinkResponse {
+    link: String,
+}
+
+/// Собирает корзину ВкусВилла ссылкой — через официальный MCP магазина.
+///
+/// Входа не нужно: корзина набирается на стороне магазина и открывается по
+/// ссылке уже полной. Не нужно и того, чтобы витрина открывалась с этой
+/// машины: MCP живёт на своём адресе и отвечает там, где сайт недоступен.
+/// Доставку и оплату человек выбирает на сайте сам — оформить за него так
+/// нельзя, но довести до одной кнопки можно.
+pub async fn cart_link(app: &AppHandle, products: &[Product]) -> Result<String, String> {
+    let config = food_config(app)?;
+    let items: Vec<serde_json::Value> = products
+        .iter()
+        .filter_map(|product| product.external_id.parse::<u64>().ok())
+        .map(|xml_id| serde_json::json!({ "xmlId": xml_id, "quantity": 1 }))
+        .collect();
+
+    if items.is_empty() {
+        return Err("у подобранного нет номеров товаров".into());
+    }
+
+    let response = client()
+        .post(format!(
+            "{}/store-adapters/page/vkusvill/cart-link",
+            config.endpoint.trim_end_matches('/')
+        ))
+        .json(&serde_json::json!({ "items": items }))
+        .send()
+        .await
+        .map_err(|err| format!("FoodPilot не ответил: {err}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("ссылку на корзину собрать не вышло: {}", response.status()));
+    }
+
+    let parsed: CartLinkResponse = response
+        .json()
+        .await
+        .map_err(|err| format!("не разобрать ответ: {err}"))?;
+    Ok(parsed.link)
+}
+
+/// Настроена ли сессия браузера, в которой человек вошёл во ВкусВилл.
+///
+/// От неё зависит, как собирается корзина: в сессии — прямо в корзине
+/// магазина, где потом можно и оплатить; без неё — ссылкой.
+pub fn has_browser_session(app: &AppHandle) -> bool {
+    food_config(app)
+        .map(|config| !config.session_id.trim().is_empty())
+        .unwrap_or(false)
+}
+
 /// Настройки заказа, если он вообще включён.
 fn food_config(app: &AppHandle) -> Result<FoodConfig, String> {
     let config = app.state::<AppState>().config().food.clone();
@@ -436,6 +511,7 @@ mod tests {
             name: name.into(),
             price: Some(price),
             url: format!("https://example.test/{name}"),
+            external_id: String::new(),
         }
     }
 

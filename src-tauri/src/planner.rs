@@ -49,6 +49,16 @@ pub enum Intent {
     Order { dishes: Vec<String> },
     /// Спрашивает, что с заказом: что набрано и на каком оно шаге.
     OrderStatus,
+    /// Открыть программу, окно или игру. `sandbox` — в песочнице Sandboxie.
+    Launch {
+        program: String,
+        sandbox: bool,
+        sandbox_box: String,
+    },
+    /// Закрыть программу.
+    Close { program: String },
+    /// Что-то сделать с самим компьютером: сон, выключение, блокировка.
+    Power { action: crate::pc::Power },
 }
 
 /// Название дела, которому не хватает срока.
@@ -100,7 +110,23 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         Intent::Breakdown { task } => Some(breakdown(app, task.as_deref(), &open).await),
         Intent::Order { dishes } => Some(order(app, &dishes).await),
         Intent::OrderStatus => Some(order_status(app)),
+        // Поиск программы читает меню «Пуск» и диски — это блокирующая
+        // работа, и занимать ею асинхронную задачу нельзя.
+        Intent::Launch {
+            program,
+            sandbox,
+            sandbox_box,
+        } => Some(blocking(move || crate::pc::launch(&program, sandbox, &sandbox_box)).await),
+        Intent::Close { program } => Some(blocking(move || crate::pc::close(&program)).await),
+        Intent::Power { action } => Some(crate::pc::power(action)),
     }
+}
+
+/// Выполняет блокирующую работу в отдельном потоке и ждёт её ответа.
+async fn blocking(work: impl FnOnce() -> String + Send + 'static) -> String {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .unwrap_or_else(|_| "Не вышло: работа оборвалась.".into())
 }
 
 /// Рассказывает, что с заказом, и показывает его окном.
@@ -324,6 +350,42 @@ async fn order(app: &AppHandle, dishes: &[String]) -> String {
         return spoken;
     }
 
+    // Входа в браузере нет — корзина собирается ссылкой через MCP магазина.
+    //
+    // Это путь по умолчанию: ему не нужны ни браузер под управлением, ни вход,
+    // ни даже то, чтобы витрина открывалась с этой машины, — MCP живёт на своём
+    // адресе. Корзина открывается в браузере уже набранной, и человеку остаются
+    // доставка и оплата. Сессия браузера нужна тому, кто хочет, чтобы Ноа
+    // складывал в корзину его учётной записи.
+    if !crate::food::has_browser_session(app) {
+        match crate::food::cart_link(app, &quote.found).await {
+            Ok(link) => {
+                if let Err(err) = crate::pc::open(&link) {
+                    log::warn!("ссылка на корзину не открылась: {err}");
+                }
+                for line in &mut shown.lines {
+                    line.in_cart = quote.found.iter().any(|product| {
+                        product.name == line.name && product.external_id.parse::<u64>().is_ok()
+                    });
+                }
+                shown.stage = crate::order::Stage::InCart;
+                shown.link = Some(link);
+                shown.note = "Корзина собрана и открыта в браузере. Доставка и оплата — там.".into();
+                spoken.push_str(
+                    " Собрал корзину и открыл её в браузере — осталось выбрать доставку и оплатить.",
+                );
+            }
+            Err(err) => {
+                log::warn!("ссылка на корзину не собралась: {err}");
+                shown.stage = crate::order::Stage::Failed;
+                shown.note = format!("Корзину собрать не вышло: {err}");
+                spoken.push_str(&format!(" Корзину собрать не вышло: {err}."));
+            }
+        }
+        crate::order::set(app, shown);
+        return spoken;
+    }
+
     match crate::food::add_to_cart(app, &quote.found).await {
         Ok(cart) => {
             spoken.push_str(&format!(" Положил в корзину: {}.", cart.added.len()));
@@ -460,6 +522,22 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             }
         }
         "orderStatus" => Intent::OrderStatus,
+        "launch" | "close" => {
+            let program = text("app");
+            match (program.is_empty(), text("intent") == "launch") {
+                (true, _) => Intent::Chat,
+                (false, true) => Intent::Launch {
+                    program,
+                    sandbox: parsed["sandbox"].as_bool().unwrap_or(false),
+                    sandbox_box: text("box"),
+                },
+                (false, false) => Intent::Close { program },
+            }
+        }
+        "power" => match crate::pc::Power::parse(&text("action")) {
+            Some(action) => Intent::Power { action },
+            None => Intent::Chat,
+        },
         _ => Intent::Chat,
     }
 }
@@ -500,14 +578,24 @@ fn intent_rules(open: &[Task]) -> String {
          разбить на шаги;\n\
          order — просит заказать еду или продукты, купить их, оформить доставку;\n\
          orderStatus — спрашивает, что с заказом: что набрано, на сколько, \
-         на каком он шаге.\n\
+         на каком он шаге;\n\
+         launch — просит открыть или запустить программу, игру, окно или \
+         системную настройку;\n\
+         close — просит закрыть или выключить программу или окно (не компьютер);\n\
+         power — про сам компьютер: усыпить, выключить, перезагрузить, \
+         заблокировать или отменить выключение.\n\
          \n\
          Остальные поля:\n\
          title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
          due — срок в виде ГГГГ-ММ-ДДTЧЧ:ММ или пустая строка, если не назван;\n\
          task — номер дела из списка ниже для done, postpone и breakdown, иначе 0;\n\
          calendar — true, если человек прямо просил в календарь;\n\
-         dishes — для order список блюд, которые просят заказать, иначе пустой.\n\
+         dishes — для order список блюд, которые просят заказать, иначе пустой;\n\
+         app — для launch и close название программы или окна, как его назвал \
+         человек, без слов «открой», «запусти», «закрой»;\n\
+         sandbox — true, если просил запустить в песочнице;\n\
+         box — имя песочницы, если названо, иначе пустая строка;\n\
+         action — для power одно из: sleep, shutdown, restart, lock, cancel.\n\
          \n\
          Если назван день без времени — ставь 18:00. Полночь никому не нужна: \
          напоминание в это время человек не услышит.\n\
@@ -546,7 +634,16 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      {\"intent\":\"order\",\"title\":\"\",\"due\":\"\",\"task\":0,\"calendar\":false,\
      \"dishes\":[\"ленивые голубцы\",\"свекольник\"]}\n\
      «что там с заказом» → \
-     {\"intent\":\"orderStatus\",\"title\":\"\",\"due\":\"\",\"task\":0,\"calendar\":false}";
+     {\"intent\":\"orderStatus\",\"title\":\"\",\"due\":\"\",\"task\":0,\"calendar\":false}\n\
+     «открой диспетчер устройств» → \
+     {\"intent\":\"launch\",\"app\":\"диспетчер устройств\",\"sandbox\":false,\"box\":\"\"}\n\
+     «запусти мортал шелл в песочнице» → \
+     {\"intent\":\"launch\",\"app\":\"мортал шелл\",\"sandbox\":true,\"box\":\"\"}\n\
+     «закрой телеграм» → {\"intent\":\"close\",\"app\":\"телеграм\"}\n\
+     «выключи телеграм» → {\"intent\":\"close\",\"app\":\"телеграм\"}\n\
+     «переведи компьютер в спящий режим» → {\"intent\":\"power\",\"action\":\"sleep\"}\n\
+     «выключи компьютер» → {\"intent\":\"power\",\"action\":\"shutdown\"}\n\
+     «отмени выключение» → {\"intent\":\"power\",\"action\":\"cancel\"}";
 
 /* ── Завести ─────────────────────────────────────────────────────────────── */
 

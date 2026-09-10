@@ -67,6 +67,10 @@ async function refresh() {
   if (over) {
     ui.ceiling.textContent = `Дороже потолка в ${order.maxOrder} ₽ — в корзину не кладу`;
   }
+
+  // Корзина, собранная ссылкой: кнопка возвращает к ней, если браузер
+  // закрыли или он открылся за другими окнами.
+  ui.link.hidden = !order.link;
 }
 
 function renderLine(line) {
@@ -123,5 +127,9 @@ document.addEventListener("keydown", (event) => {
 
 api?.invoke("runtime_config").then((config) => applyTheme(config?.theme));
 api?.listen("order:changed", refresh);
+
+ui.link.addEventListener("click", () => {
+  api?.invoke("open_order_link").catch(() => {});
+});
 
 refresh();

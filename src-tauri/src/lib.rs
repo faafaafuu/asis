@@ -18,6 +18,7 @@ mod jobs;
 mod order;
 mod overlay;
 mod planner;
+mod pc;
 mod review;
 mod secret;
 mod tasks;
@@ -176,6 +177,8 @@ pub fn run() {
             commands::pending_open,
             commands::close_popup,
             commands::popup_active,
+            commands::popup_space,
+            commands::open_order_link,
             commands::popup_taken_over,
             commands::open_tasks,
             commands::close_tasks,
@@ -280,6 +283,10 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
         .name("sufler-voice".into())
         .spawn(move || {
             for event in events {
+                // Любое нажатие голосовых клавиш — работа с окном. Минута до
+                // его закрытия отсчитывается от последнего такого нажатия, а не
+                // от открытия.
+                overlay::touch_popup();
                 match event {
                     voice::hotkey::Event::Speak => {
                         // Тем же пробелом и начинают читать, и обрывают чтение.

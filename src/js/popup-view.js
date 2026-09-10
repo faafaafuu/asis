@@ -59,17 +59,17 @@ const TEMPLATE = `
         <span class="popup__label">Примеры</span>
         <div class="popup__examples" data-el="examples"></div>
       </div>
-      <div class="popup__thread">
-        <div class="popup__messages" data-el="thread"></div>
-        <span class="popup__pending" data-el="pending" hidden>
-          <span class="spinner spinner--sm" aria-hidden="true"></span>Думаю…
-        </span>
-        <div class="popup__ask">
-          <input class="popup__input" data-el="input" type="text" placeholder="Спросить ещё…"
-                 aria-label="Спросить ещё" autocomplete="off" spellcheck="false" />
-          <button class="popup__send" data-el="send" type="button" tabindex="-1"
-                  title="Отправить" aria-label="Отправить вопрос">↵</button>
-        </div>
+    </div>
+    <div class="popup__thread" data-el="threadBox" hidden>
+      <div class="popup__messages" data-el="thread"></div>
+      <span class="popup__pending" data-el="pending" hidden>
+        <span class="spinner spinner--sm" aria-hidden="true"></span>Думаю…
+      </span>
+      <div class="popup__ask">
+        <input class="popup__input" data-el="input" type="text" placeholder="Спросить ещё…"
+               aria-label="Спросить ещё" autocomplete="off" spellcheck="false" />
+        <button class="popup__send" data-el="send" type="button" tabindex="-1"
+                title="Отправить" aria-label="Отправить вопрос">↵</button>
       </div>
     </div>
   </div>
@@ -303,8 +303,9 @@ export class PopupView {
   /**
    * Задать вопрос голосом.
    *
-   * Тред живёт только в раскрытом окне (SPEC §7), а голосом спрашивают из
-   * любого состояния — раскрываем сами, иначе вопрос было бы некуда положить.
+   * Тред стоит под ответом всегда, а не только в раскрытом окне, поэтому
+   * голосовому вопросу есть куда лечь из любого состояния, и раскрывать окно
+   * ради него не нужно.
    */
   askByVoice(text) {
     const question = String(text ?? "").trim();
@@ -313,7 +314,6 @@ export class PopupView {
     // задаче. У него нет термина (`announce` обнуляет `state.term`), и вопрос
     // уходит модели как «объясни пустоту»: она отвечает «уточните, какой
     // термин нужно объяснить». Решить, что делать в этом случае.
-    if (!this.state.expanded) this.expand({ elaborate: false });
     this.ui.input.value = question;
     this.submitAsk({ byVoice: true });
   }
@@ -471,23 +471,40 @@ export class PopupView {
           row.append(bullet, document.createTextNode(text));
           return row;
         });
-        this.#renderList(this.ui.thread, s.thread, (m) => {
-          const wrap = document.createElement("div");
-          wrap.className = "popup__message";
-          const q = document.createElement("span");
-          q.className = "popup__question";
-          q.textContent = m.q;
-          const a = document.createElement("span");
-          a.className = "popup__answer-line";
-          a.textContent = m.a;
-          wrap.append(q, a);
-          return wrap;
-        });
-        this.ui.pending.hidden = !s.pending;
       }
+
+      // Поле «Спросить ещё» — сразу под ответом, а не за кнопкой «?».
+      //
+      // Раньше оно жило в раскрытой части окна, и продолжить разговор текстом
+      // можно было, только догадавшись нажать «?» — кнопку, подписанную как
+      // «проще и с примерами», а вовсе не «задать вопрос». Спросить следующее
+      // хочется сразу, как прочитал ответ; прятать для этого поле — заставлять
+      // искать, где оно.
+      //
+      // Там, где спросить не у кого (Википедия) или не о чем (готовое
+      // напоминание без термина), поля нет: вопрос в пустоту хуже, чем его
+      // отсутствие.
+      const canAsk = this.dialogue && Boolean(s.term);
+      this.ui.threadBox.hidden = !canAsk && s.thread.length === 0;
+      this.#renderList(this.ui.thread, s.thread, (m) => {
+        const wrap = document.createElement("div");
+        wrap.className = "popup__message";
+        const q = document.createElement("span");
+        q.className = "popup__question";
+        q.textContent = m.q;
+        const a = document.createElement("span");
+        a.className = "popup__answer-line";
+        a.textContent = m.a;
+        wrap.append(q, a);
+        return wrap;
+      });
+      this.ui.pending.hidden = !s.pending;
+    } else {
+      this.ui.threadBox.hidden = true;
     }
 
     this.#reportGeometry();
+    this.onChange?.();
   }
 
   /** Полная перерисовка списка: он короткий, дифф не окупается. */
@@ -512,6 +529,11 @@ export class PopupView {
 
   /** Фокус в поле «доспросить» — только по явному действию пользователя. */
   focusAsk() {
-    if (this.state.expanded) this.ui.input.focus();
+    if (!this.ui.threadBox.hidden) this.ui.input.focus();
+  }
+
+  /** Пусто ли поле вопроса: тогда пробел в окне значит «прочитай», а не слово. */
+  get inputEmpty() {
+    return this.ui.input.value === "";
   }
 }

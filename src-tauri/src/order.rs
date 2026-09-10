@@ -66,6 +66,11 @@ pub struct Order {
     pub max_order: u32,
     /// Что сказать человеку про положение дел: причина отказа или что дальше.
     pub note: String,
+    /// Ссылка на собранную корзину в магазине, если корзина собрана ссылкой.
+    ///
+    /// Окно показывает её кнопкой: браузер мог открыться за другими окнами или
+    /// его закрыли по ошибке, и без кнопки к корзине было бы не вернуться.
+    pub link: Option<String>,
     /// Когда обновлялось, чтобы окно могло показать свежесть.
     pub updated_at: String,
 }
@@ -81,6 +86,7 @@ impl Default for Order {
             until_free_delivery: None,
             max_order: 0,
             note: String::new(),
+            link: None,
             updated_at: chrono::Local::now().to_rfc3339(),
         }
     }

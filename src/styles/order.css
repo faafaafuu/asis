@@ -186,3 +186,20 @@ body {
   color: var(--text-muted);
   font-size: var(--size-secondary);
 }
+
+/* Кнопка к корзине в браузере. Единственное действие в окне — поэтому
+   акцентом, но без заливки: окно показывает положение дел, а не торопит. */
+.sum__link {
+  margin-top: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.sum__link:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}

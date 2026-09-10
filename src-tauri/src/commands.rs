@@ -336,6 +336,30 @@ pub fn popup_active() {
     crate::overlay::touch_popup();
 }
 
+/// Пробел в самом окне попапа при пустом поле ввода.
+///
+/// Хук такой пробел не забирает — окно наше, — поэтому окно передаёт его само,
+/// и нажатие значит то же, что пробел поверх чужой программы.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn popup_space() {
+    crate::overlay::touch_popup();
+    crate::voice::hotkey::press_speak();
+}
+
+/// Открывает в браузере корзину текущего заказа.
+///
+/// Адрес берётся из состояния заказа, а не из окна: окно просит «открой
+/// корзину», и открыть по этой просьбе можно только то, что собрал сам Ноа.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn open_order_link() -> Result<(), String> {
+    let link = crate::order::current()
+        .and_then(|order| order.link)
+        .ok_or("корзины со ссылкой нет")?;
+    crate::pc::open(&link)
+}
+
 /// Произнести текст. Возвращается сразу: речь идёт своим чередом.
 #[cfg(desktop)]
 #[tauri::command]
