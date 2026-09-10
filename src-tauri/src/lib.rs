@@ -20,6 +20,7 @@ mod overlay;
 mod planner;
 mod pc;
 mod web;
+mod spend;
 mod review;
 mod secret;
 mod tasks;
@@ -98,6 +99,7 @@ pub fn run() {
             let config_dir = app.path().app_config_dir().ok();
             // Список задач лежит рядом с настройками и читается один раз.
             if let Some(dir) = config_dir.clone() {
+                spend::load(dir.clone());
                 tasks::load(dir);
             }
             let config = Config::load(config_dir);
@@ -183,6 +185,11 @@ pub fn run() {
             commands::popup_active,
             commands::popup_space,
             commands::open_order_link,
+            commands::food_settings,
+            commands::save_food_settings,
+            commands::food_login,
+            commands::order_pay,
+            commands::settings_section,
             commands::popup_taken_over,
             commands::open_tasks,
             commands::close_tasks,

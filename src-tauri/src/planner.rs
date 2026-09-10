@@ -125,7 +125,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
             program,
             sandbox,
             sandbox_box,
-        } => Some(blocking(move || crate::pc::launch(&program, sandbox, &sandbox_box)).await),
+        } => Some(match own_window(&program) {
+            Some(window) => open_own(app, window),
+            None => blocking(move || crate::pc::launch(&program, sandbox, &sandbox_box)).await,
+        }),
         Intent::Close { program } => Some(blocking(move || crate::pc::close(&program)).await),
         Intent::Power { action } => Some(crate::pc::power(action)),
         Intent::Web { site, query } => {
@@ -134,6 +137,128 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         Intent::Lookup { query } => Some(crate::web::lookup(app, &query).await),
         Intent::Vpn { on } => Some(blocking(move || crate::pc::vpn(on)).await),
         Intent::Nav { action } => Some(blocking(move || crate::pc::navigate(action)).await),
+    }
+}
+
+/// Собственное окно Суфлёра, которое просят открыть.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OwnWindow {
+    /// Настройки целиком.
+    Settings,
+    /// Настройки на разделе «Заказы».
+    FoodSettings,
+    /// Окно текущего заказа.
+    Order,
+}
+
+/// Просят ли открыть окно самого Суфлёра, а не чужую программу.
+///
+/// «Настройки заказов» и «окно заказа» — не программы на диске: искать их в
+/// меню «Пуск» бесполезно, а похожее по звучанию там найдётся всегда.
+fn own_window(program: &str) -> Option<OwnWindow> {
+    let lower = program.to_lowercase();
+    let about_orders = lower.contains("заказ") || lower.contains("продукт");
+    let settings = lower.contains("настро") || lower.contains("парамет");
+    match (about_orders, settings) {
+        (true, true) => Some(OwnWindow::FoodSettings),
+        (true, false) => Some(OwnWindow::Order),
+        _ if lower.contains("суфл") || lower.contains("ноа") => Some(OwnWindow::Settings),
+        _ => None,
+    }
+}
+
+fn open_own(app: &AppHandle, window: OwnWindow) -> String {
+    let (opened, spoken) = match window {
+        OwnWindow::Settings => (crate::overlay::show_onboarding(app), "Открываю настройки."),
+        OwnWindow::FoodSettings => (
+            crate::overlay::show_settings_section(app, "food"),
+            "Открываю настройки заказов.",
+        ),
+        OwnWindow::Order => (crate::overlay::show_order(app), "Открываю заказ."),
+    };
+    match opened {
+        Ok(()) => spoken.into(),
+        Err(err) => format!("Окно не открылось: {err}."),
+    }
+}
+
+/// Оплата, подтверждённая человеком кнопкой в окне заказа.
+///
+/// Сумма берётся из заказа — та, что написана на кнопке, — и FoodPilot
+/// оформит, только если на странице оплаты она та же. В учёт оплат без
+/// подтверждения она не идёт: человек её видел и одобрил сам.
+pub async fn pay_confirmed(app: &AppHandle) -> Result<(), String> {
+    let Some(mut shown) = crate::order::current() else {
+        return Err("заказа нет".into());
+    };
+    if shown.stage != crate::order::Stage::AwaitingPayment {
+        return Err("этот заказ оплачивать не нужно".into());
+    }
+    let total = shown.total;
+    shown.note = "Оплачиваю…".into();
+    crate::order::set(app, shown.clone());
+
+    match crate::food::checkout(app, total).await {
+        Ok(done) if done.placed => {
+            shown.stage = crate::order::Stage::Placed;
+            shown.total = done.total_rub.unwrap_or(total);
+            shown.note = "Заказ оформлен и оплачен.".into();
+            crate::order::set(app, shown);
+            Ok(())
+        }
+        Ok(done) => {
+            shown.note = format!("Не оформлено: {}", done.message);
+            crate::order::set(app, shown);
+            Err(done.message)
+        }
+        Err(err) => {
+            shown.note = format!("Не оплачено: {err}");
+            crate::order::set(app, shown);
+            Err(err)
+        }
+    }
+}
+
+/// Собирает корзину ссылкой через MCP магазина и открывает её в браузере.
+///
+/// `fallback` — корзину пытались собрать в аккаунте, и не вышло: витрина
+/// недоступна, вход слетел. Тогда ссылка — запасной путь, которому витрина не
+/// нужна, и об этом говорится: оплатить такую корзину придётся самому.
+async fn basket_by_link(
+    app: &AppHandle,
+    quote: &crate::food::StoreQuote,
+    mut shown: crate::order::Order,
+    missing: &str,
+    fallback: bool,
+) -> String {
+    match crate::food::cart_link(app, &quote.found).await {
+        Ok(link) => {
+            if let Err(err) = crate::pc::open(&link) {
+                log::warn!("ссылка на корзину не открылась: {err}");
+            }
+            for line in &mut shown.lines {
+                line.in_cart = quote.found.iter().any(|product| {
+                    product.name == line.name && product.external_id.parse::<u64>().is_ok()
+                });
+            }
+            shown.stage = crate::order::Stage::InCart;
+            shown.link = Some(link);
+            shown.note = "Корзина открыта в браузере. Доставка и оплата — там.".into();
+            crate::order::set(app, shown);
+            match fallback {
+                false => format!("Готово, корзина открыта в браузере.{missing}"),
+                true => format!(
+                    "В аккаунте собрать не вышло — открыл корзину ссылкой в браузере, оплата там.{missing}"
+                ),
+            }
+        }
+        Err(err) => {
+            log::warn!("ссылка на корзину не собралась: {err}");
+            shown.stage = crate::order::Stage::Failed;
+            shown.note = format!("Корзину собрать не вышло: {err}");
+            crate::order::set(app, shown);
+            format!("Корзину собрать не вышло: {err}.")
+        }
     }
 }
 
@@ -166,9 +291,9 @@ fn order_status(app: &AppHandle) -> String {
         crate::order::Stage::InCart => {
             format!("В корзине {in_cart} на {} рублей.", order.total)
         }
-        crate::order::Stage::TooExpensive => format!(
-            "Набрано на {} рублей — дороже потолка в {}.",
-            order.total, order.max_order
+        crate::order::Stage::AwaitingPayment => format!(
+            "Корзина на {} рублей ждёт подтверждения оплаты.",
+            order.total
         ),
         crate::order::Stage::Placed => format!("Заказ оформлен на {} рублей.", order.total),
         crate::order::Stage::Failed => "С заказом не вышло.".into(),
@@ -334,22 +459,9 @@ async fn order(app: &AppHandle, items: &[crate::food::Wanted], wanted_store: &st
         false => format!(" Не нашёл: {}.", quote.missing.join(", ")),
     };
 
-    // Дороже разрешённого — в корзину не складываем.
-    //
-    // Это то, ради чего потолок и заводился: набор кладётся в настоящую
-    // корзину настоящего магазина, и ошибка подбора на этой сумме стоит денег.
-    if food.max_order > 0 && quote.total > food.max_order {
-        shown.stage = crate::order::Stage::TooExpensive;
-        shown.note = format!(
-            "Дороже потолка в {} рублей — в корзину не положил.",
-            food.max_order
-        );
-        crate::order::set(app, shown);
-        return format!(
-            "Вышло {} рублей — дороже вашего потолка в {}, в корзину не кладу.{missing}",
-            quote.total, food.max_order
-        );
-    }
+    // Дороже предела оплаты без подтверждения — корзина всё равно
+    // собирается: предел ограничивает то, что Ноа платит сам, а не то, что
+    // он кладёт в корзину. Такая корзина ждёт подтверждения — см. ниже.
 
     // TODO(human): решить, что говорить про набор дороже потолка. Поведение
     // определено выше — такой набор в корзину не идёт, — а вопрос остался про
@@ -404,42 +516,16 @@ async fn order(app: &AppHandle, items: &[crate::food::Wanted], wanted_store: &st
     // открывается в браузере уже набранной, и человеку остаются доставка и
     // оплата. Оплатить сам Ноа может только в сессии браузера — см. ниже.
     if !crate::food::has_browser_session(app) {
-        return match crate::food::cart_link(app, &quote.found).await {
-            Ok(link) => {
-                if let Err(err) = crate::pc::open(&link) {
-                    log::warn!("ссылка на корзину не открылась: {err}");
-                }
-                for line in &mut shown.lines {
-                    line.in_cart = quote.found.iter().any(|product| {
-                        product.name == line.name && product.external_id.parse::<u64>().is_ok()
-                    });
-                }
-                shown.stage = crate::order::Stage::InCart;
-                shown.link = Some(link);
-                shown.note = "Корзина открыта в браузере. Доставка и оплата — там.".into();
-                crate::order::set(app, shown);
-                format!("Готово, корзина открыта в браузере.{missing}")
-            }
-            Err(err) => {
-                log::warn!("ссылка на корзину не собралась: {err}");
-                shown.stage = crate::order::Stage::Failed;
-                shown.note = format!("Корзину собрать не вышло: {err}");
-                crate::order::set(app, shown);
-                format!("Корзину собрать не вышло: {err}.")
-            }
-        };
+        return basket_by_link(app, quote, shown, &missing, false).await;
     }
 
     let cart = match crate::food::add_to_cart(app, &quote.found).await {
         Ok(cart) => cart,
+        // Сессия не справилась — витрина недоступна, вход слетел. Корзина
+        // всё равно собирается: ссылкой через MCP, которому витрина не нужна.
         Err(err) => {
-            // Не сложилось — говорим прямо. Молчание здесь хуже всего: человек
-            // решит, что продукты заказаны, и станет ждать курьера.
-            log::warn!("корзина не наполнилась: {err}");
-            shown.stage = crate::order::Stage::Failed;
-            shown.note = format!("В корзину не легло: {err}");
-            crate::order::set(app, shown);
-            return format!("В корзину положить не вышло: {err}.");
+            log::warn!("корзина в сессии не наполнилась: {err} — собираю ссылкой");
+            return basket_by_link(app, quote, shown, &missing, true).await;
         }
     };
 
@@ -457,36 +543,52 @@ async fn order(app: &AppHandle, items: &[crate::food::Wanted], wanted_store: &st
         false => format!(" Не легло: {}.", cart.failed.join(", ")),
     };
 
-    // Оплата без участия человека.
-    //
-    // Только когда он её включил и задан потолок, и только на сумму, которую
-    // показала сама корзина магазина: не на подсчитанную нами по ценам поиска,
-    // которые могли измениться. Сумма, превышающая потолок, не оплачивается —
-    // даже если подбор в него укладывался.
-    if !(food.auto_pay && food.max_order > 0) {
-        shown.note = format!("В корзине магазина.{failed} Оформление и оплата за вами.")
-            .trim()
-            .to_string();
-        crate::order::set(app, shown);
-        return format!("Готово, корзина собрана.{missing}{failed}");
-    }
+    // Оплата без участия человека — в пределах, которые человек задал сам:
+    // суммой одного заказа и суммой за сутки (см. `crate::spend`), и только на
+    // сумму, которую показала сама корзина магазина, а не на подсчитанную нами
+    // по ценам поиска. Всё сверх пределов ждёт подтверждения кнопкой в окне
+    // заказа: собрать корзину можно, а платить без человека — нет.
     let Some(total) = cart.total else {
         shown.note = "Сумму корзины прочитать не удалось — платить вслепую не стал.".into();
         crate::order::set(app, shown);
         return format!("Корзина собрана, но сумму прочитать не вышло — оплату не запускаю.{missing}");
     };
-    if total > food.max_order {
-        shown.note = format!("В корзине {total} рублей — дороже потолка, не оплачено.");
-        crate::order::set(app, shown);
-        return format!(
-            "В корзине {total} рублей — дороже потолка в {}, оплату не запускаю.",
+    let verdict = match food.auto_pay {
+        true => crate::spend::verdict(
+            &crate::spend::history(),
+            Local::now(),
+            total,
+            food.max_order,
+            food.daily_limit,
+        ),
+        false => crate::spend::Verdict::OverOrder,
+    };
+    let waiting = match verdict {
+        crate::spend::Verdict::Allowed => None,
+        _ if !food.auto_pay => Some(format!(
+            "Готово, корзина на {total} ₽ собрана. Оплатить — кнопкой в окне заказа."
+        )),
+        crate::spend::Verdict::OverOrder => Some(format!(
+            "Корзина на {total} ₽ — больше {} ₽, без вас не плачу. Подтвердите оплату в окне заказа.",
             food.max_order
-        );
+        )),
+        crate::spend::Verdict::OverDay { spent } => Some(format!(
+            "Корзина на {total} ₽, а за сутки уже оплачено {spent} из {} ₽. Подтвердите оплату в окне заказа.",
+            food.daily_limit
+        )),
+    };
+    if let Some(spoken) = waiting {
+        shown.stage = crate::order::Stage::AwaitingPayment;
+        shown.total = total;
+        shown.note = "Ждёт вашего подтверждения — кнопка ниже.".into();
+        crate::order::set(app, shown);
+        return format!("{spoken}{missing}{failed}");
     }
 
     match crate::food::checkout(app, total).await {
         Ok(done) if done.placed => {
             let paid = done.total_rub.unwrap_or(total);
+            crate::spend::record(paid);
             shown.stage = crate::order::Stage::Placed;
             shown.total = paid;
             shown.note = "Заказ оформлен и оплачен.".into();

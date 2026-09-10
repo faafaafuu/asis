@@ -262,6 +262,67 @@
         </div>
       </div>
 
+      <!-- Заказ продуктов. Открывается и голосом: «Ноа, открой настройки
+           заказов» — окно тогда прокручивается сюда (id используется для этого). -->
+      <div class="ob__block" data-el="foodBlock" id="food">
+        <h2 class="ob__subtitle">Заказы</h2>
+        <p class="ob__lead">
+          Ноа ищет продукты во ВкусВилле, Магните и Метро и собирает корзину во ВкусВилле.
+          Скажите «Ноа, закажи пять пачек полосатых семечек».
+        </p>
+
+        <label class="ob__check">
+          <input type="checkbox" data-el="foodEnabled" />
+          <span class="ob__check-text"><span>Заказывать продукты голосом</span></span>
+        </label>
+
+        <span class="ob__label">Где искать</span>
+        <label class="ob__check">
+          <input type="checkbox" data-el="storeVkusvill" />
+          <span class="ob__check-text"><span>ВкусВилл — поиск, корзина и оплата</span></span>
+        </label>
+        <label class="ob__check">
+          <input type="checkbox" data-el="storeMagnit" />
+          <span class="ob__check-text"><span>Магнит — поиск и цены</span></span>
+        </label>
+        <label class="ob__check">
+          <input type="checkbox" data-el="storeMetro" />
+          <span class="ob__check-text"><span>Метро — поиск и цены</span></span>
+        </label>
+
+        <label class="ob__check">
+          <input type="checkbox" data-el="foodAutoPay" />
+          <span class="ob__check-text">
+            <span>Оплачивать без подтверждения</span>
+            <span class="ob__hint">В пределах сумм ниже Ноа оформляет и оплачивает заказ сам — картой или СБП, сохранёнными в аккаунте магазина. Дороже — ждёт вашего подтверждения кнопкой в окне заказа.</span>
+          </span>
+        </label>
+
+        <span class="ob__label">Без подтверждения — до, ₽ за заказ</span>
+        <input class="ob__underline" data-el="foodPerOrder" type="number" min="0" step="100" />
+
+        <span class="ob__label">и не больше, ₽ за сутки</span>
+        <input class="ob__underline" data-el="foodPerDay" type="number" min="0" step="100" />
+        <p class="ob__hint" data-el="foodSpent"></p>
+
+        <span class="ob__label">Бесплатная доставка — от, ₽</span>
+        <input class="ob__underline" data-el="foodFreeDelivery" type="number" min="0" step="100" />
+
+        <span class="ob__label">Вход во ВкусВилл</span>
+        <p class="ob__hint">
+          Вход, адрес доставки и карта хранятся в самом ВкусВилле: Суфлёр не видит ни пароля,
+          ни номера карты. Нажмите «Войти» — откроется браузер Ноа; войдите в нём один раз,
+          выберите адрес и способ оплаты. Дальше браузер помнит вход.
+        </p>
+        <div class="ob__row">
+          <button class="ob__btn ob__btn--primary" data-el="foodLogin" type="button">Войти во ВкусВилл</button>
+          <span class="ob__status" data-el="foodLoginStatus"></span>
+        </div>
+
+        <span class="ob__label">Адрес FoodPilot</span>
+        <input class="ob__underline" data-el="foodEndpoint" type="text" spellcheck="false" />
+      </div>
+
       <details class="ob__more" data-el="advanced">
         <summary class="ob__more-head">
           <span class="ob__chevron ob__chevron--right" aria-hidden="true"></span>

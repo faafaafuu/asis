@@ -493,6 +493,101 @@ ui.calendarForget?.addEventListener("click", async () => {
 
 loadTasksSettings();
 
+/* ── Заказы ──────────────────────────────────────────────────────────────── */
+
+/** Код магазина — галочка в разметке. */
+const FOOD_STORES = { vkusvill: "storeVkusvill", magnit: "storeMagnit", metro: "storeMetro" };
+
+async function loadFood() {
+  const food = await api?.invoke("food_settings").catch(() => null);
+  if (!food) {
+    if (ui.foodBlock) ui.foodBlock.hidden = true;
+    return;
+  }
+  ui.foodEnabled.checked = Boolean(food.enabled);
+  for (const [code, el] of Object.entries(FOOD_STORES)) ui[el].checked = food.stores.includes(code);
+  ui.foodAutoPay.checked = Boolean(food.autoPay);
+  ui.foodPerOrder.value = food.perOrder;
+  ui.foodPerDay.value = food.perDay;
+  ui.foodFreeDelivery.value = food.freeDeliveryFrom;
+  ui.foodEndpoint.value = food.endpoint;
+  ui.foodSpent.textContent =
+    food.perDay > 0
+      ? `Оплачено без подтверждения за сутки: ${food.spentToday} из ${food.perDay} ₽`
+      : `Оплачено без подтверждения за сутки: ${food.spentToday} ₽`;
+  ui.foodLoginStatus.textContent = food.signedIn
+    ? "Браузер Ноа уже открывался — вход сохранён в нём"
+    : "Ещё не входили";
+}
+
+async function saveFood() {
+  const amount = (el, fallback) => {
+    const value = Number(el.value);
+    return Number.isFinite(value) && value >= 0 ? Math.round(value) : fallback;
+  };
+  try {
+    await api?.invoke("save_food_settings", {
+      settings: {
+        enabled: ui.foodEnabled.checked,
+        endpoint: ui.foodEndpoint.value.trim(),
+        stores: Object.entries(FOOD_STORES)
+          .filter(([, el]) => ui[el].checked)
+          .map(([code]) => code),
+        autoPay: ui.foodAutoPay.checked,
+        perOrder: amount(ui.foodPerOrder, 3000),
+        perDay: amount(ui.foodPerDay, 5000),
+        freeDeliveryFrom: amount(ui.foodFreeDelivery, 0),
+        spentToday: 0,
+        signedIn: false,
+      },
+    });
+  } catch (err) {
+    ui.foodSpent.textContent = `Не сохранилось: ${err}`;
+    return;
+  }
+  loadFood();
+}
+
+for (const el of [
+  ui.foodEnabled,
+  ui.storeVkusvill,
+  ui.storeMagnit,
+  ui.storeMetro,
+  ui.foodAutoPay,
+  ui.foodPerOrder,
+  ui.foodPerDay,
+  ui.foodFreeDelivery,
+  ui.foodEndpoint,
+]) {
+  el?.addEventListener("change", saveFood);
+}
+
+ui.foodLogin?.addEventListener("click", async () => {
+  ui.foodLoginStatus.textContent = "Открываю браузер…";
+  try {
+    await api?.invoke("food_login");
+    ui.foodLoginStatus.textContent =
+      "Войдите во ВкусВилл в открывшемся окне, выберите адрес и способ оплаты — Ноа запомнит.";
+  } catch (err) {
+    ui.foodLoginStatus.textContent = `Браузер не открылся: ${err}`;
+  }
+});
+
+/**
+ * Прокручивает к разделу.
+ *
+ * Так «Ноа, открой настройки заказов» попадает сразу в «Заказы», а не в начало
+ * длинного окна, где до них ещё листать и листать.
+ */
+function showSection(section) {
+  if (!section) return;
+  document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+loadFood();
+api?.invoke("settings_section").then(showSection).catch(() => {});
+api?.listen("onboarding:section", (event) => showSection(event.payload));
+
 api?.listen("voice:wake", (event) => {
   ui.wakeWord.checked = Boolean(event.payload);
 });

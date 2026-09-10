@@ -347,6 +347,101 @@ pub fn popup_space() {
     crate::voice::hotkey::press_speak();
 }
 
+/* ── Заказы: настройки, вход, оплата кнопкой ────────────────────────────── */
+
+/// Магазины, между которыми можно выбирать, — их коды.
+const FOOD_STORES: &[&str] = &["vkusvill", "magnit", "metro"];
+
+/// Настройки заказов для окна.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FoodSettings {
+    pub enabled: bool,
+    pub endpoint: String,
+    /// Включённые магазины. В настройках хранится обратное — выключенные: так
+    /// новый магазин, добавленный в программу, включён сразу.
+    pub stores: Vec<String>,
+    pub auto_pay: bool,
+    /// Предел одного заказа без подтверждения, ₽.
+    pub per_order: u32,
+    /// Предел за сутки, ₽.
+    pub per_day: u32,
+    pub free_delivery_from: u32,
+    /// Сколько оплачено без подтверждения за последние сутки. Только для показа.
+    #[serde(default)]
+    pub spent_today: u32,
+    /// Открывался ли уже браузер для входа. Только для показа.
+    #[serde(default)]
+    pub signed_in: bool,
+}
+
+#[tauri::command]
+pub fn food_settings(state: State<'_, AppState>) -> FoodSettings {
+    let food = state.config().food.clone();
+    FoodSettings {
+        enabled: food.enabled,
+        endpoint: food.endpoint.clone(),
+        stores: FOOD_STORES
+            .iter()
+            .filter(|code| !food.disabled_stores.iter().any(|off| off == *code))
+            .map(|code| (*code).to_string())
+            .collect(),
+        auto_pay: food.auto_pay,
+        per_order: food.max_order,
+        per_day: food.daily_limit,
+        free_delivery_from: food.free_delivery_from,
+        spent_today: crate::spend::spent_today(),
+        signed_in: !food.session_id.trim().is_empty(),
+    }
+}
+
+#[tauri::command]
+pub fn save_food_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: FoodSettings,
+) -> Result<(), String> {
+    {
+        let mut config = state.config_mut();
+        let food = &mut config.food;
+        food.enabled = settings.enabled;
+        // Пустой адрес — не «выключить», а опечатка: оставляем прежний.
+        if !settings.endpoint.trim().is_empty() {
+            food.endpoint = settings.endpoint.trim().to_string();
+        }
+        food.disabled_stores = FOOD_STORES
+            .iter()
+            .filter(|code| !settings.stores.iter().any(|on| on == *code))
+            .map(|code| (*code).to_string())
+            .collect();
+        food.auto_pay = settings.auto_pay;
+        food.max_order = settings.per_order;
+        food.daily_limit = settings.per_day;
+        food.free_delivery_from = settings.free_delivery_from;
+    }
+    persist(&app, &state)
+}
+
+/// Открывает браузер Ноа на ВкусВилле, чтобы человек вошёл в первый раз.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn food_login(app: AppHandle) -> Result<(), String> {
+    crate::food::open_session(&app, false).await.map(|_| ())
+}
+
+/// Оплачивает заказ, который ждёт подтверждения: человек нажал «Оплатить».
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn order_pay(app: AppHandle) -> Result<(), String> {
+    crate::planner::pay_confirmed(&app).await
+}
+
+/// Раздел настроек, который окно должно показать при загрузке.
+#[tauri::command]
+pub fn settings_section() -> Option<String> {
+    crate::overlay::take_settings_section()
+}
+
 /// Открывает в браузере корзину текущего заказа.
 ///
 /// Адрес берётся из состояния заказа, а не из окна: окно просит «открой

@@ -67,11 +67,11 @@ body {
   color: var(--label);
 }
 .head__stage[data-stage="inCart"],
-.head__stage[data-stage="placed"] {
+.head__stage[data-stage="placed"],
+.head__stage[data-stage="awaitingPayment"] {
   color: var(--accent);
 }
-.head__stage[data-stage="failed"],
-.head__stage[data-stage="tooExpensive"] {
+.head__stage[data-stage="failed"] {
   color: var(--error);
 }
 
@@ -221,4 +221,23 @@ body {
 .head__close:hover {
   color: var(--text);
   background: var(--btn-hover-bg);
+}
+
+/* Оплата кнопкой — единственное действие здесь, которое тратит деньги, поэтому
+   залитое акцентом: его нельзя принять за подпись. */
+.sum__pay {
+  margin-top: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--bg-solid);
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.sum__pay:disabled {
+  opacity: 0.6;
+  cursor: default;
 }

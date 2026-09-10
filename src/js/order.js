@@ -16,7 +16,7 @@ const STAGES = {
   picked: "подобрано",
   inCart: "в корзине",
   placed: "оформлен",
-  tooExpensive: "дороже потолка",
+  awaitingPayment: "ждёт оплаты",
   failed: "не вышло",
 };
 
@@ -66,12 +66,19 @@ async function refresh() {
   const over = order.maxOrder > 0 && order.total > order.maxOrder;
   ui.ceiling.hidden = !over;
   if (over) {
-    ui.ceiling.textContent = `Дороже потолка в ${order.maxOrder} ₽ — в корзину не кладу`;
+    ui.ceiling.textContent = `Дороже ${order.maxOrder} ₽ — без вашего подтверждения не оплачивается`;
   }
 
   // Корзина, собранная ссылкой: кнопка возвращает к ней, если браузер
   // закрыли или он открылся за другими окнами.
   ui.link.hidden = !order.link;
+
+  // Оплата кнопкой — только когда заказ её ждёт. Сумма на кнопке та же, что
+  // уйдёт в магазин: FoodPilot оформит, только если на странице оплаты она
+  // совпадёт.
+  ui.pay.hidden = order.stage !== "awaitingPayment";
+  ui.pay.disabled = false;
+  ui.pay.textContent = `Оплатить ${order.total} ₽`;
 }
 
 function renderLine(line) {
@@ -137,6 +144,17 @@ api?.listen("order:changed", refresh);
 // закрывалось только клавишей Esc.
 ui.close.addEventListener("click", () => {
   api?.invoke("close_order").catch(() => {});
+});
+
+ui.pay.addEventListener("click", async () => {
+  ui.pay.disabled = true;
+  ui.pay.textContent = "Оплачиваю…";
+  try {
+    await api?.invoke("order_pay");
+  } catch (err) {
+    ui.note.textContent = `Не оплачено: ${err}`;
+    ui.pay.disabled = false;
+  }
 });
 
 ui.link.addEventListener("click", () => {

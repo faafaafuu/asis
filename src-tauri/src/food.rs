@@ -284,6 +284,10 @@ pub async fn quote_reporting(
     mut progress: impl FnMut(&StoreQuote),
 ) -> Result<Vec<StoreQuote>, String> {
     let mut quotes: Vec<StoreQuote> = Vec::new();
+    // Магазины, которые человек выключил в настройках, не опрашиваются вовсе.
+    let disabled = food_config(app)
+        .map(|config| config.disabled_stores)
+        .unwrap_or_default();
 
     for item in items {
         let shelves = match search(app, &item.name).await {
@@ -294,6 +298,9 @@ pub async fn quote_reporting(
         };
 
         for shelf in shelves {
+            if disabled.contains(&shelf.store) {
+                continue;
+            }
             let quote = match quotes.iter_mut().find(|quote| quote.store == shelf.store) {
                 Some(quote) => quote,
                 None => {
@@ -377,9 +384,7 @@ struct CartSnapshot {
 /// отсутствие сессии — это не ошибка, а отказ с внятной причиной.
 pub async fn add_to_cart(app: &AppHandle, products: &[Product]) -> Result<CartResult, String> {
     let config = food_config(app)?;
-    if config.session_id.trim().is_empty() {
-        return Err("не в какую корзину класть: сессия браузера не настроена".into());
-    }
+    let session_id = ensure_session(app).await?;
 
     let items: Vec<serde_json::Value> = products
         .iter()
@@ -400,7 +405,7 @@ pub async fn add_to_cart(app: &AppHandle, products: &[Product]) -> Result<CartRe
             "{}/store-adapters/browser-session/vkusvill/cart",
             config.endpoint.trim_end_matches('/')
         ))
-        .json(&serde_json::json!({ "sessionId": config.session_id, "items": items }))
+        .json(&serde_json::json!({ "sessionId": session_id, "items": items }))
         .send()
         .await
         .map_err(|err| format!("FoodPilot не ответил: {err}"))?;
@@ -569,9 +574,7 @@ pub struct Checkout {
 /// другая сумма значит, что оформляется не то, что проверено потолком.
 pub async fn checkout(app: &AppHandle, expected_total: u32) -> Result<Checkout, String> {
     let config = food_config(app)?;
-    if config.session_id.trim().is_empty() {
-        return Err("сессия браузера не настроена".into());
-    }
+    let session_id = ensure_session(app).await?;
 
     let response = client()
         .post(format!(
@@ -579,7 +582,7 @@ pub async fn checkout(app: &AppHandle, expected_total: u32) -> Result<Checkout, 
             config.endpoint.trim_end_matches('/')
         ))
         .json(&serde_json::json!({
-            "sessionId": config.session_id,
+            "sessionId": session_id,
             "expectedTotalRub": expected_total,
         }))
         .send()
@@ -600,6 +603,79 @@ pub async fn checkout(app: &AppHandle, expected_total: u32) -> Result<Checkout, 
         .json()
         .await
         .map_err(|err| format!("не разобрать ответ оформления: {err}"))
+}
+
+#[derive(Deserialize)]
+struct SessionResponse {
+    id: String,
+    status: String,
+}
+
+/// Живая сессия браузера во ВкусВилле: та, что была, или новая.
+///
+/// Номер сессии живёт, пока работает FoodPilot: после его перезапуска
+/// сохранённый номер указывает в пустоту, и корзина отвечала «сессии нет».
+/// Вход при этом не теряется — он хранится в профиле браузера, — поэтому
+/// пропавшая сессия просто открывается заново, тихо, без окна.
+async fn ensure_session(app: &AppHandle) -> Result<String, String> {
+    let config = food_config(app)?;
+    let saved = config.session_id.trim();
+    if !saved.is_empty() {
+        let answer = client()
+            .get(format!(
+                "{}/store-adapters/browser-session/sessions/{saved}",
+                config.endpoint.trim_end_matches('/')
+            ))
+            .send()
+            .await;
+        if let Ok(response) = answer {
+            if response.status().is_success() {
+                if let Ok(session) = response.json::<SessionResponse>().await {
+                    if session.status == "READY_FOR_CART_AUTOMATION"
+                        || session.status == "AWAITING_PROVIDER_LOGIN"
+                    {
+                        return Ok(session.id);
+                    }
+                }
+            }
+        }
+        log::info!("сессия браузера {saved} пропала — открываю заново");
+    }
+    open_session(app, true).await
+}
+
+/// Открывает сессию браузера во ВкусВилле и запоминает её номер.
+///
+/// `headless: false` — с окном браузера: так человек входит в первый раз,
+/// выбирает адрес и способ оплаты. Дальше хватает сессии без окна.
+pub async fn open_session(app: &AppHandle, headless: bool) -> Result<String, String> {
+    let config = food_config(app)?;
+    let response = client()
+        .post(format!(
+            "{}/store-adapters/browser-session/sessions",
+            config.endpoint.trim_end_matches('/')
+        ))
+        .json(&serde_json::json!({ "provider": "vkusvill", "headless": headless }))
+        .send()
+        .await
+        .map_err(|err| format!("FoodPilot не ответил: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("сессия браузера не открылась: {}", response.status()));
+    }
+    let session: SessionResponse = response
+        .json()
+        .await
+        .map_err(|err| format!("не разобрать ответ: {err}"))?;
+    if session.status == "FAILED" {
+        return Err("браузер не запустился".into());
+    }
+
+    let state = app.state::<AppState>();
+    state.config_mut().food.session_id = session.id.clone();
+    if let Err(err) = crate::commands::persist(app, &state) {
+        log::warn!("номер сессии браузера не сохранился: {err}");
+    }
+    Ok(session.id)
 }
 
 /// Настроена ли сессия браузера, в которой человек вошёл во ВкусВилл.

@@ -870,6 +870,36 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Раздел настроек, который окно должно показать, когда загрузится.
+static SETTINGS_SECTION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Открывает настройки сразу на нужном разделе: «Ноа, открой настройки заказов».
+///
+/// Окну, которое уже открыто, раздел приходит событием. Только что созданному
+/// событие не дойдёт — страница ещё грузится, слушателя нет, — поэтому раздел
+/// придерживается здесь, и окно забирает его само: см. `take_settings_section`.
+pub fn show_settings_section(app: &AppHandle, section: &str) -> tauri::Result<()> {
+    use tauri::Emitter;
+
+    let existed = app.get_webview_window(ONBOARDING_LABEL).is_some();
+    if !existed {
+        *SETTINGS_SECTION.lock().unwrap_or_else(|err| err.into_inner()) = Some(section.to_string());
+    }
+    show_onboarding(app)?;
+    if existed {
+        let _ = app.emit_to(ONBOARDING_LABEL, "onboarding:section", section.to_string());
+    }
+    Ok(())
+}
+
+/// Отдаёт придержанный раздел ровно один раз.
+pub fn take_settings_section() -> Option<String> {
+    SETTINGS_SECTION
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .take()
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
