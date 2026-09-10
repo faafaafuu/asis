@@ -329,10 +329,14 @@ fn system_prompt(language: &str) -> &'static str {
 
 /// Потолок длины ответа.
 ///
-/// Без него модель пишет, пока не выговорится. В попапе это лишние секунды
-/// ожидания ради текста, который туда всё равно не поместится, а мелкие модели
-/// на длинной дистанции ещё и уходят в повторы и бессвязицу.
-const ANSWER_LIMIT: u32 = 220;
+/// Без него модель пишет, пока не выговорится, а мелкие модели на длинной
+/// дистанции ещё и уходят в повторы и бессвязицу. Но и тесный потолок вреден:
+/// при 220 токенах — это полтысячи русских знаков — ответ на живой вопрос в
+/// разговоре обрывался на полуслове, и человек видел половину мысли. Краткость
+/// объяснению задаёт подсказка («одним-двумя предложениями»), а потолок лишь
+/// страховка от бесконечного текста; где он всё же срабатывает, ответ
+/// дорезается до конца предложения — см. `finish_at_sentence`.
+const ANSWER_LIMIT: u32 = 700;
 
 /// Насколько модели позволено выбирать неочевидные слова.
 ///
@@ -389,6 +393,12 @@ impl HttpProvider {
             .map(|text| strip_reasoning(&text))
             .map(|text| strip_code_fence(&text).to_string())
             .ok_or(AiError::Parse)?;
+        let text = if cut_short(&value) {
+            log::info!("ответ упёрся в потолок длины — дорезаю до конца предложения");
+            finish_at_sentence(&text)
+        } else {
+            text
+        };
 
         if is_deliberation(&text) {
             log::warn!("модель прислала рассуждение вместо ответа — считаем это отказом");
@@ -522,6 +532,51 @@ fn extract_text(value: &serde_json::Value) -> Option<String> {
         // вернул 200 и текст — молчать из-за формы обёртки нельзя.
         .or_else(|| text_at(value.pointer("/choices/0/message/reasoning")))
         .or_else(|| text_at(value.pointer("/choices/0/message/reasoning_content")))
+}
+
+/// Оборвала ли модель ответ из-за потолка длины, а не потому, что договорила.
+///
+/// OpenAI-совместимые API сообщают это в `finish_reason`, родной API Ollama —
+/// в `done_reason`, Anthropic — в `stop_reason`.
+fn cut_short(value: &serde_json::Value) -> bool {
+    [
+        "/choices/0/finish_reason",
+        "/done_reason",
+        "/stop_reason",
+    ]
+    .iter()
+    .filter_map(|path| value.pointer(path).and_then(|reason| reason.as_str()))
+    .any(|reason| reason == "length" || reason == "max_tokens")
+}
+
+/// Дорезает оборванный текст до последнего законченного предложения.
+///
+/// Оборванная на полуслове фраза читается как поломка, и вслух это слышно
+/// особенно: голос замолкает посреди слова. Законченных предложений почти всегда
+/// хватает, чтобы ответить; если же точки нет вовсе или она у самого начала —
+/// режем по последнему слову и честно ставим многоточие.
+fn finish_at_sentence(text: &str) -> String {
+    let text = text.trim_end();
+    let ends = text
+        .char_indices()
+        .rev()
+        .find(|(at, ch)| {
+            matches!(ch, '.' | '!' | '?' | '…')
+                && text[at + ch.len_utf8()..]
+                    .chars()
+                    .next()
+                    .map_or(true, char::is_whitespace)
+        })
+        .map(|(at, ch)| at + ch.len_utf8());
+
+    match ends {
+        // Меньше трети текста — значит, выбросили бы почти всё сказанное.
+        Some(end) if end * 3 >= text.len() => text[..end].to_string(),
+        _ => match text.rfind(char::is_whitespace) {
+            Some(space) => format!("{}…", text[..space].trim_end()),
+            None => format!("{text}…"),
+        },
+    }
 }
 
 /// Убирает размышление, оставленное моделью прямо в тексте ответа.
@@ -1019,6 +1074,44 @@ impl AiProvider for WikipediaProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cut_answer_ends_on_a_whole_sentence() {
+        let cut = "Отжиманий хватит двадцати. Потом отдых минуту. Дальше повторить три под";
+        assert_eq!(
+            finish_at_sentence(cut),
+            "Отжиманий хватит двадцати. Потом отдых минуту."
+        );
+    }
+
+    #[test]
+    fn without_a_sentence_end_the_cut_is_marked() {
+        // Точки нет — режем по слову и не притворяемся, что мысль закончена.
+        assert_eq!(finish_at_sentence("один два три четы"), "один два три…");
+        // Точка у самого начала выбросила бы почти всё — лучше многоточие.
+        assert_eq!(
+            finish_at_sentence("Да. а дальше очень длинное рассуждение без конца и кра"),
+            "Да. а дальше очень длинное рассуждение без конца и…"
+        );
+    }
+
+    #[test]
+    fn numbers_with_dots_are_not_sentence_ends() {
+        // «2.5» — не конец предложения: после точки нет пробела.
+        assert_eq!(
+            finish_at_sentence("Жирность 2.5 процента. Объём девятьсот милли"),
+            "Жирность 2.5 процента."
+        );
+    }
+
+    #[test]
+    fn only_the_length_limit_counts_as_cut() {
+        assert!(cut_short(&serde_json::json!({ "choices": [{ "finish_reason": "length" }] })));
+        assert!(cut_short(&serde_json::json!({ "done_reason": "length" })));
+        assert!(cut_short(&serde_json::json!({ "stop_reason": "max_tokens" })));
+        assert!(!cut_short(&serde_json::json!({ "choices": [{ "finish_reason": "stop" }] })));
+        assert!(!cut_short(&serde_json::json!({ "done_reason": "stop" })));
+    }
 
     #[test]
     fn mock_finds_term_by_prefix() {
