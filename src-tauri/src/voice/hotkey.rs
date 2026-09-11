@@ -50,6 +50,40 @@ static RECORDING: AtomicBool = AtomicBool::new(false);
 
 static EVENTS: OnceLock<Sender<Event>> = OnceLock::new();
 
+/// Занят ли голос: слушает, думает или говорит. Пока занят — Esc значит
+/// «хватит», и хук сообщает об этом.
+static VOICE_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Отдельный канал для Esc.
+///
+/// Не общий с остальными клавишами: те разбирает поток, который сам бывает
+/// занят ответом по полминуты, и Esc лежал бы в очереди, пока ответ не
+/// прозвучит, — ровно тогда, когда его жмут, чтобы ответ оборвать.
+static CANCELS: OnceLock<Sender<()>> = OnceLock::new();
+
+/// Сообщает хуку, занят ли голос. Зовётся индикатором при показе и скрытии.
+pub fn voice_active(on: bool) {
+    VOICE_ACTIVE.store(on, Ordering::Relaxed);
+}
+
+/// Идёт ли запись по клавише.
+pub fn recording() -> bool {
+    RECORDING.load(Ordering::Relaxed)
+}
+
+/// Забыть о записи по клавише: её отменили клавишей Esc, и отпущенный пробел
+/// уже не значит «вопрос закончен». Отдаёт, шла ли запись.
+pub fn drop_recording() -> bool {
+    RECORDING.swap(false, Ordering::Relaxed)
+}
+
+/// Приёмник нажатий Esc. Зовётся один раз при запуске.
+pub fn cancels() -> Receiver<()> {
+    let (tx, rx) = channel::<()>();
+    let _ = CANCELS.set(tx);
+    rx
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     /// Пробел: прочитать вслух то, что сейчас в окне.
@@ -159,7 +193,8 @@ unsafe extern "system" fn keyboard_proc(
 ) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::Foundation::LRESULT;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, VK_CONTROL, VK_LMENU, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_SPACE,
+        GetAsyncKeyState, VK_CONTROL, VK_ESCAPE, VK_LMENU, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+        VK_SPACE,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, HC_ACTION, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
@@ -182,6 +217,19 @@ unsafe extern "system" fn keyboard_proc(
     // пробел приходит именно таким, и отличать его от «настоящего» значило бы
     // молча не работать у части людей.
     let info = unsafe { *(lparam.0 as *const KBDLLHOOKSTRUCT) };
+
+    // Esc, пока голос занят, — остановить всё. Клавишу не забираем: в
+    // программе под окном Esc тоже может что-то значить.
+    if info.vkCode == VK_ESCAPE.0 as u32
+        && down
+        && (VOICE_ACTIVE.load(Ordering::Relaxed) || RECORDING.load(Ordering::Relaxed))
+    {
+        if let Some(tx) = CANCELS.get() {
+            let _ = tx.send(());
+        }
+        return pass(());
+    }
+
     if info.vkCode != VK_SPACE.0 as u32 {
         // Набрал букву — пробел дальше его. Сочетания с Ctrl, Alt и Win
         // печатью не считаются: Ctrl+C и Alt+Tab текст не набирают.

@@ -180,6 +180,23 @@ pub const HUD_TITLE: &str = "Суфлёр — голос";
 #[cfg(desktop)]
 static HUD_MODE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+/// С какого момента индикатор в нынешнем состоянии. По этому видно, что
+/// «думаю» висит дольше, чем модель вообще имеет право думать.
+#[cfg(desktop)]
+static HUD_SINCE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Висит ли «думаю» дольше предела.
+#[cfg(desktop)]
+pub fn hud_stuck_thinking(limit: std::time::Duration) -> bool {
+    let thinking = HUD_MODE
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .as_deref()
+        == Some("thinking");
+    let since = *HUD_SINCE.lock().unwrap_or_else(|err| err.into_inner());
+    thinking && since.is_some_and(|at| at.elapsed() > limit)
+}
+
 /// В каком состоянии индикатор. Для окна, которое только что загрузилось.
 #[cfg(desktop)]
 pub fn hud_mode() -> String {
@@ -212,6 +229,8 @@ pub fn show_hud(app: &AppHandle, mode: &str) {
         let appearing = current.is_none();
         if current.as_deref() != Some(mode) {
             log::info!("индикатор: {mode}");
+            *HUD_SINCE.lock().unwrap_or_else(|err| err.into_inner()) =
+                Some(std::time::Instant::now());
         }
         *current = Some(mode.to_string());
         appearing
@@ -224,11 +243,15 @@ pub fn show_hud(app: &AppHandle, mode: &str) {
     }
     let _ = window.emit_to(HUD_LABEL, "hud:mode", mode.to_string());
     let _ = window.show();
+    // Пока индикатор на экране, голос занят: Esc его остановит.
+    crate::voice::hotkey::voice_active(true);
 }
 
 #[cfg(desktop)]
 pub fn hide_hud(app: &AppHandle) {
     *HUD_MODE.lock().unwrap_or_else(|err| err.into_inner()) = None;
+    *HUD_SINCE.lock().unwrap_or_else(|err| err.into_inner()) = None;
+    crate::voice::hotkey::voice_active(false);
     if let Some(window) = app.get_webview_window(HUD_LABEL) {
         let _ = window.hide();
     }
@@ -703,6 +726,10 @@ pub fn hide_popup(app: &AppHandle) {
     hide_hud(app);
 
     if let Some(window) = app.get_webview_window(POPUP_LABEL) {
+        use tauri::Emitter;
+        // Окну — весть, что его спрятали: незаконченные запросы отменяются,
+        // иначе ответ, пришедший после Esc, прочитался бы вслух.
+        let _ = window.emit_to(POPUP_LABEL, "popup:closed", ());
         let _ = window.hide();
     }
     *ALIVE_AT.lock().unwrap_or_else(|err| err.into_inner()) = None;

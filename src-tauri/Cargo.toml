@@ -154,6 +154,7 @@ windows = { version = "0.62", features = [
   # Снимок процессов — закрыть программу, свёрнутую в трей: окон у неё нет, и
   # найти её можно только среди процессов.
   "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_ProcessStatus",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

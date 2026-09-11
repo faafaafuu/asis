@@ -72,10 +72,23 @@ pub fn best<'a>(query: &str, candidates: &'a [Candidate]) -> Option<&'a Candidat
         .unwrap_or(0);
     // Ни одно слово не совпало ни у кого — судить о близости не по чему,
     // решает цена по всей полке.
-    let available: Vec<&Candidate> = available
+    let mut available: Vec<&Candidate> = available
         .into_iter()
         .filter(|item| most == 0 || matched(&stems, &item.name) == most)
         .collect();
+
+    // Оптовые упаковки — не выбор для дома.
+    //
+    // За килограмм дешевле всего самая большая упаковка, и чистая цена за
+    // меру выбирала именно её: в оптовом Метро это десять килограммов сыра,
+    // канистра сока и лоток на триста шестьдесят яиц. Завтрак из девяти
+    // позиций так и собрался на тридцать три тысячи рублей. Поэтому к
+    // сравнению за меру допускаются только упаковки не дороже трёх самых
+    // дешёвых подходящих — литр молока проходит, пятилитровая канистра нет.
+    if let Some(cheapest) = available.iter().filter_map(|item| item.price).min() {
+        let ceiling = cheapest.saturating_mul(3).max(cheapest + 150);
+        available.retain(|item| item.price.map_or(true, |price| price <= ceiling));
+    }
     let (first, _) = available.split_first()?;
 
     // Мера берётся у первого товара с распознанным объёмом. Выдача по одному
@@ -375,6 +388,25 @@ mod tests {
         assert_eq!(
             best("семечки", &shelf).map(|item| item.name.as_str()),
             Some("Семечки обжаренные отборные, 200 г")
+        );
+    }
+
+    #[test]
+    fn bulk_packs_are_not_for_home() {
+        // Как в оптовом Метро: канистра дешевле за литр, но для дома не годится.
+        let shelf = [
+            item("Сок апельсиновый, 1 л", 150),
+            item("Сок апельсиновый, канистра 5 л", 600),
+        ];
+        assert_eq!(
+            best("апельсиновый сок", &shelf).map(|item| item.name.as_str()),
+            Some("Сок апельсиновый, 1 л")
+        );
+        // Лоток на триста шестьдесят яиц — тоже.
+        let eggs = [item("Яйцо куриное С1, 10 шт", 120), item("Яйцо куриное С1, 360 шт", 3300)];
+        assert_eq!(
+            best("яйца", &eggs).map(|item| item.name.as_str()),
+            Some("Яйцо куриное С1, 10 шт")
         );
     }
 

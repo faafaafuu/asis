@@ -21,6 +21,8 @@ mod planner;
 mod pc;
 mod web;
 mod spend;
+mod sysinfo;
+mod files;
 mod review;
 mod secret;
 mod tasks;
@@ -160,6 +162,8 @@ pub fn run() {
                 // Список программ собирается заранее, в фоне: иначе первое
                 // «открой блокнот» ждало бы, пока прочитается меню «Пуск».
                 pc::start();
+                // «Думаю», которое висит дольше предела, убирается само.
+                watch_hud(app.handle());
                 watch_reminders(app.handle());
                 review::watch(app.handle());
                 start_wake(app.handle());
@@ -258,7 +262,7 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("не удалось запустить приложение")
-        .run(|_app, event| {
+        .run(|app, event| match event {
             // Программа живёт в трее и переживает свои окна.
             //
             // По умолчанию Tauri завершает приложение, когда закрылось последнее
@@ -270,17 +274,114 @@ pub fn run() {
             // `code.is_none()` отличает этот случай от настоящего выхода: пункт
             // «Выйти» в трее зовёт `app.exit(0)`, и там код проставлен — такой
             // выход мы не отменяем.
-            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+            tauri::RunEvent::ExitRequested { api, code, .. } => {
                 if code.is_none() {
                     api.prevent_exit();
                 }
             }
+            // Настоящий выход: своя модель больше не нужна. Ollama — отдельная
+            // служба и держала бы её в видеопамяти ещё двадцать минут, уже без
+            // программы.
+            #[cfg(desktop)]
+            tauri::RunEvent::Exit => release_model(app),
+            _ => {}
         });
 }
 
 /// Идёт ли сейчас разговор без рук.
 #[cfg(desktop)]
 static CONVERSATION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Сколько раз Ноа останавливали клавишей Esc.
+///
+/// Ход разговора — услышать, подумать, ответить — занимает секунды, а Esc
+/// жмут посреди него. Каждый ход помнит, с какого числа отмен он начат; если
+/// число выросло, ход отменён, и его ответ не произносится.
+#[cfg(desktop)]
+static CANCELS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(desktop)]
+thread_local! {
+    /// С какой отметки отмен начат ход, который ведёт этот поток.
+    /// `u64::MAX` — поток хода не ведёт: напоминания, например, отменять нечем.
+    static TURN: std::cell::Cell<u64> = const { std::cell::Cell::new(u64::MAX) };
+}
+
+#[cfg(desktop)]
+fn begin_turn() {
+    TURN.with(|turn| turn.set(CANCELS.load(std::sync::atomic::Ordering::SeqCst)));
+}
+
+#[cfg(desktop)]
+fn end_turn() {
+    TURN.with(|turn| turn.set(u64::MAX));
+}
+
+/// Отменён ли ход, который ведёт этот поток.
+#[cfg(desktop)]
+pub(crate) fn turn_cancelled() -> bool {
+    TURN.with(|turn| {
+        let started = turn.get();
+        started != u64::MAX && started != CANCELS.load(std::sync::atomic::Ordering::SeqCst)
+    })
+}
+
+/// Esc: остановить всё, что сейчас делает голос.
+///
+/// Прежде Esc закрывал только окно попапа, и только когда оно было на экране.
+/// Индикатор «думаю», разговор без рук, чтение вслух без окна клавишу не
+/// слышали: человек жал Esc, а Ноа продолжал слушать, отвечать или висел с
+/// «думаю». Теперь Esc — одно действие на всё: замолчать, перестать слушать,
+/// убрать индикатор и окно, а ответ, который ещё думается, не произносить.
+#[cfg(desktop)]
+fn cancel_everything(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+
+    log::info!("Esc: останавливаю речь, разговор и ожидание ответа");
+    CANCELS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    // Запись по клавише ещё идёт — выбрасываем её. Отпущенный пробел после
+    // этого вопроса уже не отправит: иначе он забрал бы звук у ожидания имени
+    // и выдал его за вопрос.
+    if voice::hotkey::drop_recording() {
+        let _ = voice::stt::stop();
+        let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
+    }
+    voice::stop();
+    end_conversation(app, false, false);
+    overlay::hide_hud(app);
+    if overlay::is_popup_visible(app) {
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || overlay::hide_popup(&handle));
+    }
+    // Ожидание имени возвращается: Esc останавливает текущее, а не выключает
+    // помощника совсем.
+    start_wake(app);
+}
+
+/// Индикатор «думаю» не висит дольше, чем модель вообще может думать.
+///
+/// Бывает, что ответ теряется по дороге — модель упала, сеть оборвалась, — и
+/// индикатор остаётся с «думаю» навсегда, поверх чужой работы. Предел тот же,
+/// что у самого запроса к модели, плюс запас.
+#[cfg(desktop)]
+fn watch_hud(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-hud-watch".into())
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let limit = {
+                let state = app.state::<AppState>();
+                let limit = state.config().ai.call_limit();
+                limit + std::time::Duration::from_secs(10)
+            };
+            if overlay::hud_stuck_thinking(limit) {
+                log::warn!("индикатор «думаю» висит дольше {} с — убираю", limit.as_secs());
+                overlay::hide_hud(&app);
+            }
+        })
+        .ok();
+}
 
 /// Слушает клавиши голосового режима и раздаёт работу.
 ///
@@ -293,6 +394,18 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
 
     let events = voice::hotkey::install();
     let app = app.clone();
+
+    // Esc — своим потоком: основной бывает занят ответом по полминуты.
+    let cancels = voice::hotkey::cancels();
+    let cancelling = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-cancel".into())
+        .spawn(move || {
+            for () in cancels {
+                cancel_everything(&cancelling);
+            }
+        })
+        .ok();
 
     std::thread::Builder::new()
         .name("sufler-voice".into())
@@ -361,6 +474,10 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         // человек ещё говорит: иначе первая фраза ждала бы его
                         // запуска уже после того, как её произнесли.
                         voice::whisper::warm(&app);
+                        // И модель: за простоем её могли выгрузить, а пока
+                        // человек говорит и пока идёт расшифровка, она успевает
+                        // подняться в память.
+                        wake_local_model(&app);
                         // Порядок важен: сперва показать помощника — вместе
                         // с ним звучит сигнал появления, — дождаться, пока он
                         // отзвучит, и только потом открывать микрофон. Иначе
@@ -370,6 +487,12 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         // можно говорить.
                         overlay::show_hud(&app, "listening");
                         std::thread::sleep(voice::chime_length());
+                        // Пока звучал сигнал, запись могли отменить клавишей
+                        // Esc — тогда микрофон не открываем.
+                        if !voice::hotkey::recording() {
+                            overlay::hide_hud(&app);
+                            continue;
+                        }
                         voice::stt::start(&input_device(&app));
                         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
                     }
@@ -385,6 +508,7 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             continue;
                         };
 
+                        begin_turn();
                         match hear(&app, wav) {
                             // Попрощались, не начав: разговор и не начинаем.
                             Some(text) if is_farewell(&text) => {
@@ -395,15 +519,23 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             // Распоряжение о задачах выполняется здесь же:
                             // «напомни завтра позвонить» — не вопрос, и
                             // объяснение в ответ было бы нелепо.
+                            //
+                            // Разговор после ответа не начинается, если ход
+                            // остановили клавишей Esc: человек сказал «хватит».
                             Some(text) if handled_as_task(&app, &text) => {
-                                start_conversation(&app);
+                                if !turn_cancelled() {
+                                    start_conversation(&app);
+                                }
                             }
                             Some(text) => {
                                 answer_aloud(&app, &text);
-                                start_conversation(&app);
+                                if !turn_cancelled() {
+                                    start_conversation(&app);
+                                }
                             }
                             None => overlay::hide_hud(&app),
                         }
+                        end_turn();
                     }
                 }
             }
@@ -485,7 +617,14 @@ fn input_device(app: &tauri::AppHandle) -> String {
 #[cfg(desktop)]
 fn hear(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
     overlay::show_hud(app, "thinking");
-    hear_quietly(app, wav)
+    let heard = hear_quietly(app, wav);
+    // Esc нажали, пока фраза расшифровывалась, — она отменена вместе с ходом:
+    // ни ответа, ни действия.
+    if turn_cancelled() {
+        log::info!("фраза расшифрована после Esc — не выполняю");
+        return None;
+    }
+    heard
 }
 
 /// То же, но молча: без индикатора и без жалоб в журнал.
@@ -597,8 +736,12 @@ fn wait_until_answered(app: &tauri::AppHandle) {
         limit
     };
     let deadline = Instant::now() + limit;
-    while Instant::now() < deadline && !voice::speaking() {
+    while Instant::now() < deadline && !voice::speaking() && !turn_cancelled() {
         std::thread::sleep(Duration::from_millis(100));
+    }
+    // Остановили клавишей Esc — ждать больше нечего.
+    if turn_cancelled() {
+        return;
     }
 
     if voice::speaking() {
@@ -607,7 +750,7 @@ fn wait_until_answered(app: &tauri::AppHandle) {
     }
 
     let deadline = Instant::now() + Duration::from_secs(300);
-    while Instant::now() < deadline && voice::speaking() {
+    while Instant::now() < deadline && voice::speaking() && !turn_cancelled() {
         std::thread::sleep(Duration::from_millis(100));
     }
 
@@ -917,6 +1060,8 @@ const FAREWELL_ANYWHERE: &[&str] = &[
     "спокойной ночи",
     "хорошего дня",
     "хорошего вечера",
+    "не хочу больше",
+    "больше не хочу",
 ];
 
 /// Прощания, которые считаются только если ими фраза и исчерпывается.
@@ -927,6 +1072,22 @@ const FAREWELL_ANYWHERE: &[&str] = &[
 /// прощание и ничего больше.
 #[cfg(desktop)]
 const FAREWELL_ALONE: &[&str] = &["пока", "покеда", "чао", "бай", "адьос"];
+
+/// Не прощание, а «хватит» — но значит то же: разговор окончен.
+///
+/// Только когда фраза этим и исчерпывается. В проверку «прощание в конце
+/// мысли» эти слова не идут: «стоп, подожди, я про другое» — не конец
+/// разговора, хоть за «стоп» и стоит запятая.
+#[cfg(desktop)]
+const STOP_ALONE: &[&str] = &[
+    "хватит", "стоп", "замолчи", "замолкни", "отбой", "отмена", "заткнись", "отстань",
+    "выключись", "закройся",
+];
+
+/// Имя в обращении — не часть прощания: «Ноа, хватит» — это «хватит», а одно
+/// «Ноа» — зов, а не прощание.
+#[cfg(desktop)]
+const NAMES: &[&str] = &["ноа", "ноя", "ноэ"];
 
 /// Слова, которые в прощании ничего не значат и мешают его узнать:
 /// «ну всё, пока», «ладно, пока», «ок, пока».
@@ -946,10 +1107,14 @@ fn is_farewell(text: &str) -> bool {
     // Убираем знаки и незначащие слова — остаться должно только прощание.
     let words: Vec<&str> = lower
         .split(|c: char| !c.is_alphabetic())
-        .filter(|w| !w.is_empty() && !FILLER.contains(w))
+        .filter(|w| !w.is_empty() && !FILLER.contains(w) && !NAMES.contains(w))
         .collect();
 
-    if !words.is_empty() && words.iter().all(|w| FAREWELL_ALONE.contains(w)) {
+    if !words.is_empty()
+        && words
+            .iter()
+            .all(|w| FAREWELL_ALONE.contains(w) || STOP_ALONE.contains(w))
+    {
         return true;
     }
 
@@ -1039,6 +1204,7 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                 voice::stt::pause_conversation(true);
                 let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
 
+                begin_turn();
                 match hear(&app, wav) {
                     Some(text) if is_farewell(&text) => {
                         log::info!("попрощались («{text}») — разговор окончен");
@@ -1051,6 +1217,7 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                     Some(text) => answer_aloud(&app, &text),
                     None => {}
                 }
+                end_turn();
 
                 if !CONVERSATION.load(Ordering::SeqCst) {
                     break;
@@ -1135,12 +1302,22 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
 
                 // Вопрос сказан той же фразой — отвечаем на него сразу.
                 // Позвали и замолчали — просто слушаем дальше, вопрос впереди.
+                begin_turn();
                 if question.trim().is_empty() {
                     log::info!("позвали без вопроса — жду его");
+                    // Вопрос ещё впереди — модель успеет подняться, если за
+                    // простоем её выгрузили.
+                    wake_local_model(&app);
                 } else if !handled_as_task(&app, &question) {
                     answer_aloud(&app, &question);
                 }
-                start_conversation(&app);
+                let cancelled = turn_cancelled();
+                end_turn();
+                // Остановили клавишей Esc — разговор не начинаем: человек сказал
+                // «хватит», а ожидание имени уже вернула сама остановка.
+                if !cancelled {
+                    start_conversation(&app);
+                }
                 break;
             }
         })
@@ -1261,6 +1438,11 @@ fn remind(app: &tauri::AppHandle, task: &tasks::Task) {
 /// должна попасть в тишину, а не поверх ответа.
 #[cfg(desktop)]
 pub(crate) fn announce(app: &tauri::AppHandle, text: String, wait: bool) {
+    // Ход остановили клавишей Esc, пока ответ думался, — ответ не нужен.
+    if turn_cancelled() {
+        log::info!("ответ пришёл после Esc — не произношу: «{text}»");
+        return;
+    }
     if let Err(err) = overlay::show_for_reminder(app, text.clone()) {
         log::warn!("окно сообщения не открылось: {err}");
     }
@@ -1569,6 +1751,29 @@ pub(crate) fn wake_local_model(app: &tauri::AppHandle) {
     });
 }
 
+/// Выгружает свою модель из памяти при выходе из программы.
+///
+/// Ждём не дольше трёх секунд: выход не должен повиснуть из-за Ollama, а не
+/// успели — память освободится сама по сроку `KEEP_ALIVE`.
+#[cfg(desktop)]
+fn release_model(app: &tauri::AppHandle) {
+    let endpoint = {
+        let state = app.state::<AppState>();
+        let config = state.config();
+        if config.ai.provider != "http" || !crate::config::is_local(&config.ai.endpoint) {
+            return;
+        }
+        config.ai.endpoint.clone()
+    };
+    let host = crate::ollama::host_from(&endpoint);
+    let released = tauri::async_runtime::block_on(async {
+        tokio::time::timeout(std::time::Duration::from_secs(3), crate::ollama::unload_ours(&host)).await
+    });
+    if released.is_err() {
+        log::warn!("модель не выгрузилась за три секунды — Ollama освободит память сама по сроку");
+    }
+}
+
 /// Иконка в трее — единственный видимый след приложения: главного окна у него нет,
 /// а попап живёт по несколько секунд. Без трея пользователь не сможет ни выйти,
 /// ни вернуться к инструкции по разрешениям.
@@ -1758,5 +1963,27 @@ mod tests {
         assert!(!is_farewell("а что было пока меня не было"));
         assert!(!is_farewell("расскажи про альбедо"));
         assert!(!is_farewell(""));
+    }
+}
+
+#[cfg(all(test, desktop))]
+mod farewell_tests {
+    use super::is_farewell;
+
+    #[test]
+    fn stop_words_end_only_a_phrase_of_their_own() {
+        assert!(is_farewell("Хватит."));
+        assert!(is_farewell("Ноа, хватит"));
+        assert!(is_farewell("ну всё, стоп"));
+        assert!(is_farewell("Замолчи!"));
+        assert!(!is_farewell("Стоп, подожди, я про другое"));
+        assert!(!is_farewell("хватит ли денег на заказ"));
+    }
+
+    #[test]
+    fn the_name_alone_is_a_call_not_a_goodbye() {
+        assert!(!is_farewell("Ноа"));
+        assert!(!is_farewell("Ноа, открой телеграм"));
+        assert!(is_farewell("Ноа, пока"));
     }
 }

@@ -68,6 +68,22 @@ pub enum Intent {
     Vpn { on: bool },
     /// Полистать страницу, вернуться назад, закрыть вкладку.
     Nav { action: crate::pc::Nav },
+    /// Что с компьютером: процессор, память, диски.
+    System { topic: crate::sysinfo::Topic },
+    /// Что за ошибка на экране и что с ней делать.
+    Diagnose,
+    /// Найти файл на компьютере.
+    Find { query: String, kind: crate::files::Kind },
+    /// Напечатать текст в окне, где человек работает.
+    Type { text: String },
+    /// Написать сообщение в мессенджере: открыть его и заготовить текст.
+    Message { app: String, to: String, text: String },
+    /// Отправить напечатанное.
+    Send,
+    /// Вставить заготовленное сообщение в открытый чат.
+    Paste,
+    /// Готовый ответ без действия: переспросить, пояснить.
+    Say(String),
 }
 
 /// Название дела, которому не хватает срока.
@@ -87,12 +103,18 @@ pub fn awaiting_time() -> bool {
 /// Забывает недоспрошенное дело. Зовётся, когда разговор кончается.
 pub fn forget_pending() {
     *AWAITING_TIME.lock().unwrap_or_else(|err| err.into_inner()) = None;
+    // И вопрос «Отправить?»: «да» в следующем разговоре — ответ уже не ему.
+    *PENDING_SEND.lock().unwrap_or_else(|err| err.into_inner()) = None;
 }
 
 /// Выполняет распоряжение и отдаёт то, что сказать вслух.
 ///
 /// `None` означает «это был обычный вопрос» — фразу надо обработать как всегда.
 pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
+    // Напечатанное ждёт подтверждения: «да» — отправить, «нет» — оставить.
+    if let Some(reply) = confirm_send(said) {
+        return Some(reply);
+    }
     // Дело ждёт срока — значит, сказанное сейчас и есть срок.
     if awaiting_time() {
         return Some(finish_pending(app, said).await);
@@ -137,6 +159,22 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         Intent::Lookup { query } => Some(crate::web::lookup(app, &query).await),
         Intent::Vpn { on } => Some(blocking(move || crate::pc::vpn(on)).await),
         Intent::Nav { action } => Some(blocking(move || crate::pc::navigate(action)).await),
+        Intent::System { topic } => Some(blocking(move || crate::sysinfo::status(topic)).await),
+        Intent::Diagnose => Some(crate::sysinfo::diagnose(app, said).await),
+        Intent::Find { query, kind } => {
+            Some(blocking(move || crate::files::find(&query, kind)).await)
+        }
+        Intent::Type { text } => Some(blocking(move || type_and_ask(&text)).await),
+        Intent::Message {
+            app: messenger,
+            to,
+            text,
+        } => Some(blocking(move || draft_message(&messenger, &to, &text)).await),
+        // Отправка без напечатанного — нажатие Enter в чужом окне вслепую. Её
+        // нет: отправляется только то, что Ноа напечатал и о чём спросил.
+        Intent::Send => Some("Отправлять нечего — сначала скажите, что напечатать.".into()),
+        Intent::Paste => Some(blocking(paste_pending).await),
+        Intent::Say(text) => Some(text),
     }
 }
 
@@ -260,6 +298,104 @@ async fn basket_by_link(
             format!("Корзину собрать не вышло: {err}.")
         }
     }
+}
+
+/// Напечатанное, которое ждёт «отправь», — когда оно напечатано.
+static PENDING_SEND: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Сообщение, которое ждёт, пока человек откроет нужный чат и скажет «вставь».
+static PENDING_TEXT: std::sync::Mutex<Option<(String, std::time::Instant)>> =
+    std::sync::Mutex::new(None);
+
+/// Печатает и спрашивает, отправлять ли.
+///
+/// Отправка — отдельный шаг с подтверждением, всегда. Сообщение, ушедшее от
+/// имени человека по ошибке распознавания, не вернуть, а «да» стоит секунду.
+fn type_and_ask(text: &str) -> String {
+    let typed = crate::pc::type_text(text);
+    if typed.starts_with("Напечатал") {
+        *PENDING_SEND.lock().unwrap_or_else(|err| err.into_inner()) = Some(std::time::Instant::now());
+        return "Напечатал. Отправить?".into();
+    }
+    typed
+}
+
+fn send_now() -> String {
+    *PENDING_SEND.lock().unwrap_or_else(|err| err.into_inner()) = None;
+    match crate::pc::press_enter() {
+        true => "Отправил.".into(),
+        false => "Не получилось нажать Enter.".into(),
+    }
+}
+
+fn paste_pending() -> String {
+    let pending = PENDING_TEXT.lock().unwrap_or_else(|err| err.into_inner()).take();
+    match pending {
+        Some((text, at)) if at.elapsed() < std::time::Duration::from_secs(600) => type_and_ask(&text),
+        _ => "Вставлять нечего — скажите, что написать.".into(),
+    }
+}
+
+/// Сообщение в мессенджере: открыть его и заготовить текст.
+///
+/// Нужный чат человек выбирает сам — щелчком. Искать собеседника по имени в
+/// чужом окне значит печатать вслепую: если в окне открыт другой чат, имя
+/// собеседника легло бы в его поле ввода. Поэтому: мессенджер открыт, текст
+/// заготовлен, чат выбран человеком — и только тогда «вставь», а за ним
+/// «отправь».
+fn draft_message(messenger: &str, to: &str, text: &str) -> String {
+    let text = text.trim();
+    if text.is_empty() {
+        return "Что написать?".into();
+    }
+    let messenger = match messenger.trim() {
+        "" => "telegram",
+        named => named,
+    };
+    let name = match crate::pc::open_named(messenger) {
+        Ok(name) => name,
+        Err(err) => return format!("Не открыл {messenger}: {err}."),
+    };
+    *PENDING_TEXT.lock().unwrap_or_else(|err| err.into_inner()) =
+        Some((text.to_string(), std::time::Instant::now()));
+    let whom = match to.trim() {
+        "" => String::new(),
+        named => format!(" с {named}"),
+    };
+    format!(
+        "Открыл {name}. Откройте чат{whom} и скажите «вставь» — я впишу: «{text}». \
+         Отправлю, только когда скажете."
+    )
+}
+
+/// Ответ на «Отправить?»: «да» отправляет, «нет» оставляет текст в поле.
+/// Любая другая фраза — значит, человек занялся другим, и вопрос снимается.
+fn confirm_send(said: &str) -> Option<String> {
+    {
+        let mut pending = PENDING_SEND.lock().unwrap_or_else(|err| err.into_inner());
+        let fresh = pending.is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(120));
+        if !fresh {
+            *pending = None;
+            return None;
+        }
+        *pending = None;
+    }
+    let lower = said.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|ch: char| !ch.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .collect();
+    const NO: &[&str] = &["нет", "не", "отмена", "стоп", "погоди", "подожди"];
+    const YES: &[&str] = &[
+        "да", "отправь", "отправляй", "отправить", "давай", "ага", "конечно", "жми", "угу",
+    ];
+    if words.iter().any(|word| NO.contains(word)) {
+        return Some("Хорошо, не отправляю — текст остался в поле.".into());
+    }
+    if words.iter().any(|word| YES.contains(word)) {
+        return Some(send_now());
+    }
+    None
 }
 
 /// Выполняет блокирующую работу в отдельном потоке и ждёт её ответа.
@@ -605,6 +741,16 @@ async fn order(app: &AppHandle, items: &[crate::food::Wanted], wanted_store: &st
         return format!("{spoken}{missing}{failed}");
     }
 
+    // Остановили клавишей Esc, пока собиралась корзина, — не платим: человек
+    // передумал, а списанные деньги не вернуть.
+    if crate::turn_cancelled() {
+        shown.stage = crate::order::Stage::AwaitingPayment;
+        shown.total = total;
+        shown.note = "Остановлено клавишей Esc — оплатить можно кнопкой ниже.".into();
+        crate::order::set(app, shown);
+        return "Остановил: корзина собрана, но не оплачена.".into();
+    }
+
     match crate::food::checkout(app, total).await {
         Ok(done) if done.placed => {
             let paid = done.total_rub.unwrap_or(total);
@@ -671,6 +817,31 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
     let task = pick_task(&parsed, open);
 
     let intent = text("intent");
+
+    // «Купи яйца, бекон и хлеб» модель порой записывает делом — так в список
+    // дел и попал завтрак. Покупка — это заказ: если в сказанном нет ни
+    // «напомни», ни «задачи», а есть «купи» или «закажи», то, что модель
+    // назвала делом, заказывается.
+    if intent == "add" && !asks_to_note(said) && bought(said) {
+        let items: Vec<crate::food::Wanted> = text("title")
+            .split([',', ';'])
+            .flat_map(|part| part.split(" и "))
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(|name| crate::food::Wanted {
+                name: name.to_string(),
+                quantity: 1,
+            })
+            .collect();
+        if !items.is_empty() {
+            log::info!("«{said}» разобрано как дело, но это покупка — заказываю");
+            return Intent::Order {
+                items,
+                store: text("store"),
+            };
+        }
+    }
+
     if !asked_for(&intent, said) {
         log::info!("«{said}» разобрано как {intent}, но просьбы в нём нет — считаю разговором");
         return Intent::Chat;
@@ -694,10 +865,37 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
         "postpone" => Intent::Postpone { task, due },
         "breakdown" => Intent::Breakdown { task },
         "order" => {
-            let items = wanted_items(&parsed);
+            // «Корзина», «заказ», «покупки» — не товары, а слова о самом заказе:
+            // «собери во ВкусВилле корзину» модель порой так и записывает —
+            // товаром «корзина».
+            let mut items: Vec<crate::food::Wanted> = wanted_items(&parsed)
+                .into_iter()
+                .filter(|item| !about_the_order(&item.name))
+                .collect();
+            // «Ингредиенты для завтрака» — не товар: искать эти слова в
+            // магазине бесполезно, а наберётся что попало. Переспрашиваем.
+            if items.iter().any(|item| vague(&item.name)) {
+                return Intent::Say(
+                    "Скажите, какие именно продукты — например: яйца, хлеб, молоко.".into(),
+                );
+            }
+            // Уточнение без новых товаров — «собери во ВкусВилле корзину».
+            // Модель, не найдя товаров в сказанном, берёт их из примеров: так
+            // вместо яиц и молока приехали семечки. Если ни один товар в
+            // сказанном не звучал, а фраза — продолжение, берём текущий заказ.
+            let mentioned = items.iter().any(|item| mentions(said, &item.name));
+            if !mentioned && follow_up(said) {
+                if let Some(current) = fresh_order_items() {
+                    log::info!("«{said}» — уточнение без новых товаров, беру текущий заказ");
+                    items = current;
+                }
+            }
             // Без товаров заказывать нечего, а молчаливый пустой заказ выглядел
-            // бы как поломка. Пусть лучше ответит как на обычную фразу.
-            if items.is_empty() {
+            // бы как поломка. Просили купить — переспрашиваем, что именно;
+            // иначе пусть ответит как на обычную фразу.
+            if items.is_empty() && bought(said) {
+                Intent::Say("Что заказать? Назовите продукты — например: яйца, хлеб, молоко.".into())
+            } else if items.is_empty() {
                 Intent::Chat
             } else {
                 Intent::Order {
@@ -747,6 +945,28 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             Some(action) => Intent::Nav { action },
             None => Intent::Chat,
         },
+        "system" => Intent::System {
+            topic: crate::sysinfo::Topic::parse(&text("topic")),
+        },
+        "diagnose" => Intent::Diagnose,
+        "find" => Intent::Find {
+            query: match text("query") {
+                query if query.is_empty() => said.to_string(),
+                query => query,
+            },
+            kind: crate::files::Kind::parse(&text("kind")),
+        },
+        "type" => match text("text") {
+            typed if typed.is_empty() => Intent::Say("Что напечатать?".into()),
+            typed => Intent::Type { text: typed },
+        },
+        "message" => Intent::Message {
+            app: text("app"),
+            to: text("to"),
+            text: text("text"),
+        },
+        "send" => Intent::Send,
+        "paste" => Intent::Paste,
         _ => Intent::Chat,
     }
 }
@@ -820,6 +1040,88 @@ fn order_line() -> String {
     }
 }
 
+/// Просят ли записать дело: «напомни», «запиши», «добавь в задачи».
+fn asks_to_note(said: &str) -> bool {
+    let said = said.to_lowercase();
+    [
+        "напомн", "запиш", "задач", "дело", "дела", "делах", "делам", "план", "календар",
+        "не забыть", "не забудь", "заплан", "встреч", "дедлайн", "добав",
+    ]
+    .iter()
+    .any(|stem| said.contains(stem))
+}
+
+/// Можно ли показать текст русскому читателю: без иероглифов и корейского.
+///
+/// Локальная модель порой соскальзывает в китайский посреди русской фразы —
+/// «написать первое 草稿». Такой шаг или совет не показывается.
+fn readable(text: &str) -> bool {
+    !text.chars().any(|ch| {
+        matches!(
+            ch as u32,
+            0x3040..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF
+        )
+    })
+}
+
+/// Похоже ли на покупку: «купи», «закажи», «привези».
+fn bought(said: &str) -> bool {
+    let lower = said.to_lowercase();
+    ["закаж", "купи", "купить", "заказ", "привез", "достав", "корзин"]
+        .iter()
+        .any(|stem| lower.contains(stem))
+}
+
+/// Не товар, а описание: «ингредиенты для завтрака», «продукты на ужин».
+fn vague(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.contains("ингредиент")
+        || lower.starts_with("продукт")
+        || lower.contains("для завтрак")
+        || lower.contains("на завтрак")
+        || lower.contains("для ужин")
+        || lower.contains("для обед")
+        || lower.trim() == "еда"
+}
+
+/// Звучал ли товар в сказанном — хотя бы одним словом.
+fn mentions(said: &str, name: &str) -> bool {
+    let said = said.to_lowercase().replace('ё', "е");
+    name.to_lowercase()
+        .replace('ё', "е")
+        .split(|ch: char| !ch.is_alphabetic())
+        .filter(|word| word.chars().count() >= 4)
+        .any(|word| said.contains(&word.chars().take(4).collect::<String>()))
+}
+
+/// Слово о самом заказе, а не товар: «корзина», «заказ», «покупки».
+fn about_the_order(name: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "корзина", "корзину", "корзинка", "корзинку", "заказ", "покупки", "товары", "продукты",
+        "все", "всё", "то же самое",
+    ];
+    WORDS.contains(&name.trim().to_lowercase().as_str())
+}
+
+/// Похоже ли на продолжение заказа, а не на новый: «собери там», «оформи».
+fn follow_up(said: &str) -> bool {
+    let lower = said.to_lowercase();
+    [
+        "собери", "корзин", "там", "туда", "оформи", "эту", "эти", "то же", "тоже", "давай",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+/// Товары текущего заказа, если он свежий — не старше получаса.
+fn fresh_order_items() -> Option<Vec<crate::food::Wanted>> {
+    let order = crate::order::current()?;
+    let fresh = DateTime::parse_from_rfc3339(&order.updated_at)
+        .map(|at| Local::now().signed_duration_since(at) < Duration::minutes(30))
+        .unwrap_or(false);
+    (fresh && !order.asked.is_empty()).then_some(order.asked)
+}
+
 /// Есть ли в сказанном сама просьба.
 ///
 /// Разбор реплики делает небольшая модель, и она охотно достраивает команду
@@ -852,6 +1154,19 @@ fn asked_for(intent: &str, said: &str) -> bool {
             "вкладк", "обнови", "обновить", "сверни", "рабочий стол", "в начало", "в конец",
         ],
         "vpn" => &["впн", "vpn", "вэпээн", "випиэн", "ви пи эн"],
+        "system" => &[
+            "груз", "тормоз", "процесс", "памят", "оператив", "диск", "места", "процессор",
+            "нагрузк", "видеокарт", "температур", "компьютер", "систем",
+        ],
+        "diagnose" => &[
+            "ошибк", "не работает", "сломал", "проблем", "случилось", "глючит", "висит", "вылет",
+            "зависа", "почему", "что это",
+        ],
+        "find" => &["найди", "найти", "поищи", "где лежит", "где файл", "где мой", "где мо"],
+        "type" => &["напиши", "напечатай", "впиши", "введи", "набери", "напечат"],
+        "message" => &["напиши", "отправь", "сообщени", "скажи", "передай"],
+        "send" => &["отправ", "жми", "энтер", "enter"],
+        "paste" => &["встав"],
         "power" => &[
             "выключ", "перезагр", "перезапуст", "усыпи", "спящ", "сон", "заблокир", "блокир",
             "отмени", "отмена", "гибернац",
@@ -871,6 +1186,15 @@ fn pick_task(parsed: &serde_json::Value, open: &[Task]) -> Option<String> {
 }
 
 fn intent_rules(open: &[Task]) -> String {
+    rules_with_context(
+        open,
+        &[now_line(), crate::web::site_line(), order_line()].join(" "),
+    )
+}
+
+/// Правила разбора с заданной строкой обстановки: время, открытый сайт,
+/// текущий заказ. Отдельно — ради сравнения моделей на одной обстановке.
+fn rules_with_context(open: &[Task], context: &str) -> String {
     let list = if open.is_empty() {
         "Открытых дел нет.".to_string()
     } else {
@@ -911,7 +1235,16 @@ fn intent_rules(open: &[Task]) -> String {
          часы работы, адрес, телефон, цены, расписание, новости, погоду, курс;\n\
          vpn — просит включить или выключить VPN;\n\
          nav — просит полистать страницу, вернуться назад или вперёд, закрыть \
-         вкладку, обновить страницу или свернуть все окна.\n\
+         вкладку, обновить страницу или свернуть все окна;\n\
+         system — спрашивает о состоянии компьютера: что грузит процессор, память \
+         или диск, сколько места, почему тормозит;\n\
+         diagnose — спрашивает про ошибку или проблему на компьютере: «что это за \
+         ошибка», «почему не работает», «что случилось»;\n\
+         find — просит найти файл на компьютере;\n\
+         type — просит напечатать или вписать текст в окно;\n\
+         message — просит написать кому-то сообщение в мессенджере;\n\
+         send — просит отправить напечатанное;\n\
+         paste — просит вставить заготовленный текст: «вставь».\n\
          \n\
          Остальные поля:\n\
          title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
@@ -932,7 +1265,12 @@ fn intent_rules(open: &[Task]) -> String {
          метро), иначе пустая строка;\n\
          site — для web сайт, как его назвали, иначе пустая строка;\n\
          query — для web что искать на сайте, для lookup короткий запрос для \
-         поисковика, иначе пустая строка.\n\
+         поисковика, для find что за файл («паспорт»), иначе пустая строка;\n\
+         topic — для system одно из: cpu, memory, disk, overview;\n\
+         kind — для find тип файла: image, document, video, audio или any;\n\
+         text — для type и message сам текст, слово в слово, без «напиши»;\n\
+         to — для message кому писать, как назвали; app для message — мессенджер, \
+         по умолчанию telegram.\n\
          \n\
          Про программы и процессы — «сними задачу», «заверши процесс», «убей \
          программу», «закрой окно» — это close, а не дела: done, postpone и \
@@ -942,6 +1280,9 @@ fn intent_rules(open: &[Task]) -> String {
          Если человек уточняет текущий заказ — сколько штук, какой именно \
          товар, в каком магазине, — верни order со всем заказом целиком, уже с \
          уточнением; товары, которых он не касался, оставь как были.\n\
+         Покупки и продукты — это order, а не add: add только когда просят \
+         записать дело или напомнить о нём. «Продукты на яичницу» — это order с \
+         конкретными продуктами (яйца, масло), а не «ингредиенты».\n\
          \n\
          Если назван день без времени — ставь 18:00. Полночь никому не нужна: \
          напоминание в это время человек не услышит.\n\
@@ -951,7 +1292,7 @@ fn intent_rules(open: &[Task]) -> String {
          {}\n\
          \n\
          {}",
-        [now_line(), crate::web::site_line(), order_line()].join(" "),
+        context,
         list,
         EXAMPLES
     )
@@ -1013,7 +1354,22 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      «сверни все окна» → {\"intent\":\"nav\",\"action\":\"desktop\"}\n\
      «звучит музыка» → {\"intent\":\"chat\"}\n\
      «а что сейчас открыто» → {\"intent\":\"chat\"}\n\
-     «программа сейчас запущена» → {\"intent\":\"chat\"}";
+     «программа сейчас запущена» → {\"intent\":\"chat\"}\n\
+     «что сейчас грузит компьютер» → {\"intent\":\"system\",\"topic\":\"overview\"}\n\
+     «сколько места на диске» → {\"intent\":\"system\",\"topic\":\"disk\"}\n\
+     «вылезла какая-то ошибка, что это» → {\"intent\":\"diagnose\"}\n\
+     «найди на компьютере фото паспорта» → \
+     {\"intent\":\"find\",\"query\":\"паспорт\",\"kind\":\"image\"}\n\
+     «напечатай: буду через десять минут» → \
+     {\"intent\":\"type\",\"text\":\"буду через десять минут\"}\n\
+     «напиши в телеграм маше, что я опоздаю» → \
+     {\"intent\":\"message\",\"app\":\"telegram\",\"to\":\"маша\",\"text\":\"я опоздаю\"}\n\
+     «вставь» → {\"intent\":\"paste\"}\n\
+     «отправляй» → {\"intent\":\"send\"}\n\
+     «закажи продукты на яичницу» → \
+     {\"intent\":\"order\",\"items\":[{\"name\":\"яйца\",\"quantity\":1},{\"name\":\"сливочное масло\",\"quantity\":1}],\"store\":\"\"}\n\
+     «купи яйца, бекон и хлеб» → \
+     {\"intent\":\"order\",\"items\":[{\"name\":\"яйца\",\"quantity\":1},{\"name\":\"бекон\",\"quantity\":1},{\"name\":\"хлеб\",\"quantity\":1}],\"store\":\"\"}";
 
 /* ── Завести ─────────────────────────────────────────────────────────────── */
 
@@ -1186,7 +1542,7 @@ async fn breakdown(app: &AppHandle, id: Option<&str>, open: &[Task]) -> String {
             list.iter()
                 .filter_map(|step| step.as_str())
                 .map(|step| step.trim().to_string())
-                .filter(|step| !step.is_empty())
+                .filter(|step| !step.is_empty() && readable(step))
                 .collect()
         })
         .unwrap_or_default();
@@ -1198,7 +1554,7 @@ async fn breakdown(app: &AppHandle, id: Option<&str>, open: &[Task]) -> String {
     let advice = parsed["advice"]
         .as_str()
         .map(str::trim)
-        .filter(|advice| !advice.is_empty())
+        .filter(|advice| !advice.is_empty() && readable(advice))
         .map(str::to_string);
 
     tasks::set_plan(&task.id, steps.clone(), advice.clone());
@@ -1236,7 +1592,7 @@ pub async fn plan_task(app: &AppHandle, id: &str) -> Result<Option<Task>, String
             list.iter()
                 .filter_map(|step| step.as_str())
                 .map(|step| step.trim().to_string())
-                .filter(|step| !step.is_empty())
+                .filter(|step| !step.is_empty() && readable(step))
                 .collect()
         })
         .unwrap_or_default();
@@ -1248,7 +1604,7 @@ pub async fn plan_task(app: &AppHandle, id: &str) -> Result<Option<Task>, String
     let advice = parsed["advice"]
         .as_str()
         .map(str::trim)
-        .filter(|advice| !advice.is_empty())
+        .filter(|advice| !advice.is_empty() && readable(advice))
         .map(str::to_string);
 
     Ok(tasks::set_plan(&task.id, steps, advice))
@@ -1258,6 +1614,7 @@ const PLAN_RULES: &str = "Разбей дело на 3–5 понятных ша
      с чего начать. Ответь одним объектом JSON без пояснений:\n\
      {\"steps\": [\"…\", \"…\"], \"advice\": \"…\"}\n\
      Шаги — в неопределённой форме, каждый на одно действие, не длиннее семи слов.\n\
+     Пиши только по-русски: ни иероглифов, ни английских слов.\n\
      Совет — одно предложение.\n\
      Пример для дела «разослать резюме»:\n\
      {\"steps\":[\"обновить опыт за последний год\",\"собрать список из десяти вакансий\",\
@@ -1417,6 +1774,139 @@ pub fn changed(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_purchase_is_not_a_task() {
+        assert!(bought("купи яйца, бекон и хлеб"));
+        assert!(!asks_to_note("купи яйца, бекон и хлеб"));
+        assert!(asks_to_note("напомни завтра купить хлеб"));
+        assert!(asks_to_note("добавь созвон на завтра в десять"));
+        // Дела без слов о записи фильтр не отсекает: «завтра в десять созвон»
+        // остаётся делом, как решила модель.
+        assert!(asked_for("add", "завтра в десять созвон"));
+        // Enter вслепую не нажимается: «да» внутри слов — не просьба отправить.
+        assert!(!asked_for("send", "давай расскажи, когда откроется"));
+        assert!(!readable("написать первое 草稿"));
+        assert!(readable("написать первый черновик"));
+    }
+
+    #[test]
+    fn vague_goods_are_asked_about() {
+        assert!(vague("ингредиенты для завтрашнего дня"));
+        assert!(vague("продукты на завтрак"));
+        assert!(!vague("яйца"));
+        assert!(!vague("апельсиновый сок"));
+    }
+
+    #[test]
+    fn goods_from_the_examples_are_recognised_as_made_up() {
+        // Семечки в «собери во ВкусВилле корзину» не звучали — их взяла модель.
+        assert!(!mentions("Собери во ВкусВилл, пожалуйста, корзину", "полосатые семечки"));
+        assert!(follow_up("Собери во ВкусВилл, пожалуйста, корзину"));
+        // А здесь сок звучал — заказ настоящий, даже если яйца модель вывела
+        // из «яичницы» сама.
+        assert!(mentions("хотел яичницу, апельсиновый сок, хлеб", "апельсиновый сок"));
+        // «Корзина» — не товар: так модель записывает «собери корзину».
+        assert!(about_the_order("корзина"));
+        assert!(about_the_order(" Корзину "));
+        assert!(!about_the_order("яйца"));
+    }
+
+    #[test]
+    fn computer_questions_pass_the_filter() {
+        assert!(asked_for("system", "что сейчас грузит компьютер"));
+        assert!(asked_for("diagnose", "вылезла ошибка, что это"));
+        assert!(asked_for("find", "найди фото паспорта"));
+        assert!(asked_for("type", "напечатай привет"));
+        assert!(!asked_for("find", "звучит музыка"));
+    }
+
+    /// Какая модель лучше разбирает реплики — на одних и тех же фразах.
+    ///
+    /// `cargo test planner::tests::compare_models -- --ignored --nocapture`;
+    /// модели — через `SUFLER_MODELS=qwen2.5:7b,gemma3:12b`.
+    #[test]
+    #[ignore = "ходит в локальную модель"]
+    fn compare_models() {
+        use crate::ai_client::AiProvider;
+
+        let current = "Текущий заказ: яйца ×1, апельсиновый сок ×1, хлеб ×1, молоко ×1, магазин Магнит.";
+        let cases: &[(&str, &str, &str)] = &[
+            ("Я бы на завтрак хотел яичницу, апельсиновый сок, хлеб и молоко", "", "order"),
+            ("закажи продукты на яичницу", "", "order"),
+            ("купи яйца, бекон и хлеб на завтрак", "", "order"),
+            ("закажи пять пачек полосатых семечек", "", "order"),
+            ("Собери во ВкусВилле, пожалуйста, корзину", current, "order"),
+            ("напомни завтра купить хлеб", "", "add"),
+            ("какие у меня дела на сегодня", "", "list"),
+            ("что сейчас грузит компьютер", "", "system"),
+            ("сколько места осталось на диске", "", "system"),
+            ("выскочила какая-то ошибка, что это", "", "diagnose"),
+            ("найди на компьютере фото паспорта", "", "find"),
+            ("напиши в телеграм Маше, что я опоздаю", "", "message"),
+            ("напечатай: буду через десять минут", "", "type"),
+            ("звучит музыка", "", "chat"),
+            ("что такое альбедо", "", "chat"),
+            ("закрой телеграм", "", "close"),
+            ("сними задачу хром", "", "close"),
+            ("открой настройки заказов", "", "launch"),
+            ("открой вайлдберриз", "", "web"),
+            ("до скольки работает ашан на ленинском", "", "lookup"),
+        ];
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let models: Vec<String> = std::env::var("SUFLER_MODELS")
+            .map(|list| list.split(',').map(str::to_string).collect())
+            .unwrap_or_else(|_| vec!["qwen2.5:7b".into(), "gemma3:12b".into()]);
+
+        for model in models {
+            let config = crate::config::AiConfig {
+                endpoint: crate::ollama::DEFAULT_ENDPOINT.into(),
+                model: model.clone(),
+                ..Default::default()
+            };
+            let provider = crate::ai_client::HttpProvider::new(&config, "ru").expect("провайдер");
+            // Первый запрос грузит модель в память — его время не в счёт.
+            let _ = runtime.block_on(provider.interpret("Ответь: {}", "прогрев"));
+            let started = std::time::Instant::now();
+            let mut right = 0;
+            for (said, context, expected) in cases {
+                let rules = rules_with_context(&[], &format!("{} {context}", now_line()));
+                let raw = runtime
+                    .block_on(provider.interpret(&rules, said))
+                    .unwrap_or_default();
+                let json = raw
+                    .find('{')
+                    .zip(raw.rfind('}'))
+                    .map(|(from, to)| raw[from..=to].to_string())
+                    .unwrap_or_default();
+                let got = serde_json::from_str::<serde_json::Value>(&json)
+                    .ok()
+                    .and_then(|value| value["intent"].as_str().map(str::to_string))
+                    .unwrap_or_else(|| "?".into());
+                let ok = got == *expected;
+                if ok {
+                    right += 1;
+                }
+                println!(
+                    "{model:>11} {} {said:<52} → {got:<9} {}",
+                    if ok { "✓" } else { "✗" },
+                    json.chars().take(170).collect::<String>()
+                );
+            }
+            println!(
+                "{model}: верно {right} из {}, в среднем {} мс на реплику\n",
+                cases.len(),
+                started.elapsed().as_millis() / cases.len() as u128
+            );
+            // Сравнение не должно оставлять модели в видеопамяти: провайдер
+            // просит Ollama держать их долго, как для настоящих вопросов.
+            runtime.block_on(crate::ollama::unload(crate::ollama::DEFAULT_HOST, &model));
+        }
+    }
 
     #[test]
     fn statements_are_not_commands() {

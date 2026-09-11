@@ -206,6 +206,10 @@ if (api) {
     api.invoke("voice_speak", { text: answer }).catch(() => {});
   };
 
+  // Окно спрятали со стороны Rust — Esc, конец разговора. Незаконченные
+  // запросы отменяются: иначе ответ, пришедший после Esc, прочитался бы вслух.
+  api.listen("popup:closed", () => view.close());
+
   // Идёт запись голоса — показываем, что слушаем.
   api.listen("voice:listening", (event) => {
     view.listening = Boolean(event.payload);

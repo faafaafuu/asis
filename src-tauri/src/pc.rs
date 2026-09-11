@@ -370,6 +370,200 @@ pub fn navigate(action: Nav) -> String {
     spoken.into()
 }
 
+/// Текст окна, где человек работает: заголовок и все надписи внутри.
+///
+/// Нужен вопросу «что это за ошибка»: окно с ошибкой обычно и есть то, что
+/// было впереди, когда человек позвал Ноа. Читается через автоматизацию
+/// интерфейса Windows — так видны надписи и в обычных окнах, и в
+/// приложениях, где кнопки и тексты рисует сама программа.
+pub fn last_window_text() -> String {
+    window_text(LAST_EXTERNAL.load(Ordering::Relaxed))
+}
+
+#[cfg(target_os = "windows")]
+fn window_text(handle: isize) -> String {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+    };
+    use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomation};
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowTextW;
+
+    if handle == 0 {
+        return String::new();
+    }
+    let window = HWND(handle as *mut core::ffi::c_void);
+
+    // SAFETY: только чтение текста окна и его элементов; COM в этом потоке
+    // инициализируется один раз, повторная инициализация безвредна.
+    unsafe {
+        let mut title = [0u16; 512];
+        let length = GetWindowTextW(window, &mut title).max(0) as usize;
+        let mut texts: Vec<String> = Vec::new();
+        let title = String::from_utf16_lossy(&title[..length]);
+        if !title.trim().is_empty() {
+            texts.push(title.trim().to_string());
+        }
+
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let automation: Option<IUIAutomation> =
+            CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok();
+        let Some(automation) = automation else {
+            return texts.join(" | ");
+        };
+        let (Ok(root), Ok(walker)) = (automation.ElementFromHandle(window), automation.ControlViewWalker())
+        else {
+            return texts.join(" | ");
+        };
+
+        let mut names = names_under(&walker, &root);
+        // Окна на движке браузера — Chrome, Electron, Telegram — строят дерево
+        // надписей, только когда его впервые попросят: первый обход видит одну
+        // рамку окна. Тогда — пауза, и обход ещё раз.
+        if names.len() <= 6 {
+            std::thread::sleep(Duration::from_millis(500));
+            names = names_under(&walker, &root);
+        }
+        for name in names {
+            if !texts.contains(&name) {
+                texts.push(name);
+            }
+        }
+
+        texts.join(" | ").chars().take(2500).collect()
+    }
+}
+
+/// Надписи элементов окна по порядку: сперва ближние, потом вложенные.
+///
+/// Обход с пределами по числу элементов и по времени: у браузера их тысячи,
+/// а ответ нужен сейчас.
+#[cfg(target_os = "windows")]
+fn names_under(
+    walker: &windows::Win32::UI::Accessibility::IUIAutomationTreeWalker,
+    root: &windows::Win32::UI::Accessibility::IUIAutomationElement,
+) -> Vec<String> {
+    let started = Instant::now();
+    let mut names: Vec<String> = Vec::new();
+    let mut queue = std::collections::VecDeque::from([(root.clone(), 0usize)]);
+    let mut visited = 0;
+    // SAFETY: только чтение свойств элементов; интерфейсы живут до конца обхода.
+    unsafe {
+        while let Some((element, depth)) = queue.pop_front() {
+            visited += 1;
+            if visited > 1500 || started.elapsed() > Duration::from_millis(1500) {
+                break;
+            }
+            if let Ok(name) = element.CurrentName() {
+                let name = name.to_string();
+                let name = name.trim();
+                if !name.is_empty() && name.chars().count() < 600 && !names.iter().any(|seen| seen == name) {
+                    names.push(name.to_string());
+                }
+            }
+            if depth >= 30 {
+                continue;
+            }
+            let mut child = walker.GetFirstChildElement(&element).ok();
+            while let Some(current) = child {
+                if queue.len() > 3000 {
+                    break;
+                }
+                child = walker.GetNextSiblingElement(&current).ok();
+                queue.push_back((current, depth + 1));
+            }
+        }
+    }
+    names
+}
+
+#[cfg(not(target_os = "windows"))]
+fn window_text(_handle: isize) -> String {
+    String::new()
+}
+
+/// Печатает текст в окне, где человек работает, — как если бы он набрал его сам.
+///
+/// Буквы уходят как символы, а не как клавиши: так печатается любая
+/// раскладка и любой язык, и не важно, какая раскладка сейчас включена.
+/// Перевод строки заменяется пробелом: в чатах Enter отправляет сообщение, а
+/// отправлять без спроса нельзя.
+pub fn type_text(text: &str) -> String {
+    let target = LAST_EXTERNAL.load(Ordering::Relaxed);
+    if target == 0 {
+        return "Не знаю, в какое окно печатать.".into();
+    }
+    if type_into(target, text) {
+        "Напечатал.".into()
+    } else {
+        "Не получилось напечатать.".into()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn type_into(window: isize, text: &str) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+        VIRTUAL_KEY,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+
+    let flat = text.replace(['\n', '\r'], " ");
+    let mut inputs: Vec<INPUT> = Vec::new();
+    for unit in flat.encode_utf16() {
+        for up in [false, true] {
+            let mut flags = KEYEVENTF_UNICODE;
+            if up {
+                flags |= KEYEVENTF_KEYUP;
+            }
+            inputs.push(INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(0),
+                        wScan: unit,
+                        dwFlags: flags,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            });
+        }
+    }
+    if inputs.is_empty() {
+        return false;
+    }
+
+    // SAFETY: окно только выводится вперёд; события — массив, живущий до
+    // конца вызова.
+    unsafe {
+        let _ = SetForegroundWindow(HWND(window as *mut core::ffi::c_void));
+        std::thread::sleep(Duration::from_millis(150));
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) as usize == inputs.len()
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn type_into(_window: isize, _text: &str) -> bool {
+    false
+}
+
+/// Нажимает Enter в окне, где человек работает: отправить напечатанное.
+pub fn press_enter() -> bool {
+    const ENTER: u16 = 0x0D;
+    let target = LAST_EXTERNAL.load(Ordering::Relaxed);
+    target != 0 && press(target, &[ENTER])
+}
+
+/// Открывает программу по названию и отдаёт, как она называется.
+pub fn open_named(spoken: &str) -> Result<String, String> {
+    let entries = catalog();
+    let entry = best_match(spoken, &entries).ok_or_else(|| format!("не нашёл «{spoken}»"))?;
+    launch_entry(entry)?;
+    Ok(entry.name.clone())
+}
+
 #[cfg(target_os = "windows")]
 fn track_foreground() {
     std::thread::Builder::new()
@@ -1961,5 +2155,26 @@ mod tests {
             ),
             Err(err) => println!("sc.exe: ошибка {err}"),
         }
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod live_window {
+    /// `cargo test --lib pc::live_window -- --ignored --nocapture`
+    #[test]
+    #[ignore = "читает окно, что сейчас впереди"]
+    fn reads_the_foreground_window() {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
+        let window = unsafe { GetForegroundWindow() };
+        let started = std::time::Instant::now();
+        let text = super::window_text(window.0 as isize);
+        println!(
+            "{} символов за {} мс: {}",
+            text.chars().count(),
+            started.elapsed().as_millis(),
+            text.chars().take(300).collect::<String>()
+        );
+        assert!(!text.is_empty());
     }
 }
