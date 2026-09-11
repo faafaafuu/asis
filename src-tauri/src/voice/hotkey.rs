@@ -19,7 +19,7 @@
 //! ничего другого не делает: стоит ему перейти в другое окно или напечатать
 //! хоть одну букву, пробел снова его.
 
-use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::OnceLock;
 
@@ -61,6 +61,24 @@ static VOICE_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// прозвучит, — ровно тогда, когда его жмут, чтобы ответ оборвать.
 static CANCELS: OnceLock<Sender<()>> = OnceLock::new();
 
+/// Когда человек последний раз печатал — в миллисекундах от запуска, плюс
+/// один: ноль значит «ни разу». Нужен разговору: фраза, записанная под стук
+/// клавиш, — это клавиатура, а не вопрос.
+static LAST_TYPED: AtomicU64 = AtomicU64::new(0);
+
+/// Начало отсчёта для `LAST_TYPED`: из хука `Instant` в атомарное не положить.
+static STARTED: OnceLock<std::time::Instant> = OnceLock::new();
+
+fn now_ms() -> u64 {
+    STARTED.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
+}
+
+/// Печатал ли человек за последние `window`.
+pub fn typed_within(window: std::time::Duration) -> bool {
+    let last = LAST_TYPED.load(Ordering::Relaxed);
+    last != 0 && now_ms().saturating_sub(last - 1) <= window.as_millis() as u64
+}
+
 /// Сообщает хуку, занят ли голос. Зовётся индикатором при показе и скрытии.
 pub fn voice_active(on: bool) {
     VOICE_ACTIVE.store(on, Ordering::Relaxed);
@@ -94,6 +112,8 @@ pub enum Event {
     TalkStop,
     /// Ctrl+Shift+Alt с пробелом: включить или выключить ожидание обращения.
     ToggleWake,
+    /// Ctrl+Alt с пробелом: показывать ли окно с ответами.
+    ToggleWindow,
 }
 
 /// Включает и выключает перехват. Зовётся, когда попап появляется и исчезает.
@@ -218,11 +238,21 @@ unsafe extern "system" fn keyboard_proc(
     // молча не работать у части людей.
     let info = unsafe { *(lparam.0 as *const KBDLLHOOKSTRUCT) };
 
-    // Esc, пока голос занят, — остановить всё. Клавишу не забираем: в
-    // программе под окном Esc тоже может что-то значить.
+    // Человек печатает — отметка для разговора. Здесь программные нажатия
+    // (LLKHF_INJECTED) как раз не считаются: так печатает сам Суфлёр, вписывая
+    // текст в окно, и его «печать» не должна глушить ответ «да» на «Отправить?».
+    if down && typing_key(info.vkCode) && (info.flags.0 & 0x10) == 0 {
+        LAST_TYPED.store(now_ms() + 1, Ordering::Relaxed);
+    }
+
+    // Esc, пока голос занят или звучит речь, — остановить всё. Речь проверяется
+    // отдельно: ответ читается и без индикатора — например, по пробелу в окне.
+    // Клавишу не забираем: в программе под окном Esc тоже может что-то значить.
     if info.vkCode == VK_ESCAPE.0 as u32
         && down
-        && (VOICE_ACTIVE.load(Ordering::Relaxed) || RECORDING.load(Ordering::Relaxed))
+        && (VOICE_ACTIVE.load(Ordering::Relaxed)
+            || RECORDING.load(Ordering::Relaxed)
+            || crate::voice::speaking())
     {
         if let Some(tx) = CANCELS.get() {
             let _ = tx.send(());
@@ -270,9 +300,12 @@ unsafe extern "system" fn keyboard_proc(
     let ctrl = held(VK_CONTROL.0 as i32);
     let shift = held(VK_SHIFT.0 as i32);
 
-    // Три модификатора сразу — сочетание, которое не занято ничем: обычные
-    // Ctrl+Alt+пробел и Alt+Shift+пробел уже разобраны системой и программами.
+    // Три модификатора сразу — переключатель ожидания обращения. Ctrl+Alt без
+    // Shift — переключатель окна с ответами: в Windows это сочетание ничем не
+    // занято, а если в какой-то программе оно своё, то, пока Суфлёр работает,
+    // оно принадлежит ему — как и Alt+пробел.
     let toggle = ctrl && shift && alt;
+    let window_toggle = ctrl && alt && !shift;
 
     // Что именно мы забираем себе.
     //
@@ -307,6 +340,8 @@ unsafe extern "system" fn keyboard_proc(
         // зажат, считалось бы обычным «Alt с пробелом».
         if toggle {
             send(Event::ToggleWake);
+        } else if window_toggle {
+            send(Event::ToggleWindow);
         } else if alt {
             RECORDING.store(true, Ordering::Relaxed);
             send(Event::TalkStart);

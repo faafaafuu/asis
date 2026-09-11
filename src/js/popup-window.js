@@ -79,10 +79,13 @@ function attachHandles(popup) {
     api?.invoke("popup_taken_over", { moved: true, sized: true }).catch(() => {});
   });
 
-  const head = popup.querySelector(".popup__head");
-  head?.addEventListener("pointerdown", (event) => {
-    // Кнопка «?» живёт в заголовке — за неё окно не таскают.
-    if (event.button !== 0 || event.target.closest("button")) return;
+  // Окно таскается за любое место, кроме полей, кнопок, ссылок и краёв. Раньше —
+  // только за заголовок, а у голосового ответа и напоминания он пустой, и
+  // ухватиться было не за что. Выделять текст в окне и так нельзя: нажатие
+  // мыши гасится, чтобы окно не отнимало фокус.
+  popup.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target?.dataset?.edge) return;
+    if (event.target.closest("button, a, input, textarea, select, label")) return;
     event.preventDefault();
     win.startDragging();
     api?.invoke("popup_taken_over", { moved: true, sized: false }).catch(() => {});

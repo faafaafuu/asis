@@ -23,6 +23,7 @@ mod web;
 mod spend;
 mod sysinfo;
 mod files;
+mod screen;
 mod review;
 mod secret;
 mod tasks;
@@ -443,6 +444,11 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                     // именно такая: чтобы память не занималась впустую, когда
                     // помощник не нужен.
                     voice::hotkey::Event::ToggleWake => toggle_wake(&app),
+                    voice::hotkey::Event::ToggleWindow => {
+                        let shown = app.state::<AppState>().config().voice.show_window;
+                        let reply = set_show_window(&app, !shown);
+                        speak_with_hud(&app, reply, false);
+                    }
                     // Зажали левый Alt с пробелом — пишем, пока держат. Работает
                     // и при закрытом окне: тогда вопрос задаётся с чистого
                     // места, а окно откроется само вместе с ответом.
@@ -693,6 +699,12 @@ fn hear_hinted(app: &tauri::AppHandle, wav: Vec<u8>, hint: &str) -> Option<Strin
 #[cfg(desktop)]
 fn answer_aloud(app: &tauri::AppHandle, text: &str) {
     use tauri::Emitter;
+
+    // Окно с ответами выключено — отвечаем только голосом.
+    if !show_window(app) {
+        answer_without_window(app, text);
+        return;
+    }
 
     let text = text.to_string();
     if overlay::is_popup_visible(app) {
@@ -1089,6 +1101,13 @@ const STOP_ALONE: &[&str] = &[
 #[cfg(desktop)]
 const NAMES: &[&str] = &["ноа", "ноя", "ноэ"];
 
+/// Фразы, которые целиком — конец разговора: ответ на «что-то ещё?».
+#[cfg(desktop)]
+const FAREWELL_PHRASES: &[&str] = &[
+    "это все", "все", "на этом все", "это пока все", "ничего", "больше ничего",
+    "ничего не надо", "не надо",
+];
+
 /// Слова, которые в прощании ничего не значат и мешают его узнать:
 /// «ну всё, пока», «ладно, пока», «ок, пока».
 #[cfg(desktop)]
@@ -1101,6 +1120,18 @@ const FILLER: &[&str] = &[
 fn is_farewell(text: &str) -> bool {
     let lower = text.to_lowercase();
     if FAREWELL_ANYWHERE.iter().any(|word| lower.contains(word)) {
+        return true;
+    }
+
+    // Коротко «это всё», «всё», «ничего» — тоже конец: так отвечают на «что-то
+    // ещё?», и продолжать разговор на них нелепо.
+    let normalized = lower
+        .replace('ё', "е")
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if FAREWELL_PHRASES.contains(&normalized.as_str()) {
         return true;
     }
 
@@ -1199,6 +1230,15 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                     voice::stt::Heard::Phrase(wav) => wav,
                 };
 
+                // Фраза пришлась на печать — это стук клавиш, а не вопрос:
+                // распознавание слышит в нём «стрелки» и «отрезать», и Ноа
+                // начинал отвечать сам себе. Человек печатает — значит, занят
+                // другим, и разговор окончен.
+                if typed_during(&wav) {
+                    log::info!("во время фразы печатали — это клавиатура; разговор окончен");
+                    break;
+                }
+
                 // Пока думаем и отвечаем — не слушаем: иначе в следующую фразу
                 // попадёт собственный ответ.
                 voice::stt::pause_conversation(true);
@@ -1214,6 +1254,11 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                     // «напомни завтра позвонить» — не вопрос, отвечать на него
                     // объяснением было бы нелепо.
                     Some(text) if handled_as_task(&app, &text) => {}
+                    // Обрывок в одно-два слова без вопроса — скорее ослышка,
+                    // чем вопрос: отвечать на него полминуты незачем.
+                    Some(text) if fragment(&text) => {
+                        log::info!("«{text}» — обрывок, не отвечаю");
+                    }
                     Some(text) => answer_aloud(&app, &text),
                     None => {}
                 }
@@ -1282,6 +1327,10 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
                 let voice::stt::Heard::Phrase(wav) = heard else {
                     continue;
                 };
+                // Стук клавиш — не обращение, и расшифровывать его незачем.
+                if typed_during(&wav) {
+                    continue;
+                }
 
                 let Some(text) = hear_hinted(&app, wav, WAKE_HINT) else {
                     continue;
@@ -1446,7 +1495,12 @@ pub(crate) fn announce(app: &tauri::AppHandle, text: String, wait: bool) {
     if let Err(err) = overlay::show_for_reminder(app, text.clone()) {
         log::warn!("окно сообщения не открылось: {err}");
     }
+    speak_with_hud(app, text, wait);
+}
 
+/// Произносит текст с индикатором «говорю»; `wait` — дождаться конца речи.
+#[cfg(desktop)]
+fn speak_with_hud(app: &tauri::AppHandle, text: String, wait: bool) {
     if !app.state::<AppState>().config().voice.enabled {
         return;
     }
@@ -1496,7 +1550,7 @@ fn handled_as_task(app: &tauri::AppHandle, text: &str) -> bool {
         return false;
     };
     log::info!("распоряжение о задачах: «{text}» → «{reply}»");
-    announce(app, reply, true);
+    respond(app, reply);
     true
 }
 
@@ -1544,6 +1598,7 @@ fn end_conversation(app: &tauri::AppHandle, signal: bool, close_window: bool) {
     // кончился — ждать больше нечего, иначе следующая же фраза через час была
     // бы принята за срок.
     planner::forget_pending();
+    VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner()).clear();
     review::stop();
     let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
     overlay::hide_hud(app);
@@ -1774,6 +1829,120 @@ fn release_model(app: &tauri::AppHandle) {
     }
 }
 
+/// Показывать ли окно с ответами. Голос выключен — окно показывается всегда:
+/// иначе ответа не было бы ни видно, ни слышно.
+#[cfg(desktop)]
+fn show_window(app: &tauri::AppHandle) -> bool {
+    let state = app.state::<AppState>();
+    let config = state.config();
+    config.voice.show_window || !config.voice.enabled
+}
+
+/// Включает или выключает окно с ответами и отдаёт, что сказать.
+pub(crate) fn set_show_window(app: &tauri::AppHandle, show: bool) -> String {
+    {
+        let state = app.state::<AppState>();
+        state.config_mut().voice.show_window = show;
+        if let Err(err) = commands::persist(app, &state) {
+            log::warn!("настройка окна не сохранилась: {err}");
+        }
+    }
+    log::info!("окно с ответами: {}", if show { "показываю" } else { "не показываю" });
+    if show {
+        "Буду показывать окно с ответами.".into()
+    } else {
+        "Отвечаю без окна, только голосом. Вернуть окно — Ctrl, Alt и пробел.".into()
+    }
+}
+
+/// Ответ на распоряжение: с окном или только голосом — как выбрал человек.
+#[cfg(desktop)]
+fn respond(app: &tauri::AppHandle, text: String) {
+    if show_window(app) {
+        announce(app, text, true);
+    } else if turn_cancelled() {
+        log::info!("ответ пришёл после Esc — не произношу: «{text}»");
+    } else {
+        speak_with_hud(app, text, true);
+    }
+}
+
+/// Последние вопросы и ответы разговора без окна — чтобы «а сколько это
+/// стоит?» было понятно, о чём. Три обмена: на большем маленькая модель
+/// начинает пересказывать прежнее вместо ответа на новое.
+#[cfg(desktop)]
+static VOICE_THREAD: std::sync::Mutex<Vec<ai_client::ThreadItem>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Отвечает на вопрос только голосом: без окна, с индикатором.
+#[cfg(desktop)]
+fn answer_without_window(app: &tauri::AppHandle, question: &str) {
+    overlay::show_hud(app, "thinking");
+    let (provider, limit) = {
+        let state = app.state::<AppState>();
+        let limit = state.config().ai.call_limit();
+        (state.provider(), limit)
+    };
+    let history = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner()).clone();
+    let asked = tauri::async_runtime::block_on(async {
+        tokio::time::timeout(limit, provider.ask("", "", &history, question)).await
+    });
+    let answer = match asked {
+        Ok(Ok(answer)) if !answer.trim().is_empty() => answer.trim().to_string(),
+        Ok(Err(err)) => {
+            log::warn!("ответ без окна не пришёл: {err}");
+            "Не получилось ответить: модель не ответила.".to_string()
+        }
+        _ => "Не получилось ответить: модель не успела.".to_string(),
+    };
+    if turn_cancelled() {
+        overlay::hide_hud(app);
+        return;
+    }
+    {
+        let mut thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
+        thread.push(ai_client::ThreadItem {
+            q: question.to_string(),
+            a: answer.clone(),
+        });
+        let excess = thread.len().saturating_sub(3);
+        thread.drain(..excess);
+    }
+    speak_with_hud(app, answer, true);
+}
+
+/// Печатали ли, пока звучала фраза: с её начала и ещё секунду после.
+#[cfg(desktop)]
+fn typed_during(wav: &[u8]) -> bool {
+    voice::hotkey::typed_within(phrase_length(wav) + std::time::Duration::from_secs(1))
+}
+
+/// Длина записи WAV по её заголовку.
+fn phrase_length(wav: &[u8]) -> std::time::Duration {
+    let byte_rate = wav
+        .get(28..32)
+        .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+        .unwrap_or(0);
+    if byte_rate == 0 || wav.len() <= 44 {
+        return std::time::Duration::ZERO;
+    }
+    std::time::Duration::from_secs_f64((wav.len() - 44) as f64 / byte_rate as f64)
+}
+
+/// Обрывок в одно-два слова без вопроса — скорее ослышка, чем вопрос.
+#[cfg(desktop)]
+fn fragment(text: &str) -> bool {
+    const GREETINGS: &[&str] = &["привет", "здравств", "здорово", "хай", "салют", "добр"];
+    let lower = text.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|w| !w.is_empty())
+        .collect();
+    words.len() <= 2
+        && !lower.contains('?')
+        && !words.iter().any(|word| GREETINGS.iter().any(|greeting| word.starts_with(greeting)))
+}
+
 /// Иконка в трее — единственный видимый след приложения: главного окна у него нет,
 /// а попап живёт по несколько секунд. Без трея пользователь не сможет ни выйти,
 /// ни вернуться к инструкции по разрешениям.
@@ -1985,5 +2154,33 @@ mod farewell_tests {
         assert!(!is_farewell("Ноа"));
         assert!(!is_farewell("Ноа, открой телеграм"));
         assert!(is_farewell("Ноа, пока"));
+    }
+
+    #[test]
+    fn that_is_all_ends_the_talk() {
+        assert!(is_farewell("Это все."));
+        assert!(is_farewell("Всё."));
+        assert!(is_farewell("Больше ничего"));
+        assert!(!is_farewell("Это все книги Толстого?"));
+    }
+
+    #[test]
+    fn a_fragment_is_not_a_question() {
+        use super::fragment;
+        assert!(fragment("Стрелки."));
+        assert!(fragment("Отрезать."));
+        assert!(!fragment("Альбедо?"));
+        assert!(!fragment("Привет"));
+        assert!(!fragment("что такое альбедо"));
+    }
+
+    #[test]
+    fn a_phrase_is_as_long_as_its_sound() {
+        use super::phrase_length;
+        let mut wav = vec![0u8; 44];
+        wav[28..32].copy_from_slice(&32_000u32.to_le_bytes());
+        wav.extend(std::iter::repeat(0).take(32_000));
+        assert_eq!(phrase_length(&wav), std::time::Duration::from_secs(1));
+        assert_eq!(phrase_length(&[]), std::time::Duration::ZERO);
     }
 }

@@ -482,7 +482,12 @@ pub async fn voice_speak(
     }
     // Отметка о самом факте: без неё по журналу не отличить «пробел не дошёл»
     // от «дошёл, но озвучивать нечем», а чинится это в разных местах.
-    log::info!("озвучиваю {} символов голосом {}", text.chars().count(), config.voice);
+    log::info!(
+        "озвучиваю {} символов голосом {}: «{}»",
+        text.chars().count(),
+        config.voice,
+        text.chars().take(90).collect::<String>()
+    );
     let result = crate::voice::speak(&app, &config, &text).await;
     if let Err(err) = &result {
         log::warn!("озвучить не вышло: {err}");

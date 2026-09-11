@@ -409,12 +409,34 @@ const HALLUCINATIONS: &[&str] = &[
     "amara.org",
     "thanks for watching",
     "thank you for watching",
+    // Подписи к музыке из тех же субтитров: на стуке клавиш и шорохе модель
+    // выдаёт их чаще всего.
+    "динамичная музыка",
+    "динамическая музыка",
+    "спокойная музыка",
+    "веселая музыка",
+    "весёлая музыка",
+    "грустная музыка",
+    "напряженная музыка",
+    "напряжённая музыка",
+    "торжественная музыка",
+    "аплодисменты",
 ];
 
 /// Похоже ли, что модель это выдумала, а не расслышала.
 fn is_hallucination(text: &str) -> bool {
     let lower = text.to_lowercase();
     if HALLUCINATIONS.iter().any(|mark| lower.contains(mark)) {
+        return true;
+    }
+
+    // Целиком в скобках — «[музыка]», «(смех)», «「Google Chrome」» — это подпись
+    // к звуку из тех же субтитров, а не сказанные слова.
+    let bare = lower.trim().trim_end_matches(['.', '!', '?', '…']);
+    let wrapped = [('[', ']'), ('(', ')'), ('「', '」'), ('『', '』'), ('*', '*')]
+        .iter()
+        .any(|(open, close)| bare.starts_with(*open) && bare.ends_with(*close));
+    if wrapped || lower.contains('♪') {
         return true;
     }
 
@@ -501,6 +523,15 @@ mod tests {
         // Заклинившая модель повторяет одно слово.
         assert!(is_hallucination("Пока, пока, пока, пока, пока."));
         assert!(is_hallucination("да да да да"));
+    }
+
+    #[test]
+    fn captions_for_sounds_are_not_speech() {
+        assert!(is_hallucination("Динамическая музыка"));
+        assert!(is_hallucination("「Google Chrome」"));
+        assert!(is_hallucination("[музыка]"));
+        assert!(is_hallucination("(смех)"));
+        assert!(!is_hallucination("открой Google Chrome"));
     }
 
     #[test]

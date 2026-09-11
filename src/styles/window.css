@@ -151,3 +151,19 @@ body {
   flex: 1 1 auto;
   min-height: 0;
 }
+
+/* Окно таскается за любое место — курсор это показывает. */
+.popup {
+  cursor: grab;
+}
+.popup:active {
+  cursor: grabbing;
+}
+.popup input,
+.popup textarea {
+  cursor: text;
+}
+.popup button,
+.popup a {
+  cursor: pointer;
+}

@@ -888,7 +888,9 @@ impl AiProvider for HttpProvider {
                     },
                 });
             }
-            for item in thread {
+            // Последние три обмена, не больше: на длинной переписке маленькая
+            // модель начинает пересказывать прежние ответы вместо нового.
+            for item in &thread[thread.len().saturating_sub(3)..] {
                 messages.push(Message {
                     role: "user",
                     content: item.q.clone(),

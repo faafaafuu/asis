@@ -38,6 +38,8 @@ pub enum Intent {
     List,
     /// Отметить сделанным.
     Done { task: Option<String> },
+    /// Удалить дело из списка — не отметить сделанным.
+    Remove { task: Option<String> },
     /// Перенести на другой срок.
     Postpone {
         task: Option<String>,
@@ -57,7 +59,8 @@ pub enum Intent {
         sandbox_box: String,
     },
     /// Закрыть программу.
-    Close { program: String },
+    /// `force` — «сними задачу»: завершить все процессы разом.
+    Close { program: String, force: bool },
     /// Что-то сделать с самим компьютером: сон, выключение, блокировка.
     Power { action: crate::pc::Power },
     /// Открыть сайт или поискать на нём.
@@ -82,6 +85,9 @@ pub enum Intent {
     Send,
     /// Вставить заготовленное сообщение в открытый чат.
     Paste,
+    /// Вопрос про скриншот в буфере или про то, что на экране. `check` —
+    /// проверить, правда ли это.
+    Screen { check: bool },
     /// Готовый ответ без действия: переспросить, пояснить.
     Say(String),
 }
@@ -115,6 +121,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(reply) = confirm_send(said) {
         return Some(reply);
     }
+    // «Отвечай без окна», «показывай окно» — переключатель, а не вопрос.
+    if let Some(show) = window_request(said) {
+        return Some(crate::set_show_window(app, show));
+    }
     // Дело ждёт срока — значит, сказанное сейчас и есть срок.
     if awaiting_time() {
         return Some(finish_pending(app, said).await);
@@ -137,6 +147,7 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
             Some(list())
         }
         Intent::Done { task } => Some(done(app, task.as_deref(), &open)),
+        Intent::Remove { task } => Some(remove(app, said, task.as_deref(), &open)),
         Intent::Postpone { task, due } => Some(postpone(app, task.as_deref(), due, &open)),
         Intent::Breakdown { task } => Some(breakdown(app, task.as_deref(), &open).await),
         Intent::Order { items, store } => Some(order(app, &items, &store).await),
@@ -151,7 +162,9 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
             Some(window) => open_own(app, window),
             None => blocking(move || crate::pc::launch(&program, sandbox, &sandbox_box)).await,
         }),
-        Intent::Close { program } => Some(blocking(move || crate::pc::close(&program)).await),
+        Intent::Close { program, force } => {
+            Some(blocking(move || crate::pc::close(&program, force)).await)
+        }
         Intent::Power { action } => Some(crate::pc::power(action)),
         Intent::Web { site, query } => {
             Some(blocking(move || crate::web::open_site(&site, &query)).await)
@@ -174,6 +187,7 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         // нет: отправляется только то, что Ноа напечатал и о чём спросил.
         Intent::Send => Some("Отправлять нечего — сначала скажите, что напечатать.".into()),
         Intent::Paste => Some(blocking(paste_pending).await),
+        Intent::Screen { check } => Some(crate::screen::answer(app, said, check).await),
         Intent::Say(text) => Some(text),
     }
 }
@@ -861,6 +875,10 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             }
         }
         "list" => Intent::List,
+        // «Удали эту задачу» модель порой записывает как «сделано» — и
+        // отмечает не ту: так вместо лишнего дела закрылось чужое. Удаление —
+        // отдельное действие.
+        "done" | "remove" if intent == "remove" || erases(said) => Intent::Remove { task },
         "done" => Intent::Done { task },
         "postpone" => Intent::Postpone { task, due },
         "breakdown" => Intent::Breakdown { task },
@@ -914,7 +932,10 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
                     sandbox: parsed["sandbox"].as_bool().unwrap_or(false),
                     sandbox_box: text("box"),
                 },
-                (false, false) => Intent::Close { program },
+                (false, false) => Intent::Close {
+                    program,
+                    force: forced(said),
+                },
             }
         }
         "power" => match crate::pc::Power::parse(&text("action")) {
@@ -946,7 +967,13 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             None => Intent::Chat,
         },
         "system" => Intent::System {
-            topic: crate::sysinfo::Topic::parse(&text("topic")),
+            // «Память видеокарты» модель порой относит к памяти вообще — и
+            // отвечала про оперативную. Видеокарта в сказанном — значит, она.
+            topic: if about_gpu(said) {
+                crate::sysinfo::Topic::Gpu
+            } else {
+                crate::sysinfo::Topic::parse(&text("topic"))
+            },
         },
         "diagnose" => Intent::Diagnose,
         "find" => Intent::Find {
@@ -967,6 +994,9 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
         },
         "send" => Intent::Send,
         "paste" => Intent::Paste,
+        "screen" => Intent::Screen {
+            check: parsed["check"].as_bool().unwrap_or(false) || checks_truth(said),
+        },
         _ => Intent::Chat,
     }
 }
@@ -1064,6 +1094,181 @@ fn readable(text: &str) -> bool {
     })
 }
 
+/// Последнее записанное дело и когда — для «удали эту».
+static LAST_ADDED: std::sync::Mutex<Option<(String, std::time::Instant)>> =
+    std::sync::Mutex::new(None);
+
+fn remember_added(id: &str) {
+    *LAST_ADDED.lock().unwrap_or_else(|err| err.into_inner()) =
+        Some((id.to_string(), std::time::Instant::now()));
+}
+
+/// Дело, записанное в последние полчаса.
+fn recently_added() -> Option<String> {
+    LAST_ADDED
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .as_ref()
+        .filter(|(_, at)| at.elapsed() < std::time::Duration::from_secs(30 * 60))
+        .map(|(id, _)| id.clone())
+}
+
+/// Удаляет дело.
+///
+/// Какое — решается по сказанному, а не по номеру от модели: номер она
+/// угадывает, и однажды вместо лишнего дела «термин» закрыла «найти битки».
+/// Время в просьбе — «на 18:00» — выбирает дело по сроку, слова названия —
+/// «про банк» — дело с ними; «эту», «только что», «не просил записывать» — то,
+/// что записано последним. Номер от модели — в последнюю очередь. Не нашлось
+/// ничего — переспрашивается: удалить наугад хуже, чем спросить.
+fn remove(app: &AppHandle, said: &str, task: Option<&str>, open: &[Task]) -> String {
+    let by_time = time_in(said).and_then(|(hour, minute)| {
+        let wanted = format!("{hour:02}:{minute:02}");
+        open.iter()
+            .find(|task| task.due.is_some_and(|due| due.format("%H:%M").to_string() == wanted))
+            .map(|task| task.id.clone())
+    });
+    let id = by_time
+        .or_else(|| by_title(said, open))
+        .or_else(|| recently_added().filter(|_| points_at_last(said)))
+        .or_else(|| task.map(str::to_string));
+    let Some(id) = id else {
+        return "Не понял, какое дело удалить, — назовите его.".into();
+    };
+    match tasks::remove(&id) {
+        Some(task) => {
+            log::info!("удалено дело «{}»", task.title);
+            changed(app);
+            format!("Удалил: {}.", task.title)
+        }
+        None => "Такого дела уже нет.".into(),
+    }
+}
+
+/// Дело, чьё название звучит в просьбе: «удали задачу про банк».
+fn by_title(said: &str, open: &[Task]) -> Option<String> {
+    // Слова, которые есть в любой просьбе о делах, названия не выдают.
+    const COMMON: &[&str] = &["задач", "дело", "дела", "удали", "удалить", "запис", "напом"];
+    let said = said.to_lowercase().replace('ё', "е");
+    let stem = |word: &str| word.chars().take(5).collect::<String>();
+    open.iter()
+        .map(|task| {
+            let title = task.title.to_lowercase().replace('ё', "е");
+            let hits = title
+                .split(|ch: char| !ch.is_alphabetic())
+                .filter(|word| word.chars().count() >= 4)
+                .map(stem)
+                .filter(|word| !COMMON.iter().any(|common| word.starts_with(common)))
+                .filter(|word| said.contains(word.as_str()))
+                .count();
+            (hits, task)
+        })
+        .filter(|(hits, _)| *hits > 0)
+        .max_by_key(|(hits, _)| *hits)
+        .map(|(_, task)| task.id.clone())
+}
+
+/// Время, названное в просьбе: «на 18:00», «в 9».
+fn time_in(said: &str) -> Option<(u32, u32)> {
+    let chars: Vec<char> = said.chars().collect();
+    let mut at = 0;
+    while at < chars.len() {
+        if !chars[at].is_ascii_digit() {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < chars.len() && chars[at].is_ascii_digit() {
+            at += 1;
+        }
+        let hour: String = chars[start..at].iter().collect();
+        let (Ok(hour), true) = (hour.parse::<u32>(), at - start <= 2) else {
+            continue;
+        };
+        let minutes = chars.get(at + 1..at + 3).map(|pair| pair.iter().collect::<String>());
+        if let (Some(':' | '.'), Some(Ok(minute))) = (
+            chars.get(at).copied(),
+            minutes.as_deref().map(str::parse::<u32>),
+        ) {
+            if hour < 24 && minute < 60 {
+                return Some((hour, minute));
+            }
+        }
+    }
+    let lower = said.to_lowercase();
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    words.windows(2).find_map(|pair| {
+        let hour = pair[1]
+            .trim_matches(|ch: char| !ch.is_ascii_digit())
+            .parse::<u32>()
+            .ok()?;
+        (matches!(pair[0], "в" | "на") && hour < 24).then_some((hour, 0))
+    })
+}
+
+/// Про только что записанное ли речь: «эту», «последнюю», «не просил».
+fn points_at_last(said: &str) -> bool {
+    let lower = said.to_lowercase();
+    ["эту", "это", "последн", "только что", "не просил", "лишн", "запись", "записал"]
+        .iter()
+        .any(|word| lower.contains(word))
+}
+
+/// Просят удалить, а не отметить сделанным.
+fn erases(said: &str) -> bool {
+    let lower = said.to_lowercase();
+    ["удал", "убери", "убрать", "сотри", "стереть", "стер"]
+        .iter()
+        .any(|word| lower.contains(word))
+}
+
+/// «Сними задачу», «убей процесс» — завершить программу целиком.
+fn forced(said: &str) -> bool {
+    let lower = said.to_lowercase();
+    [
+        "сними задач", "снять задач", "сними процесс", "заверши задач", "завершить задач",
+        "заверши процесс", "завершить процесс", "убей", "убить", "прибей", "принудительн",
+        "полностью", "совсем", "диспетчер",
+    ]
+    .iter()
+    .any(|word| lower.contains(word))
+}
+
+/// Речь о видеокарте.
+fn about_gpu(said: &str) -> bool {
+    let lower = said.to_lowercase();
+    ["видеокарт", "видеопамят", "видюх", "gpu", "джипию", "графическ"]
+        .iter()
+        .any(|word| lower.contains(word))
+}
+
+/// Просят проверить, правда ли это.
+fn checks_truth(said: &str) -> bool {
+    let lower = said.to_lowercase();
+    ["фейк", "правд", "вброс", "достовер", "провер", "врут", "ложь"]
+        .iter()
+        .any(|word| lower.contains(word))
+}
+
+/// Просьба показывать окно с ответами или не показывать.
+fn window_request(said: &str) -> Option<bool> {
+    let lower = said.to_lowercase();
+    // Только просьбы к самому Ноа: «комната без окна» — не просьба.
+    const HIDE: &[&str] = &[
+        "отвечай без окна", "говори без окна", "работай без окна", "давай без окна",
+        "не показывай окно", "окно не показывай", "скрывай окно", "не открывай окно",
+        "выключи окно ответ", "отключи окно ответ",
+    ];
+    const SHOW: &[&str] = &[
+        "показывай окно", "отвечай с окном", "верни окно", "включи окно ответ",
+        "открывай окно",
+    ];
+    if HIDE.iter().any(|phrase| lower.contains(phrase)) {
+        return Some(false);
+    }
+    SHOW.iter().any(|phrase| lower.contains(phrase)).then_some(true)
+}
+
 /// Похоже ли на покупку: «купи», «закажи», «привези».
 fn bought(said: &str) -> bool {
     let lower = said.to_lowercase();
@@ -1156,7 +1361,8 @@ fn asked_for(intent: &str, said: &str) -> bool {
         "vpn" => &["впн", "vpn", "вэпээн", "випиэн", "ви пи эн"],
         "system" => &[
             "груз", "тормоз", "процесс", "памят", "оператив", "диск", "места", "процессор",
-            "нагрузк", "видеокарт", "температур", "компьютер", "систем",
+            "нагрузк", "видеокарт", "температур", "компьютер", "систем", "видеопамят",
+            "видюх", "gpu",
         ],
         "diagnose" => &[
             "ошибк", "не работает", "сломал", "проблем", "случилось", "глючит", "висит", "вылет",
@@ -1167,6 +1373,11 @@ fn asked_for(intent: &str, said: &str) -> bool {
         "message" => &["напиши", "отправь", "сообщени", "скажи", "передай"],
         "send" => &["отправ", "жми", "энтер", "enter"],
         "paste" => &["встав"],
+        "remove" => &["удал", "убер", "убра", "сотр", "стер", "не просил", "не надо было", "лишн"],
+        "screen" => &[
+            "скрин", "экран", "фейк", "правд", "написан", "переведи", "картинк", "снимк",
+            "снимок", "провер", "вброс", "достовер", "врут", "что тут", "что здесь",
+        ],
         "power" => &[
             "выключ", "перезагр", "перезапуст", "усыпи", "спящ", "сон", "заблокир", "блокир",
             "отмени", "отмена", "гибернац",
@@ -1188,7 +1399,13 @@ fn pick_task(parsed: &serde_json::Value, open: &[Task]) -> Option<String> {
 fn intent_rules(open: &[Task]) -> String {
     rules_with_context(
         open,
-        &[now_line(), crate::web::site_line(), order_line()].join(" "),
+        &[
+            now_line(),
+            crate::web::site_line(),
+            order_line(),
+            crate::screen::clipboard_line(),
+        ]
+        .join(" "),
     )
 }
 
@@ -1216,6 +1433,8 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          встречу или добавить в календарь;\n\
          list — спрашивает, что у него запланировано, какие дела, что на сегодня;\n\
          done — сообщает, что уже что-то сделал;\n\
+         remove — просит удалить, стереть, убрать дело из списка — не отметить \
+         сделанным, а именно удалить: «удали эту задачу», «я не просил это записывать»;\n\
          postpone — просит перенести дело на другое время;\n\
          breakdown — просит помощи с делом: как за него взяться, с чего начать, \
          разбить на шаги;\n\
@@ -1244,12 +1463,15 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          type — просит напечатать или вписать текст в окно;\n\
          message — просит написать кому-то сообщение в мессенджере;\n\
          send — просит отправить напечатанное;\n\
-         paste — просит вставить заготовленный текст: «вставь».\n\
+         paste — просит вставить заготовленный текст: «вставь»;\n\
+         screen — вопрос про скриншот в буфере обмена или про то, что сейчас на \
+         экране: «это фейк?», «правда ли это», «что тут написано», «переведи».\n\
          \n\
          Остальные поля:\n\
          title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
          due — срок в виде ГГГГ-ММ-ДДTЧЧ:ММ или пустая строка, если не назван;\n\
-         task — номер дела из списка ниже для done, postpone и breakdown, иначе 0;\n\
+         task — номер дела из списка ниже для done, remove, postpone и breakdown, \
+         иначе 0; «эту», «последнюю», «только что записанную» — 0;\n\
          calendar — true, если человек прямо просил в календарь;\n\
          items — для order список товаров: name — что именно, со всеми \
          уточнениями («полосатые семечки», а не «семечки»), quantity — сколько \
@@ -1266,7 +1488,9 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          site — для web сайт, как его назвали, иначе пустая строка;\n\
          query — для web что искать на сайте, для lookup короткий запрос для \
          поисковика, для find что за файл («паспорт»), иначе пустая строка;\n\
-         topic — для system одно из: cpu, memory, disk, overview;\n\
+         topic — для system одно из: cpu, memory, gpu, disk, overview; gpu — \
+         видеокарта: видеопамять, её загрузка и температура;\n\
+         check — для screen true, если просят проверить, правда ли это;\n\
          kind — для find тип файла: image, document, video, audio или any;\n\
          text — для type и message сам текст, слово в слово, без «напиши»;\n\
          to — для message кому писать, как назвали; app для message — мессенджер, \
@@ -1369,7 +1593,12 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      «закажи продукты на яичницу» → \
      {\"intent\":\"order\",\"items\":[{\"name\":\"яйца\",\"quantity\":1},{\"name\":\"сливочное масло\",\"quantity\":1}],\"store\":\"\"}\n\
      «купи яйца, бекон и хлеб» → \
-     {\"intent\":\"order\",\"items\":[{\"name\":\"яйца\",\"quantity\":1},{\"name\":\"бекон\",\"quantity\":1},{\"name\":\"хлеб\",\"quantity\":1}],\"store\":\"\"}";
+     {\"intent\":\"order\",\"items\":[{\"name\":\"яйца\",\"quantity\":1},{\"name\":\"бекон\",\"quantity\":1},{\"name\":\"хлеб\",\"quantity\":1}],\"store\":\"\"}\n\
+     «сколько занято видеопамяти» → {\"intent\":\"system\",\"topic\":\"gpu\"}\n\
+     «удали эту задачу» → {\"intent\":\"remove\",\"task\":0}\n\
+     «я ничего не просил записывать, удали» → {\"intent\":\"remove\",\"task\":0}\n\
+     «это фейк?» → {\"intent\":\"screen\",\"check\":true}\n\
+     «что тут написано» → {\"intent\":\"screen\",\"check\":false}";
 
 /* ── Завести ─────────────────────────────────────────────────────────────── */
 
@@ -1383,6 +1612,7 @@ fn add(app: &AppHandle, title: String, due: Option<DateTime<Local>>, calendar: b
 
     let task = tasks::add(title, due, None);
     log::info!("заведено дело «{}» на {:?}", task.title, task.due);
+    remember_added(&task.id);
     crate::calendar::sync_task(app, &task, calendar);
     changed(app);
     format!("Записал: {}, {}.", task.title, spoken_due(task.due))
@@ -1398,6 +1628,7 @@ async fn finish_pending(app: &AppHandle, said: &str) -> String {
 
     if refuses_time(said) {
         let task = tasks::add(title, None, None);
+        remember_added(&task.id);
         changed(app);
         return format!("Оставил без срока: {}.", task.title);
     }
@@ -1408,6 +1639,7 @@ async fn finish_pending(app: &AppHandle, said: &str) -> String {
     };
 
     let task = tasks::add(title, due, None);
+    remember_added(&task.id);
     crate::calendar::sync_task(app, &task, false);
     changed(app);
     match task.due {
@@ -1776,6 +2008,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_task_is_found_by_its_title() {
+        let open = vec![task("1", "найти битки"), task("2", "позвонить в банк")];
+        assert_eq!(by_title("удали задачу про банк", &open), Some("2".to_string()));
+        assert_eq!(by_title("удали эту задачу", &open), None);
+        assert_eq!(window_request("как проветрить комнату без окна"), None);
+    }
+
+    #[test]
+    fn removing_is_not_marking_done() {
+        assert!(erases("Удали эту задачу на 18:00."));
+        assert!(!erases("я сделал резюме"));
+        assert_eq!(time_in("Удали эту задачу на 18:00."), Some((18, 0)));
+        assert_eq!(time_in("удали задачу в 9"), Some((9, 0)));
+        assert_eq!(time_in("удали эту"), None);
+        assert!(points_at_last("Я ничего не просил записывать, удалить эту запись."));
+    }
+
+    #[test]
+    fn ending_a_task_is_asked_in_words() {
+        assert!(forced("Но завершить задачу Google Chrome."));
+        assert!(forced("сними задачу хром"));
+        assert!(!forced("закрой хром"));
+    }
+
+    #[test]
+    fn the_video_card_is_not_memory() {
+        assert!(about_gpu("сколько занято памяти видеокарты"));
+        assert!(!about_gpu("сколько занято памяти"));
+    }
+
+    #[test]
+    fn the_window_is_switched_in_words() {
+        assert_eq!(window_request("отвечай без окна"), Some(false));
+        assert_eq!(window_request("не показывай окно"), Some(false));
+        assert_eq!(window_request("показывай окно с ответами"), Some(true));
+        assert_eq!(window_request("закрой окно"), None);
+    }
+
+    #[test]
     fn a_purchase_is_not_a_task() {
         assert!(bought("купи яйца, бекон и хлеб"));
         assert!(!asks_to_note("купи яйца, бекон и хлеб"));
@@ -1831,6 +2102,7 @@ mod tests {
         use crate::ai_client::AiProvider;
 
         let current = "Текущий заказ: яйца ×1, апельсиновый сок ×1, хлеб ×1, молоко ×1, магазин Магнит.";
+        let screenshot = "В буфере обмена лежит картинка — скорее всего, скриншот.";
         let cases: &[(&str, &str, &str)] = &[
             ("Я бы на завтрак хотел яичницу, апельсиновый сок, хлеб и молоко", "", "order"),
             ("закажи продукты на яичницу", "", "order"),
@@ -1852,6 +2124,12 @@ mod tests {
             ("открой настройки заказов", "", "launch"),
             ("открой вайлдберриз", "", "web"),
             ("до скольки работает ашан на ленинском", "", "lookup"),
+            ("удали эту задачу", "", "remove"),
+            ("я ничего не просил записывать, удали это", "", "remove"),
+            ("сколько занято видеопамяти", "", "system"),
+            ("какая температура у видеокарты", "", "system"),
+            ("это фейк?", screenshot, "screen"),
+            ("что тут написано", screenshot, "screen"),
         ];
 
         let runtime = tokio::runtime::Builder::new_current_thread()

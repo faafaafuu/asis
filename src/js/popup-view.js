@@ -186,6 +186,10 @@ export class PopupView {
   open({ term: raw, context = "", speak = false }) {
     this.#abortAll();
     this.speakOnAnswer = Boolean(speak);
+    // Окно открыл голосовой вопрос — его «термин» и есть сам вопрос. Следующие
+    // вопросы голосом — новые вопросы, а не уточнения к первому: иначе модель
+    // слышала «уточни про „Стрелки“» и отвечала про первое снова и снова.
+    this.openedByVoice = Boolean(speak);
     const term = normalizeTerm(raw);
     this.state = {
       term,
@@ -342,8 +346,15 @@ export class PopupView {
       this.render();
     }, RESPONSE_TIMEOUT_MS);
 
+    const standalone = byVoice && this.openedByVoice;
     this.client
-      .ask(this.state.term, this.state.context, this.state.thread.slice(0, index), question, { signal })
+      .ask(
+        standalone ? "" : this.state.term,
+        standalone ? "" : this.state.context,
+        this.state.thread.slice(0, index),
+        question,
+        { signal },
+      )
       .then((answer) => {
         clearTimeout(watchdog);
         if (signal.aborted || this.state.term !== asked) return;

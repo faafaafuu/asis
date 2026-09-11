@@ -1337,7 +1337,10 @@ fn sandboxie() -> Option<PathBuf> {
 /// нет вовсе, а значит, нет и крестика. Раньше на неё отвечалось «такого окна
 /// нет», хотя значок висел в трее. Для такой программы «закрой» значит
 /// завершить процесс: открытых окон с несохранённым у неё нет.
-pub fn close(spoken: &str) -> String {
+///
+/// `force` — «сними задачу», «убей процесс»: все процессы программы
+/// завершаются сразу, как «Снять задачу» в диспетчере, окна не спрашиваются.
+pub fn close(spoken: &str, force: bool) -> String {
     let windows = open_windows();
 
     // Лучшее окно — по заголовку или по имени программы: «закрой телеграм»
@@ -1362,6 +1365,11 @@ pub fn close(spoken: &str) -> String {
         let shared = SHARED_HOSTS
             .iter()
             .any(|host| chosen.exe.eq_ignore_ascii_case(host));
+        // Хозяина чужих окон задачей не снимают: вместе с ним ушли бы все
+        // приложения из магазина.
+        if force && !shared {
+            return end_task(&chosen.exe, &readable(&chosen.exe));
+        }
         let targets: Vec<&OpenWindow> = windows
             .iter()
             .filter(|window| window.exe == chosen.exe)
@@ -1379,6 +1387,9 @@ pub fn close(spoken: &str) -> String {
             .filter(|window| close_window(window.handle))
             .count();
         log::info!("закрываю {name}: окон {closed}");
+        if closed > 0 && !shared {
+            finish_leftovers(chosen.exe.clone(), name.clone());
+        }
         return match closed {
             0 => format!("{name} не закрылся."),
             _ => format!("Закрываю {name}."),
@@ -1392,8 +1403,76 @@ pub fn close(spoken: &str) -> String {
     log::info!("{name} без окон — завершаю процессов: {ended} из {}", pids.len());
     match ended {
         0 => format!("{name} не закрылся — Windows не дала его завершить."),
+        _ if force => format!("Снял задачу: {name}."),
         _ => format!("Закрываю {name}."),
     }
+}
+
+/// Все процессы программы с этим именем файла, кроме нашего и системных.
+fn pids_of(exe: &str) -> Vec<u32> {
+    let stem = |name: &str| {
+        let lower = name.to_lowercase();
+        lower.strip_suffix(".exe").unwrap_or(&lower).to_string()
+    };
+    let wanted = stem(exe);
+    if NEVER_END.contains(&wanted.as_str()) {
+        return Vec::new();
+    }
+    let own = std::process::id();
+    processes()
+        .into_iter()
+        .filter(|(pid, name)| *pid != own && stem(name) == wanted)
+        .map(|(pid, _)| pid)
+        .collect()
+}
+
+/// «Снять задачу»: все процессы программы разом.
+fn end_task(exe: &str, name: &str) -> String {
+    let pids = pids_of(exe);
+    let ended = pids.iter().filter(|pid| terminate(**pid)).count();
+    log::info!("снимаю задачу {name}: процессов {ended} из {}", pids.len());
+    match ended {
+        0 => format!("{name} не завершился — Windows не дала."),
+        _ => format!("Снял задачу: {name}."),
+    }
+}
+
+/// Добивает то, что осталось от программы после закрытия окон.
+///
+/// Chrome, Discord, Steam и им подобные, закрыв последнее окно, не выходят, а
+/// остаются в фоне — и продолжают занимать память. «Закрой» значит, что
+/// программы больше нет. Поэтому: окна закрыты, двенадцать секунд на то, чтобы
+/// выйти самой, — и оставшиеся без окон процессы завершаются. Осталось окно —
+/// «сохранить изменения?» — не трогается ничего: там решает человек.
+fn finish_leftovers(exe: String, name: String) {
+    std::thread::Builder::new()
+        .name("sufler-close".into())
+        .spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(12);
+            loop {
+                std::thread::sleep(Duration::from_secs(1));
+                if pids_of(&exe).is_empty() {
+                    return;
+                }
+                let window_left = open_windows()
+                    .iter()
+                    .any(|window| window.exe.eq_ignore_ascii_case(&exe));
+                if Instant::now() < deadline {
+                    continue;
+                }
+                if window_left {
+                    return;
+                }
+                let pids = pids_of(&exe);
+                let ended = pids.iter().filter(|pid| terminate(**pid)).count();
+                log::info!(
+                    "{name} остался в фоне без окон — завершаю процессов: {ended} из {}",
+                    pids.len()
+                );
+                return;
+            }
+        })
+        .ok();
 }
 
 /// Процессы, которые держат окна чужих программ.
@@ -2176,5 +2255,17 @@ mod live_window {
             text.chars().take(300).collect::<String>()
         );
         assert!(!text.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod ending {
+    use super::pids_of;
+
+    #[test]
+    fn system_processes_are_never_ended() {
+        assert!(pids_of("svchost.exe").is_empty());
+        assert!(pids_of("explorer").is_empty());
+        assert!(pids_of("sufler.exe").is_empty());
     }
 }

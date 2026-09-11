@@ -300,6 +300,84 @@ pub async fn lookup(app: &AppHandle, question: &str) -> String {
     }
 }
 
+/// Проверяет, правда ли написанное, — по свежему поиску.
+///
+/// Запрос — само утверждение: заголовок или самая содержательная из первых
+/// строк, а не весь текст скриншота с датами и кнопками. Ответ — «подтверждается»,
+/// «опровергается» или «проверить не удалось», с тем, по каким сайтам вывод.
+/// Модели прямо сказано не судить по своей памяти: сегодняшних новостей она
+/// не знает.
+pub async fn fact_check(app: &AppHandle, text: &str, question: &str) -> String {
+    let provider = app.state::<AppState>().provider();
+    check_with(provider.as_ref(), text, question).await
+}
+
+/// Проверка — отдельно от программы: модель передаётся снаружи.
+async fn check_with<P>(provider: &P, text: &str, question: &str) -> String
+where
+    P: crate::ai_client::AiProvider + ?Sized,
+{
+    let query = claim_query(text);
+    if query.is_empty() {
+        return "Не нашёл, что проверять: в тексте нет ни одной связной фразы.".into();
+    }
+    let hits = match search(&query).await {
+        Ok(hits) => hits,
+        Err(err) => {
+            log::warn!("проверка «{query}»: поиск не удался: {err}");
+            return "Проверить не вышло: поиск в интернете сейчас не отвечает.".into();
+        }
+    };
+    log::info!("проверка «{query}»: результатов {}", hits.len());
+
+    let found = hits
+        .iter()
+        .take(8)
+        .enumerate()
+        .map(|(at, hit)| format!("[{}] {} ({})\n{}", at + 1, hit.title, hit.site, hit.snippet))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let rules = format!(
+        "Ты — Ноа, голосовой помощник. Человек увидел текст ниже — обычно новость со \
+         скриншота — и спрашивает, правда ли это. Сравни главное утверждение текста с \
+         фрагментами свежего поиска. Скажи прямо, одним-тремя предложениями, по-русски: \
+         подтверждается, опровергается или проверить не удалось — и почему. Если об \
+         этом пишут только сомнительные сайты или не пишет никто, так и скажи. Не суди \
+         по своей памяти: сегодняшних новостей ты не знаешь. В конце назови, по данным \
+         каких сайтов вывод. {}\n\nТекст:\n{}\n\nФрагменты поиска:\n{found}",
+        crate::planner::now_line(),
+        text.chars().take(1500).collect::<String>()
+    );
+
+    match provider.interpret(&rules, question).await {
+        Ok(answer) if !answer.trim().is_empty() => answer.trim().to_string(),
+        _ => match hits.first() {
+            Some(hit) => format!(
+                "Проверить не вышло: модель не ответила. Первое, что нашлось: {} ({}).",
+                hit.title, hit.site
+            ),
+            None => "Проверить не вышло: модель не ответила.".into(),
+        },
+    }
+}
+
+/// Запрос для проверки: самая содержательная из первых строк текста.
+///
+/// Скриншот новости начинается с обвязки сайта — меню, даты, «Реклама», — а
+/// заголовок обычно самая длинная из первых строк. Берётся она, до
+/// четырнадцати слов: длиннее поисковик режет сам и находит хуже.
+fn claim_query(text: &str) -> String {
+    let best = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.split_whitespace().count() >= 4)
+        .take(6)
+        .max_by_key(|line| line.split_whitespace().count())
+        .or_else(|| text.lines().map(str::trim).find(|line| !line.is_empty()))
+        .unwrap_or_default();
+    best.split_whitespace().take(14).collect::<Vec<_>>().join(" ")
+}
+
 async fn search(query: &str) -> Result<Vec<Hit>, String> {
     let client = crate::net::client_builder()
         .timeout(Duration::from_secs(8))
@@ -464,5 +542,48 @@ mod tests {
     #[test]
     fn markup_and_entities_leave_only_text() {
         assert_eq!(clean(" <b>Кафе</b>&nbsp;&laquo;Уют&raquo; &amp; бар "), "Кафе «Уют» & бар");
+    }
+}
+
+#[cfg(test)]
+mod checking {
+    use super::claim_query;
+
+    #[test]
+    fn the_claim_is_the_headline_not_the_menu() {
+        let text = "Новости\nГлавное\n12:40\nВ Москве с понедельника отменят все электрички на два \
+                    года, сообщили в мэрии\nРеклама";
+        assert_eq!(
+            claim_query(text),
+            "В Москве с понедельника отменят все электрички на два года, сообщили в мэрии"
+        );
+    }
+}
+
+#[cfg(test)]
+mod live {
+    /// `cargo test --lib web::live -- --ignored --nocapture`
+    #[test]
+    #[ignore = "ходит в поиск и в локальную модель"]
+    fn a_claim_is_checked_against_the_news() {
+        let config = crate::config::AiConfig {
+            endpoint: crate::ollama::DEFAULT_ENDPOINT.into(),
+            model: "qwen2.5:7b".into(),
+            ..Default::default()
+        };
+        let provider = crate::ai_client::HttpProvider::new(&config, "ru").expect("провайдер");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        for text in [
+            "Летние Олимпийские игры 2024 года прошли в Париже",
+            "Илон Маск купил Луну и переименовал её в Теслу, сообщили в NASA",
+        ] {
+            let started = std::time::Instant::now();
+            let answer = runtime.block_on(super::check_with(&provider, text, "это правда?"));
+            println!("{} мс — «{text}»:\n  {answer}\n", started.elapsed().as_millis());
+            assert!(!answer.is_empty());
+        }
     }
 }

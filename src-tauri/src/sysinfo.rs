@@ -23,6 +23,7 @@ pub enum Topic {
     Cpu,
     Memory,
     Disk,
+    Gpu,
 }
 
 impl Topic {
@@ -31,6 +32,7 @@ impl Topic {
             "cpu" | "processor" => Self::Cpu,
             "memory" | "ram" => Self::Memory,
             "disk" | "disks" | "storage" => Self::Disk,
+            "gpu" | "video" | "vram" | "graphics" => Self::Gpu,
             _ => Self::Overview,
         }
     }
@@ -50,6 +52,8 @@ struct Snapshot {
     disks: Vec<Disk>,
     /// Сколько часов компьютер работает без перезагрузки.
     uptime_hours: f64,
+    /// Видеокарта — если Windows о ней рассказала.
+    gpu: Option<Gpu>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -69,6 +73,20 @@ struct Disk {
     free: f64,
 }
 
+#[derive(Debug, Default)]
+struct Gpu {
+    name: String,
+    /// Видеопамять всего и занято, ГБ.
+    total: f64,
+    used: f64,
+    /// Загрузка, проценты.
+    load: Option<f64>,
+    /// Температура, градусы, — если её сообщает драйвер.
+    temperature: Option<f64>,
+    /// Кто больше всего занимает видеопамять; `memory` — мегабайты.
+    by_memory: Vec<Process>,
+}
+
 /// Сколько длится замер загрузки процессора.
 ///
 /// Загрузка — это разница двух отсчётов времени процессора. Короче полсекунды
@@ -76,6 +94,11 @@ struct Disk {
 /// чем нужно.
 #[cfg(target_os = "windows")]
 const SAMPLE: std::time::Duration = std::time::Duration::from_millis(700);
+
+#[cfg(target_os = "windows")]
+const MB: f64 = 1024.0 * 1024.0;
+#[cfg(target_os = "windows")]
+const GB: f64 = MB * 1024.0;
 
 /// Снимок состояния: процессы, память, диски.
 ///
@@ -98,8 +121,6 @@ fn snapshot() -> Result<Snapshot, String> {
     };
 
     const DRIVE_FIXED: u32 = 3;
-    const MB: f64 = 1024.0 * 1024.0;
-    const GB: f64 = MB * 1024.0;
 
     fn ticks(time: FILETIME) -> u64 {
         (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime)
@@ -150,6 +171,11 @@ fn snapshot() -> Result<Snapshot, String> {
         }
         let _ = CloseHandle(list);
 
+        // Видеокарта меряется в ту же паузу, что и процессор.
+        let names: HashMap<u32, String> =
+            listed.iter().map(|(pid, name)| (*pid, program_of(name))).collect();
+        let gpu_probe = gpu::start();
+
         let before = system_times().ok_or("время процессора не прочиталось")?;
         let mut open: Vec<(String, HANDLE, u64)> = Vec::new();
         for (pid, name) in listed {
@@ -169,6 +195,7 @@ fn snapshot() -> Result<Snapshot, String> {
         }
 
         std::thread::sleep(SAMPLE);
+        let gpu = gpu_probe.map(|probe| probe.finish(&names));
 
         let after = system_times().ok_or("время процессора не прочиталось")?;
         let total = after.0.saturating_sub(before.0).max(1);
@@ -192,15 +219,7 @@ fn snapshot() -> Result<Snapshot, String> {
             };
             let _ = CloseHandle(handle);
 
-            // Без «.exe». Срез — по границе символа: имя может быть русским.
-            let stem = name
-                .len()
-                .checked_sub(4)
-                .filter(|&at| at > 0 && name.get(at..).is_some_and(|tail| tail.eq_ignore_ascii_case(".exe")));
-            let program = match stem {
-                Some(at) => name[..at].to_string(),
-                None => name,
-            };
+            let program = program_of(&name);
             let entry = grouped.entry(program.to_lowercase()).or_insert_with(|| Process {
                 name: program,
                 ..Default::default()
@@ -257,6 +276,7 @@ fn snapshot() -> Result<Snapshot, String> {
             memory_free: status.ullAvailPhys as f64 / GB,
             disks,
             uptime_hours: GetTickCount64() as f64 / 3_600_000.0,
+            gpu,
         })
     }
 }
@@ -264,6 +284,299 @@ fn snapshot() -> Result<Snapshot, String> {
 #[cfg(not(target_os = "windows"))]
 fn snapshot() -> Result<Snapshot, String> {
     Err("сведения о системе есть только на Windows".into())
+}
+
+/// Имя программы без «.exe». Срез — по границе символа: имя может быть русским.
+fn program_of(name: &str) -> String {
+    match name.len().checked_sub(4) {
+        Some(at) if at > 0 && name.get(at..).is_some_and(|tail| tail.eq_ignore_ascii_case(".exe")) => {
+            name[..at].to_string()
+        }
+        _ => name.to_string(),
+    }
+}
+
+/// Кто по-настоящему занимает видеопамять — для ответа вслух.
+///
+/// Счётчик Windows по процессам честен не для всех: оконный менеджер и оверлей
+/// NVIDIA держат ссылки на кадры всех окон и показывают по восемь-десять
+/// гигабайт — больше, чем занято на всей карте. Вживую так и было: 10,3 ГБ у
+/// оверлея и 8,6 ГБ у оконного менеджера при 8,8 ГБ занятых. Такие строки
+/// отбрасываются: по ним человек решил бы, что видеопамять съела сама Windows.
+fn heavy_on_gpu(mut processes: Vec<Process>, used_gb: f64) -> Vec<Process> {
+    const SYSTEM: &[&str] = &[
+        "dwm", "nvidia overlay", "nvidia share", "nvcontainer", "csrss", "system",
+        "memory compression",
+    ];
+    processes.retain(|process| {
+        process.memory >= 50.0
+            && process.memory / 1024.0 <= used_gb + 0.25
+            && !SYSTEM.contains(&process.name.to_lowercase().as_str())
+    });
+    processes.sort_by(|a, b| b.memory.total_cmp(&a.memory));
+    processes.truncate(5);
+    processes
+}
+
+/// Видеокарта: видеопамять и загрузка — по счётчикам Windows, тем же, что в
+/// диспетчере задач; название и объём — у DXGI; температура — у драйвера
+/// NVIDIA, если он её сообщает.
+///
+/// Счётчики берутся по английским именам: на русской Windows их пути
+/// переведены, и английский путь без этого молча ничего бы не нашёл.
+#[cfg(target_os = "windows")]
+mod gpu {
+    use std::collections::HashMap;
+
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+    use windows::Win32::System::Performance::{
+        PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterArrayW,
+        PdhOpenQueryW, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY,
+        PDH_MORE_DATA,
+    };
+
+    use super::{heavy_on_gpu, Gpu, Process, GB, MB};
+
+    /// Видеокарта, о которой отвечать: с самой большой своей памятью.
+    struct Card {
+        name: String,
+        /// Метка адаптера в именах счётчиков: «luid_0x00000000_0x0000de7a».
+        luid: String,
+        total: f64,
+        nvidia: bool,
+    }
+
+    fn card() -> Option<Card> {
+        // SAFETY: только чтение описаний видеокарт.
+        unsafe {
+            let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+            let mut best: Option<Card> = None;
+            let mut index = 0;
+            while let Ok(adapter) = factory.EnumAdapters1(index) {
+                index += 1;
+                let Ok(desc) = adapter.GetDesc1() else {
+                    continue;
+                };
+                // Программная видеокарта Windows — не железо.
+                if desc.Flags & 2 != 0 {
+                    continue;
+                }
+                let total = desc.DedicatedVideoMemory as f64 / GB;
+                if best.as_ref().is_some_and(|card| card.total >= total) {
+                    continue;
+                }
+                let length = desc
+                    .Description
+                    .iter()
+                    .position(|unit| *unit == 0)
+                    .unwrap_or(desc.Description.len());
+                best = Some(Card {
+                    name: String::from_utf16_lossy(&desc.Description[..length]).trim().to_string(),
+                    luid: format!(
+                        "luid_0x{:08x}_0x{:08x}",
+                        desc.AdapterLuid.HighPart as u32, desc.AdapterLuid.LowPart
+                    ),
+                    total,
+                    nvidia: desc.VendorId == 0x10DE,
+                });
+            }
+            best
+        }
+    }
+
+    /// Замер: открывается до паузы замера процессора, читается после неё.
+    pub(super) struct Probe {
+        query: PDH_HQUERY,
+        adapters: PDH_HCOUNTER,
+        processes: PDH_HCOUNTER,
+        engines: PDH_HCOUNTER,
+        card: Card,
+        temperature: Option<std::process::Child>,
+    }
+
+    pub(super) fn start() -> Option<Probe> {
+        let card = card()?;
+        // SAFETY: запрос счётчиков открывается здесь и закрывается в `finish`.
+        unsafe {
+            let mut query = PDH_HQUERY(std::ptr::null_mut());
+            if PdhOpenQueryW(PCWSTR::null(), 0, &mut query) != 0 {
+                return None;
+            }
+            let add = |path: PCWSTR| {
+                let mut counter = PDH_HCOUNTER(std::ptr::null_mut());
+                (PdhAddEnglishCounterW(query, path, 0, &mut counter) == 0).then_some(counter)
+            };
+            let counters = (
+                add(w!("\\GPU Adapter Memory(*)\\Dedicated Usage")),
+                add(w!("\\GPU Process Memory(*)\\Dedicated Usage")),
+                add(w!("\\GPU Engine(*)\\Utilization Percentage")),
+            );
+            let (Some(adapters), Some(processes), Some(engines)) = counters else {
+                let _ = PdhCloseQuery(query);
+                return None;
+            };
+            let _ = PdhCollectQueryData(query);
+            let temperature = if card.nvidia { nvidia_temperature() } else { None };
+            Some(Probe {
+                query,
+                adapters,
+                processes,
+                engines,
+                card,
+                temperature,
+            })
+        }
+    }
+
+    impl Probe {
+        pub(super) fn finish(self, names: &HashMap<u32, String>) -> Gpu {
+            let Probe {
+                query,
+                adapters,
+                processes,
+                engines,
+                card,
+                temperature,
+            } = self;
+            // SAFETY: запрос открыт в `start` и закрывается здесь же, после чтения.
+            let (adapters, processes, engines) = unsafe {
+                let _ = PdhCollectQueryData(query);
+                let read = (values(adapters), values(processes), values(engines));
+                let _ = PdhCloseQuery(query);
+                read
+            };
+            let ours = |instance: &str| instance.to_lowercase().contains(&card.luid);
+
+            let used = adapters
+                .iter()
+                .filter(|(instance, _)| ours(instance))
+                .map(|(_, bytes)| bytes)
+                .sum::<f64>()
+                / GB;
+
+            let mut memory: HashMap<String, Process> = HashMap::new();
+            for (instance, bytes) in processes.iter().filter(|(instance, _)| ours(instance)) {
+                let Some(pid) = pid_of(instance) else {
+                    continue;
+                };
+                let program = names.get(&pid).cloned().unwrap_or_else(|| format!("процесс {pid}"));
+                let entry = memory.entry(program.to_lowercase()).or_insert_with(|| Process {
+                    name: program,
+                    ..Default::default()
+                });
+                entry.memory += bytes / MB;
+            }
+            let by_memory = heavy_on_gpu(memory.into_values().collect(), used);
+
+            // Загрузка — как в диспетчере задач: по каждому движку сумма всех
+            // процессов, и берётся самый занятый движок.
+            let mut per_engine: HashMap<String, f64> = HashMap::new();
+            for (instance, percent) in engines.iter().filter(|(instance, _)| ours(instance)) {
+                let engine = instance
+                    .split_once("_luid_")
+                    .map(|(_, rest)| rest.to_string())
+                    .unwrap_or_default();
+                *per_engine.entry(engine).or_default() += percent;
+            }
+            let load = per_engine.values().copied().reduce(f64::max).map(|load| load.min(100.0));
+
+            let temperature = temperature
+                .and_then(|child| child.wait_with_output().ok())
+                .and_then(|output| {
+                    String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .next()
+                        .and_then(|line| line.trim().parse::<f64>().ok())
+                });
+
+            Gpu {
+                name: card.name,
+                total: card.total,
+                used,
+                load,
+                temperature,
+                by_memory,
+            }
+        }
+    }
+
+    /// Значения счётчика по всем экземплярам: имя экземпляра и число.
+    fn values(counter: PDH_HCOUNTER) -> Vec<(String, f64)> {
+        // SAFETY: буфер под массив выделяется по размеру, который назвала сама
+        // PDH; строки имён живут в том же буфере и копируются до его освобождения.
+        unsafe {
+            for _ in 0..3 {
+                let (mut size, mut count) = (0u32, 0u32);
+                let status =
+                    PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE, &mut size, &mut count, None);
+                if status != PDH_MORE_DATA || size == 0 {
+                    return Vec::new();
+                }
+                let mut buffer = vec![0u64; (size as usize).div_ceil(8)];
+                let items = buffer.as_mut_ptr().cast::<PDH_FMT_COUNTERVALUE_ITEM_W>();
+                let status = PdhGetFormattedCounterArrayW(
+                    counter,
+                    PDH_FMT_DOUBLE,
+                    &mut size,
+                    &mut count,
+                    Some(items),
+                );
+                // Пока читали, появились новые экземпляры — ещё раз.
+                if status == PDH_MORE_DATA {
+                    continue;
+                }
+                if status != 0 {
+                    return Vec::new();
+                }
+                return std::slice::from_raw_parts(items, count as usize)
+                    .iter()
+                    .filter(|item| item.FmtValue.CStatus <= 1)
+                    .map(|item| {
+                        (
+                            item.szName.to_string().unwrap_or_default(),
+                            item.FmtValue.Anonymous.doubleValue,
+                        )
+                    })
+                    .collect();
+            }
+            Vec::new()
+        }
+    }
+
+    /// Номер процесса из имени экземпляра: «pid_10416_luid_…».
+    fn pid_of(instance: &str) -> Option<u32> {
+        instance.strip_prefix("pid_")?.split('_').next()?.parse().ok()
+    }
+
+    /// Температура у драйвера NVIDIA: запускается сразу, читается после паузы.
+    fn nvidia_temperature() -> Option<std::process::Child> {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+        let tool = std::path::Path::new(&std::env::var("SystemRoot").ok()?)
+            .join("System32")
+            .join("nvidia-smi.exe");
+        if !tool.exists() {
+            return None;
+        }
+        std::process::Command::new(tool)
+            .args(["--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .ok()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn the_process_number_is_read_from_the_counter_name() {
+            assert_eq!(super::pid_of("pid_10416_luid_0x00000000_0x0000DE7A_phys_0"), Some(10416));
+            assert_eq!(super::pid_of("luid_0x00000000_0x0000DE7A_phys_0"), None);
+        }
+    }
 }
 
 /// Короткий ответ вслух о состоянии компьютера.
@@ -343,6 +656,16 @@ fn describe(snapshot: &Snapshot, topic: Topic) -> String {
         parts.push(line);
     }
 
+    if matches!(topic, Topic::Overview | Topic::Gpu) {
+        match &snapshot.gpu {
+            Some(gpu) => parts.push(describe_gpu(gpu, topic == Topic::Gpu)),
+            None if topic == Topic::Gpu => {
+                parts.push("Сведений о видеокарте Windows не отдала.".into())
+            }
+            None => {}
+        }
+    }
+
     if matches!(topic, Topic::Overview | Topic::Disk) {
         let disks: Vec<String> = snapshot
             .disks
@@ -371,6 +694,39 @@ fn describe(snapshot: &Snapshot, topic: Topic) -> String {
     }
 
     parts.join(" ")
+}
+
+/// Строка о видеокарте. `full` — отдельный вопрос о ней: с названием и тем,
+/// кто занимает видеопамять; в обзоре — одна короткая строка.
+fn describe_gpu(gpu: &Gpu, full: bool) -> String {
+    let named = match (full, gpu.name.is_empty()) {
+        (true, false) => format!(" {}", gpu.name),
+        _ => String::new(),
+    };
+    let mut line = format!(
+        "Видеокарта{named}: видеопамяти занято {} из {:.0} ГБ",
+        decimal(gpu.used),
+        gpu.total
+    );
+    if let Some(load) = gpu.load {
+        line.push_str(&format!(", загрузка {load:.0}%"));
+    }
+    if let Some(temperature) = gpu.temperature {
+        line.push_str(&format!(", температура {temperature:.0} °C"));
+    }
+    line.push('.');
+    if full {
+        let heavy: Vec<String> = gpu
+            .by_memory
+            .iter()
+            .take(3)
+            .map(|p| format!("{} — {}", spoken_name(&p.name), gigabytes(p.memory)))
+            .collect();
+        if !heavy.is_empty() {
+            line.push_str(&format!(" Больше всего видеопамяти у {}.", heavy.join(", ")));
+        }
+    }
+    line
 }
 
 /* ── Что за ошибка ──────────────────────────────────────────────────────── */
@@ -501,6 +857,17 @@ mod tests {
                 Disk { letter: "D:".into(), size: 315.0, free: 120.0 },
             ],
             uptime_hours: 100.0,
+            gpu: Some(Gpu {
+                name: "NVIDIA GeForce RTX 3080".into(),
+                total: 10.0,
+                used: 9.2,
+                load: Some(50.0),
+                temperature: Some(42.0),
+                by_memory: vec![
+                    Process { name: "llama-server".into(), cpu: 0.0, memory: 4700.0 },
+                    Process { name: "Cyberpunk2077".into(), cpu: 0.0, memory: 2048.0 },
+                ],
+            }),
         }
     }
 
@@ -533,6 +900,49 @@ mod tests {
     }
 
     #[test]
+    fn the_video_card_is_its_own_answer() {
+        let text = describe(&sample(), Topic::Gpu);
+        assert!(
+            text.starts_with(
+                "Видеокарта NVIDIA GeForce RTX 3080: видеопамяти занято 9,2 из 10 ГБ, \
+                 загрузка 50%, температура 42 °C."
+            ),
+            "{text}"
+        );
+        assert!(text.contains("llama-server — 4,6 ГБ"), "{text}");
+        assert!(!text.contains("Процессор"), "{text}");
+        assert_eq!(Topic::parse("gpu"), Topic::Gpu);
+    }
+
+    #[test]
+    fn the_overview_mentions_the_video_card_briefly() {
+        let text = describe(&sample(), Topic::Overview);
+        assert!(text.contains("Видеокарта: видеопамяти занято 9,2 из 10 ГБ"), "{text}");
+        assert!(!text.contains("llama-server — 4,6"), "{text}");
+    }
+
+    #[test]
+    fn the_window_manager_does_not_eat_the_video_card() {
+        // Цифры из живого замера: на карте занято 8,8 ГБ.
+        let listed = vec![
+            Process { name: "NVIDIA Overlay".into(), cpu: 0.0, memory: 10_547.0 },
+            Process { name: "dwm".into(), cpu: 0.0, memory: 8_806.0 },
+            Process { name: "llama-server".into(), cpu: 0.0, memory: 4_403.0 },
+            Process { name: "chrome".into(), cpu: 0.0, memory: 20.0 },
+        ];
+        let heavy = heavy_on_gpu(listed, 8.8);
+        let names: Vec<&str> = heavy.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["llama-server"]);
+    }
+
+    #[test]
+    fn programs_are_named_without_exe() {
+        assert_eq!(program_of("chrome.exe"), "chrome");
+        assert_eq!(program_of("Яндекс Музыка.exe"), "Яндекс Музыка");
+        assert_eq!(program_of("System"), "System");
+    }
+
+    #[test]
     fn scripts_are_encoded_as_powershell_expects() {
         // UTF-16 в base64 — так PowerShell ждёт `-EncodedCommand`.
         assert_eq!(encoded("A"), "QQA=");
@@ -551,6 +961,7 @@ mod live {
             ("процессор", super::Topic::Cpu),
             ("память", super::Topic::Memory),
             ("диски", super::Topic::Disk),
+            ("видеокарта", super::Topic::Gpu),
         ] {
             let started = std::time::Instant::now();
             let said = super::status(topic);
