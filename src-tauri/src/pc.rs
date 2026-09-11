@@ -556,6 +556,53 @@ pub fn press_enter() -> bool {
     target != 0 && press(target, &[ENTER])
 }
 
+/// «Спроси Клода»: открыть Claude и передать ему вопрос.
+///
+/// Claude открывается как обычная программа. Когда его окно появится, вопрос
+/// вписывается в поле и отправляется — дальше разговор идёт там. Окно не
+/// появилось за десять секунд — ничего не печатается: вписать вопрос вслепую
+/// значило бы отправить его в какое-то другое окно.
+pub fn ask_claude(question: &str) -> String {
+    let entries = catalog();
+    let Some(entry) = best_match("claude", &entries) else {
+        return "Claude на этом компьютере не нашёл.".into();
+    };
+    if let Err(err) = launch_entry(entry) {
+        return format!("Claude не открылся: {err}.");
+    }
+    let question = question.trim();
+    if question.is_empty() {
+        return "Открываю Claude — продолжайте там.".into();
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let window = loop {
+        let found = open_windows()
+            .into_iter()
+            .find(|window| window.exe.eq_ignore_ascii_case("claude"));
+        if let Some(window) = found {
+            break Some(window.handle);
+        }
+        if Instant::now() > deadline {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    };
+    let Some(window) = window else {
+        return "Открыл Claude — вопрос задайте там.".into();
+    };
+    // Поле ввода встаёт не сразу после появления окна.
+    std::thread::sleep(Duration::from_millis(900));
+    if !type_into(window, question) {
+        return "Открыл Claude — вопрос задайте там.".into();
+    }
+    std::thread::sleep(Duration::from_millis(250));
+    const ENTER: u16 = 0x0D;
+    press(window, &[ENTER]);
+    log::info!("вопрос передан Claude: «{question}»");
+    "Спросил Claude — ответ в его окне.".into()
+}
+
 /// Открывает программу по названию и отдаёт, как она называется.
 pub fn open_named(spoken: &str) -> Result<String, String> {
     let entries = catalog();

@@ -24,6 +24,8 @@ mod spend;
 mod sysinfo;
 mod files;
 mod screen;
+mod browser;
+mod prices;
 mod review;
 mod secret;
 mod tasks;
@@ -47,6 +49,18 @@ pub fn run() {
         // а работающая по нему закрывается сама и убирает за собой значок в трее.
         if std::env::args().any(|arg| arg == "--quit") {
             instance::request_quit();
+            return;
+        }
+
+        // `--ask «фраза»` — тоже просьба: работающая копия примет фразу так,
+        // будто её сказали голосом. Разбирается до проверки «уже запущена» —
+        // иначе вторая копия просто показала бы окно настройки.
+        let args: Vec<String> = std::env::args().collect();
+        if let Some(at) = args.iter().position(|arg| arg == "--ask") {
+            let text = args[at + 1..].join(" ");
+            if !text.trim().is_empty() {
+                instance::request_ask(text.trim());
+            }
             return;
         }
 
@@ -1570,6 +1584,12 @@ fn handled_as_task(app: &tauri::AppHandle, text: &str) -> bool {
     };
     log::info!("распоряжение о задачах: «{text}» → «{reply}»");
     respond(app, reply);
+    // Разговор передан Claude: Ноа замолкает и уходит. Ход считается
+    // оконченным — разговор после него не начинается, — а окно закрывается.
+    if planner::take_handoff() {
+        CANCELS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        end_conversation(app, false, true);
+    }
     true
 }
 
@@ -1853,6 +1873,23 @@ fn release_model(app: &tauri::AppHandle) {
     if released.is_err() {
         log::warn!("модель не выгрузилась за три секунды — Ollama освободит память сама по сроку");
     }
+}
+
+/// Фраза из командной строки (`--ask`) — как если бы её сказали голосом.
+#[cfg(desktop)]
+pub(crate) fn ask(app: &tauri::AppHandle, text: String) {
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-ask".into())
+        .spawn(move || {
+            log::info!("фраза из командной строки: «{text}»");
+            begin_turn();
+            if !is_farewell(&text) && !handled_as_task(&app, &text) {
+                answer_aloud(&app, &text);
+            }
+            end_turn();
+        })
+        .ok();
 }
 
 /// Показывать ли окно с ответами. Голос выключен — окно показывается всегда:

@@ -88,6 +88,10 @@ pub enum Intent {
     /// Вопрос про скриншот в буфере или про то, что на экране. `check` —
     /// проверить, правда ли это.
     Screen { check: bool },
+    /// Цена криптовалюты или курс валюты.
+    Price { asset: String },
+    /// Передать разговор Claude: открыть его и задать ему вопрос.
+    Claude { text: String },
     /// Готовый ответ без действия: переспросить, пояснить.
     Say(String),
 }
@@ -188,6 +192,16 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         Intent::Send => Some("Отправлять нечего — сначала скажите, что напечатать.".into()),
         Intent::Paste => Some(blocking(paste_pending).await),
         Intent::Screen { check } => Some(crate::screen::answer(app, said, check).await),
+        // Точная цена — у CoinGecko и ЦБ; не нашлось там — ищет Google.
+        Intent::Price { asset } => Some(match crate::prices::price(&asset).await {
+            Some(answer) => answer,
+            None => crate::web::lookup(app, said).await,
+        }),
+        Intent::Claude { text } => {
+            // Разговор уходит в Claude — Ноа после ответа замолкает и уходит.
+            HANDOFF.store(true, std::sync::atomic::Ordering::SeqCst);
+            Some(blocking(move || crate::pc::ask_claude(&text)).await)
+        }
         Intent::Say(text) => Some(text),
     }
 }
@@ -997,6 +1011,13 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
         "screen" => Intent::Screen {
             check: parsed["check"].as_bool().unwrap_or(false) || checks_truth(said),
         },
+        "price" => Intent::Price {
+            asset: match text("asset") {
+                asset if asset.is_empty() => said.to_string(),
+                asset => asset,
+            },
+        },
+        "claude" => Intent::Claude { text: text("text") },
         _ => Intent::Chat,
     }
 }
@@ -1269,6 +1290,14 @@ fn window_request(said: &str) -> Option<bool> {
     SHOW.iter().any(|phrase| lower.contains(phrase)).then_some(true)
 }
 
+/// Разговор передан Claude: после ответа Ноа замолкает и закрывает окно.
+static HANDOFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Передан ли разговор Claude — и сбросить отметку.
+pub fn take_handoff() -> bool {
+    HANDOFF.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Похоже ли на покупку: «купи», «закажи», «привези».
 fn bought(said: &str) -> bool {
     let lower = said.to_lowercase();
@@ -1373,6 +1402,8 @@ fn asked_for(intent: &str, said: &str) -> bool {
         "message" => &["напиши", "отправь", "сообщени", "скажи", "передай"],
         "send" => &["отправ", "жми", "энтер", "enter"],
         "paste" => &["встав"],
+        "price" => &["стоит", "цена", "цену", "курс", "стоимост", "почём", "почем", "котиров"],
+        "claude" => &["клод", "claude", "клауд", "клоуд"],
         "remove" => &["удал", "убер", "убра", "сотр", "стер", "не просил", "не надо было", "лишн"],
         "screen" => &[
             "скрин", "экран", "фейк", "правд", "написан", "переведи", "картинк", "снимк",
@@ -1466,7 +1497,11 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          paste — просит вставить заготовленный текст: «вставь»;\n\
          screen — вопрос про скриншот или скопированный текст в буфере обмена или \
          про то, что сейчас на экране: «это фейк?», «это правда?», «что тут \
-         написано», «переведи».\n\
+         написано», «переведи»;\n\
+         price — спрашивает цену или курс криптовалюты, токена, монеты или валюты: \
+         «сколько стоит биткоин», «курс доллара», «почём pump.fun»;\n\
+         claude — просит спросить Claude (Клода) или перейти к нему: «спроси Клода, \
+         как …», «позови Клода», «хочу поговорить с Клодом».\n\
          \n\
          Остальные поля:\n\
          title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
@@ -1492,8 +1527,11 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          topic — для system одно из: cpu, memory, gpu, disk, overview; gpu — \
          видеокарта: видеопамять, её загрузка и температура;\n\
          check — для screen true, если просят проверить, правда ли это;\n\
+         asset — для price что именно: монету — латиницей, как на бирже (bitcoin, \
+         pump.fun), валюту — по-русски (доллар, евро);\n\
          kind — для find тип файла: image, document, video, audio или any;\n\
-         text — для type и message сам текст, слово в слово, без «напиши»;\n\
+         text — для type, message и claude сам текст, слово в слово, без «напиши» и \
+         «спроси»; для claude без вопроса — пусто;\n\
          to — для message кому писать, как назвали; app для message — мессенджер, \
          по умолчанию telegram.\n\
          \n\
@@ -1600,7 +1638,11 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      «я ничего не просил записывать, удали» → {\"intent\":\"remove\",\"task\":0}\n\
      «это фейк?» → {\"intent\":\"screen\",\"check\":true}\n\
      «что тут написано» → {\"intent\":\"screen\",\"check\":false}\n\
-     «это правда?» → {\"intent\":\"screen\",\"check\":true}";
+     «это правда?» → {\"intent\":\"screen\",\"check\":true}\n\
+     «сколько стоит пампфан токен» → {\"intent\":\"price\",\"asset\":\"pump.fun\"}\n\
+     «курс доллара» → {\"intent\":\"price\",\"asset\":\"доллар\"}\n\
+     «спроси клода, как написать резюме» → {\"intent\":\"claude\",\"text\":\"как написать резюме\"}\n\
+     «позови клода» → {\"intent\":\"claude\",\"text\":\"\"}";
 
 /* ── Завести ─────────────────────────────────────────────────────────────── */
 
@@ -2132,6 +2174,9 @@ mod tests {
             ("какая температура у видеокарты", "", "system"),
             ("это фейк?", screenshot, "screen"),
             ("что тут написано", screenshot, "screen"),
+            ("сколько стоит пампфан токен", "", "price"),
+            ("какой сейчас курс евро", "", "price"),
+            ("спроси клода, как написать резюме", "", "claude"),
         ];
 
         let runtime = tokio::runtime::Builder::new_current_thread()

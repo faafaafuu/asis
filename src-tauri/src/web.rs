@@ -220,7 +220,7 @@ pub fn open_known(site: &str, query: &str) -> Option<String> {
 }
 
 /// Проценты вместо небезопасных байтов; пробел — `%20`.
-fn encode(raw: &str) -> String {
+pub(crate) fn encode(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len() * 3);
     for byte in raw.as_bytes() {
         match byte {
@@ -262,8 +262,21 @@ pub async fn lookup(app: &AppHandle, question: &str) -> String {
         return "Не понял, что посмотреть.".into();
     }
 
+    // Сначала — Google в невидимом окне браузера: в его выдаче и карточки с
+    // ценой, часами работы и коротким ответом. Нашёлся ответ — он и звучит.
+    match crate::browser::google(app, question).await {
+        Ok(page) => {
+            let provider = app.state::<AppState>().provider();
+            if let Some(answer) = answer_from_page(provider.as_ref(), question, &page).await {
+                return answer;
+            }
+            log::info!("в выдаче Google ответа на «{question}» не нашлось");
+        }
+        Err(err) => log::warn!("Google через браузер не ответил: {err}"),
+    }
+
     // Часы работы, адрес, как доехать — это карты: там они точные и в городе
-    // человека, а выдача поисковиков программам их не отдаёт.
+    // человека.
     if about_place(question) {
         let url = format!("https://yandex.ru/maps/?text={}", encode(question));
         return match crate::pc::open(&url) {
@@ -798,6 +811,35 @@ fn unescape(text: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// Ответ по тексту выдачи Google. `None` — ответа там нет.
+///
+/// Ответ — JSON с отметкой «нашёл»: на свободный ответ «нет» маленькая модель
+/// отвечала и там, где ответ был, — так уже случилось с проверкой утверждений.
+async fn answer_from_page<P>(provider: &P, question: &str, page: &str) -> Option<String>
+where
+    P: crate::ai_client::AiProvider + ?Sized,
+{
+    let rules = format!(
+        "Ниже текст страницы выдачи Google по вопросу человека — с карточками и \
+         короткими ответами. Найди в нём ответ на вопрос. Ответь только JSON: \
+         {{\"found\": true, \"answer\": \"ответ одним-двумя короткими предложениями \
+         по-русски: число, цену, время, имя — как есть, без ссылок и названий сайтов\"}}; \
+         если ответа в тексте нет — {{\"found\": false, \"answer\": \"\"}}. {}\n\nВыдача:\n{page}",
+        crate::planner::now_line()
+    );
+    let raw = provider.interpret(&rules, question).await.ok()?;
+    let parsed = raw
+        .find('{')
+        .zip(raw.rfind('}'))
+        .filter(|(from, to)| from < to)
+        .and_then(|(from, to)| serde_json::from_str::<serde_json::Value>(&raw[from..=to]).ok())?;
+    if parsed["found"].as_bool() != Some(true) {
+        return None;
+    }
+    let answer = spoken(parsed["answer"].as_str().unwrap_or_default(), 2);
+    (!answer.is_empty() && !crate::ai_client::has_foreign_script(&answer)).then_some(answer)
 }
 
 /// Вопрос про место: часы работы, адрес, дорога.

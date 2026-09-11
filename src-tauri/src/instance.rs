@@ -28,6 +28,32 @@ const EVENT_NAME: windows::core::PCWSTR = w!("Local\\app.sufler.popup.show");
 /// Просьба закрыться. Нужна установщику: он обновляет файлы поверх работающей
 /// программы и обязан её сначала остановить.
 const QUIT_EVENT_NAME: windows::core::PCWSTR = w!("Local\\app.sufler.popup.quit");
+/// Фраза из командной строки: `sufler.exe --ask "сколько стоит биткоин"`.
+const ASK_EVENT_NAME: windows::core::PCWSTR = w!("Local\\app.sufler.popup.ask");
+
+/// Где лежит фраза, пока работающая копия её не забрала.
+fn ask_file() -> Option<std::path::PathBuf> {
+    std::env::var_os("APPDATA")
+        .map(|dir| std::path::PathBuf::from(dir).join("app.sufler.popup").join("ask.txt"))
+}
+
+/// Передаёт работающей копии фразу — как если бы её сказали голосом.
+///
+/// Так вопрос задаётся без микрофона — с ярлыка, горячей клавиши или из
+/// скрипта, — и так же ответы Ноа проверяются, не говоря вслух.
+pub fn request_ask(text: &str) {
+    let Some(path) = ask_file() else {
+        return;
+    };
+    if std::fs::write(&path, text).is_err() {
+        return;
+    }
+    unsafe {
+        if let Ok(event) = CreateEventW(None, false, false, ASK_EVENT_NAME) {
+            let _ = SetEvent(event);
+        }
+    }
+}
 
 /// Занимает право быть единственной копией.
 ///
@@ -87,7 +113,12 @@ pub fn listen(app: tauri::AppHandle) {
             return;
         };
 
-        let events = [show, quit];
+        let Ok(ask) = CreateEventW(None, false, false, ASK_EVENT_NAME) else {
+            log::warn!("не удалось создать событие вопроса — `--ask` работать не будет");
+            return;
+        };
+
+        let events = [show, quit, ask];
         loop {
             // Ждём оба сразу: bWaitAll = false — «разбуди на первом же».
             let signaled = WaitForMultipleObjects(&events, false, INFINITE);
@@ -109,6 +140,20 @@ pub fn listen(app: tauri::AppHandle) {
                 // а это работа для того потока, который их создавал.
                 let _ = app.run_on_main_thread(move || handle.exit(0));
                 return;
+            }
+
+            if signaled.0 == WAIT_OBJECT_0.0 + 2 {
+                let text = ask_file()
+                    .and_then(|path| {
+                        let text = std::fs::read_to_string(&path).ok();
+                        let _ = std::fs::remove_file(&path);
+                        text
+                    })
+                    .unwrap_or_default();
+                if !text.trim().is_empty() {
+                    crate::ask(&app, text.trim().to_string());
+                }
+                continue;
             }
 
             // Ожидание сломалось (дескриптор закрыт, система отказала) — слушать
