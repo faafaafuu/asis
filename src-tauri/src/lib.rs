@@ -163,6 +163,8 @@ pub fn run() {
                 // Список программ собирается заранее, в фоне: иначе первое
                 // «открой блокнот» ждало бы, пока прочитается меню «Пуск».
                 pc::start();
+                // Когда в буфере обмена появилось новое — «это правда?» про свежее.
+                screen::watch();
                 // «Думаю», которое висит дольше предела, убирается само.
                 watch_hud(app.handle());
                 watch_reminders(app.handle());
@@ -497,6 +499,7 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         // Esc — тогда микрофон не открываем.
                         if !voice::hotkey::recording() {
                             overlay::hide_hud(&app);
+                            start_wake(&app);
                             continue;
                         }
                         voice::stt::start(&input_device(&app));
@@ -510,7 +513,9 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         let Some(wav) = voice::stt::stop() else {
                             // Нажали и сразу отпустили или микрофона нет —
                             // сказать нечего, и молчание тут правильный ответ.
+                            // Ожидание имени, остановленное нажатием, — обратно.
                             overlay::hide_hud(&app);
+                            start_wake(&app);
                             continue;
                         };
 
@@ -539,7 +544,10 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                                     start_conversation(&app);
                                 }
                             }
-                            None => overlay::hide_hud(&app),
+                            None => {
+                                overlay::hide_hud(&app);
+                                start_wake(&app);
+                            }
                         }
                         end_turn();
                     }
@@ -1236,6 +1244,9 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                 // другим, и разговор окончен.
                 if typed_during(&wav) {
                     log::info!("во время фразы печатали — это клавиатура; разговор окончен");
+                    // Без сигнала и не закрывая окно: человек занят своим, а
+                    // ответ в окне ему, может быть, ещё нужен.
+                    end_conversation(&app, false, false);
                     break;
                 }
 
@@ -1298,7 +1309,14 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
             config.voice.input_device.clone(),
         )
     };
-    if !enabled || CONVERSATION.load(Ordering::SeqCst) || !voice::whisper::ready(app) {
+    // И пока идёт запись по Alt+пробелу: микрофон один, и отложенный перезапуск
+    // ожидания — после Esc или конца разговора — вживую перехватывал его посреди
+    // вопроса, и в расшифровку уходила пустота.
+    if !enabled
+        || CONVERSATION.load(Ordering::SeqCst)
+        || voice::hotkey::recording()
+        || !voice::whisper::ready(app)
+    {
         return;
     }
     if WAKE.swap(true, Ordering::SeqCst) {
@@ -1504,6 +1522,7 @@ fn speak_with_hud(app: &tauri::AppHandle, text: String, wait: bool) {
     if !app.state::<AppState>().config().voice.enabled {
         return;
     }
+    log::info!("говорю: «{}»", text.chars().take(90).collect::<String>());
 
     let handle = app.clone();
     let speaking = move || {
@@ -1788,8 +1807,15 @@ pub(crate) fn wake_local_model(app: &tauri::AppHandle) {
         }
 
         /* 3. Прогрев. */
+        let started = std::time::Instant::now();
         match crate::ollama::preload(&host, &model).await {
-            Ok(()) => log::info!("модель {model} загружена в память и ждёт вопросов"),
+            // Уже была в памяти — Ollama отвечает сразу, и писать об этом на
+            // каждый зов незачем.
+            Ok(()) if started.elapsed() < std::time::Duration::from_secs(1) => {}
+            Ok(()) => log::info!(
+                "модель {model} загружена в память за {} с и ждёт вопросов",
+                started.elapsed().as_secs()
+            ),
             Err(err) => log::warn!("{err}"),
         }
 

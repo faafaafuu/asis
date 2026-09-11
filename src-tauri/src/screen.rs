@@ -1,21 +1,36 @@
-//! Скриншот в буфере обмена: прочитать, что на нём написано, и ответить.
+//! Буфер обмена и экран: прочитать, что там написано, и ответить.
 //!
-//! «Это фейк?» про новость — самый частый вопрос к скриншоту, и отвечать на
-//! него по памяти модели нельзя: сегодняшних новостей она не знает и охотно
-//! выдумает. Поэтому текст со снимка читает распознавание текста Windows —
-//! оно встроено в систему, работает без сети и без видеопамяти, — а проверка
-//! идёт по свежему поиску (см. `web::fact_check`).
+//! «Это правда?» про новость — самый частый вопрос сюда, и отвечать на него по
+//! памяти модели нельзя: сегодняшних новостей она не знает и охотно выдумает.
+//! Поэтому текст берётся из свежего буфера обмена — скопированный текст как
+//! есть, скриншот через распознавание текста Windows (оно встроено в систему и
+//! работает без сети и без видеопамяти), — а проверка идёт по свежему поиску
+//! (см. `web::fact_check`).
 //!
-//! Скриншота в буфере нет — берётся текст окна, которое было впереди: у
-//! браузера это текст открытой страницы.
+//! Свежего в буфере нет — берётся текст окна, которое было впереди: у браузера
+//! это текст открытой страницы.
 
 use tauri::{AppHandle, Manager};
 
 use crate::state::AppState;
 
-/// Формат картинки в буфере обмена, который кладут и «Ножницы», и Print Screen.
+/// Форматы буфера обмена: картинка — её кладут и «Ножницы», и Print Screen, —
+/// и текст.
 #[cfg(target_os = "windows")]
 const CF_DIB: u32 = 8;
+#[cfg(target_os = "windows")]
+const CF_UNICODETEXT: u32 = 13;
+
+/// Сколько содержимое буфера считается свежим: скопировали — и сразу спросили.
+///
+/// Старое без прямой просьбы не берётся: иначе «это правда?» про открытую
+/// новость проверяло бы то, что скопировали вчера.
+const FRESH: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// Номер последнего изменения буфера и когда его заметили. Время `None` —
+/// содержимое лежало ещё до запуска программы, и сколько ему, неизвестно.
+static CLIPBOARD: std::sync::Mutex<Option<(u32, Option<std::time::Instant>)>> =
+    std::sync::Mutex::new(None);
 
 /// Картинка в памяти: строки сверху вниз, четыре байта на точку — B, G, R, A.
 pub(crate) struct Image {
@@ -24,69 +39,152 @@ pub(crate) struct Image {
     pub bgra: Vec<u8>,
 }
 
-/// Строка для разбора реплики: есть ли в буфере картинка.
+/// Что лежит в буфере.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Content {
+    Image,
+    Text,
+    Nothing,
+}
+
+/// Следит за буфером обмена: запоминает, когда в нём появилось новое.
 ///
-/// Разбору надо знать, есть ли на что смотреть: «это фейк?» при скриншоте в
-/// буфере — вопрос про скриншот, а без него — про открытую страницу.
-pub fn clipboard_line() -> String {
+/// Дёшево: номер изменения Windows отдаёт без открытия буфера.
+pub fn watch() {
+    std::thread::Builder::new()
+        .name("sufler-clipboard".into())
+        .spawn(|| loop {
+            let number = sequence();
+            {
+                let mut seen = CLIPBOARD.lock().unwrap_or_else(|err| err.into_inner());
+                match *seen {
+                    Some((known, _)) if known == number => {}
+                    Some(_) => *seen = Some((number, Some(std::time::Instant::now()))),
+                    None => *seen = Some((number, None)),
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+        })
+        .ok();
+}
+
+/// Свежее ли содержимое буфера.
+fn fresh() -> bool {
+    let seen = *CLIPBOARD.lock().unwrap_or_else(|err| err.into_inner());
+    matches!(seen, Some((number, Some(at))) if number == sequence() && at.elapsed() < FRESH)
+}
+
+fn content() -> Content {
     if has_image() {
-        "В буфере обмена лежит картинка — скорее всего, скриншот.".into()
+        Content::Image
+    } else if clipboard_text().is_some_and(|text| text.trim().chars().count() >= 20) {
+        Content::Text
     } else {
-        String::new()
+        Content::Nothing
     }
 }
 
-/// Отвечает на вопрос про скриншот или открытое окно.
+/// Строка для разбора реплики: что свежего в буфере.
+///
+/// Разбору надо знать, есть ли на что смотреть: «это правда?» при свежем
+/// скриншоте или скопированном тексте — вопрос про них, а без них — про
+/// открытую страницу.
+pub fn clipboard_line() -> String {
+    if !fresh() {
+        return String::new();
+    }
+    match content() {
+        Content::Image => "В буфере обмена свежий скриншот.".into(),
+        Content::Text => {
+            let text = clipboard_text().unwrap_or_default();
+            let start = text.split_whitespace().take(12).collect::<Vec<_>>().join(" ");
+            format!("В буфере обмена свежий скопированный текст: «{start}…».")
+        }
+        Content::Nothing => String::new(),
+    }
+}
+
+/// Отвечает на вопрос про буфер обмена или открытое окно.
 pub async fn answer(app: &AppHandle, question: &str, check: bool) -> String {
-    let screenshot = tauri::async_runtime::spawn_blocking(read_screenshot)
-        .await
-        .unwrap_or_else(|err| Err(err.to_string()));
-    let (text, source) = match screenshot {
-        Ok(Some(text)) if !text.trim().is_empty() => (text, "со скриншота"),
-        Ok(Some(_)) => {
-            return "На скриншоте не нашлось текста — спросите словами, что на нём.".into();
-        }
-        Ok(None) => {
-            let window = tauri::async_runtime::spawn_blocking(crate::pc::last_window_text)
-                .await
-                .unwrap_or_default();
-            // Надписи окна идут через черту — для поиска заголовка нужны строки.
-            (window.replace(" | ", "\n"), "открытого окна")
-        }
-        Err(err) => {
-            log::warn!("скриншот не прочитался: {err}");
-            return "Не смог прочитать скриншот.".into();
-        }
+    let lower = question.to_lowercase();
+    let asked_image = ["скрин", "снимок", "снимк", "картинк"].iter().any(|word| lower.contains(word));
+    let asked_text = ["текст", "скопир", "буфер"].iter().any(|word| lower.contains(word));
+    let recent = fresh();
+    let source =
+        tauri::async_runtime::spawn_blocking(move || pick_source(asked_image, asked_text, recent))
+            .await
+            .unwrap_or_else(|err| Err(format!("Не смог прочитать буфер обмена: {err}.")));
+    let (text, from) = match source {
+        Ok(found) => found,
+        Err(message) => return message,
     };
     let text: String = text.chars().take(4000).collect();
     if text.trim().is_empty() {
-        return "Не вижу текста: скриншота в буфере нет, а в окне впереди пусто.".into();
+        return format!("Не вижу текста {from}.");
     }
-    log::info!("текст {source}: {} символов", text.chars().count());
+    log::info!("текст {from}: {} символов", text.chars().count());
 
     if check {
         return crate::web::fact_check(app, &text, question).await;
     }
 
+    // Перевод и «что тут написано» — длиннее: там весь смысл в самом тексте.
+    let sentences = if ["перевед", "переведи", "написано", "прочитай", "прочти"]
+        .iter()
+        .any(|word| lower.contains(word))
+    {
+        6
+    } else {
+        2
+    };
     let rules = format!(
-        "Ты — Ноа, голосовой помощник. Ниже текст {source}, который видит человек. \
-         Ответь на его вопрос по этому тексту: коротко, двумя-четырьмя предложениями, \
-         по-русски, обычным текстом без списков. Если ответа в тексте нет, так и скажи. \
-         Не выдумывай.\n\nТекст:\n{text}"
+        "Ты — Ноа, голосовой помощник. Ниже текст {from}, который видит человек. \
+         Ответь на его вопрос по этому тексту коротко, по-русски, обычным текстом без \
+         списков и ссылок. Если ответа в тексте нет, так и скажи. Не выдумывай.\
+         \n\nТекст:\n{text}"
     );
     let provider = app.state::<AppState>().provider();
-    match provider.interpret(&rules, question).await {
-        Ok(answer) if !answer.trim().is_empty() => answer.trim().to_string(),
-        _ => "Не смог ответить: модель не ответила.".into(),
-    }
+    crate::web::native_answer(provider.as_ref(), &rules, question, sentences)
+        .await
+        .unwrap_or_else(|| "Не смог ответить: модель не ответила.".into())
 }
 
-/// Текст со скриншота в буфере. `Ok(None)` — картинки в буфере нет.
-fn read_screenshot() -> Result<Option<String>, String> {
-    let Some(image) = clipboard_image() else {
-        return Ok(None);
-    };
-    recognize(&image).map(Some)
+/// Откуда брать текст: свежий скриншот, свежий скопированный текст или окно
+/// впереди. Прямо названное — «скриншот», «текст» — берётся, сколько бы ему
+/// ни было. Ошибка — готовая фраза для человека.
+fn pick_source(
+    asked_image: bool,
+    asked_text: bool,
+    recent: bool,
+) -> Result<(String, &'static str), String> {
+    let content = content();
+    if asked_image && content != Content::Image {
+        return Err("В буфере обмена нет скриншота — сделайте его и спросите ещё раз.".into());
+    }
+    if content == Content::Image && (asked_image || (recent && !asked_text)) {
+        let image = clipboard_image().ok_or_else(|| "Не смог прочитать скриншот.".to_string())?;
+        return recognize(&image).map(|text| (text, "со скриншота")).map_err(|err| {
+            log::warn!("скриншот не распознался: {err}");
+            "Не смог прочитать скриншот.".to_string()
+        });
+    }
+    if content == Content::Text && (asked_text || recent) {
+        if let Some(text) = clipboard_text() {
+            return Ok((text, "из буфера обмена"));
+        }
+    }
+    if asked_text {
+        return Err("В буфере обмена нет текста — скопируйте его и спросите ещё раз.".into());
+    }
+    Ok((crate::pc::last_window_text().replace(" | ", "\n"), "открытого окна"))
+}
+
+#[cfg(target_os = "windows")]
+fn sequence() -> u32 {
+    use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+
+    // SAFETY: только номер последнего изменения буфера.
+    unsafe { GetClipboardSequenceNumber() }
 }
 
 #[cfg(target_os = "windows")]
@@ -97,30 +195,33 @@ fn has_image() -> bool {
     unsafe { IsClipboardFormatAvailable(CF_DIB).is_ok() }
 }
 
+/// Открывает буфер: он бывает занят другой программой — несколько попыток.
+#[cfg(target_os = "windows")]
+fn open_clipboard() -> bool {
+    use windows::Win32::System::DataExchange::OpenClipboard;
+
+    for _ in 0..10 {
+        // SAFETY: открытие буфера; закрывает его вызывающий.
+        if unsafe { OpenClipboard(None) }.is_ok() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    false
+}
+
 #[cfg(target_os = "windows")]
 fn clipboard_image() -> Option<Image> {
     use windows::Win32::Foundation::HGLOBAL;
-    use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+    use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData};
     use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 
-    if !has_image() {
+    if !has_image() || !open_clipboard() {
         return None;
     }
-    // SAFETY: буфер открывается и закрывается здесь же; блок памяти читается
+    // SAFETY: буфер открыт выше и закрывается здесь же; блок памяти читается
     // под замком и копируется до того, как замок снят.
     unsafe {
-        // Буфер бывает занят другой программой — несколько попыток подряд.
-        let mut opened = false;
-        for _ in 0..10 {
-            if OpenClipboard(None).is_ok() {
-                opened = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(30));
-        }
-        if !opened {
-            return None;
-        }
         let copied = GetClipboardData(CF_DIB).ok().and_then(|handle| {
             let block = HGLOBAL(handle.0);
             let pointer = GlobalLock(block) as *const u8;
@@ -133,6 +234,38 @@ fn clipboard_image() -> Option<Image> {
         });
         let _ = CloseClipboard();
         dib_to_bgra(&copied?)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn clipboard_text() -> Option<String> {
+    use windows::Win32::Foundation::HGLOBAL;
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable,
+    };
+    use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+
+    // SAFETY: только спрашивает систему, есть ли в буфере текст.
+    if unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) }.is_err() || !open_clipboard() {
+        return None;
+    }
+    // SAFETY: буфер открыт выше и закрывается здесь же; текст копируется до
+    // того, как снят замок с памяти.
+    unsafe {
+        let text = GetClipboardData(CF_UNICODETEXT).ok().and_then(|handle| {
+            let block = HGLOBAL(handle.0);
+            let pointer = GlobalLock(block) as *const u16;
+            if pointer.is_null() {
+                return None;
+            }
+            let units = std::slice::from_raw_parts(pointer, GlobalSize(block) / 2);
+            let length = units.iter().position(|unit| *unit == 0).unwrap_or(units.len());
+            let text = String::from_utf16_lossy(&units[..length]);
+            let _ = GlobalUnlock(block);
+            Some(text)
+        });
+        let _ = CloseClipboard();
+        text
     }
 }
 
@@ -197,12 +330,22 @@ fn recognize_bitmap(bitmap: &windows::Graphics::Imaging::SoftwareBitmap) -> Resu
 }
 
 #[cfg(not(target_os = "windows"))]
+fn sequence() -> u32 {
+    0
+}
+
+#[cfg(not(target_os = "windows"))]
 fn has_image() -> bool {
     false
 }
 
 #[cfg(not(target_os = "windows"))]
 fn clipboard_image() -> Option<Image> {
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn clipboard_text() -> Option<String> {
     None
 }
 

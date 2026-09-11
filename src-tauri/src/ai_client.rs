@@ -495,7 +495,7 @@ impl HttpProvider {
 ///
 /// Пустой результат — это не «ответ без иероглифов», а «ответа не было».
 /// Показать в окне пустоту хуже, чем честную ошибку: человек будет ждать.
-fn purge(text: &str) -> Result<String, AiError> {
+pub(crate) fn purge(text: &str) -> Result<String, AiError> {
     let cleaned = strip_foreign(text);
     if cleaned.is_empty() {
         log::warn!("после вычистки чужого письма от ответа ничего не осталось");
@@ -726,7 +726,7 @@ fn is_foreign(c: char) -> bool {
     )
 }
 
-fn has_foreign_script(text: &str) -> bool {
+pub(crate) fn has_foreign_script(text: &str) -> bool {
     text.chars().any(is_foreign)
 }
 

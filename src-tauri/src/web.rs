@@ -6,11 +6,11 @@
 //! самого сайта: «давай посмотрим чехлы для айфона» после открытого Wildberries
 //! открывает его выдачу, как если бы человек набрал запрос сам.
 //!
-//! Вопросы вроде «до скольки работает кафе» — другое дело: ответ нужен голосом,
-//! а не вкладкой. Такие вопросы уходят в поисковик, найденные фрагменты — в
-//! модель, и модель отвечает по ним, называя, откуда ответ. Модель на этой
-//! машине не знает ни часов работы кафе, ни сегодняшних цен: без поиска она бы
-//! их выдумала.
+//! Вопросы к интернету — другое дело: ответ нужен голосом, а не вкладкой. Они
+//! уходят в ленты новостей и Википедию, найденные фрагменты — в модель, и она
+//! отвечает по ним. Модель на этой машине не знает сегодняшних новостей: без
+//! поиска она бы их выдумала. Часы работы и адреса — это карты: обычная выдача
+//! поисковиков программам их не отдаёт, и место открывается в Яндекс Картах.
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -244,16 +244,13 @@ struct Hit {
     snippet: String,
 }
 
-/// Поисковики по порядку.
+/// Обычный поиск — запасной путь, когда ни новости, ни Википедия ничего не
+/// нашли.
 ///
-/// DuckDuckGo в облегчённой версии отдаёт выдачу простой таблицей без
-/// скриптов — её легко читать. Он же временами обрывает соединение, поэтому
-/// запасной — Bing. Яндекс и Brave на запрос без браузера отвечают капчей и в
-/// список не входят.
-const ENGINES: &[(&str, &str)] = &[
-    ("DuckDuckGo", "https://lite.duckduckgo.com/lite/?q={q}"),
-    ("Bing", "https://www.bing.com/search?q={q}&mkt=ru-RU&setlang=ru"),
-];
+/// Только DuckDuckGo. Bing отсюда убран: программам он отдаёт посторонние
+/// страницы — на запрос про Олимпиаду в Париже вернул Roblox и Microsoft
+/// Teams, — и ответ по ним хуже, чем честное «не нашёл».
+const ENGINES: &[(&str, &str)] = &[("DuckDuckGo", "https://lite.duckduckgo.com/lite/?q={q}")];
 
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
      (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -265,12 +262,28 @@ pub async fn lookup(app: &AppHandle, question: &str) -> String {
         return "Не понял, что посмотреть.".into();
     }
 
-    let hits = match search(question).await {
+    // Часы работы, адрес, как доехать — это карты: там они точные и в городе
+    // человека, а выдача поисковиков программам их не отдаёт.
+    if about_place(question) {
+        let url = format!("https://yandex.ru/maps/?text={}", encode(question));
+        return match crate::pc::open(&url) {
+            Ok(()) => "Открыл в Яндекс Картах — часы работы и адрес там.".into(),
+            Err(err) => format!("Карты не открылись: {err}."),
+        };
+    }
+
+    // Новости и Википедия; не нашлось — обычный поиск; и там пусто — поиск
+    // открывается в браузере: честнее, чем ответ по посторонним страницам.
+    let hits = match evidence(question).await {
         Ok(hits) => hits,
-        Err(err) => {
-            log::warn!("поиск «{question}» не удался: {err}");
-            return "Поиск в интернете сейчас не отвечает.".into();
-        }
+        Err(_) => match search(question).await {
+            Ok(hits) => hits,
+            Err(err) => {
+                log::warn!("поиск «{question}» не удался: {err}");
+                let _ = crate::pc::open(&format!("https://ya.ru/search/?text={}", encode(question)));
+                return "Ответа не нашёл — открыл поиск в браузере.".into();
+            }
+        },
     };
     log::info!("поиск «{question}»: результатов {}", hits.len());
 
@@ -286,27 +299,27 @@ pub async fn lookup(app: &AppHandle, question: &str) -> String {
         "Ты — Ноа, голосовой помощник. Ответь на вопрос человека по фрагментам из \
          поиска ниже: одним-двумя короткими предложениями, по-русски, обычным \
          текстом, без списков и ссылок. Опирайся только на фрагменты; если ответа \
-         в них нет, так и скажи — не выдумывай. {} В конце коротко назови, по \
-         данным какого сайта ответ.\n\nФрагменты:\n{found}",
+         в них нет, так и скажи — не выдумывай. {} Источник, если он важен, назови \
+         словом, без адреса сайта.\n\nФрагменты:\n{found}",
         crate::planner::now_line()
     );
 
     let provider = app.state::<AppState>().provider();
-    match provider.interpret(&rules, question).await {
-        Ok(answer) if !answer.trim().is_empty() => answer.trim().to_string(),
+    match native_answer(provider.as_ref(), &rules, question, 3).await {
+        Some(answer) => answer,
         // Модель не ответила — лучше прочитать лучший фрагмент как есть, чем
         // промолчать: поиск-то сработал.
-        _ => format!("Нашёл: {}. {}", hits[0].title, hits[0].snippet),
+        None => format!("Нашёл: {}. {}", hits[0].title, hits[0].snippet),
     }
 }
 
 /// Проверяет, правда ли написанное, — по свежему поиску.
 ///
-/// Запрос — само утверждение: заголовок или самая содержательная из первых
-/// строк, а не весь текст скриншота с датами и кнопками. Ответ — «подтверждается»,
-/// «опровергается» или «проверить не удалось», с тем, по каким сайтам вывод.
-/// Модели прямо сказано не судить по своей памяти: сегодняшних новостей она
-/// не знает.
+/// Запрос — само утверждение, которое модель выписывает из текста (см.
+/// `main_claim`). Ответ — «Правда», «Фейк» или «Не подтверждается» и один факт в
+/// доказательство: он идёт вслух, и ссылки, адреса и перечни сайтов в нём не
+/// нужны. Модели прямо сказано не судить по своей памяти: сегодняшних новостей
+/// она не знает.
 pub async fn fact_check(app: &AppHandle, text: &str, question: &str) -> String {
     let provider = app.state::<AppState>().provider();
     check_with(provider.as_ref(), text, question).await
@@ -317,48 +330,302 @@ async fn check_with<P>(provider: &P, text: &str, question: &str) -> String
 where
     P: crate::ai_client::AiProvider + ?Sized,
 {
-    let query = claim_query(text);
-    if query.is_empty() {
-        return "Не нашёл, что проверять: в тексте нет ни одной связной фразы.".into();
+    let claim = match main_claim(provider, text).await {
+        Claim::Found(claim) => claim,
+        Claim::Nothing => {
+            return "Здесь нечего проверять: в тексте нет утверждения о фактах.".into();
+        }
+        // Модель не ответила — берётся самая содержательная строка.
+        Claim::Unknown => claim_query(text),
+    };
+    if claim.is_empty() {
+        return "Не нашёл, что проверять.".into();
     }
-    let hits = match search(&query).await {
+    let hits = match evidence(&claim).await {
         Ok(hits) => hits,
         Err(err) => {
-            log::warn!("проверка «{query}»: поиск не удался: {err}");
-            return "Проверить не вышло: поиск в интернете сейчас не отвечает.".into();
+            log::warn!("проверка «{claim}»: поиск не удался: {err}");
+            return "Проверить не вышло: поиск сейчас не отвечает.".into();
         }
     };
-    log::info!("проверка «{query}»: результатов {}", hits.len());
+    log::info!("проверка «{claim}»: результатов {}", hits.len());
 
-    let found = hits
-        .iter()
+    let rules = verdict_rules(&claim, &fragments(&hits));
+    verdict(provider, &claim, &rules, question)
+        .await
+        .unwrap_or_else(|| "Проверить не вышло: модель не ответила.".into())
+}
+
+/// Фрагменты поиска для модели. Сайты не подписываются: модель тянет их в
+/// ответ, а адреса вслух не нужны.
+fn fragments(hits: &[Hit]) -> String {
+    hits.iter()
         .take(8)
         .enumerate()
-        .map(|(at, hit)| format!("[{}] {} ({})\n{}", at + 1, hit.title, hit.site, hit.snippet))
+        .map(|(at, hit)| format!("[{}] {}\n{}", at + 1, hit.title, hit.snippet))
         .collect::<Vec<_>>()
-        .join("\n\n");
-    let rules = format!(
-        "Ты — Ноа, голосовой помощник. Человек увидел текст ниже — обычно новость со \
-         скриншота — и спрашивает, правда ли это. Сравни главное утверждение текста с \
-         фрагментами свежего поиска. Скажи прямо, одним-тремя предложениями, по-русски: \
-         подтверждается, опровергается или проверить не удалось — и почему. Если об \
-         этом пишут только сомнительные сайты или не пишет никто, так и скажи. Не суди \
-         по своей памяти: сегодняшних новостей ты не знаешь. В конце назови, по данным \
-         каких сайтов вывод. {}\n\nТекст:\n{}\n\nФрагменты поиска:\n{found}",
-        crate::planner::now_line(),
-        text.chars().take(1500).collect::<String>()
-    );
+        .join("\n\n")
+}
 
-    match provider.interpret(&rules, question).await {
-        Ok(answer) if !answer.trim().is_empty() => answer.trim().to_string(),
-        _ => match hits.first() {
-            Some(hit) => format!(
-                "Проверить не вышло: модель не ответила. Первое, что нашлось: {} ({}).",
-                hit.title, hit.site
-            ),
-            None => "Проверить не вышло: модель не ответила.".into(),
-        },
+/// Правила вывода проверки.
+///
+/// Сначала — что говорят найденные страницы, потом вывод. С выводом первым
+/// словом маленькая модель ставила его наугад: вживую Олимпиаду 2024 в Париже,
+/// подтверждённую первыми же фрагментами, назвала фейком.
+fn verdict_rules(claim: &str, found: &str) -> String {
+    format!(
+        "Сравни утверждение «{claim}» с фрагментами свежего поиска ниже. Ответь только \
+         JSON: {{\"fact\": \"...\", \"verdict\": \"...\"}}. fact — сам факт из \
+         фрагментов, который решает дело: что именно произошло — с датой, местом или \
+         числом, если они есть, — одной короткой фразой по-русски, без ссылок и \
+         названий сайтов. Не пиши «утверждение подтверждается» — пиши, что именно \
+         сказано во фрагментах. verdict — «правда», если фрагменты подтверждают \
+         утверждение по сути; «фейк», если прямо опровергают; «не подтверждается», если \
+         о нём в них нет. Суди только по фрагментам, не по памяти; то, что событие было \
+         в прошлом, не делает утверждение ложным. {}\n\nФрагменты поиска:\n{found}",
+        crate::planner::now_line()
+    )
+}
+
+/// Вывод проверки для голоса: «Правда. Игры прошли в Париже.»
+///
+/// «Правда» и «Фейк» говорятся, только если найденный факт выдерживает второй,
+/// узкий вопрос — подтверждает (опровергает) ли он утверждение целиком. Без
+/// него новость «Маск купил энергетическую компанию» засчитывалась как
+/// подтверждение того, что он купил Луну. Нет конкретного факта — вывод не
+/// проверить, и «правду» наугад Ноа не говорит.
+async fn verdict<P>(provider: &P, claim: &str, rules: &str, question: &str) -> Option<String>
+where
+    P: crate::ai_client::AiProvider + ?Sized,
+{
+    const UNCONFIRMED: &str = "Не подтверждается.";
+    let answer = provider.interpret(rules, question).await.ok()?;
+    let parsed = answer
+        .find('{')
+        .zip(answer.rfind('}'))
+        .filter(|(from, to)| from < to)
+        .and_then(|(from, to)| serde_json::from_str::<serde_json::Value>(&answer[from..=to]).ok())?;
+    let word = match parsed["verdict"].as_str().unwrap_or_default().trim().to_lowercase().as_str() {
+        "правда" => "Правда",
+        "фейк" => "Фейк",
+        _ => "Не подтверждается",
+    };
+    let fact = spoken(parsed["fact"].as_str().unwrap_or_default(), 1);
+    // «Утверждение подтверждается» — не факт, а пересказ вывода.
+    let retold = ["утвержден", "подтвержда", "фрагмент", "является правд", "является ложн"]
+        .iter()
+        .any(|word| fact.to_lowercase().contains(word));
+    if fact.is_empty() || retold || crate::ai_client::has_foreign_script(&fact) {
+        return Some(UNCONFIRMED.into());
     }
+    let fact = {
+        let mut letters = fact.chars();
+        match letters.next() {
+            Some(first) => first.to_uppercase().chain(letters).collect::<String>(),
+            None => String::new(),
+        }
+    };
+    let fact = if fact.ends_with(['.', '!', '?']) { fact } else { format!("{fact}.") };
+
+    if word != "Не подтверждается" {
+        let relation = if word == "Правда" { "Подтверждает" } else { "Опровергает" };
+        let check = format!(
+            "Утверждение: «{claim}». Факт из новостей: «{}». {relation} ли этот факт \
+             утверждение целиком — все его части, а не только упомянутых людей и места?",
+            fact.trim_end_matches('.')
+        );
+        let agrees = provider
+            .interpret("Отвечай одним словом: да или нет.", &check)
+            .await
+            .map(|answer| answer.trim().to_lowercase().starts_with("да"))
+            .unwrap_or(false);
+        if !agrees {
+            log::info!("вывод «{word}» не выдержал перепроверки: «{fact}»");
+            return Some(UNCONFIRMED.into());
+        }
+    }
+    Some(format!("{word}. {fact}"))
+}
+
+/// Что нашлось в тексте для проверки.
+enum Claim {
+    Found(String),
+    /// Проверять нечего: переписка, реклама, меню.
+    Nothing,
+    /// Модель не ответила.
+    Unknown,
+}
+
+/// Главное утверждение текста — одной фразой для поиска.
+///
+/// Скриншот начинается с меню, дат и кнопок, и первая длинная строка бывала
+/// обрывком интерфейса: вживую в поиск ушло «но какие из них можно было бы
+/// взять на», и проверялось совсем не то. Утверждение выписывает модель.
+async fn main_claim<P>(provider: &P, text: &str) -> Claim
+where
+    P: crate::ai_client::AiProvider + ?Sized,
+{
+    // Ответ — JSON. На свободный ответ со словом «нет» для случая «нечего
+    // проверять» модель отвечала «нет» и на голое утверждение: «Олимпиада 2024
+    // прошла в Париже» проверять оказывалось нечего.
+    const RULES: &str = "Тебе дают текст, который человек скопировал или \
+        сфотографировал с экрана: новость, пост или переписку — вместе с меню, \
+        датами и кнопками. Найди главное утверждение о фактах, которое можно \
+        проверить поиском в интернете. Ответь только JSON: {\"claim\": \
+        \"утверждение одной фразой до двенадцати слов, по-русски\", \"checkable\": \
+        true}. Если проверять нечего — это переписка о личном, реклама или меню, — \
+        ответь {\"claim\": \"\", \"checkable\": false}.";
+    let text: String = text.chars().take(3000).collect();
+    let Ok(answer) = provider.interpret(RULES, &text).await else {
+        return Claim::Unknown;
+    };
+    let Some(parsed) = answer
+        .find('{')
+        .zip(answer.rfind('}'))
+        .filter(|(from, to)| from < to)
+        .and_then(|(from, to)| serde_json::from_str::<serde_json::Value>(&answer[from..=to]).ok())
+    else {
+        return Claim::Unknown;
+    };
+    if parsed["checkable"].as_bool() == Some(false) {
+        return Claim::Nothing;
+    }
+    let claim = parsed["claim"].as_str().unwrap_or_default().trim().to_string();
+    if claim.is_empty() || crate::ai_client::has_foreign_script(&claim) {
+        return Claim::Unknown;
+    }
+    Claim::Found(claim.split_whitespace().take(16).collect::<Vec<_>>().join(" "))
+}
+
+/// Ответ модели для голоса: по-русски, без ссылок и хвостов, не длиннее
+/// `sentences` предложений.
+///
+/// Мелкая модель на длинном тексте срывается на другой язык — вживую ответ о
+/// новости ушёл в китайский, — поэтому такой ответ переспрашивается и всё
+/// равно вычищается.
+pub(crate) async fn native_answer<P>(
+    provider: &P,
+    rules: &str,
+    question: &str,
+    sentences: usize,
+) -> Option<String>
+where
+    P: crate::ai_client::AiProvider + ?Sized,
+{
+    let mut answer = provider.interpret(rules, question).await.ok()?;
+    if crate::ai_client::has_foreign_script(&answer) {
+        log::warn!("ответ сорвался на другой язык — переспрашиваю");
+        if let Ok(second) = provider.interpret(rules, question).await {
+            answer = second;
+        }
+    }
+    let answer = crate::ai_client::purge(&answer).ok()?;
+    let said = spoken(&answer, sentences);
+    (!said.is_empty()).then_some(said)
+}
+
+/// Текст для голоса: без ссылок, адресов, разметки и перечня источников, не
+/// длиннее `sentences` предложений.
+///
+/// Вживую модель дописывала «Источники: wikipedia.org, benchchem.com…» и
+/// ссылки в разметке — и всё это читалось вслух.
+pub(crate) fn spoken(answer: &str, sentences: usize) -> String {
+    const TAILS: &[&str] = &[
+        "Источники:", "источники:", "Источник:", "источник:", "Сайты", "сайты для",
+        "Вывод основ", "вывод основ", "Ссылки:", "ссылки:",
+    ];
+    let cut = TAILS
+        .iter()
+        .filter_map(|tail| answer.find(tail))
+        .min()
+        .unwrap_or(answer.len());
+    let body = drop_linked_parts(&strip_markdown_links(&answer[..cut])).replace(['*', '#'], "");
+    let words: Vec<&str> = body
+        .split_whitespace()
+        .filter(|word| !word.contains("http") && !word.contains("www.") && !looks_like_domain(word))
+        // Номера списка — «1.», «2)» — вслух читались бы числами.
+        .filter(|word| {
+            let bare = word.trim_end_matches(['.', ')']);
+            !(bare.len() < word.len() && !bare.is_empty() && bare.chars().all(|ch| ch.is_ascii_digit()))
+        })
+        .map(|word| word.trim_start_matches(['-', '•']))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let flat = words.join(" ").replace(" .", ".").replace(" ,", ",");
+    first_sentences(&flat, sentences)
+}
+
+/// Ссылки разметки — «[CARLA](https://…)» — становятся просто текстом.
+fn strip_markdown_links(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        let Some(close) = rest[open..].find("](") else {
+            break;
+        };
+        let Some(end) = rest[open + close..].find(')') else {
+            break;
+        };
+        out.push_str(&rest[..open]);
+        out.push_str(&rest[open + 1..open + close]);
+        rest = &rest[open + close + end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Скобки с адресами — «(ru.wikipedia.org, olymps.ru)» — выбрасываются целиком.
+fn drop_linked_parts(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('(') {
+        let Some(length) = rest[open..].find(')') else {
+            break;
+        };
+        let inner = &rest[open + 1..open + length];
+        out.push_str(&rest[..open]);
+        let linked = inner.contains("http")
+            || inner
+                .split(|ch: char| ch.is_whitespace() || ch == ',')
+                .any(looks_like_domain);
+        if !linked {
+            out.push_str(&rest[open..=open + length]);
+        }
+        rest = &rest[open + length + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Похоже ли слово на адрес сайта: «wikipedia.org», «ru.wikipedia.org».
+fn looks_like_domain(word: &str) -> bool {
+    let bare = word.trim_matches(|ch: char| !ch.is_alphanumeric());
+    match bare.rsplit_once('.') {
+        Some((name, zone)) => {
+            name.chars().any(|ch| ch.is_ascii_alphanumeric())
+                && (2..=6).contains(&zone.len())
+                && zone.chars().all(|ch| ch.is_ascii_lowercase())
+        }
+        None => false,
+    }
+}
+
+/// Первые `count` предложений. Точка внутри числа — «25.39» — концом не считается.
+fn first_sentences(text: &str, count: usize) -> String {
+    let mut seen = 0;
+    for (at, ch) in text.char_indices() {
+        if !matches!(ch, '.' | '!' | '?') {
+            continue;
+        }
+        let after = at + ch.len_utf8();
+        if text[after..].chars().next().map_or(true, char::is_whitespace) {
+            seen += 1;
+            if seen == count {
+                return text[..after].trim().to_string();
+            }
+        }
+    }
+    text.trim().to_string()
 }
 
 /// Запрос для проверки: самая содержательная из первых строк текста.
@@ -376,6 +643,173 @@ fn claim_query(text: &str) -> String {
         .or_else(|| text.lines().map(str::trim).find(|line| !line.is_empty()))
         .unwrap_or_default();
     best.split_whitespace().take(14).collect::<Vec<_>>().join(" ")
+}
+
+/// Свидетельства для проверки утверждения: свежие новости и справка.
+///
+/// Ленты новостей Google и Bing и поиск Википедии — адреса для программ (RSS
+/// и API), и отвечают они по делу. Обычная выдача поисковиков программам для
+/// этого больше не годится: DuckDuckGo отдаёт заглушку для роботов, а Bing на
+/// запрос про Олимпиаду в Париже вернул страницы про Roblox и Microsoft Teams.
+/// Все три опрашиваются сразу: у каждого своя сторона дела.
+async fn evidence(query: &str) -> Result<Vec<Hit>, String> {
+    let client = crate::net::client_builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .map_err(|err| format!("HTTP-клиент не собрался: {err}"))?;
+    let q = encode(query);
+    let fetch = |url: String| {
+        let client = client.clone();
+        async move {
+            let response = client
+                .get(&url)
+                .header("User-Agent", USER_AGENT)
+                .header("Accept-Language", "ru-RU,ru;q=0.9")
+                .send()
+                .await
+                .ok()?;
+            if !response.status().is_success() {
+                return None;
+            }
+            response.text().await.ok()
+        }
+    };
+    let (google, bing, wikipedia) = tokio::join!(
+        fetch(format!("https://news.google.com/rss/search?q={q}&hl=ru&gl=RU&ceid=RU:ru")),
+        fetch(format!("https://www.bing.com/news/search?q={q}&format=rss&setlang=ru")),
+        fetch(format!(
+            "https://ru.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=4&srsearch={q}"
+        )),
+    );
+
+    let mut hits = Vec::new();
+    hits.extend(google.as_deref().map(parse_rss).unwrap_or_default().into_iter().take(5));
+    hits.extend(bing.as_deref().map(parse_rss).unwrap_or_default().into_iter().take(4));
+    hits.extend(wikipedia.as_deref().map(parse_wikipedia).unwrap_or_default().into_iter().take(3));
+    // Одна новость в двух лентах — один раз.
+    let mut seen = std::collections::HashSet::new();
+    hits.retain(|hit| seen.insert(hit.title.to_lowercase()));
+    if hits.is_empty() {
+        return Err("ни ленты новостей, ни Википедия ничего не нашли".into());
+    }
+    Ok(hits)
+}
+
+/// Новости из ленты RSS: заголовок, источник, дата и описание.
+fn parse_rss(xml: &str) -> Vec<Hit> {
+    xml.split("<item>")
+        .skip(1)
+        .filter_map(|item| {
+            let field = |tag: &str| {
+                between(item, &format!("<{tag}>"), &format!("</{tag}>")).map(|raw| {
+                    clean(&unescape(
+                        raw.trim().trim_start_matches("<![CDATA[").trim_end_matches("]]>"),
+                    ))
+                })
+            };
+            let full = field("title").filter(|title| !title.is_empty())?;
+            // У Google источник — хвост заголовка после « - »: он отдельно, а в
+            // заголовке остаётся только сама новость.
+            let (title, site) = match full.rsplit_once(" - ") {
+                Some((headline, site)) => (headline.to_string(), site.to_string()),
+                None => (full.clone(), String::new()),
+            };
+            let date = field("pubDate").unwrap_or_default();
+            // Описание у Google — тот же заголовок ссылкой; такое не нужно.
+            let description = field("description")
+                .filter(|text| !text.contains(title.as_str()))
+                .unwrap_or_default();
+            let snippet = [date, description]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join(" — ");
+            Some(Hit { title, site, snippet })
+        })
+        .collect()
+}
+
+/// Статьи из поиска Википедии: название и кусок текста с найденными словами.
+fn parse_wikipedia(json: &str) -> Vec<Hit> {
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    parsed["query"]["search"]
+        .as_array()
+        .map(|pages| {
+            pages
+                .iter()
+                .filter_map(|page| {
+                    let title = page["title"].as_str()?;
+                    Some(Hit {
+                        title: format!("Википедия: {title}"),
+                        site: "ru.wikipedia.org".into(),
+                        snippet: clean(page["snippet"].as_str().unwrap_or_default()),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// HTML-сущности, в том числе числовые — «&#0183;», «&#171;».
+fn unescape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        let Some(end) = rest.find(';').filter(|end| *end <= 10) else {
+            out.push('&');
+            rest = &rest[1..];
+            continue;
+        };
+        let entity = &rest[1..end];
+        let decoded = match entity {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            "nbsp" => Some(' '),
+            "laquo" => Some('«'),
+            "raquo" => Some('»'),
+            "mdash" => Some('—'),
+            "ndash" => Some('–'),
+            "hellip" => Some('…'),
+            _ => entity
+                .strip_prefix('#')
+                .and_then(|code| match code.strip_prefix(['x', 'X']) {
+                    Some(hex) => u32::from_str_radix(hex, 16).ok(),
+                    None => code.parse().ok(),
+                })
+                .and_then(char::from_u32),
+        };
+        match decoded {
+            Some(ch) => {
+                out.push(ch);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Вопрос про место: часы работы, адрес, дорога.
+fn about_place(question: &str) -> bool {
+    let lower = question.to_lowercase();
+    [
+        "до скольки", "часы работы", "режим работы", "во сколько открыва",
+        "во сколько закрыва", "работает ли", "адрес", "где находится", "как добраться",
+        "как доехать", "как пройти",
+    ]
+    .iter()
+    .any(|words| lower.contains(words))
 }
 
 async fn search(query: &str) -> Result<Vec<Hit>, String> {
@@ -481,16 +915,7 @@ fn clean(fragment: &str) -> String {
             _ => {}
         }
     }
-    let text = text
-        .replace("&nbsp;", " ")
-        .replace("&amp;", "&")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&#x27;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&laquo;", "«")
-        .replace("&raquo;", "»");
+    let text = unescape(&text);
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -547,7 +972,66 @@ mod tests {
 
 #[cfg(test)]
 mod checking {
-    use super::claim_query;
+    use super::{about_place, claim_query, parse_rss, parse_wikipedia, spoken, unescape};
+
+    #[test]
+    fn places_go_to_the_map() {
+        assert!(about_place("до скольки работает кафе Уют на Сивцевом Вражке"));
+        assert!(about_place("где находится ближайшая аптека"));
+        assert!(!about_place("кто выиграл вчерашний матч"));
+    }
+
+    #[test]
+    fn news_feeds_are_read() {
+        let google = "<rss><channel><title>Лента</title><item><title>В Париже завершилась \
+            Олимпиада-2024 - Ведомости</title><pubDate>Mon, 12 Aug 2024 07:00:00 GMT</pubDate>\
+            <description>&lt;a href=\"x\"&gt;В Париже завершилась Олимпиада-2024 - \
+            Ведомости&lt;/a&gt;</description></item></channel></rss>";
+        let hits = parse_rss(google);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "В Париже завершилась Олимпиада-2024");
+        assert_eq!(hits[0].site, "Ведомости");
+        assert_eq!(hits[0].snippet, "Mon, 12 Aug 2024 07:00:00 GMT");
+
+        let bing = "<item><title><![CDATA[Париж примет игры]]></title><description>Игры \
+            пройдут &#171;летом&#187; 2024 года</description></item>";
+        let hits = parse_rss(bing);
+        assert_eq!(hits[0].title, "Париж примет игры");
+        assert_eq!(hits[0].snippet, "Игры пройдут «летом» 2024 года");
+    }
+
+    #[test]
+    fn wikipedia_search_is_read() {
+        let json = r#"{"query":{"search":[{"title":"Летние Олимпийские игры 2024",
+            "snippet":"прошли в <span class=\"searchmatch\">Париже</span>"}]}}"#;
+        let hits = parse_wikipedia(json);
+        assert_eq!(hits[0].title, "Википедия: Летние Олимпийские игры 2024");
+        assert_eq!(hits[0].snippet, "прошли в Париже");
+    }
+
+    #[test]
+    fn numeric_entities_are_decoded() {
+        assert_eq!(unescape("16 апр.&#0183;&#32;текст &amp; &#x41;"), "16 апр.· текст & A");
+        assert_eq!(unescape("A & B"), "A & B");
+    }
+
+    #[test]
+    fn the_spoken_answer_has_no_links_and_no_tail() {
+        let answer = "Правда. Игры прошли в Париже с 26 июля по 11 августа 2024 года \
+                      (ru.wikipedia.org, olymps.ru). Это подтверждают несколько источников.\n\n\
+                      Источники: wikipedia.org";
+        assert_eq!(
+            spoken(answer, 2),
+            "Правда. Игры прошли в Париже с 26 июля по 11 августа 2024 года."
+        );
+        let answer = "Не подтверждается. Проект есть на [CARLA Simulator](https://carla.readthedocs.io/).\n\
+                      1. Другие ресурсы";
+        assert_eq!(spoken(answer, 2), "Не подтверждается. Проект есть на CARLA Simulator.");
+        assert_eq!(
+            spoken("**Фейк**. Курс 25.39 никто не обещал.", 2),
+            "Фейк. Курс 25.39 никто не обещал."
+        );
+    }
 
     #[test]
     fn the_claim_is_the_headline_not_the_menu() {
@@ -562,6 +1046,42 @@ mod checking {
 
 #[cfg(test)]
 mod live {
+    /// Что видит проверка: утверждение, фрагменты поиска и сырой ответ модели.
+    ///
+    /// `cargo test --lib web::live::what_the_check_sees -- --ignored --nocapture`
+    #[test]
+    #[ignore = "ходит в поиск и в локальную модель"]
+    fn what_the_check_sees() {
+        use crate::ai_client::AiProvider;
+
+        let config = crate::config::AiConfig {
+            endpoint: crate::ollama::DEFAULT_ENDPOINT.into(),
+            model: "qwen2.5:7b".into(),
+            ..Default::default()
+        };
+        let provider = crate::ai_client::HttpProvider::new(&config, "ru").expect("провайдер");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        for text in ["Летние Олимпийские игры 2024 года прошли в Париже"] {
+            let claim = match runtime.block_on(super::main_claim(&provider, text)) {
+                super::Claim::Found(claim) => claim,
+                _ => text.to_string(),
+            };
+            let hits = runtime.block_on(super::evidence(&claim)).unwrap_or_default();
+            for hit in &hits {
+                println!("  · {} ({})\n    {}", hit.title, hit.site, hit.snippet);
+            }
+            let found = super::fragments(&hits);
+            let rules = super::verdict_rules(&claim, &found);
+            let raw = runtime
+                .block_on(provider.interpret(&rules, "это правда?"))
+                .unwrap_or_default();
+            println!("утверждение: {claim}\nответ модели: {raw}\n");
+        }
+    }
+
     /// `cargo test --lib web::live -- --ignored --nocapture`
     #[test]
     #[ignore = "ходит в поиск и в локальную модель"]
