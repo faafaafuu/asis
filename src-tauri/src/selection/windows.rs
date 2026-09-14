@@ -301,6 +301,31 @@ unsafe fn write_clipboard_text(text: &str) {
     }
 }
 
+/// Отпустили ли мышь над собственным окном Суфлёра.
+///
+/// В ответе Ноа выделяют текст с Ctrl, чтобы спросить про выделенное, — это
+/// продолжение разговора внутри окна, и вопрос окно отправит само. Без этой
+/// проверки тот же жест открывал бы поверх разговора новое объяснение.
+fn over_our_window() -> bool {
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, WindowFromPoint};
+
+    let mut point = POINT::default();
+    // SAFETY: только читают состояние системы.
+    unsafe {
+        if GetCursorPos(&mut point).is_err() {
+            return false;
+        }
+        let window = WindowFromPoint(point);
+        if window.0.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(window, Some(&mut pid as *mut u32));
+        pid == GetCurrentProcessId()
+    }
+}
+
 impl PlatformIntegration for Platform {
     fn capability(&self) -> Capability {
         // Отдельного разрешения Windows не требует: UI Automation доступен обычному
@@ -330,6 +355,9 @@ impl PlatformIntegration for Platform {
 
         // Именно левый Ctrl. Правый попап не открывает (SPEC §3, §12.5).
         if config.require_left_ctrl && !had_left_ctrl {
+            return None;
+        }
+        if over_our_window() {
             return None;
         }
 

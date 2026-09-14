@@ -26,6 +26,7 @@ mod files;
 mod screen;
 mod browser;
 mod prices;
+mod watchlist;
 mod review;
 mod secret;
 mod tasks;
@@ -117,7 +118,8 @@ pub fn run() {
             // Список задач лежит рядом с настройками и читается один раз.
             if let Some(dir) = config_dir.clone() {
                 spend::load(dir.clone());
-                tasks::load(dir);
+                tasks::load(dir.clone());
+                watchlist::load(dir);
             }
             let config = Config::load(config_dir);
             log::info!("AI-провайдер: {}", config.ai.provider);
@@ -216,6 +218,15 @@ pub fn run() {
             commands::close_tasks,
             commands::open_order,
             commands::close_order,
+            commands::watch_rows,
+            commands::watch_add,
+            commands::watch_remove,
+            commands::watch_tabs,
+            commands::watch_tab_add,
+            commands::watch_tab_remove,
+            commands::watch_open_tab,
+            commands::watch_chart,
+            commands::close_watchlist,
             commands::order_state,
             commands::task_list,
             commands::task_add,
@@ -427,7 +438,17 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
     std::thread::Builder::new()
         .name("sufler-voice".into())
         .spawn(move || {
-            for event in events {
+            // Переключатели, пережившие разбор очереди после долгого хода, —
+            // см. `drop_stale`.
+            let mut backlog = std::collections::VecDeque::new();
+            loop {
+                let event = match backlog.pop_front() {
+                    Some(event) => event,
+                    None => match events.recv() {
+                        Ok(event) => event,
+                        Err(_) => break,
+                    },
+                };
                 // Любое нажатие голосовых клавиш — работа с окном. Минута до
                 // его закрытия отсчитывается от последнего такого нажатия, а не
                 // от открытия.
@@ -498,8 +519,20 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         voice::whisper::warm(&app);
                         // И модель: за простоем её могли выгрузить, а пока
                         // человек говорит и пока идёт расшифровка, она успевает
-                        // подняться в память.
-                        wake_local_model(&app);
+                        // подняться в память. Но после распознавания, а не
+                        // вместе с ним: две загрузки в видеопамять разом мешают
+                        // друг другу, и распознавание однажды поднималось
+                        // больше минуты вместо трёх секунд.
+                        let for_model = app.clone();
+                        std::thread::spawn(move || {
+                            for _ in 0..40 {
+                                if voice::whisper::ready_now() {
+                                    break;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(500));
+                            }
+                            wake_local_model(&for_model);
+                        });
                         // Порядок важен: сперва показать помощника — вместе
                         // с ним звучит сигнал появления, — дождаться, пока он
                         // отзвучит, и только потом открывать микрофон. Иначе
@@ -564,11 +597,43 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             }
                         }
                         end_turn();
+                        drop_stale(&events, &mut backlog);
                     }
                 }
             }
         })
         .ok();
+}
+
+/// Разбирает нажатия, накопившиеся, пока шёл ход.
+///
+/// Поток голоса занят ходом целиком: расшифровка, ответ, речь. Нажатия за это
+/// время ждут в очереди и раньше срабатывали все разом, когда ход кончался, —
+/// через минуту после того, как их нажали: помощник возникал «из ниоткуда»
+/// и десяток раз подряд открывал и закрывал микрофон. Разговорные нажатия из
+/// очереди устарели и выбрасываются; переключатели остаются — это
+/// распоряжения, а не реплики. Если клавиши зажаты прямо сейчас, человек
+/// говорит в эту секунду, и запись начинается заново.
+#[cfg(desktop)]
+fn drop_stale(
+    events: &std::sync::mpsc::Receiver<voice::hotkey::Event>,
+    backlog: &mut std::collections::VecDeque<voice::hotkey::Event>,
+) {
+    use voice::hotkey::Event;
+
+    let mut dropped = 0;
+    for event in events.try_iter() {
+        match event {
+            Event::ToggleWake | Event::ToggleWindow => backlog.push_back(event),
+            Event::Speak | Event::TalkStart | Event::TalkStop => dropped += 1,
+        }
+    }
+    if dropped > 0 {
+        log::info!("пропускаю нажатий, накопившихся за ходом: {dropped}");
+        if voice::hotkey::recording() {
+            backlog.push_back(Event::TalkStart);
+        }
+    }
 }
 
 /// Шлёт индикатору громкость речи, пока она звучит.
@@ -644,8 +709,15 @@ fn input_device(app: &tauri::AppHandle) -> String {
 /// там, где он уже попрощался.
 #[cfg(desktop)]
 fn hear(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
-    overlay::show_hud(app, "thinking");
+    // Распознавание ещё поднимается — индикатор так и говорит: одни летящие
+    // точки, без кольца. Иначе минута загрузки выглядела бы как «думаю»,
+    // которое зависло.
+    let loading = !voice::whisper::ready_now();
+    overlay::show_hud(app, if loading { "loading" } else { "thinking" });
     let heard = hear_quietly(app, wav);
+    if loading && heard.is_some() {
+        overlay::show_hud(app, "thinking");
+    }
     // Esc нажали, пока фраза расшифровывалась, — она отменена вместе с ходом:
     // ни ответа, ни действия.
     if turn_cancelled() {
@@ -2016,9 +2088,10 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
     let tasks = MenuItem::with_id(app, "tasks", "Задачи", true, None::<&str>)?;
     let order = MenuItem::with_id(app, "order", "Заказ", true, None::<&str>)?;
+    let watchlist = MenuItem::with_id(app, "watchlist", "Активы", true, None::<&str>)?;
     let onboarding = MenuItem::with_id(app, "onboarding", "Настройка и проверка…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&tasks, &order, &onboarding, &quit])?;
+    let menu = Menu::with_items(app, &[&tasks, &order, &watchlist, &onboarding, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("sufler-tray")
         .tooltip("Суфлёр")
@@ -2036,6 +2109,11 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         "tasks" => {
             if let Err(err) = overlay::show_tasks(app) {
                 log::error!("не удалось открыть окно задач: {err}");
+            }
+        }
+        "watchlist" => {
+            if let Err(err) = overlay::show_watchlist(app) {
+                log::error!("не удалось открыть окно активов: {err}");
             }
         }
         "order" => {

@@ -21,20 +21,42 @@ const NO_RESPONSE_TEXT = "Ответ не пришёл. Откройте нас�
 /**
  * Вопрос, который прячется за кнопкой «?».
  *
- * Раньше «простыми словами» и примеры приходили вместе с определением, одним
- * ответом. Платили за это все: каждое выделение ждало, пока модель напишет
- * втрое больше текста, который в девяти случаях из десяти никто не раскрывал.
- * Теперь их спрашивают тогда, когда попросили.
+ * Спрашивается тогда, когда попросили, а не вместе с первым ответом: каждое
+ * выделение иначе ждало бы втрое больше текста, который редко раскрывают.
+ *
+ * Прежде здесь было «объясни простыми словами», и модель пересказывала то же,
+ * что уже сказала. Теперь — разбор по шагам: что за чем происходит и почему.
+ * Первый ответ уходит вместе с вопросом (см. `#elaborate`), чтобы модель
+ * видела, что уже прозвучало.
  */
-const ELABORATE_QUESTION = "Объясни это простыми словами и приведи один короткий пример.";
+const ELABORATE_QUESTION =
+  "Не повторяй то, что уже сказано. Разбери по шагам, что здесь на самом деле " +
+  "происходит: что за чем следует и почему. Три–пять коротких пунктов, каждый с новой строки.";
+
+/**
+ * Стоит ли указатель на полосе прокрутки тела окна.
+ *
+ * Окно таскается за любое место, и нажатие на ползунок раньше тоже хватало
+ * окно — прокрутить длинный ответ мышью было нельзя.
+ */
+export function onScrollbar(event) {
+  const box = event.target?.closest?.(".popup__body");
+  if (!box || box.scrollHeight <= box.clientHeight) return false;
+  // Полоса бывает и поверх текста, без собственной ширины, — тогда разница
+  // ширин нулевая. Поэтому правый край в двенадцать пикселей — ползунок всегда.
+  const bar = Math.max(box.offsetWidth - box.clientWidth, 12);
+  return event.clientX >= box.getBoundingClientRect().right - bar;
+}
 
 const TEMPLATE = `
 <div class="popup" data-el="root" tabindex="-1" role="dialog" aria-label="Объяснение выделенного текста">
   <div class="popup__head">
     <span class="popup__term" data-el="term"></span>
     <button class="popup__expand" data-el="expand" type="button" tabindex="-1"
-            title="Проще и с примерами" aria-label="Показать проще и с примерами">?</button>
+            title="Разобрать по шагам, что происходит" aria-label="Разобрать по шагам">?</button>
     <span class="popup__mark" data-el="mark" aria-hidden="true" hidden></span>
+    <button class="popup__close" data-el="close" type="button" tabindex="-1"
+            title="Закрыть (Esc)" aria-label="Закрыть окно">×</button>
   </div>
 
   <span class="popup__listening" data-el="listening" role="status" hidden>
@@ -52,7 +74,7 @@ const TEMPLATE = `
     <div data-el="answer"></div>
     <div class="popup__extra" data-el="extra" hidden>
       <div class="popup__section" data-el="simpleSection">
-        <span class="popup__label">Простыми словами</span>
+        <span class="popup__label">По шагам</span>
         <span class="popup__simple" data-el="simple"></span>
       </div>
       <div class="popup__section" data-el="examplesSection">
@@ -129,12 +151,31 @@ export class PopupView {
     // Исключение — явный клик в поле ввода: там фокус нужен.
     this.el.addEventListener("mousedown", (e) => {
       if (e.target === this.ui.input) return;
+      // С Ctrl в тексте ответа выделяют — чтобы спросить про выделенное
+      // (см. mouseup ниже); ползунок прокрутки должен прокручивать.
+      if (e.ctrlKey && this.ui.body.contains(e.target)) return;
+      if (onScrollbar(e)) return;
       e.preventDefault();
+    });
+
+    // Выделил с Ctrl кусок ответа — Ноа продолжает про него.
+    this.el.addEventListener("mouseup", (e) => {
+      if (!e.ctrlKey) return;
+      const selection = window.getSelection?.();
+      const picked = selection?.toString().trim();
+      if (!picked || !this.ui.body.contains(selection.anchorNode)) return;
+      selection.removeAllRanges();
+      this.askAbout(picked);
     });
 
     this.ui.expand.addEventListener("click", (e) => {
       e.preventDefault();
       this.expand();
+    });
+
+    this.ui.close.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.onClose();
     });
 
     this.ui.send.addEventListener("click", (e) => {
@@ -284,8 +325,13 @@ export class PopupView {
       this.render();
     }, RESPONSE_TIMEOUT_MS);
 
+    // Первый ответ — в историю разговора: так модель видит, что уже сказала,
+    // и разбирает дальше, а не пересказывает.
+    const said = this.state.data?.def
+      ? [{ q: this.openedByVoice ? asked : `Что такое «${asked}»?`, a: this.state.data.def }]
+      : [];
     this.client
-      .ask(asked, this.state.context, [], ELABORATE_QUESTION, { signal })
+      .ask(asked, this.state.context, said, ELABORATE_QUESTION, { signal })
       .then((answer) => {
         clearTimeout(watchdog);
         if (signal.aborted || this.state.term !== asked) return;
@@ -322,7 +368,21 @@ export class PopupView {
     this.submitAsk({ byVoice: true });
   }
 
-  submitAsk({ byVoice = false } = {}) {
+  /**
+   * Спросить про выделенный кусок ответа.
+   *
+   * Вопрос ложится в тред как обычный: видно, о чём спросили, и разговор идёт
+   * дальше с тем же контекстом. Окно, открытое голосом, и отвечает голосом.
+   */
+  askAbout(text) {
+    const piece = String(text ?? "").trim().replace(/\s+/g, " ");
+    if (!piece || this.state.phase !== "success" || this.state.pending) return;
+    const short = piece.length > 160 ? `${piece.slice(0, 160)}…` : piece;
+    this.ui.input.value = `Подробнее: «${short}»`;
+    this.submitAsk({ speak: this.openedByVoice });
+  }
+
+  submitAsk({ byVoice = false, speak = false } = {}) {
     const question = this.ui.input.value.trim();
     if (!question || this.state.pending) return;
 
@@ -364,7 +424,7 @@ export class PopupView {
         this.#scrollToLatest();
         // Спросили голосом — отвечаем голосом. Разговор не должен обрываться
         // на середине только потому, что ответ пришёл текстом.
-        if (byVoice) this.onAnswer?.(answer);
+        if (byVoice || speak) this.onAnswer?.(answer);
       })
       .catch((err) => {
         clearTimeout(watchdog);

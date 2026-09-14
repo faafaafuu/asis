@@ -836,6 +836,67 @@ pub fn close_order(app: AppHandle) {
     crate::overlay::hide_order(&app);
 }
 
+/// Строки окна активов: цены и изменения.
+#[tauri::command]
+pub async fn watch_rows() -> Vec<crate::watchlist::Row> {
+    crate::watchlist::rows().await
+}
+
+/// Добавляет актив по тикеру или названию — во вкладку, если она открыта;
+/// отдаёт, как актив называется.
+#[tauri::command]
+pub async fn watch_add(query: String, tab: Option<String>) -> Result<String, String> {
+    crate::watchlist::add(&query, tab.as_deref())
+        .await
+        .map(|asset| asset.name)
+}
+
+/// Убирает актив: из вкладки, если она открыта, иначе из списка совсем.
+#[tauri::command]
+pub fn watch_remove(id: String, tab: Option<String>) -> bool {
+    crate::watchlist::remove(&id, tab.as_deref()).is_some()
+}
+
+/// Вкладки списка активов.
+#[tauri::command]
+pub fn watch_tabs() -> Vec<String> {
+    crate::watchlist::tabs()
+}
+
+/// Заводит вкладку.
+#[tauri::command]
+pub fn watch_tab_add(name: String) -> Result<String, String> {
+    crate::watchlist::add_tab(&name)
+}
+
+/// Убирает вкладку; активы остаются.
+#[tauri::command]
+pub fn watch_tab_remove(name: String) -> bool {
+    crate::watchlist::remove_tab(&name)
+}
+
+/// Вкладка, которую голосом попросили открыть, пока окна не было.
+#[tauri::command]
+pub fn watch_open_tab() -> Option<String> {
+    crate::watchlist::take_open_tab()
+}
+
+/// Открывает график актива в TradingView.
+///
+/// Адрес собирается здесь, по списку: окно передаёт только, какой актив, и
+/// открыть по его просьбе можно лишь то, что в списке есть.
+#[tauri::command]
+pub fn watch_chart(id: String) -> Result<(), String> {
+    let url = crate::watchlist::chart_url(&id).ok_or("такого актива в списке нет")?;
+    crate::pc::open(&url)
+}
+
+/// Закрывает окно активов.
+#[tauri::command]
+pub fn close_watchlist(app: AppHandle) {
+    crate::overlay::hide_watchlist(&app);
+}
+
 /// Что сейчас с заказом. `null` — заказа ещё не было.
 #[tauri::command]
 pub fn order_state() -> Option<crate::order::Order> {

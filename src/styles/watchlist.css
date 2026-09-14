@@ -1,0 +1,353 @@
+/* Окно активов. Язык тот же, что у окон задач и заказа: тёплый фон, антиква в
+   заголовке, один акцентный цвет. Токены общие — см. tokens.css. Своих цветов
+   здесь два — рост и падение: без них таблица изменений не читается. */
+
+:root {
+  --up: #2f9e5f;
+  --down: var(--error);
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-solid);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--size-ui);
+  line-height: var(--line-ui);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Заголовок ─────────────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 18px 16px 10px 20px;
+  /* Окно без рамки: заголовок — то место, за которое его двигают. */
+  cursor: grab;
+}
+.head:active {
+  cursor: grabbing;
+}
+
+.head__title {
+  margin: 0;
+  font-family: var(--font-term);
+  font-size: 26px;
+  font-weight: var(--term-weight);
+  line-height: 1;
+  color: var(--accent);
+}
+
+.head__updated {
+  margin-left: auto;
+  font-size: var(--size-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--label);
+}
+
+.head__button {
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.head__button:hover {
+  color: var(--text);
+  background: var(--btn-hover-bg);
+}
+.head__close {
+  font-size: 20px;
+}
+
+/* ── Вкладки ───────────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 20px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--size-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--text);
+  background: var(--btn-hover-bg);
+}
+.tab[aria-selected="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Крестик вкладки — только под курсором: убирает вкладку, не активы. */
+.tab__drop {
+  line-height: 1;
+  color: var(--text-muted);
+  visibility: hidden;
+}
+.tab:hover .tab__drop {
+  visibility: visible;
+}
+.tab__drop:hover {
+  color: var(--text);
+}
+
+.tab--new {
+  color: var(--label);
+}
+
+.tab__input {
+  flex: 0 0 auto;
+  width: 120px;
+  padding: 3px 11px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--size-secondary);
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ── Таблица ───────────────────────────────────────────────────────────── */
+
+/* Одна сетка на заголовки колонок и строки: цифры встают друг под другом. */
+.grid {
+  display: grid;
+  grid-template-columns:
+    minmax(110px, 1.6fr) 64px minmax(78px, 1fr)
+    repeat(5, minmax(54px, 0.8fr)) 22px;
+  align-items: center;
+  column-gap: 8px;
+}
+
+.columns {
+  padding: 0 20px 6px;
+  font-size: var(--size-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--label);
+  border-bottom: 1px solid var(--divider);
+}
+.columns__price,
+.columns button {
+  text-align: right;
+}
+.columns__spark {
+  text-align: center;
+}
+
+/* Период — кнопка: щелчок выделяет колонку и упорядочивает строки по ней. */
+.columns button {
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.columns button:hover,
+.columns button[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.table {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+
+.row {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--divider);
+}
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row__who {
+  min-width: 0;
+}
+
+/* Тикер — ссылка на график: акцентом и с подчёркиванием под курсором. */
+.row__ticker {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  text-align: left;
+  cursor: pointer;
+}
+.row__ticker:hover {
+  text-decoration: underline;
+}
+
+.row__name {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}
+
+.row__spark {
+  width: 64px;
+  height: 20px;
+}
+.row__spark path {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.spark--up {
+  stroke: var(--up);
+}
+.spark--down {
+  stroke: var(--down);
+}
+
+.row__price,
+.row__change {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.row__price {
+  color: var(--text-body);
+}
+
+.row__change--up {
+  color: var(--up);
+}
+.row__change--down {
+  color: var(--down);
+}
+.row__change--none,
+.row__change--flat {
+  color: var(--text-muted);
+}
+.row__change--chosen {
+  font-weight: 600;
+}
+
+/* Крестик строки — только под курсором: в покое таблица должна читаться. */
+.row__remove {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  visibility: hidden;
+}
+.row:hover .row__remove {
+  visibility: visible;
+}
+.row__remove:hover {
+  color: var(--text);
+  background: var(--btn-hover-bg);
+}
+
+.empty {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 8px 20px;
+  color: var(--text-muted);
+  font-size: var(--size-secondary);
+}
+
+/* ── Добавить ──────────────────────────────────────────────────────────── */
+
+.add {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px 6px;
+  border-top: 1px solid var(--divider);
+}
+
+.add__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 10px;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.add__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.add__button {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  font: inherit;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.add__button:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.add__note {
+  min-height: 1.4em;
+  margin: 0;
+  padding: 0 20px 12px;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}

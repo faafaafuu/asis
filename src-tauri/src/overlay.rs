@@ -852,6 +852,40 @@ pub fn show_order(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+pub const WATCH_LABEL: &str = "watchlist";
+
+/// Показывает список активов. Если окно уже есть — поднимает его наверх.
+pub fn show_watchlist(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(WATCH_LABEL) {
+        window.show()?;
+        window.set_focus()?;
+        return Ok(());
+    }
+
+    let window =
+        WebviewWindowBuilder::new(app, WATCH_LABEL, WebviewUrl::App("watchlist.html".into()))
+            .initialization_script(&theme_script(app))
+            .title("Суфлёр — активы")
+            .inner_size(640.0, 460.0)
+            .min_inner_size(480.0, 280.0)
+            .resizable(true)
+            .decorations(false)
+            .skip_taskbar(true)
+            .build()?;
+
+    // Там же, где задачи и заказ: у правого края, ближе к верху.
+    let (x, y) = tasks_corner(&window);
+    window.set_position(PhysicalPosition::new(x, y))?;
+    Ok(())
+}
+
+/// Прячет окно активов.
+pub fn hide_watchlist(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(WATCH_LABEL) {
+        let _ = window.hide();
+    }
+}
+
 /// Прячет окно заказа.
 pub fn hide_order(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(ORDER_LABEL) {

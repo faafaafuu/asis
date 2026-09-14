@@ -3,7 +3,7 @@
 // Отличие от веб-режима: здесь попап — целое окно, поэтому позиционированием
 // занимается Rust. Фронтенд отвечает только за содержимое и сообщает свой размер.
 
-import { PopupView } from "./popup-view.js";
+import { PopupView, onScrollbar } from "./popup-view.js";
 import { TauriProvider, MockProvider, DEFAULT_ERROR_TEXT } from "./ai-client.js";
 import { tauri, appWindow, applyTheme } from "./bridge.js";
 import { attachMobileEntry } from "./mobile-entry.js";
@@ -86,6 +86,9 @@ function attachHandles(popup) {
   popup.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || event.target?.dataset?.edge) return;
     if (event.target.closest("button, a, input, textarea, select, label")) return;
+    // Ползунок прокрутки прокручивает, а Ctrl — выделяет текст, чтобы спросить
+    // про выделенное: ни то ни другое не повод хватать окно.
+    if (event.ctrlKey || onScrollbar(event)) return;
     event.preventDefault();
     win.startDragging();
     api?.invoke("popup_taken_over", { moved: true, sized: false }).catch(() => {});

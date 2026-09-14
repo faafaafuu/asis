@@ -23,6 +23,9 @@ const PALETTE = {
   listening: ["oklch(0.75 0.15 160)", "oklch(0.72 0.16 190)", "oklch(0.78 0.13 140)"],
   thinking: ["oklch(0.7 0.15 250)", "oklch(0.65 0.18 290)", "oklch(0.72 0.13 210)"],
   speaking: ["oklch(0.75 0.19 300)", "oklch(0.78 0.17 260)", "oklch(0.82 0.14 200)"],
+  // Загрузка распознавания: одни точки, без кольца. Кольцо значит «я тут и
+  // работаю», а пока распознавание поднимается, работать ещё нечем.
+  loading: ["oklch(0.7 0.15 250)", "oklch(0.65 0.18 290)", "oklch(0.8 0.12 220)"],
 };
 
 let mode = "idle";
@@ -57,6 +60,8 @@ const particles = Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
 /** Целевой уровень «громкости» — он же амплитуда зубцов. */
 function targetLevel() {
   switch (mode) {
+    case "loading":
+      return 0.25;
     case "listening":
     case "thinking":
       // Спокойная медленная пульсация: программа ждёт, а не суетится.
@@ -119,23 +124,36 @@ function draw() {
   cloud.addColorStop(0, withAlpha(colors[0], 0.28 + level * 0.2));
   cloud.addColorStop(0.5, withAlpha(colors[1], 0.1));
   cloud.addColorStop(1, "transparent");
-  ctx.fillStyle = cloud;
-  ctx.beginPath();
-  ctx.arc(cx, cy, cloudR, 0, Math.PI * 2);
-  ctx.fill();
+  const loading = mode === "loading";
+  if (!loading) {
+    ctx.fillStyle = cloud;
+    ctx.beginPath();
+    ctx.arc(cx, cy, cloudR, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
-  // Частицы: дрейфуют по эллиптической орбите и мерцают вразнобой.
+  // Частицы: дрейфуют по эллиптической орбите и мерцают вразнобой. В загрузке
+  // они одни на экране — летят быстрее и светятся ярче, чтобы было видно:
+  // программа жива и чего-то ждёт.
   for (const p of particles) {
-    p.a += p.speed * 0.012;
+    p.a += p.speed * (loading ? 0.035 : 0.012);
     const wobble = Math.sin(time * 1.5 + p.phase) * 6;
     const radius = p.r + wobble + level * 18;
     const x = cx + Math.cos(p.a) * radius;
     const y = cy + Math.sin(p.a) * radius * 0.62;
-    const alpha = 0.15 + Math.abs(Math.sin(time * 2 + p.phase)) * 0.35;
+    const glow = Math.abs(Math.sin(time * 2 + p.phase));
+    const alpha = loading ? 0.35 + glow * 0.55 : 0.15 + glow * 0.35;
     ctx.fillStyle = withAlpha(colors[2], alpha);
     ctx.beginPath();
-    ctx.arc(x, y, p.size, 0, Math.PI * 2);
+    ctx.arc(x, y, loading ? p.size * 1.3 : p.size, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  // Кольца в загрузке нет: одни точки.
+  if (loading) {
+    ctx.restore();
+    requestAnimationFrame(draw);
+    return;
   }
 
   // Кольцо. В речи зубцов меньше, но каждый крупнее — движение читается как

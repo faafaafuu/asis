@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Суфлёр — активы</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/watchlist.css" />
+  </head>
+  <body>
+    <header class="head" data-el="head">
+      <h1 class="head__title">Активы</h1>
+      <span class="head__updated" data-el="updated"></span>
+      <button class="head__button" data-el="refresh" type="button" title="Обновить цены" aria-label="Обновить цены">↻</button>
+      <button class="head__button head__close" data-el="close" type="button" title="Закрыть (Esc)" aria-label="Закрыть окно активов">×</button>
+    </header>
+
+    <nav class="tabs" data-el="tabs" aria-label="Вкладки"></nav>
+
+    <div class="grid columns" data-el="columns">
+      <span>Актив</span>
+      <span class="columns__spark" title="У монет — неделя по часам, у акций — месяц по дням">график</span>
+      <span class="columns__price">Цена</span>
+      <button type="button" data-period="day" title="Упорядочить по изменению за день">День</button>
+      <button type="button" data-period="week" title="Упорядочить по изменению за неделю">Неделя</button>
+      <button type="button" data-period="month" title="Упорядочить по изменению за месяц">Месяц</button>
+      <button type="button" data-period="year" title="Упорядочить по изменению за год">Год</button>
+      <button type="button" data-period="all" title="С первой известной цены. У новых монет этой истории может не быть">Всё</button>
+      <span></span>
+    </div>
+
+    <main class="table" data-el="rows" aria-live="polite"></main>
+
+    <p class="empty" data-el="empty" hidden>
+      Список пуст. Впишите тикер или название ниже — btc, pump, aapl, sber, eurusd —
+      или скажите «Ноа, добавь биткоин в активы».
+    </p>
+
+    <form class="add" data-el="form">
+      <input class="add__input" data-el="input" type="text" placeholder="Тикер или название: btc, pump, aapl, sber" autocomplete="off" spellcheck="false" />
+      <button class="add__button" type="submit">Добавить</button>
+    </form>
+    <p class="add__note" data-el="note"></p>
+
+    <script type="module" src="./js/watchlist.js"></script>
+  </body>
+</html>

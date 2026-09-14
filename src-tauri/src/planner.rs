@@ -92,6 +92,8 @@ pub enum Intent {
     Price { asset: String },
     /// Передать разговор Claude: открыть его и задать ему вопрос.
     Claude { text: String },
+    /// Список активов: показать, добавить, убрать.
+    Watch { action: String, asset: String, tab: String },
     /// Готовый ответ без действия: переспросить, пояснить.
     Say(String),
 }
@@ -128,6 +130,11 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     // «Отвечай без окна», «показывай окно» — переключатель, а не вопрос.
     if let Some(show) = window_request(said) {
         return Some(crate::set_show_window(app, show));
+    }
+    // «Который час», «какое сегодня число» — по часам компьютера, без модели:
+    // точно и сразу.
+    if let Some(reply) = clock_answer(said, Local::now()) {
+        return Some(reply);
     }
     // Дело ждёт срока — значит, сказанное сейчас и есть срок.
     if awaiting_time() {
@@ -197,6 +204,7 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
             Some(answer) => answer,
             None => crate::web::lookup(app, said).await,
         }),
+        Intent::Watch { action, asset, tab } => Some(watch(app, &action, &asset, &tab).await),
         Intent::Claude { text } => {
             // Разговор уходит в Claude — Ноа после ответа замолкает и уходит.
             HANDOFF.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -883,7 +891,9 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             } else {
                 Intent::Add {
                     title,
-                    due,
+                    // «Через час» считает программа — модель в такой арифметике
+                    // ошибается.
+                    due: relative_due(said, Local::now()).or(due),
                     calendar: parsed["calendar"].as_bool().unwrap_or(false),
                 }
             }
@@ -894,7 +904,10 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
         // отдельное действие.
         "done" | "remove" if intent == "remove" || erases(said) => Intent::Remove { task },
         "done" => Intent::Done { task },
-        "postpone" => Intent::Postpone { task, due },
+        "postpone" => Intent::Postpone {
+            task,
+            due: relative_due(said, Local::now()).or(due),
+        },
         "breakdown" => Intent::Breakdown { task },
         "order" => {
             // «Корзина», «заказ», «покупки» — не товары, а слова о самом заказе:
@@ -1018,6 +1031,11 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             },
         },
         "claude" => Intent::Claude { text: text("text") },
+        "watch" => Intent::Watch {
+            action: text("action"),
+            asset: text("asset"),
+            tab: text("tab"),
+        },
         _ => Intent::Chat,
     }
 }
@@ -1278,11 +1296,15 @@ fn window_request(said: &str) -> Option<bool> {
     const HIDE: &[&str] = &[
         "отвечай без окна", "говори без окна", "работай без окна", "давай без окна",
         "не показывай окно", "окно не показывай", "скрывай окно", "не открывай окно",
-        "выключи окно ответ", "отключи окно ответ",
+        "выключи окно ответ", "отключи окно ответ", "убери окно", "спрячь окно",
+        "выключи диалоговое окно", "убери диалоговое окно", "закрой диалоговое окно",
     ];
+    // «Покажи окно», «открой диалоговое окно» — так просят вернуть окно ответов:
+    // других окон у Ноа нет, а программу по слову «окно» открывать нечего.
     const SHOW: &[&str] = &[
-        "показывай окно", "отвечай с окном", "верни окно", "включи окно ответ",
-        "открывай окно",
+        "показывай окно", "отвечай с окном", "верни окно", "включи окно",
+        "открывай окно", "покажи окно", "диалоговое окно", "окно диалоговое",
+        "наше окно", "окно ответов",
     ];
     if HIDE.iter().any(|phrase| lower.contains(phrase)) {
         return Some(false);
@@ -1296,6 +1318,167 @@ static HANDOFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// Передан ли разговор Claude — и сбросить отметку.
 pub fn take_handoff() -> bool {
     HANDOFF.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Список активов голосом: показать, добавить, убрать. Окно открывается при
+/// любом из трёх — сразу видно, что получилось.
+async fn watch(app: &AppHandle, action: &str, asset: &str, tab: &str) -> String {
+    use tauri::Emitter;
+
+    let tab = tab.trim();
+    let named = (!tab.is_empty()).then_some(tab);
+    let reply = match action.trim() {
+        "add" => match crate::watchlist::add(asset, named).await {
+            Ok(added) => match named.and_then(crate::watchlist::find_tab) {
+                Some(tab) => format!("Добавил {} во вкладку «{tab}».", added.name),
+                None => format!("Добавил {} в активы.", added.name),
+            },
+            Err(err) => err,
+        },
+        "remove" => match crate::watchlist::remove(asset, named) {
+            Some(removed) => match named {
+                Some(tab) => format!("Убрал {} из вкладки «{tab}».", removed.name),
+                None => format!("Убрал {} из активов.", removed.name),
+            },
+            None => format!("«{}» там нет.", asset.trim()),
+        },
+        _ => {
+            let rows = crate::watchlist::rows().await;
+            match named {
+                Some(tab) => match crate::watchlist::find_tab(tab) {
+                    Some(tab) => {
+                        let inside: Vec<_> =
+                            rows.into_iter().filter(|row| row.tabs.contains(&tab)).collect();
+                        format!("«{tab}». {}", crate::watchlist::summary(&inside))
+                    }
+                    None => format!("Вкладки «{tab}» нет. Её можно завести в окне — плюсом."),
+                },
+                None => crate::watchlist::summary(&rows),
+            }
+        }
+    };
+    // Какую вкладку открыть: названную — если она есть.
+    let open = named.and_then(crate::watchlist::find_tab);
+    crate::watchlist::open_tab(open.clone());
+    if let Err(err) = crate::overlay::show_watchlist(app) {
+        log::warn!("окно активов не открылось: {err}");
+    }
+    let _ = app.emit_to(crate::overlay::WATCH_LABEL, "watchlist:changed", ());
+    if let Some(open) = open {
+        let _ = app.emit_to(crate::overlay::WATCH_LABEL, "watchlist:tab", open);
+    }
+    reply
+}
+
+/// Ответ по часам компьютера: «который час», «какое сегодня число».
+///
+/// Модель время знает только из подсказки и в арифметике с ним путается, а
+/// часы компьютера точные. «Сколько времени займёт дорога» — не вопрос о
+/// часах: такие обороты берутся, только если фраза короткая.
+fn clock_answer(said: &str, now: DateTime<Local>) -> Option<String> {
+    let lower = said.to_lowercase().replace('ё', "е");
+    let words: Vec<&str> = lower
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let phrase = words.join(" ");
+    let short = words.len() <= 5;
+    let any = |phrases: &[&str]| phrases.iter().any(|wanted| phrase.contains(wanted));
+    let time = any(&["который час", "сколько на часах"])
+        || (short && any(&["сколько времени", "сколько время", "какое время"]));
+    let date = any(&["какое сегодня число", "какая сегодня дата", "какой сегодня день", "какой день недели"])
+        || (short && any(&["какое число", "какая дата"]));
+    match (time, date) {
+        (true, true) => Some(format!(
+            "Сейчас {}, {}, {}.",
+            now.format("%H:%M"),
+            weekday(now),
+            month_day(now)
+        )),
+        (true, false) => Some(format!("Сейчас {}.", now.format("%H:%M"))),
+        (false, true) => Some(format!("Сегодня {}, {}.", weekday(now), month_day(now))),
+        (false, false) => None,
+    }
+}
+
+/// Срок «через …» от текущего времени: «через час», «через 20 минут»,
+/// «через полчаса», «через два дня».
+///
+/// Считает программа, а не модель: сколько будет «через сорок минут», модель
+/// порой считала неверно — и напоминание уезжало на другой час.
+fn relative_due(said: &str, now: DateTime<Local>) -> Option<DateTime<Local>> {
+    let lower = said.to_lowercase().replace('ё', "е");
+    let words: Vec<&str> = lower
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let at = words.iter().position(|word| *word == "через")?;
+    let rest = &words[at + 1..];
+    let first = *rest.first()?;
+    if first.starts_with("полчас") {
+        return Some(now + Duration::minutes(30));
+    }
+    let (count, unit) = match unit_of(first) {
+        Some(unit) => (1.0, unit),
+        None => {
+            let (count, used) = count_of(rest)?;
+            (count, unit_of(rest.get(used)?)?)
+        }
+    };
+    let minutes = (count * unit as f64).round() as i64;
+    (minutes > 0).then(|| now + Duration::minutes(minutes))
+}
+
+/// Единица времени в минутах.
+fn unit_of(word: &str) -> Option<i64> {
+    if word.starts_with("мин") {
+        Some(1)
+    } else if word.starts_with("час") {
+        Some(60)
+    } else if word.starts_with("сут") || matches!(word, "день" | "дня" | "дней") {
+        Some(24 * 60)
+    } else if word.starts_with("недел") {
+        Some(7 * 24 * 60)
+    } else {
+        None
+    }
+}
+
+/// Число в начале слов: «20», «двадцать пять», «пару», «полтора». Отдаёт число
+/// и сколько слов оно заняло.
+fn count_of(words: &[&str]) -> Option<(f64, usize)> {
+    const UNITS: &[(&str, f64)] = &[
+        ("один", 1.0), ("одну", 1.0), ("одна", 1.0), ("два", 2.0), ("две", 2.0), ("три", 3.0),
+        ("четыре", 4.0), ("пять", 5.0), ("шесть", 6.0), ("семь", 7.0), ("восемь", 8.0),
+        ("девять", 9.0),
+    ];
+    const TENS: &[(&str, f64)] = &[
+        ("десять", 10.0), ("пятнадцать", 15.0), ("двадцать", 20.0), ("тридцать", 30.0),
+        ("сорок", 40.0), ("пятьдесят", 50.0),
+    ];
+    let first = *words.first()?;
+    if let Ok(number) = first.parse::<f64>() {
+        return Some((number, 1));
+    }
+    if first.starts_with("пар") {
+        return Some((2.0, 1));
+    }
+    if first.starts_with("полтор") {
+        return Some((1.5, 1));
+    }
+    if let Some((_, tens)) = TENS.iter().find(|(word, _)| *word == first) {
+        let units = words
+            .get(1)
+            .and_then(|next| UNITS.iter().find(|(word, _)| word == next));
+        return Some(match units {
+            Some((_, units)) => (tens + units, 2),
+            None => (*tens, 1),
+        });
+    }
+    UNITS
+        .iter()
+        .find(|(word, _)| *word == first)
+        .map(|(_, value)| (*value, 1))
 }
 
 /// Похоже ли на покупку: «купи», «закажи», «привези».
@@ -1404,6 +1587,7 @@ fn asked_for(intent: &str, said: &str) -> bool {
         "paste" => &["встав"],
         "price" => &["стоит", "цена", "цену", "курс", "стоимост", "почём", "почем", "котиров"],
         "claude" => &["клод", "claude", "клауд", "клоуд"],
+        "watch" => &["вотч", "watch", "актив", "портфел", "монет", "акци", "отслежива", "списк"],
         "remove" => &["удал", "убер", "убра", "сотр", "стер", "не просил", "не надо было", "лишн"],
         "screen" => &[
             "скрин", "экран", "фейк", "правд", "написан", "переведи", "картинк", "снимк",
@@ -1501,7 +1685,9 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          price — спрашивает цену или курс криптовалюты, токена, монеты или валюты: \
          «сколько стоит биткоин», «курс доллара», «почём pump.fun»;\n\
          claude — просит спросить Claude (Клода) или перейти к нему: «спроси Клода, \
-         как …», «позови Клода», «хочу поговорить с Клодом».\n\
+         как …», «позови Клода», «хочу поговорить с Клодом»;\n\
+         watch — про список отслеживаемых активов (вотчлист, «мои активы»): \
+         показать его, добавить или убрать монету, акцию, валюту.\n\
          \n\
          Остальные поля:\n\
          title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
@@ -1527,8 +1713,12 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          topic — для system одно из: cpu, memory, gpu, disk, overview; gpu — \
          видеокарта: видеопамять, её загрузка и температура;\n\
          check — для screen true, если просят проверить, правда ли это;\n\
-         asset — для price что именно: монету — латиницей, как на бирже (bitcoin, \
-         pump.fun), валюту — по-русски (доллар, евро);\n\
+         asset — для price и watch что именно: монету — латиницей, как на бирже \
+         (bitcoin, pump.fun), акцию — тикером (AAPL, SBER), валюту — по-русски \
+         (доллар, евро); для watch show — пусто;\n\
+         action — для watch одно из: show, add, remove;\n\
+         tab — для watch вкладка списка, если названа («в избранное», «в крипту», \
+         «вкладку фонды»), в именительном падеже; не названа — пусто;\n\
          kind — для find тип файла: image, document, video, audio или any;\n\
          text — для type, message и claude сам текст, слово в слово, без «напиши» и \
          «спроси»; для claude без вопроса — пусто;\n\
@@ -1642,7 +1832,12 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      «сколько стоит пампфан токен» → {\"intent\":\"price\",\"asset\":\"pump.fun\"}\n\
      «курс доллара» → {\"intent\":\"price\",\"asset\":\"доллар\"}\n\
      «спроси клода, как написать резюме» → {\"intent\":\"claude\",\"text\":\"как написать резюме\"}\n\
-     «позови клода» → {\"intent\":\"claude\",\"text\":\"\"}";
+     «позови клода» → {\"intent\":\"claude\",\"text\":\"\"}\n\
+     «покажи мои активы» → {\"intent\":\"watch\",\"action\":\"show\",\"asset\":\"\"}\n\
+     «добавь биткоин в вотчлист» → {\"intent\":\"watch\",\"action\":\"add\",\"asset\":\"bitcoin\"}\n\
+     «убери эфир из активов» → {\"intent\":\"watch\",\"action\":\"remove\",\"asset\":\"ethereum\"}\n\
+     «добавь биткоин в избранное» → {\"intent\":\"watch\",\"action\":\"add\",\"asset\":\"bitcoin\",\"tab\":\"избранное\"}\n\
+     «покажи вкладку фонды» → {\"intent\":\"watch\",\"action\":\"show\",\"asset\":\"\",\"tab\":\"фонды\"}";
 
 /* ── Завести ─────────────────────────────────────────────────────────────── */
 
@@ -2052,6 +2247,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_answer_window_is_asked_for_in_plain_words() {
+        assert_eq!(window_request("Покажи окно."), Some(true));
+        assert_eq!(window_request("Открой диалоговое окно наше."), Some(true));
+        assert_eq!(window_request("убери диалоговое окно"), Some(false));
+        assert_eq!(window_request("открой окно в браузере"), None);
+        assert_eq!(window_request("комната без окна"), None);
+    }
+
+    #[test]
+    fn relative_times_are_counted_by_the_clock() {
+        let now = Local.with_ymd_and_hms(2026, 9, 11, 15, 7, 0).unwrap();
+        let later = |said: &str| relative_due(said, now).map(|due| due.format("%d %H:%M").to_string());
+        assert_eq!(later("напомни через час сходить в магазин").as_deref(), Some("11 16:07"));
+        assert_eq!(later("через 20 минут позвонить").as_deref(), Some("11 15:27"));
+        assert_eq!(later("через двадцать пять минут").as_deref(), Some("11 15:32"));
+        assert_eq!(later("через полчаса").as_deref(), Some("11 15:37"));
+        assert_eq!(later("через пару часов").as_deref(), Some("11 17:07"));
+        assert_eq!(later("через два дня").as_deref(), Some("13 15:07"));
+        assert_eq!(later("напомни завтра в десять"), None);
+    }
+
+    #[test]
+    fn the_clock_answers_by_itself() {
+        let now = Local.with_ymd_and_hms(2026, 9, 11, 15, 7, 0).unwrap();
+        assert_eq!(clock_answer("Ноа, который час?", now).as_deref(), Some("Сейчас 15:07."));
+        let date = clock_answer("какое сегодня число", now).unwrap_or_default();
+        assert!(date.starts_with("Сегодня пятница, 11 сентября"), "{date}");
+        assert_eq!(clock_answer("сколько времени займёт дорога до работы на машине", now), None);
+    }
+
+    #[test]
     fn a_task_is_found_by_its_title() {
         let open = vec![task("1", "найти битки"), task("2", "позвонить в банк")];
         assert_eq!(by_title("удали задачу про банк", &open), Some("2".to_string()));
@@ -2177,6 +2403,8 @@ mod tests {
             ("сколько стоит пампфан токен", "", "price"),
             ("какой сейчас курс евро", "", "price"),
             ("спроси клода, как написать резюме", "", "claude"),
+            ("покажи мои активы", "", "watch"),
+            ("добавь эфир в вотчлист", "", "watch"),
         ];
 
         let runtime = tokio::runtime::Builder::new_current_thread()

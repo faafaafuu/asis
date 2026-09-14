@@ -148,7 +148,7 @@ fn describe_coin(name: &str, symbol: &str, usd: f64, rub: Option<f64>, change: O
 
 /// Число для голоса: запятая вместо точки, пробелы между тысячами; у мелочи —
 /// две значащие цифры после нулей, «0,0037».
-fn amount(value: f64) -> String {
+pub(crate) fn amount(value: f64) -> String {
     let value = value.abs();
     if value >= 1000.0 {
         return thousands(value.round() as u64);
@@ -175,7 +175,7 @@ fn thousands(value: u64) -> String {
 }
 
 /// Форма слова после числа. У дробных — «доллара», как «0,31 рубля».
-fn plural<'a>(value: f64, one: &'a str, few: &'a str, many: &'a str) -> &'a str {
+pub(crate) fn plural<'a>(value: f64, one: &'a str, few: &'a str, many: &'a str) -> &'a str {
     let shown = amount(value);
     if shown.contains(',') {
         return few;
