@@ -1539,9 +1539,9 @@ fn screenshot_request(app: &AppHandle, said: &str) -> Option<String> {
     let saved = crate::shots::save(app, &png);
     *PHOTO.lock().unwrap_or_else(|err| err.into_inner()) = Some(png);
     Some(match saved {
-        Ok(path) => {
+        Ok((path, folder)) => {
             log::info!("снимок {what}: {}", path.display());
-            format!("Снимок {what} сохранил в «Изображения\\Суфлёр».")
+            format!("Снимок {what} сохранил в {folder}.")
         }
         Err(err) => format!("Снимок {what} сделал, но не сохранил: {err}"),
     })

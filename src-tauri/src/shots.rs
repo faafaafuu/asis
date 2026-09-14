@@ -73,20 +73,42 @@ pub fn window(handle: isize) -> Result<Vec<u8>, String> {
     png(&grab(rect.left, rect.top, width, height)?, width as u32, height as u32)
 }
 
-/// Кладёт снимок в «Изображения\Суфлёр» и отдаёт путь.
-pub fn save(app: &AppHandle, png: &[u8]) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .picture_dir()
-        .map_err(|err| format!("папка «Изображения» не нашлась: {err}"))?
-        .join("Суфлёр");
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-    let path = dir.join(format!(
+/// Кладёт снимок в «Изображения\Суфлёр» и отдаёт путь и то, как назвать
+/// папку вслух.
+///
+/// «Изображения» — папка, которую Windows может охранять от незнакомых
+/// программ («Контролируемый доступ к папкам» в Защитнике): запись туда
+/// тогда отклоняется. Снимок в этом случае ложится в папку самой программы —
+/// сделанный снимок не должен пропадать из-за того, куда его не пустили.
+pub fn save(app: &AppHandle, png: &[u8]) -> Result<(PathBuf, &'static str), String> {
+    let name = format!(
         "снимок {}.png",
         chrono::Local::now().format("%Y-%m-%d %H-%M-%S")
-    ));
-    std::fs::write(&path, png).map_err(|err| err.to_string())?;
-    Ok(path)
+    );
+    let write = |dir: PathBuf| -> Result<PathBuf, String> {
+        std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+        let path = dir.join(&name);
+        std::fs::write(&path, png).map_err(|err| err.to_string())?;
+        Ok(path)
+    };
+
+    let pictures = app
+        .path()
+        .picture_dir()
+        .map_err(|err| err.to_string())
+        .and_then(|dir| write(dir.join("Суфлёр")));
+    match pictures {
+        Ok(path) => Ok((path, "«Изображения\\Суфлёр»")),
+        Err(err) => {
+            log::warn!("в «Изображения» снимок не записался ({err}) — кладу в папку программы");
+            let own = app
+                .path()
+                .app_local_data_dir()
+                .map_err(|err| err.to_string())?
+                .join("снимки");
+            write(own).map(|path| (path, "папку программы"))
+        }
+    }
 }
 
 /// Пиксели прямоугольника экрана: BGRA, сверху вниз.
