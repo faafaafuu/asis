@@ -571,6 +571,45 @@ for (const el of [
   el?.addEventListener("change", saveFood);
 }
 
+/* ── Уведомления в Telegram ───────────────────────────────────────────── */
+
+async function loadTelegram() {
+  const telegram = await api?.invoke("telegram_settings").catch(() => null);
+  if (!telegram) {
+    if (ui.telegramBlock) ui.telegramBlock.hidden = true;
+    return;
+  }
+  ui.telegramToken.value = telegram.token;
+  ui.telegramStatus.textContent = telegram.chatId
+    ? "Подключено: оповещения придут в Telegram"
+    : telegram.token
+      ? "Токен сохранён — напишите боту и нажмите «Проверить»"
+      : "";
+}
+
+ui.telegramToken?.addEventListener("change", async () => {
+  try {
+    await api?.invoke("save_telegram_settings", {
+      settings: { token: ui.telegramToken.value, chatId: "" },
+    });
+  } catch (err) {
+    ui.telegramStatus.textContent = `Не сохранилось: ${err}`;
+    return;
+  }
+  loadTelegram();
+});
+
+ui.telegramTest?.addEventListener("click", async () => {
+  ui.telegramStatus.textContent = "Проверяю…";
+  try {
+    ui.telegramStatus.textContent = await api?.invoke("telegram_test");
+  } catch (err) {
+    ui.telegramStatus.textContent = String(err);
+  }
+});
+
+loadTelegram();
+
 ui.foodLogin?.addEventListener("click", async () => {
   ui.foodLoginStatus.textContent = "Открываю браузер…";
   try {

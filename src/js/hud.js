@@ -225,6 +225,62 @@ api
     /* окно открыто вне приложения — рисуем состояние ожидания */
   });
 
+// Голосовые из Telegram. Rust присылает OGG/Opus, здесь он становится WAV на
+// 16 кГц: движок браузера Opus понимает, а своего декодера у программы нет.
+// Окно индикатора для этого подходит — оно есть всегда и фокус не берёт.
+// Rust повторяет просьбу, пока страница не ответит, — повтор не разбирается
+// заново.
+const decoding = new Set();
+api?.listen("audio:decode", async (event) => {
+  const { id, data } = event.payload ?? {};
+  if (!id || decoding.has(id)) return;
+  decoding.add(id);
+  try {
+    const bytes = Uint8Array.from(atob(data), (ch) => ch.charCodeAt(0));
+    // Контекст на 16 кГц: разбирая, движок сам приводит звук к своей частоте.
+    const audio = await new OfflineAudioContext(1, 1, 16000).decodeAudioData(bytes.buffer);
+    const wav = wav16(audio.getChannelData(0), audio.sampleRate);
+    await api.invoke("audio_decoded", { id, wav: toBase64(wav), error: null });
+  } catch (err) {
+    api?.invoke("audio_decoded", { id, wav: null, error: String(err?.message ?? err) }).catch(() => {});
+  }
+});
+
+/** Моно, 16 бит — то, что ждёт распознавание. */
+function wav16(samples, rate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+  const text = (at, value) => {
+    for (let i = 0; i < value.length; i++) view.setUint8(at + i, value.charCodeAt(i));
+  };
+  text(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  text(8, "WAVE");
+  text(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  text(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Uint8Array(buffer);
+}
+
+function toBase64(bytes) {
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(text);
+}
+
 api?.listen("hud:appear", () => {
   appearAt = performance.now();
 });

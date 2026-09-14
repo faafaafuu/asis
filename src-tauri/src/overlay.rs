@@ -284,6 +284,64 @@ fn ensure_hud_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     Ok(window)
 }
 
+/// Голосовые из Telegram, ждущие разбора: номер и куда отдать результат.
+#[cfg(desktop)]
+type Decoded = std::sync::mpsc::Sender<Result<Vec<u8>, String>>;
+#[cfg(desktop)]
+static DECODES: std::sync::Mutex<Vec<(u64, Decoded)>> = std::sync::Mutex::new(Vec::new());
+
+/// Разбирает голосовое сообщение (OGG/Opus) в WAV на 16 кГц — движком
+/// браузера в окне индикатора.
+///
+/// Своего декодера Opus в программе нет, а тянуть его ради одной задачи —
+/// лишняя библиотека на C. Движок браузера Opus понимает и так, а окно
+/// индикатора есть всегда, скрыто и фокус не берёт.
+#[cfg(desktop)]
+pub fn decode_audio(app: &AppHandle, data: &[u8]) -> Result<Vec<u8>, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::mpsc::RecvTimeoutError;
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+
+    let window =
+        ensure_hud_window(app).map_err(|err| format!("окно разбора не создалось: {err}"))?;
+    let id = NEXT.fetch_add(1, Ordering::SeqCst);
+    let (tx, rx) = std::sync::mpsc::channel();
+    DECODES
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .push((id, tx));
+    let payload = serde_json::json!({ "id": id, "data": crate::secret::base64(data) });
+
+    // Только что созданное окно ещё грузит страницу, и первое событие до неё
+    // может не дойти: просьба повторяется раз в секунду, пока не ответят.
+    let mut result = Err("разбор голосового не ответил".to_string());
+    for _ in 0..30 {
+        let _ = window.emit_to(HUD_LABEL, "audio:decode", payload.clone());
+        match rx.recv_timeout(std::time::Duration::from_secs(1)) {
+            Ok(done) => {
+                result = done;
+                break;
+            }
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    DECODES
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .retain(|(known, _)| *known != id);
+    result
+}
+
+/// Результат разбора из окна индикатора.
+#[cfg(desktop)]
+pub fn decoded_audio(id: u64, result: Result<Vec<u8>, String>) {
+    let decodes = DECODES.lock().unwrap_or_else(|err| err.into_inner());
+    if let Some((_, tx)) = decodes.iter().find(|(known, _)| *known == id) {
+        let _ = tx.send(result);
+    }
+}
+
 /// Ставит индикатор сверху по центру того монитора, где сейчас работают.
 #[cfg(desktop)]
 fn place_hud(window: &WebviewWindow) {

@@ -148,9 +148,11 @@ body {
 /* Одна сетка на заголовки колонок и строки: цифры встают друг под другом. */
 .grid {
   display: grid;
-  grid-template-columns:
-    minmax(110px, 1.6fr) 64px minmax(78px, 1fr)
-    repeat(5, minmax(54px, 0.8fr)) 22px;
+  /* Колонки задаёт скрипт: часть из них прячут в меню ⚙. */
+  grid-template-columns: var(
+    --grid,
+    14px minmax(96px, 1.6fr) 64px minmax(74px, 1fr) repeat(5, minmax(52px, 0.8fr)) 22px 22px
+  );
   align-items: center;
   column-gap: 8px;
 }
@@ -294,6 +296,215 @@ body {
 .row__remove:hover {
   color: var(--text);
   background: var(--btn-hover-bg);
+}
+
+/* ── Ручка, настройки актива, оповещения ───────────────────────────────── */
+
+.row__head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.row__grip {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: -2px;
+  cursor: grab;
+  touch-action: none;
+  visibility: hidden;
+}
+.row:hover .row__grip {
+  visibility: visible;
+}
+.row__grip--off,
+.row:hover .row__grip--off {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.row--dragging {
+  opacity: 0.45;
+}
+.row--before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.row--after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.row__bell {
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+.row__alert {
+  display: block;
+  font-size: var(--size-label);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.row__alert--near {
+  color: var(--accent);
+  font-weight: 600;
+}
+.row__alert--fired {
+  text-decoration: line-through;
+}
+
+/* «⋯» — настройки актива. Неприметная, как и крестик: видна под курсором. */
+.row__more {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  visibility: hidden;
+}
+.row:hover .row__more,
+.row--open .row__more {
+  visibility: visible;
+}
+.row__more:hover,
+.row--open .row__more {
+  color: var(--accent);
+  background: var(--btn-hover-bg);
+}
+
+.panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  padding: 4px 0 12px 22px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+.panel__label {
+  font-size: var(--size-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--label);
+}
+
+.panel__alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--size-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.panel__alert--fired {
+  color: var(--text-muted);
+}
+
+.panel__drop {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.panel__drop:hover {
+  color: var(--text);
+}
+
+.panel__form {
+  display: flex;
+  gap: 6px;
+}
+
+.panel__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: var(--size-secondary);
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--btn-border);
+  border-radius: 7px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.panel__input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.panel__button {
+  padding: 5px 11px;
+  font: inherit;
+  font-size: var(--size-secondary);
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.panel__hint {
+  font-size: var(--size-label);
+  color: var(--text-muted);
+}
+
+.panel__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tab[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── Меню колонок ──────────────────────────────────────────────────────── */
+
+.menu {
+  position: absolute;
+  top: 54px;
+  right: 16px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--bg-solid);
+  border: 1px solid var(--btn-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+}
+
+.menu__label {
+  font-size: var(--size-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--label);
+}
+
+.menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--size-secondary);
+  cursor: pointer;
 }
 
 .empty {

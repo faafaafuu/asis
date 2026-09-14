@@ -9,6 +9,10 @@
 //! «Избранное», «Крипто», «РФ фонды». Актив может лежать в нескольких
 //! вкладках сразу; во вкладке «Все» видны все.
 //!
+//! Порядок строк — свой: его перетаскивают в окне. На актив ставят
+//! оповещения о цене; сработавшее Ноа присылает в Telegram, а если он не
+//! подключён — показывает окном.
+//!
 //! Список лежит в `watchlist.json` рядом с настройками.
 
 use std::path::PathBuf;
@@ -23,6 +27,9 @@ const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 /// Сколько держать цены, прежде чем спросить снова. CoinGecko без ключа даёт
 /// десяток запросов в минуту, а окно, пока открыто, обновляется само.
 const FRESH: Duration = Duration::from_secs(60);
+
+/// Как часто проверять оповещения. Чаще, чем обновляются цены, незачем.
+const ALERT_EVERY: Duration = Duration::from_secs(60);
 
 /// Откуда цена.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +64,23 @@ pub struct Asset {
     /// Вкладки, в которых актив лежит.
     #[serde(default)]
     pub tabs: Vec<String>,
+    /// Оповещения о цене.
+    #[serde(default)]
+    pub alerts: Vec<Alert>,
+}
+
+/// Оповещение: цена дойдёт до `price`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Alert {
+    pub price: f64,
+    /// Ждём роста до цены или падения — считается от цены в момент, когда
+    /// оповещение ставили: «напомни на 80 000» при цене 76 000 значит рост.
+    pub above: bool,
+    /// Когда сработало. Сработавшее не повторяется, пока его не уберут: иначе
+    /// цена, которая гуляет около отметки, слала бы сообщение каждую минуту.
+    #[serde(default)]
+    pub fired: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -86,6 +110,7 @@ pub struct Row {
     /// по дням.
     pub spark: Vec<f64>,
     pub tabs: Vec<String>,
+    pub alerts: Vec<Alert>,
 }
 
 static STORE: Mutex<Option<(PathBuf, Store)>> = Mutex::new(None);
@@ -119,8 +144,8 @@ fn with<T>(change: impl FnOnce(&mut Store) -> (T, bool)) -> Option<T> {
             }
             Err(err) => log::warn!("список активов не сложился в JSON: {err}"),
         }
-        // Список изменился — прежние строки окна уже не про него.
-        *CACHE.lock().unwrap_or_else(|err| err.into_inner()) = None;
+        // Цены при этом остаются: порядок, вкладки и оповещения на них не
+        // влияют, а новые и убранные активы `rows` замечает сам.
     }
     Some(value)
 }
@@ -203,6 +228,190 @@ pub fn remove(key: &str, tab: Option<&str>) -> Option<Asset> {
         }
     })
     .flatten()
+}
+
+/// Актив из списка по внутреннему имени, тикеру или названию.
+pub fn find(key: &str) -> Option<Asset> {
+    let key = key.trim().to_lowercase();
+    if key.is_empty() {
+        return None;
+    }
+    assets().into_iter().find(|asset| {
+        let name = asset.name.to_lowercase();
+        asset.id.to_lowercase() == key
+            || asset.symbol.to_lowercase() == key
+            || name == key
+            || name.contains(&key)
+    })
+}
+
+/// Новый порядок строк — как перетащили в окне. Кого в перечне нет, те
+/// остаются в конце в прежнем порядке.
+pub fn reorder(ids: &[String]) {
+    with(|store| {
+        let place = |id: &str| ids.iter().position(|known| known == id).unwrap_or(usize::MAX);
+        store.assets.sort_by_key(|asset| place(&asset.id));
+        ((), true)
+    });
+}
+
+/// Кладёт актив во вкладку или вынимает из неё.
+pub fn set_tab(id: &str, tab: &str, on: bool) -> bool {
+    if tab.trim().is_empty() {
+        return false;
+    }
+    with(|store| {
+        let tab = tab_in(store, tab);
+        let Some(asset) = store.assets.iter_mut().find(|asset| asset.id == id) else {
+            return (false, false);
+        };
+        let has = asset.tabs.contains(&tab);
+        if on && !has {
+            asset.tabs.push(tab);
+        } else if !on && has {
+            asset.tabs.retain(|known| *known != tab);
+        } else {
+            return (true, false);
+        }
+        (true, true)
+    })
+    .unwrap_or(false)
+}
+
+/// Ставит оповещение на актив из списка. Отдаёт его и цену словами.
+pub async fn add_alert(id: &str, price: f64) -> Result<(Alert, String), String> {
+    if !price.is_finite() || price <= 0.0 {
+        return Err("Цена оповещения должна быть больше нуля.".into());
+    }
+    let row = rows()
+        .await
+        .into_iter()
+        .find(|row| row.id == id)
+        .ok_or("Такого актива в списке нет.")?;
+    let now = row
+        .price
+        .ok_or("Цену актива сейчас не узнать — попробуйте через минуту.")?;
+    let alert = Alert {
+        price,
+        above: price >= now,
+        fired: None,
+    };
+    let added = with(|store| match store.assets.iter_mut().find(|asset| asset.id == id) {
+        Some(asset) => {
+            asset.alerts.push(alert.clone());
+            (true, true)
+        }
+        None => (false, false),
+    })
+    .unwrap_or(false);
+    if !added {
+        return Err("Такого актива в списке нет.".into());
+    }
+    log::info!("оповещение: {} — {} ({})", row.name, price, if alert.above { "рост" } else { "падение" });
+    Ok((alert, money(price, &row.currency)))
+}
+
+/// Убирает оповещение по номеру.
+pub fn remove_alert(id: &str, index: usize) -> bool {
+    with(|store| {
+        let Some(asset) = store.assets.iter_mut().find(|asset| asset.id == id) else {
+            return (false, false);
+        };
+        if index >= asset.alerts.len() {
+            return (false, false);
+        }
+        asset.alerts.remove(index);
+        (true, true)
+    })
+    .unwrap_or(false)
+}
+
+/// Цена с валютой: «80 000 $», «282 ₽».
+pub fn money(value: f64, currency: &str) -> String {
+    let sign = match currency {
+        "USD" => "$",
+        "RUB" => "₽",
+        "EUR" => "€",
+        other => other,
+    };
+    format!("{} {sign}", crate::prices::amount(value))
+}
+
+/// Раз в минуту проверяет оповещения. Пока ни одного не стоит, в сеть не
+/// ходит вовсе.
+pub fn watch_alerts(app: tauri::AppHandle) {
+    std::thread::Builder::new()
+        .name("sufler-alerts".into())
+        .spawn(move || loop {
+            std::thread::sleep(ALERT_EVERY);
+            let armed = assets()
+                .iter()
+                .any(|asset| asset.alerts.iter().any(|alert| alert.fired.is_none()));
+            if armed {
+                tauri::async_runtime::block_on(check_alerts(&app));
+            }
+        })
+        .ok();
+}
+
+/// Какие оповещения сработали — и сообщить о них.
+async fn check_alerts(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+
+    let rows = rows().await;
+    let mut fired = Vec::new();
+    for asset in assets() {
+        let Some(row) = rows.iter().find(|row| row.id == asset.id) else {
+            continue;
+        };
+        let Some(price) = row.price else {
+            continue;
+        };
+        for (at, alert) in asset.alerts.iter().enumerate() {
+            let reached = if alert.above {
+                price >= alert.price
+            } else {
+                price <= alert.price
+            };
+            if alert.fired.is_none() && reached {
+                let text = format!(
+                    "Ноа: цена {} ({}) дошла до {} — сейчас {}.",
+                    asset.name,
+                    asset.symbol,
+                    money(alert.price, &row.currency),
+                    money(price, &row.currency)
+                );
+                fired.push((asset.id.clone(), at, text));
+            }
+        }
+    }
+    if fired.is_empty() {
+        return;
+    }
+
+    let stamp = chrono::Local::now().format("%d.%m %H:%M").to_string();
+    with(|store| {
+        for (id, at, _) in &fired {
+            let alert = store
+                .assets
+                .iter_mut()
+                .find(|asset| &asset.id == id)
+                .and_then(|asset| asset.alerts.get_mut(*at));
+            if let Some(alert) = alert {
+                alert.fired = Some(stamp.clone());
+            }
+        }
+        ((), true)
+    });
+    let _ = app.emit_to(crate::overlay::WATCH_LABEL, "watchlist:changed", ());
+
+    for (_, _, text) in fired {
+        log::info!("сработало оповещение: {text}");
+        if let Err(err) = crate::telegram::notify(app, &text).await {
+            log::warn!("в Telegram не ушло ({err}) — показываю здесь");
+            crate::announce(app, text, false);
+        }
+    }
 }
 
 /// Вкладки по порядку.
@@ -302,12 +511,26 @@ pub fn chart_url(id: &str) -> Option<String> {
 
 /// Строки окна: цены и изменения. Минуту держатся в памяти.
 pub async fn rows() -> Vec<Row> {
-    if let Some((at, rows)) = CACHE.lock().unwrap_or_else(|err| err.into_inner()).as_ref() {
-        if at.elapsed() < FRESH {
-            return rows.clone();
+    let assets = assets();
+    // Свежие цены на тот же набор активов — берутся из памяти, а порядок,
+    // вкладки и оповещения — из списка: их меняют чаще, чем цены.
+    if let Some((at, cached)) = CACHE.lock().unwrap_or_else(|err| err.into_inner()).as_ref() {
+        let same = cached.len() == assets.len()
+            && assets.iter().all(|asset| cached.iter().any(|row| row.id == asset.id));
+        if at.elapsed() < FRESH && same {
+            return assets
+                .iter()
+                .filter_map(|asset| {
+                    let row = cached.iter().find(|row| row.id == asset.id)?;
+                    Some(Row {
+                        tabs: asset.tabs.clone(),
+                        alerts: asset.alerts.clone(),
+                        ..row.clone()
+                    })
+                })
+                .collect();
         }
     }
-    let assets = assets();
     let Ok(client) = client() else {
         return Vec::new();
     };
@@ -452,6 +675,7 @@ async fn coin(client: &reqwest::Client, query: &str, exact: bool) -> Option<Asse
         first: None,
         first_checked: false,
         tabs: Vec::new(),
+        alerts: Vec::new(),
     })
 }
 
@@ -478,6 +702,7 @@ async fn moex(client: &reqwest::Client, secid: &str) -> Option<Asset> {
         first: None,
         first_checked: false,
         tabs: Vec::new(),
+        alerts: Vec::new(),
     })
 }
 
@@ -510,6 +735,7 @@ async fn yahoo(client: &reqwest::Client, ticker: &str) -> Option<Asset> {
             first: None,
             first_checked: false,
             tabs: Vec::new(),
+            alerts: Vec::new(),
         });
     }
     None
@@ -696,6 +922,7 @@ fn empty_row(asset: &Asset, currency: &str) -> Row {
         all: None,
         spark: Vec::new(),
         tabs: asset.tabs.clone(),
+        alerts: asset.alerts.clone(),
     }
 }
 
@@ -753,6 +980,7 @@ mod tests {
             first: None,
             first_checked: false,
             tabs: Vec::new(),
+            alerts: Vec::new(),
         }
     }
 
@@ -767,6 +995,13 @@ mod tests {
         assert_eq!(round(row.year), Some(251.0));
         assert_eq!(row.spark.len(), 22);
         assert_eq!(change(10.0, Some(0.0)), None);
+    }
+
+    #[test]
+    fn money_is_spoken_with_its_sign() {
+        assert_eq!(money(80000.0, "USD"), "80 000 $");
+        assert!(money(282.16, "RUB").ends_with(" ₽"));
+        assert!(money(1.0, "GBp").ends_with(" GBp"));
     }
 
     #[test]

@@ -93,7 +93,7 @@ pub enum Intent {
     /// Передать разговор Claude: открыть его и задать ему вопрос.
     Claude { text: String },
     /// Список активов: показать, добавить, убрать.
-    Watch { action: String, asset: String, tab: String },
+    Watch { action: String, asset: String, tab: String, price: String },
     /// Готовый ответ без действия: переспросить, пояснить.
     Say(String),
 }
@@ -124,8 +124,11 @@ pub fn forget_pending() {
 /// `None` означает «это был обычный вопрос» — фразу надо обработать как всегда.
 pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     // Напечатанное ждёт подтверждения: «да» — отправить, «нет» — оставить.
-    if let Some(reply) = confirm_send(said) {
-        return Some(reply);
+    // Из Telegram — нет: не видя экрана, подтверждать отправку нельзя.
+    if !remote() {
+        if let Some(reply) = confirm_send(said) {
+            return Some(reply);
+        }
     }
     // «Отвечай без окна», «показывай окно» — переключатель, а не вопрос.
     if let Some(show) = window_request(said) {
@@ -136,13 +139,25 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(reply) = clock_answer(said, Local::now()) {
         return Some(reply);
     }
+    // Таймер и будильник — тоже по часам компьютера.
+    if let Some(reply) = timer_request(app, said, Local::now()) {
+        return Some(reply);
+    }
+    // «Включи музыку» без уточнений — своя станция из настроек.
+    if let Some(reply) = music_request(app, said) {
+        return Some(reply);
+    }
     // Дело ждёт срока — значит, сказанное сейчас и есть срок.
     if awaiting_time() {
         return Some(finish_pending(app, said).await);
     }
 
     let open = open_tasks();
-    match read_intent(app, said, &open).await {
+    let intent = read_intent(app, said, &open).await;
+    if remote() && risky_remotely(&intent) {
+        return Some("Это делаю только голосом за компьютером — из Telegram не выполняю.".into());
+    }
+    match intent {
         Intent::Chat => None,
         Intent::Add {
             title,
@@ -204,7 +219,9 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
             Some(answer) => answer,
             None => crate::web::lookup(app, said).await,
         }),
-        Intent::Watch { action, asset, tab } => Some(watch(app, &action, &asset, &tab).await),
+        Intent::Watch { action, asset, tab, price } => {
+            Some(watch(app, &action, &asset, &tab, &price).await)
+        }
         Intent::Claude { text } => {
             // Разговор уходит в Claude — Ноа после ответа замолкает и уходит.
             HANDOFF.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1035,6 +1052,12 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             action: text("action"),
             asset: text("asset"),
             tab: text("tab"),
+            // Цену модель пишет и числом, и строкой.
+            price: parsed["price"]
+                .as_f64()
+                .map(|price| price.to_string())
+                .or_else(|| parsed["price"].as_str().map(str::to_string))
+                .unwrap_or_default(),
         },
         _ => Intent::Chat,
     }
@@ -1320,14 +1343,266 @@ pub fn take_handoff() -> bool {
     HANDOFF.swap(false, std::sync::atomic::Ordering::SeqCst)
 }
 
+/// Разговор идёт через Telegram. С той стороны не видно, что происходит с
+/// компьютером, а бота может найти кто угодно: опасное удалённо не делается.
+static REMOTE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// То же, что `handle`, но для сказанного в Telegram.
+pub async fn handle_remote(app: &AppHandle, said: &str) -> Option<String> {
+    use std::sync::atomic::Ordering;
+    REMOTE.store(true, Ordering::SeqCst);
+    let reply = handle(app, said).await;
+    REMOTE.store(false, Ordering::SeqCst);
+    reply
+}
+
+fn remote() -> bool {
+    REMOTE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Чего не делать по просьбе из Telegram: выключать компьютер, платить,
+/// писать людям от имени человека, закрывать программы, печатать в окна.
+fn risky_remotely(intent: &Intent) -> bool {
+    matches!(
+        intent,
+        Intent::Power { .. }
+            | Intent::Order { .. }
+            | Intent::Send
+            | Intent::Type { .. }
+            | Intent::Message { .. }
+            | Intent::Paste
+            | Intent::Close { .. }
+            | Intent::Claude { .. }
+    )
+}
+
+fn words_of(said: &str) -> Vec<String> {
+    said.to_lowercase()
+        .replace('ё', "е")
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Таймер и будильник: «поставь таймер на 10 минут», «засеки полчаса»,
+/// «разбуди в семь утра», «отмени таймер», «сколько осталось на таймере».
+fn timer_request(app: &AppHandle, said: &str, now: DateTime<Local>) -> Option<String> {
+    let owned = words_of(said);
+    let words: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let starts = |stems: &[&str]| words.iter().any(|word| stems.iter().any(|stem| word.starts_with(stem)));
+    let timer = starts(&["таймер", "засек"]);
+    let alarm = starts(&["будильник", "разбуд"]);
+    if !timer && !alarm {
+        return None;
+    }
+    if starts(&["отмен", "выключ", "убер", "сними", "останов", "стоп"]) {
+        return Some(match crate::timers::cancel_all() {
+            0 => "Таймеров нет.".into(),
+            1 => "Отменил.".into(),
+            count => format!("Отменил все: {count}."),
+        });
+    }
+    if timer && starts(&["остал", "сколько"]) {
+        return Some(match crate::timers::pending().first() {
+            None => "Таймеров нет.".into(),
+            Some(next) => format!("Осталось: {}.", spoken_span((next.at - now).num_seconds().max(1))),
+        });
+    }
+    // «Таймеры в JavaScript» — вопрос, а не просьба: нужна просьба завести.
+    if !starts(&["постав", "завед", "засек", "запуст", "включ", "сделай", "разбуд", "нужен", "давай"]) {
+        return None;
+    }
+    if alarm {
+        let Some(at) = clock_time(&words, now) else {
+            return Some("Во сколько разбудить? Скажите, например: «разбуди в семь утра».".into());
+        };
+        crate::timers::start(app, at, format!("Будильник — {}.", at.format("%H:%M")));
+        let day = if at.date_naive() == now.date_naive() { "" } else { "завтра " };
+        return Some(format!("Разбужу {day}в {}.", at.format("%H:%M")));
+    }
+    let seconds = words
+        .iter()
+        .enumerate()
+        .filter(|(_, word)| matches!(**word, "на" | "через") || word.starts_with("засек"))
+        .find_map(|(at, _)| span_seconds(&words[at + 1..]));
+    let Some(seconds) = seconds else {
+        return Some("На сколько поставить таймер?".into());
+    };
+    let span = spoken_span(seconds);
+    let at = now + Duration::seconds(seconds);
+    crate::timers::start(app, at, format!("Время вышло — таймер на {span}."));
+    Some(format!("Засёк {span}. Позвоню в {}.", at.format("%H:%M")))
+}
+
+/// Длительность в секундах в начале слов: «10 минут», «полчаса», «час»,
+/// «30 секунд», «полтора часа».
+fn span_seconds(rest: &[&str]) -> Option<i64> {
+    let first = *rest.first()?;
+    if first.starts_with("полчас") {
+        return Some(30 * 60);
+    }
+    let unit = |word: &str| {
+        if word.starts_with("сек") {
+            Some(1)
+        } else {
+            unit_of(word).map(|minutes| minutes * 60)
+        }
+    };
+    let (count, seconds) = match unit(first) {
+        Some(seconds) => (1.0, seconds),
+        None => {
+            let (count, used) = count_of(rest)?;
+            (count, unit(rest.get(used)?)?)
+        }
+    };
+    let total = (count * seconds as f64).round() as i64;
+    (total > 0).then_some(total)
+}
+
+/// Время на часах из сказанного: «в семь утра», «на 7 30», «в 19», «в девять
+/// вечера». Прошедшее сегодня — значит, завтра.
+fn clock_time(words: &[&str], now: DateTime<Local>) -> Option<DateTime<Local>> {
+    words
+        .iter()
+        .enumerate()
+        .filter(|(_, word)| matches!(**word, "в" | "на"))
+        .find_map(|(at, _)| {
+            let rest = &words[at + 1..];
+            let (hour, used) = count_of(rest)?;
+            let mut hour = hour as u32;
+            let mut next = used;
+            let mut minute = 0;
+            if let Some((value, taken)) = count_of(&rest[next..]) {
+                if (0.0..60.0).contains(&value) {
+                    minute = value as u32;
+                    next += taken;
+                }
+            }
+            match rest.get(next).copied() {
+                Some(word) if (word.starts_with("вечер") || word == "дня") && hour < 12 => hour += 12,
+                Some(word) if word.starts_with("ноч") && hour == 12 => hour = 0,
+                _ => {}
+            }
+            if hour > 23 {
+                return None;
+            }
+            let day = now.date_naive().and_hms_opt(hour, minute, 0)?;
+            let mut when = Local.from_local_datetime(&day).single()?;
+            if when <= now {
+                when += Duration::days(1);
+            }
+            Some(when)
+        })
+}
+
+/// «10 минут», «1 час 30 минут», «45 секунд».
+fn spoken_span(seconds: i64) -> String {
+    let (hours, minutes, rest) = (seconds / 3600, seconds % 3600 / 60, seconds % 60);
+    let mut parts = Vec::new();
+    if hours > 0 {
+        parts.push(format!("{hours} {}", crate::prices::plural(hours as f64, "час", "часа", "часов")));
+    }
+    if minutes > 0 {
+        parts.push(format!(
+            "{minutes} {}",
+            crate::prices::plural(minutes as f64, "минуту", "минуты", "минут")
+        ));
+    }
+    if rest > 0 && hours == 0 {
+        parts.push(format!(
+            "{rest} {}",
+            crate::prices::plural(rest as f64, "секунду", "секунды", "секунд")
+        ));
+    }
+    if parts.is_empty() {
+        "0 секунд".into()
+    } else {
+        parts.join(" ")
+    }
+}
+
+/// «Включи музыку», «поставь музычку фоном» — без названия, исполнителя и
+/// жанра. С уточнением это уже поиск, и его разбирает модель.
+fn asks_for_music(said: &str) -> bool {
+    const VERBS: &[&str] = &["включ", "постав", "вруб", "запуст", "давай", "хочу"];
+    const FILLER: &[&str] = &[
+        "ноа", "мне", "нам", "пожалуйста", "какую", "нибудь", "немного", "фоном", "фоновую",
+        "что", "то", "ка", "эй", "можешь", "можно", "плиз",
+    ];
+    let words = words_of(said);
+    let Some(music) = words
+        .iter()
+        .position(|word| word.starts_with("музык") || word.starts_with("музычк"))
+    else {
+        return false;
+    };
+    let verb = |word: &str| VERBS.iter().any(|stem| word.starts_with(stem));
+    words.iter().any(|word| verb(word))
+        && words
+            .iter()
+            .enumerate()
+            .all(|(at, word)| at == music || verb(word) || FILLER.contains(&word.as_str()))
+}
+
+fn music_request(app: &AppHandle, said: &str) -> Option<String> {
+    if !asks_for_music(said) {
+        return None;
+    }
+    let url = app.state::<AppState>().config().voice.music_url.trim().to_string();
+    if url.is_empty() {
+        return None;
+    }
+    Some(match crate::pc::open(&url) {
+        Ok(()) => "Включаю музыку.".into(),
+        Err(err) => format!("Не смог открыть музыку: {err}"),
+    })
+}
+
 /// Список активов голосом: показать, добавить, убрать. Окно открывается при
 /// любом из трёх — сразу видно, что получилось.
-async fn watch(app: &AppHandle, action: &str, asset: &str, tab: &str) -> String {
+async fn watch(app: &AppHandle, action: &str, asset: &str, tab: &str, price: &str) -> String {
     use tauri::Emitter;
 
     let tab = tab.trim();
     let named = (!tab.is_empty()).then_some(tab);
     let reply = match action.trim() {
+        "alert" => {
+            let target = price
+                .trim()
+                .replace([' ', '\u{a0}'], "")
+                .replace(',', ".")
+                .parse::<f64>()
+                .ok()
+                .filter(|target| *target > 0.0);
+            match target {
+                None => "Не расслышал цену для оповещения.".to_string(),
+                Some(target) => {
+                    let found = match crate::watchlist::find(asset) {
+                        Some(found) => Ok(found),
+                        None => crate::watchlist::add(asset, None).await,
+                    };
+                    let placed = match found {
+                        Ok(found) => crate::watchlist::add_alert(&found.id, target)
+                            .await
+                            .map(|(alert, money)| (found, alert, money)),
+                        Err(err) => Err(err),
+                    };
+                    match placed {
+                        Ok((found, alert, money)) => {
+                            let way = if alert.above { "поднимется" } else { "опустится" };
+                            let whereto = if crate::telegram::ready(app) {
+                                "Напишу в Telegram."
+                            } else {
+                                "Telegram не подключён — скажу здесь."
+                            };
+                            format!("Поставил оповещение: {} {way} до {money}. {whereto}", found.name)
+                        }
+                        Err(err) => err,
+                    }
+                }
+            }
+        }
         "add" => match crate::watchlist::add(asset, named).await {
             Ok(added) => match named.and_then(crate::watchlist::find_tab) {
                 Some(tab) => format!("Добавил {} во вкладку «{tab}».", added.name),
@@ -1587,7 +1862,10 @@ fn asked_for(intent: &str, said: &str) -> bool {
         "paste" => &["встав"],
         "price" => &["стоит", "цена", "цену", "курс", "стоимост", "почём", "почем", "котиров"],
         "claude" => &["клод", "claude", "клауд", "клоуд"],
-        "watch" => &["вотч", "watch", "актив", "портфел", "монет", "акци", "отслежива", "списк"],
+        "watch" => &[
+            "вотч", "watch", "актив", "портфел", "монет", "акци", "отслежива", "списк", "алерт",
+            "оповещ", "уведом",
+        ],
         "remove" => &["удал", "убер", "убра", "сотр", "стер", "не просил", "не надо было", "лишн"],
         "screen" => &[
             "скрин", "экран", "фейк", "правд", "написан", "переведи", "картинк", "снимк",
@@ -1716,7 +1994,8 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          asset — для price и watch что именно: монету — латиницей, как на бирже \
          (bitcoin, pump.fun), акцию — тикером (AAPL, SBER), валюту — по-русски \
          (доллар, евро); для watch show — пусто;\n\
-         action — для watch одно из: show, add, remove;\n\
+         action — для watch одно из: show, add, remove, alert (оповещение о цене, алерт);\n\
+         price — для watch alert цена-цель числом, без валюты;\n\
          tab — для watch вкладка списка, если названа («в избранное», «в крипту», \
          «вкладку фонды»), в именительном падеже; не названа — пусто;\n\
          kind — для find тип файла: image, document, video, audio или any;\n\
@@ -1837,7 +2116,8 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      «добавь биткоин в вотчлист» → {\"intent\":\"watch\",\"action\":\"add\",\"asset\":\"bitcoin\"}\n\
      «убери эфир из активов» → {\"intent\":\"watch\",\"action\":\"remove\",\"asset\":\"ethereum\"}\n\
      «добавь биткоин в избранное» → {\"intent\":\"watch\",\"action\":\"add\",\"asset\":\"bitcoin\",\"tab\":\"избранное\"}\n\
-     «покажи вкладку фонды» → {\"intent\":\"watch\",\"action\":\"show\",\"asset\":\"\",\"tab\":\"фонды\"}";
+     «покажи вкладку фонды» → {\"intent\":\"watch\",\"action\":\"show\",\"asset\":\"\",\"tab\":\"фонды\"}\n\
+     «поставь алерт на биткоин на 80 тысяч» → {\"intent\":\"watch\",\"action\":\"alert\",\"asset\":\"bitcoin\",\"price\":80000}";
 
 /* ── Завести ─────────────────────────────────────────────────────────────── */
 
@@ -2245,6 +2525,45 @@ pub fn changed(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timers_are_measured_by_the_clock() {
+        let span = |said: &str| {
+            let owned = words_of(said);
+            let words: Vec<&str> = owned.iter().map(String::as_str).collect();
+            let at = words.iter().position(|word| matches!(*word, "на" | "через" | "засеки"))?;
+            span_seconds(&words[at + 1..])
+        };
+        assert_eq!(span("поставь таймер на 10 минут"), Some(600));
+        assert_eq!(span("засеки полчаса"), Some(1800));
+        assert_eq!(span("таймер на 30 секунд"), Some(30));
+        assert_eq!(span("таймер на полтора часа"), Some(5400));
+        assert_eq!(span("таймер на минуту"), Some(60));
+        assert_eq!(spoken_span(5400), "1 час 30 минут");
+        assert_eq!(spoken_span(45), "45 секунд");
+    }
+
+    #[test]
+    fn an_alarm_is_set_by_the_clock() {
+        let now = Local.with_ymd_and_hms(2026, 9, 11, 15, 7, 0).unwrap();
+        let at = |said: &str| {
+            let owned = words_of(said);
+            let words: Vec<&str> = owned.iter().map(String::as_str).collect();
+            clock_time(&words, now).map(|at| at.format("%d %H:%M").to_string())
+        };
+        assert_eq!(at("разбуди в семь утра").as_deref(), Some("12 07:00"));
+        assert_eq!(at("поставь будильник на 7:30").as_deref(), Some("12 07:30"));
+        assert_eq!(at("разбуди в девять вечера").as_deref(), Some("11 21:00"));
+        assert_eq!(at("будильник на завтра на 8").as_deref(), Some("12 08:00"));
+    }
+
+    #[test]
+    fn plain_music_is_the_own_station() {
+        assert!(asks_for_music("Ноа, включи музыку"));
+        assert!(asks_for_music("поставь музычку фоном"));
+        assert!(!asks_for_music("включи музыку Моргенштерна"));
+        assert!(!asks_for_music("что такое музыка барокко"));
+    }
 
     #[test]
     fn the_answer_window_is_asked_for_in_plain_words() {

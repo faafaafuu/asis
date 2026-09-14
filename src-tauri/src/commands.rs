@@ -881,6 +881,130 @@ pub fn watch_open_tab() -> Option<String> {
     crate::watchlist::take_open_tab()
 }
 
+/// Новый порядок активов — как перетащили в окне.
+#[tauri::command]
+pub fn watch_reorder(ids: Vec<String>) {
+    crate::watchlist::reorder(&ids);
+}
+
+/// Кладёт актив во вкладку или вынимает из неё.
+#[tauri::command]
+pub fn watch_set_tab(id: String, tab: String, on: bool) -> bool {
+    crate::watchlist::set_tab(&id, &tab, on)
+}
+
+/// Ставит оповещение о цене; отдаёт цену словами.
+#[tauri::command]
+pub async fn watch_alert_add(id: String, price: f64) -> Result<String, String> {
+    crate::watchlist::add_alert(&id, price)
+        .await
+        .map(|(_, money)| money)
+}
+
+/// Убирает оповещение.
+#[tauri::command]
+pub fn watch_alert_remove(id: String, index: usize) -> bool {
+    crate::watchlist::remove_alert(&id, index)
+}
+
+/// Подключён ли Telegram — окно активов подсказывает, куда придёт оповещение.
+#[tauri::command]
+pub fn watch_telegram_ready(app: AppHandle) -> bool {
+    crate::telegram::ready(&app)
+}
+
+/// Настройки Telegram для окна настройки. Токен наружу — только точками.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramSettings {
+    pub token: String,
+    #[serde(default)]
+    pub chat_id: String,
+}
+
+#[tauri::command]
+pub fn telegram_settings(state: State<'_, AppState>) -> TelegramSettings {
+    let config = state.config();
+    TelegramSettings {
+        token: if config.telegram.bot_token.is_empty() {
+            String::new()
+        } else {
+            "••••••••".into()
+        },
+        chat_id: config.telegram.chat_id.clone(),
+    }
+}
+
+#[tauri::command]
+pub fn save_telegram_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: TelegramSettings,
+) -> Result<(), String> {
+    {
+        let mut config = state.config_mut();
+        let telegram = &mut config.telegram;
+        // Точки означают «не менять»: наружу токен уходил замаскированным.
+        if !settings.token.starts_with('•') {
+            let token = settings.token.trim();
+            // Другой бот — другой чат: прежний ему не принадлежит.
+            if crate::secret::reveal(&telegram.bot_token) != token {
+                telegram.chat_id.clear();
+            }
+            telegram.bot_token = crate::secret::protect(token);
+        }
+        if !settings.chat_id.trim().is_empty() {
+            telegram.chat_id = settings.chat_id.trim().to_string();
+        }
+    }
+    persist(&app, &state)
+}
+
+/// Разобранное голосовое из окна индикатора — см. `overlay::decode_audio`.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn audio_decoded(id: u64, wav: Option<String>, error: Option<String>) {
+    let result = match (wav, error) {
+        (Some(wav), _) => {
+            crate::secret::unbase64(&wav).ok_or_else(|| "звук пришёл испорченным".to_string())
+        }
+        (None, Some(error)) => Err(error),
+        (None, None) => Err("звук не пришёл".into()),
+    };
+    crate::overlay::decoded_audio(id, result);
+}
+
+/// Проверка из окна настройки: найти чат, если его ещё нет, и написать туда.
+#[tauri::command]
+pub async fn telegram_test(app: AppHandle) -> Result<String, String> {
+    let (token, chat) = crate::telegram::credentials(&app);
+    if token.is_empty() {
+        return Err("Сначала вставьте токен бота.".into());
+    }
+    let (chat, name) = if chat.is_empty() {
+        let found = crate::telegram::find_chat(&token).await?;
+        {
+            let state = app.state::<AppState>();
+            state.config_mut().telegram.chat_id = found.0.clone();
+            persist(&app, &state)?;
+        }
+        found
+    } else {
+        (chat, String::new())
+    };
+    crate::telegram::send(
+        &token,
+        &chat,
+        "Ноа на связи. Сюда будут приходить оповещения о ценах из окна «Активы».",
+    )
+    .await?;
+    Ok(if name.is_empty() {
+        "Готово: проверочное сообщение отправлено.".into()
+    } else {
+        format!("Готово: нашёл чат «{name}» и отправил туда проверочное сообщение.")
+    })
+}
+
 /// Открывает график актива в TradingView.
 ///
 /// Адрес собирается здесь, по списку: окно передаёт только, какой актив, и

@@ -21,6 +21,7 @@ pub struct Config {
     pub calendar: CalendarConfig,
     pub review: ReviewConfig,
     pub food: FoodConfig,
+    pub telegram: TelegramConfig,
 }
 
 /// Заказ продуктов через FoodPilot.
@@ -109,6 +110,17 @@ impl FoodConfig {
     pub fn ready(&self) -> bool {
         self.enabled && !self.endpoint.trim().is_empty()
     }
+}
+
+/// Уведомления в Telegram — от бота, которого человек заводит сам у @BotFather.
+/// См. `crate::telegram`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TelegramConfig {
+    /// Токен бота. На диске — зашифрован (см. `crate::secret`).
+    pub bot_token: String,
+    /// Чат, куда писать. Находится сам: человек пишет боту, Ноа видит чат.
+    pub chat_id: String,
 }
 
 /// Связь с Google-календарём.
@@ -378,6 +390,8 @@ pub struct VoiceConfig {
     /// индикатор. Переключается сочетанием Ctrl+Alt+пробел или словами
     /// «отвечай без окна» и «показывай окно».
     pub show_window: bool,
+    /// Что включать на «включи музыку» без уточнений — адрес станции.
+    pub music_url: String,
 }
 
 impl Default for VoiceConfig {
@@ -397,6 +411,7 @@ impl Default for VoiceConfig {
             // с голосовым разговором.
             speak_answers: false,
             show_window: true,
+            music_url: "https://www.youtube.com/watch?v=tRsQsTMvPNg".into(),
         }
     }
 }

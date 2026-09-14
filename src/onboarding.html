@@ -334,6 +334,27 @@
         <input class="ob__underline" data-el="foodEndpoint" type="text" spellcheck="false" />
       </div>
 
+      <!-- Уведомления в Telegram: сюда приходят оповещения о ценах из окна «Активы». -->
+      <div class="ob__block" data-el="telegramBlock" id="telegram">
+        <h2 class="ob__subtitle">Уведомления в Telegram</h2>
+        <p class="ob__lead">
+          Оповещения о ценах из окна «Активы» Ноа присылает в Telegram — от вашего собственного бота.
+        </p>
+        <p class="ob__hint">
+          1. В Telegram откройте @BotFather, отправьте /newbot и придумайте боту имя — он пришлёт токен.<br />
+          2. Вставьте токен ниже.<br />
+          3. Откройте своего бота и отправьте ему любое сообщение, например /start.<br />
+          4. Нажмите «Проверить» — Ноа найдёт чат и пришлёт проверочное сообщение.
+        </p>
+        <span class="ob__label">Токен бота</span>
+        <input class="ob__underline" data-el="telegramToken" type="password" autocomplete="off"
+               spellcheck="false" placeholder="123456789:AA…" />
+        <div class="ob__row">
+          <button class="ob__btn ob__btn--primary" data-el="telegramTest" type="button">Проверить</button>
+          <span class="ob__status" data-el="telegramStatus"></span>
+        </div>
+      </div>
+
       <details class="ob__more" data-el="advanced">
         <summary class="ob__more-head">
           <span class="ob__chevron ob__chevron--right" aria-hidden="true"></span>

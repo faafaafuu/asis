@@ -27,6 +27,8 @@ mod screen;
 mod browser;
 mod prices;
 mod watchlist;
+mod telegram;
+mod timers;
 mod review;
 mod secret;
 mod tasks;
@@ -185,6 +187,8 @@ pub fn run() {
                 watch_hud(app.handle());
                 watch_reminders(app.handle());
                 review::watch(app.handle());
+                watchlist::watch_alerts(app.handle().clone());
+                telegram::listen(app.handle().clone());
                 start_wake(app.handle());
             }
 
@@ -225,6 +229,15 @@ pub fn run() {
             commands::watch_tab_add,
             commands::watch_tab_remove,
             commands::watch_open_tab,
+            commands::watch_reorder,
+            commands::watch_set_tab,
+            commands::watch_alert_add,
+            commands::watch_alert_remove,
+            commands::watch_telegram_ready,
+            commands::telegram_settings,
+            commands::save_telegram_settings,
+            commands::telegram_test,
+            commands::audio_decoded,
             commands::watch_chart,
             commands::close_watchlist,
             commands::order_state,
