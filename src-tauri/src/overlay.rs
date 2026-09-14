@@ -298,6 +298,18 @@ static DECODES: std::sync::Mutex<Vec<(u64, Decoded)>> = std::sync::Mutex::new(Ve
 /// индикатора есть всегда, скрыто и фокус не берёт.
 #[cfg(desktop)]
 pub fn decode_audio(app: &AppHandle, data: &[u8]) -> Result<Vec<u8>, String> {
+    transcode(app, "audio:decode", data)
+}
+
+/// Обратное: WAV в OGG/Opus — голосовой ответ в Telegram.
+#[cfg(desktop)]
+pub fn encode_voice(app: &AppHandle, wav: &[u8]) -> Result<Vec<u8>, String> {
+    transcode(app, "audio:encode", wav)
+}
+
+/// Отдаёт звук странице индикатора и ждёт, что она вернёт.
+#[cfg(desktop)]
+fn transcode(app: &AppHandle, event: &str, data: &[u8]) -> Result<Vec<u8>, String> {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::mpsc::RecvTimeoutError;
     static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -314,9 +326,9 @@ pub fn decode_audio(app: &AppHandle, data: &[u8]) -> Result<Vec<u8>, String> {
 
     // Только что созданное окно ещё грузит страницу, и первое событие до неё
     // может не дойти: просьба повторяется раз в секунду, пока не ответят.
-    let mut result = Err("разбор голосового не ответил".to_string());
+    let mut result = Err("звук не обработался: окно индикатора не ответило".to_string());
     for _ in 0..30 {
-        let _ = window.emit_to(HUD_LABEL, "audio:decode", payload.clone());
+        let _ = window.emit_to(HUD_LABEL, event, payload.clone());
         match rx.recv_timeout(std::time::Duration::from_secs(1)) {
             Ok(done) => {
                 result = done;

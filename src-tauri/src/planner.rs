@@ -124,11 +124,8 @@ pub fn forget_pending() {
 /// `None` означает «это был обычный вопрос» — фразу надо обработать как всегда.
 pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     // Напечатанное ждёт подтверждения: «да» — отправить, «нет» — оставить.
-    // Из Telegram — нет: не видя экрана, подтверждать отправку нельзя.
-    if !remote() {
-        if let Some(reply) = confirm_send(said) {
-            return Some(reply);
-        }
+    if let Some(reply) = confirm_send(said) {
+        return Some(reply);
     }
     // «Отвечай без окна», «показывай окно» — переключатель, а не вопрос.
     if let Some(show) = window_request(said) {
@@ -147,17 +144,17 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(reply) = music_request(app, said) {
         return Some(reply);
     }
+    // «Сделай скриншот», «скинь скрин хрома».
+    if let Some(reply) = screenshot_request(app, said) {
+        return Some(reply);
+    }
     // Дело ждёт срока — значит, сказанное сейчас и есть срок.
     if awaiting_time() {
         return Some(finish_pending(app, said).await);
     }
 
     let open = open_tasks();
-    let intent = read_intent(app, said, &open).await;
-    if remote() && risky_remotely(&intent) {
-        return Some("Это делаю только голосом за компьютером — из Telegram не выполняю.".into());
-    }
-    match intent {
+    match read_intent(app, said, &open).await {
         Intent::Chat => None,
         Intent::Add {
             title,
@@ -1343,39 +1340,6 @@ pub fn take_handoff() -> bool {
     HANDOFF.swap(false, std::sync::atomic::Ordering::SeqCst)
 }
 
-/// Разговор идёт через Telegram. С той стороны не видно, что происходит с
-/// компьютером, а бота может найти кто угодно: опасное удалённо не делается.
-static REMOTE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// То же, что `handle`, но для сказанного в Telegram.
-pub async fn handle_remote(app: &AppHandle, said: &str) -> Option<String> {
-    use std::sync::atomic::Ordering;
-    REMOTE.store(true, Ordering::SeqCst);
-    let reply = handle(app, said).await;
-    REMOTE.store(false, Ordering::SeqCst);
-    reply
-}
-
-fn remote() -> bool {
-    REMOTE.load(std::sync::atomic::Ordering::SeqCst)
-}
-
-/// Чего не делать по просьбе из Telegram: выключать компьютер, платить,
-/// писать людям от имени человека, закрывать программы, печатать в окна.
-fn risky_remotely(intent: &Intent) -> bool {
-    matches!(
-        intent,
-        Intent::Power { .. }
-            | Intent::Order { .. }
-            | Intent::Send
-            | Intent::Type { .. }
-            | Intent::Message { .. }
-            | Intent::Paste
-            | Intent::Close { .. }
-            | Intent::Claude { .. }
-    )
-}
-
 fn words_of(said: &str) -> Vec<String> {
     said.to_lowercase()
         .replace('ё', "е")
@@ -1520,6 +1484,67 @@ fn spoken_span(seconds: i64) -> String {
     } else {
         parts.join(" ")
     }
+}
+
+/// Последний снимок экрана. Попросили из Telegram — он уходит туда
+/// фотографией; см. `take_photo`.
+static PHOTO: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
+
+/// Снимок, сделанный по последней просьбе, — один раз.
+pub fn take_photo() -> Option<Vec<u8>> {
+    PHOTO.lock().unwrap_or_else(|err| err.into_inner()).take()
+}
+
+/// Что снимать: `Some(None)` — весь экран, `Some(Some(программа))` — окно
+/// программы, `None` — это не просьба о снимке.
+fn shot_target(said: &str) -> Option<Option<String>> {
+    const VERBS: &[&str] = &["сдела", "пришл", "скин", "сним", "покаж", "отправ", "дай", "кин"];
+    const FILLER: &[&str] = &[
+        "ноа", "мне", "пожалуйста", "экрана", "экран", "всего", "весь", "целиком", "окна", "окно",
+        "программы", "приложения", "мой", "моего", "сейчас", "что", "там", "на", "с", "со", "ка",
+        "из", "его", "в", "у", "меня", "рабочего", "стола", "стол", "мониторов", "монитора",
+    ];
+    let words = words_of(said);
+    let shot = words
+        .iter()
+        .position(|word| word.starts_with("скрин") || word == "снимок")?;
+    let verb = |word: &str| VERBS.iter().any(|stem| word.starts_with(stem));
+    if !words.iter().any(|word| verb(word)) {
+        return None;
+    }
+    let program: Vec<&str> = words
+        .iter()
+        .enumerate()
+        .filter(|(at, word)| *at != shot && !verb(word) && !FILLER.contains(&word.as_str()))
+        .map(|(_, word)| word.as_str())
+        .collect();
+    Some((!program.is_empty()).then(|| program.join(" ")))
+}
+
+/// Снимок экрана или окна: в «Изображения\Суфлёр», а для Telegram — в
+/// `PHOTO`.
+fn screenshot_request(app: &AppHandle, said: &str) -> Option<String> {
+    let target = shot_target(said)?;
+    let (taken, what) = match target {
+        None => (crate::shots::screen(), "экрана".to_string()),
+        Some(program) => match crate::pc::window_for(&program) {
+            Some((handle, name)) => (crate::shots::window(handle), format!("окна {name}")),
+            None => return Some(format!("Не нашёл открытого окна «{program}».")),
+        },
+    };
+    let png = match taken {
+        Ok(png) => png,
+        Err(err) => return Some(format!("Снимок не получился: {err}")),
+    };
+    let saved = crate::shots::save(app, &png);
+    *PHOTO.lock().unwrap_or_else(|err| err.into_inner()) = Some(png);
+    Some(match saved {
+        Ok(path) => {
+            log::info!("снимок {what}: {}", path.display());
+            format!("Снимок {what} сохранил в «Изображения\\Суфлёр».")
+        }
+        Err(err) => format!("Снимок {what} сделал, но не сохранил: {err}"),
+    })
 }
 
 /// «Включи музыку», «поставь музычку фоном» — без названия, исполнителя и
@@ -2555,6 +2580,14 @@ mod tests {
         assert_eq!(at("поставь будильник на 7:30").as_deref(), Some("12 07:30"));
         assert_eq!(at("разбуди в девять вечера").as_deref(), Some("11 21:00"));
         assert_eq!(at("будильник на завтра на 8").as_deref(), Some("12 08:00"));
+    }
+
+    #[test]
+    fn a_screenshot_is_asked_for() {
+        assert_eq!(shot_target("Ноа, сделай скриншот"), Some(None));
+        assert_eq!(shot_target("пришли снимок экрана"), Some(None));
+        assert_eq!(shot_target("скинь скрин хрома"), Some(Some("хрома".into())));
+        assert_eq!(shot_target("что такое скриншот"), None);
     }
 
     #[test]

@@ -114,8 +114,8 @@ struct Incoming {
     voice: Option<String>,
 }
 
-/// Слушает бота, пока программа работает: на текст и голосовые отвечает так
-/// же, как вслух, — только текстом.
+/// Слушает бота, пока программа работает: выполняет всё то же, что голосом за
+/// компьютером; на текст отвечает текстом, на голосовое — голосовым.
 ///
 /// Отвечает единственному чату — тому, что в настройках. Бот доступен любому,
 /// кто его найдёт, а через Ноа управляют компьютером: чужие сообщения
@@ -228,6 +228,7 @@ async fn reply_to(
     incoming: Incoming,
     history: &mut Vec<crate::ai_client::ThreadItem>,
 ) {
+    let by_voice = incoming.text.is_none() && incoming.voice.is_some();
     let said = match (incoming.text, incoming.voice) {
         (Some(text), _) => text,
         (None, Some(file)) => match heard(app, token, &file).await {
@@ -254,10 +255,101 @@ async fn reply_to(
         return;
     }
     log::info!("Telegram: «{said}»");
+    // Снимок, оставшийся от просьбы голосом за компьютером, сюда не относится.
+    let _ = crate::planner::take_photo();
     let reply = answer(app, &said, history).await;
     log::info!("Telegram, ответ: «{reply}»");
-    if let Err(err) = send(token, chat, &reply).await {
+    let sent = if let Some(photo) = crate::planner::take_photo() {
+        let file = File::new("sendPhoto", "photo", photo, "screen.png", "image/png");
+        send_file(token, chat, file, &reply).await
+    } else if by_voice {
+        // Спросили голосом — отвечаем голосом. Текст — подписью: голосовое
+        // не всегда удобно слушать. Длинный текст в подпись не влезает и
+        // уходит следом отдельным сообщением.
+        match spoken(app, &reply) {
+            Ok(voice) => {
+                let fits = reply.chars().count() <= 1000;
+                let file = File::new("sendVoice", "voice", voice, "voice.ogg", "audio/ogg");
+                let sent = send_file(token, chat, file, if fits { &reply } else { "" }).await;
+                match sent {
+                    Ok(()) if !fits => send(token, chat, &reply).await,
+                    other => other,
+                }
+            }
+            Err(err) => {
+                log::warn!("Telegram: голосом ответить не вышло ({err}) — отвечаю текстом");
+                send(token, chat, &reply).await
+            }
+        }
+    } else {
+        send(token, chat, &reply).await
+    };
+    if let Err(err) = sent {
         log::warn!("Telegram: ответ не ушёл: {err}");
+    }
+}
+
+/// Ответ голосом: синтез своим голосом и перекодирование в OGG/Opus — формат
+/// голосовых сообщений Telegram.
+fn spoken(app: &AppHandle, text: &str) -> Result<Vec<u8>, String> {
+    let voice = app.state::<crate::state::AppState>().config().voice.clone();
+    let wav = crate::voice::synthesize(app, &voice, text)?;
+    crate::overlay::encode_voice(app, &wav)
+}
+
+/// Файл для отправки: каким методом, в каком поле, что и как назвать.
+struct File {
+    method: &'static str,
+    field: &'static str,
+    bytes: Vec<u8>,
+    name: &'static str,
+    mime: &'static str,
+}
+
+impl File {
+    fn new(
+        method: &'static str,
+        field: &'static str,
+        bytes: Vec<u8>,
+        name: &'static str,
+        mime: &'static str,
+    ) -> Self {
+        Self {
+            method,
+            field,
+            bytes,
+            name,
+            mime,
+        }
+    }
+}
+
+/// Шлёт файл — фотографию или голосовое — с подписью.
+async fn send_file(token: &str, chat: &str, file: File, caption: &str) -> Result<(), String> {
+    let part = reqwest::multipart::Part::bytes(file.bytes)
+        .file_name(file.name)
+        .mime_str(file.mime)
+        .map_err(|err| err.to_string())?;
+    let mut form = reqwest::multipart::Form::new()
+        .text("chat_id", chat.to_string())
+        .part(file.field, part);
+    if !caption.is_empty() {
+        form = form.text("caption", caption.chars().take(1000).collect::<String>());
+    }
+    let response = client()?
+        .post(format!("{API}/bot{token}/{}", file.method))
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|err| format!("Telegram не ответил: {}", err.without_url()))?;
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|err| format!("Telegram ответил непонятно: {}", err.without_url()))?;
+    if body["ok"].as_bool() == Some(true) {
+        Ok(())
+    } else {
+        Err(describe(&body))
     }
 }
 
@@ -268,7 +360,7 @@ async fn answer(
     said: &str,
     history: &mut Vec<crate::ai_client::ThreadItem>,
 ) -> String {
-    if let Some(reply) = crate::planner::handle_remote(app, said).await {
+    if let Some(reply) = crate::planner::handle(app, said).await {
         return reply;
     }
     let (provider, limit) = {

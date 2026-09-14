@@ -29,6 +29,7 @@ mod prices;
 mod watchlist;
 mod telegram;
 mod timers;
+mod shots;
 mod review;
 mod secret;
 mod tasks;

@@ -99,45 +99,7 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
     // подставить в неё частоту дискретизации.
     let hz = sample_rate(&assets::json_beside(&model));
 
-    let mut command = Command::new(&exe);
-    command
-        .arg("--model")
-        .arg(&model)
-        // Сырой звук в поток вывода, а не файл на диске: так первые слова
-        // начинают звучать, пока конец фразы ещё синтезируется.
-        //
-        // Имя флага именно с подчёркиванием — так у Piper 2023.11.
-        .arg("--output_raw")
-        // Скорость наоборот: параметр задаёт длительность звуков, а не темп.
-        // Просят вдвое быстрее — значит каждый звук вдвое короче.
-        .arg("--length_scale")
-        .arg(format!("{:.3}", length_scale(rate)))
-        // Живость. Оба числа отвечают за разброс: первое — за интонацию в целом,
-        // второе — за длительность отдельных звуков. На умолчаниях (0.667 и 0.8)
-        // голос ровный до безжизненности: каждая фраза читается одинаково. Чуть
-        // больший разброс даёт естественные колебания темпа и высоты — то, чем
-        // живая речь отличается от диктора-автомата. Ещё выше поднимать нельзя:
-        // начинает «плыть» произношение.
-        .arg("--noise_scale")
-        .arg("0.78")
-        .arg("--noise_w")
-        .arg("0.95")
-        // Пауза между предложениями. Умолчание 0.2 с — речь звучит скороговоркой;
-        // чуть длиннее пауза читается как осмысленная, а не как заминка.
-        .arg("--sentence_silence")
-        .arg("0.35")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        // Piper подробно рассказывает о себе в поток ошибок на каждую фразу.
-        // В журнале приложения это только шум.
-        .stderr(Stdio::null());
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    let mut command = piper_command(&exe, &model, rate);
 
     let mut child = command
         .spawn()
@@ -277,6 +239,116 @@ pub fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), 
     Ok(())
 }
 
+/// Команда запуска Piper — одна на речь в колонки и на запись в файл.
+fn piper_command(exe: &std::path::Path, model: &std::path::Path, rate: f32) -> Command {
+    let mut command = Command::new(exe);
+    command
+        .arg("--model")
+        .arg(model)
+        // Сырой звук в поток вывода, а не файл на диске: так первые слова
+        // начинают звучать, пока конец фразы ещё синтезируется.
+        //
+        // Имя флага именно с подчёркиванием — так у Piper 2023.11.
+        .arg("--output_raw")
+        // Скорость наоборот: параметр задаёт длительность звуков, а не темп.
+        // Просят вдвое быстрее — значит каждый звук вдвое короче.
+        .arg("--length_scale")
+        .arg(format!("{:.3}", length_scale(rate)))
+        // Живость. Оба числа отвечают за разброс: первое — за интонацию в целом,
+        // второе — за длительность отдельных звуков. На умолчаниях (0.667 и 0.8)
+        // голос ровный до безжизненности: каждая фраза читается одинаково. Чуть
+        // больший разброс даёт естественные колебания темпа и высоты — то, чем
+        // живая речь отличается от диктора-автомата. Ещё выше поднимать нельзя:
+        // начинает «плыть» произношение.
+        .arg("--noise_scale")
+        .arg("0.78")
+        .arg("--noise_w")
+        .arg("0.95")
+        // Пауза между предложениями. Умолчание 0.2 с — речь звучит скороговоркой;
+        // чуть длиннее пауза читается как осмысленная, а не как заминка.
+        .arg("--sentence_silence")
+        .arg("0.35")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        // Piper подробно рассказывает о себе в поток ошибок на каждую фразу.
+        // В журнале приложения это только шум.
+        .stderr(Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
+/// Синтезирует текст в WAV целиком — для ответа голосовым сообщением.
+///
+/// В отличие от `speak`, ничего не играет и чужую речь не обрывает: звук
+/// собирается в память и отдаётся одним файлом.
+pub fn synthesize(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<Vec<u8>, String> {
+    let voice = if voice.trim().is_empty() {
+        assets::DEFAULT_VOICE
+    } else {
+        voice
+    };
+    let exe = assets::piper_exe(app)?;
+    let model = assets::voice_path(app, voice)?;
+    if !exe.exists() || !model.exists() {
+        return Err("голос ещё не скачан".into());
+    }
+    let hz = sample_rate(&assets::json_beside(&model));
+
+    let mut child = piper_command(&exe, &model, rate)
+        .spawn()
+        .map_err(|err| format!("не удалось запустить синтезатор: {err}"))?;
+    crate::jobs::adopt(&child);
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or("синтезатор не принимает текст")?;
+    let line = format!("{}\n", text.replace('\n', " "));
+    // Текст пишется своим потоком: пока звук не вычитан, Piper может встать
+    // на записи, и запись текста в том же потоке ждала бы вечно.
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(line.as_bytes());
+    });
+    let mut raw = Vec::new();
+    let read = child
+        .stdout
+        .take()
+        .ok_or("синтезатор не отдаёт звук")?
+        .read_to_end(&mut raw);
+    let _ = writer.join();
+    let _ = child.wait();
+    read.map_err(|err| format!("синтезатор оборвался: {err}"))?;
+    if raw.len() < 2 {
+        return Err("синтезатор ничего не сказал".into());
+    }
+    Ok(wav(&raw, hz))
+}
+
+/// Сырой звук Piper — 16 бит, моно — в файл WAV.
+fn wav(raw: &[u8], hz: u32) -> Vec<u8> {
+    let data = (raw.len() & !1) as u32;
+    let mut out = Vec::with_capacity(44 + data as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&hz.to_le_bytes());
+    out.extend_from_slice(&(hz * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data.to_le_bytes());
+    out.extend_from_slice(&raw[..data as usize]);
+    out
+}
+
 /// Скорость речи в длительность звука.
 ///
 /// Пределы не каприз: ниже 0.5 речь растягивается до неразборчивого воя, выше
@@ -333,5 +405,19 @@ mod tests {
         assert_eq!(pcm(0x00, 0x00), 0.0);
         assert!((pcm(0xFF, 0x7F) - 0.999_97).abs() < 0.001);
         assert_eq!(pcm(0x00, 0x80), -1.0);
+    }
+}
+
+#[cfg(test)]
+mod wav_tests {
+    #[test]
+    fn raw_sound_becomes_a_wav_file() {
+        let wav = super::wav(&[1, 0, 2, 0, 3], 22_050);
+        assert_eq!(&wav[..4], b"RIFF");
+        assert_eq!(&wav[8..16], b"WAVEfmt ");
+        assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 22_050);
+        // Непарный байт — половинка отсчёта — отбрасывается.
+        assert_eq!(u32::from_le_bytes(wav[40..44].try_into().unwrap()), 4);
+        assert_eq!(wav.len(), 48);
     }
 }

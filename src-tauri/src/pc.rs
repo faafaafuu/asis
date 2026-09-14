@@ -1745,6 +1745,20 @@ fn open_windows() -> Vec<OpenWindow> {
     Vec::new()
 }
 
+/// Окно программы по сказанному названию — «хром», «телеграм»: его ручка и
+/// имя программы. Для снимка окна.
+pub(crate) fn window_for(spoken: &str) -> Option<(isize, String)> {
+    let windows = open_windows();
+    let mut best: Option<(&OpenWindow, f32)> = None;
+    for window in &windows {
+        let value = score(spoken, &window.exe).max(score(spoken, &window.title));
+        if value >= MATCH_THRESHOLD && best.is_none_or(|(_, top)| value > top) {
+            best = Some((window, value));
+        }
+    }
+    best.map(|(window, _)| (window.handle, window.exe.clone()))
+}
+
 #[cfg(target_os = "windows")]
 fn close_window(handle: isize) -> bool {
     use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};

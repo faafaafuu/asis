@@ -963,10 +963,10 @@ pub fn save_telegram_settings(
 /// Разобранное голосовое из окна индикатора — см. `overlay::decode_audio`.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn audio_decoded(id: u64, wav: Option<String>, error: Option<String>) {
-    let result = match (wav, error) {
-        (Some(wav), _) => {
-            crate::secret::unbase64(&wav).ok_or_else(|| "звук пришёл испорченным".to_string())
+pub fn audio_decoded(id: u64, data: Option<String>, error: Option<String>) {
+    let result = match (data, error) {
+        (Some(data), _) => {
+            crate::secret::unbase64(&data).ok_or_else(|| "звук пришёл испорченным".to_string())
         }
         (None, Some(error)) => Err(error),
         (None, None) => Err("звук не пришёл".into()),

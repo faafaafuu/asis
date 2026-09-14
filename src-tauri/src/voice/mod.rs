@@ -45,6 +45,15 @@ pub async fn speak(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<
     }
 }
 
+/// Синтезирует текст своим голосом в WAV — для ответа голосовым сообщением.
+pub fn synthesize(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<Vec<u8>, String> {
+    let text = clean(text);
+    if text.is_empty() {
+        return Err("нечего сказать".into());
+    }
+    piper::synthesize(app, &config.voice, config.rate, &text)
+}
+
 /// Список онлайн-голосов. Через обёртку: сам модуль edge закрытый, наружу
 /// торчит только то, что нужно окну настройки.
 pub fn edge_voices() -> &'static [(&'static str, &'static str)] {
