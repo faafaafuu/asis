@@ -94,6 +94,8 @@ pub enum Intent {
     Claude { text: String },
     /// Список активов: показать, добавить, убрать.
     Watch { action: String, asset: String, tab: String, price: String },
+    /// Обучение: открыть курс, узнать прогресс, опрос голосом.
+    Learn { action: String, topic: String },
     /// Готовый ответ без действия: переспросить, пояснить.
     Say(String),
 }
@@ -151,6 +153,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     // Дело ждёт срока — значит, сказанное сейчас и есть срок.
     if awaiting_time() {
         return Some(finish_pending(app, said).await);
+    }
+    // Идёт опрос по курсу — сказанное и есть ответ на вопрос.
+    if let Some(reply) = crate::learning::quiz_answer(app, said).await {
+        return Some(reply);
     }
 
     let open = open_tasks();
@@ -219,6 +225,7 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         Intent::Watch { action, asset, tab, price } => {
             Some(watch(app, &action, &asset, &tab, &price).await)
         }
+        Intent::Learn { action, topic } => Some(crate::learning::voice(app, &action, &topic).await),
         Intent::Claude { text } => {
             // Разговор уходит в Claude — Ноа после ответа замолкает и уходит.
             HANDOFF.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1045,6 +1052,10 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             },
         },
         "claude" => Intent::Claude { text: text("text") },
+        "learn" => Intent::Learn {
+            action: text("action"),
+            topic: text("topic"),
+        },
         "watch" => Intent::Watch {
             action: text("action"),
             asset: text("asset"),
@@ -1887,6 +1898,10 @@ fn asked_for(intent: &str, said: &str) -> bool {
         "paste" => &["встав"],
         "price" => &["стоит", "цена", "цену", "курс", "стоимост", "почём", "почем", "котиров"],
         "claude" => &["клод", "claude", "клауд", "клоуд"],
+        "learn" => &[
+            "обуч", "учеб", "курс", "экзамен", "погоня", "прогресс", "урок", "вопрос по",
+            "девопс", "devops", "подготов", "собеседован", "изуч",
+        ],
         "watch" => &[
             "вотч", "watch", "актив", "портфел", "монет", "акци", "отслежива", "списк", "алерт",
             "оповещ", "уведом",
@@ -1991,6 +2006,9 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          как …», «позови Клода», «хочу поговорить с Клодом»;\n\
          watch — про список отслеживаемых активов (вотчлист, «мои активы»): \
          показать его, добавить или убрать монету, акцию, валюту.\n\
+         learn — обучение по курсу (DevOps и другие): открыть курс или тему, \
+         узнать прогресс, «погоняй меня», «задай вопрос по докеру», подготовка \
+         к собеседованию.\n\
          \n\
          Остальные поля:\n\
          title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
@@ -2021,6 +2039,9 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          (доллар, евро); для watch show — пусто;\n\
          action — для watch одно из: show, add, remove, alert (оповещение о цене, алерт);\n\
          price — для watch alert цена-цель числом, без валюты;\n\
+         action — для learn одно из: open, progress, quiz;\n\
+         topic — для learn тема или курс словами человека (докер, сети, девопс), \
+         иначе пусто;\n\
          tab — для watch вкладка списка, если названа («в избранное», «в крипту», \
          «вкладку фонды»), в именительном падеже; не названа — пусто;\n\
          kind — для find тип файла: image, document, video, audio или any;\n\
@@ -2142,7 +2163,10 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      «убери эфир из активов» → {\"intent\":\"watch\",\"action\":\"remove\",\"asset\":\"ethereum\"}\n\
      «добавь биткоин в избранное» → {\"intent\":\"watch\",\"action\":\"add\",\"asset\":\"bitcoin\",\"tab\":\"избранное\"}\n\
      «покажи вкладку фонды» → {\"intent\":\"watch\",\"action\":\"show\",\"asset\":\"\",\"tab\":\"фонды\"}\n\
-     «поставь алерт на биткоин на 80 тысяч» → {\"intent\":\"watch\",\"action\":\"alert\",\"asset\":\"bitcoin\",\"price\":80000}";
+     «поставь алерт на биткоин на 80 тысяч» → {\"intent\":\"watch\",\"action\":\"alert\",\"asset\":\"bitcoin\",\"price\":80000}\n\
+     «погоняй меня по докеру» → {\"intent\":\"learn\",\"action\":\"quiz\",\"topic\":\"докер\"}\n\
+     «как мой прогресс по девопсу» → {\"intent\":\"learn\",\"action\":\"progress\",\"topic\":\"девопс\"}\n\
+     «открой обучение» → {\"intent\":\"learn\",\"action\":\"open\",\"topic\":\"\"}";
 
 /* ── Завести ─────────────────────────────────────────────────────────────── */
 

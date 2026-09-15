@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Суфлёр — обучение</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/learning.css" />
+  </head>
+  <body>
+    <header class="head" data-el="head">
+      <h1 class="head__title">Обучение</h1>
+      <span class="head__course" data-el="courseTitle"></span>
+      <div class="head__progress" title="Сколько курса пройдено">
+        <span class="bar"><span class="bar__fill" data-el="courseBar"></span></span>
+        <span class="head__percent" data-el="coursePercent"></span>
+      </div>
+      <button class="head__button head__close" data-el="close" type="button" title="Закрыть (Esc)" aria-label="Закрыть окно обучения">×</button>
+    </header>
+
+    <div class="layout">
+      <!-- Темы курса: статус, баллы, ошибки. Внизу — финальный экзамен. -->
+      <nav class="side" aria-label="Темы">
+        <button class="side__home" data-el="home" type="button">Обзор курса</button>
+        <ol class="topics" data-el="topics"></ol>
+        <button class="side__final" data-el="final" type="button">Финальный экзамен</button>
+      </nav>
+
+      <main class="main" data-el="main"></main>
+    </div>
+
+    <script type="module" src="./js/learning.js"></script>
+  </body>
+</html>

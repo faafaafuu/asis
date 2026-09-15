@@ -30,6 +30,7 @@ mod watchlist;
 mod telegram;
 mod timers;
 mod shots;
+mod learning;
 mod review;
 mod secret;
 mod tasks;
@@ -122,7 +123,8 @@ pub fn run() {
             if let Some(dir) = config_dir.clone() {
                 spend::load(dir.clone());
                 tasks::load(dir.clone());
-                watchlist::load(dir);
+                watchlist::load(dir.clone());
+                learning::load(dir);
             }
             let config = Config::load(config_dir);
             log::info!("AI-провайдер: {}", config.ai.provider);
@@ -239,6 +241,14 @@ pub fn run() {
             commands::save_telegram_settings,
             commands::telegram_test,
             commands::audio_decoded,
+            commands::learn_overview,
+            commands::learn_topic,
+            commands::learn_read,
+            commands::learn_check,
+            commands::learn_self_grade,
+            commands::learn_exam,
+            commands::learn_submit,
+            commands::close_learning,
             commands::watch_chart,
             commands::close_watchlist,
             commands::order_state,
@@ -2103,9 +2113,13 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let tasks = MenuItem::with_id(app, "tasks", "Задачи", true, None::<&str>)?;
     let order = MenuItem::with_id(app, "order", "Заказ", true, None::<&str>)?;
     let watchlist = MenuItem::with_id(app, "watchlist", "Активы", true, None::<&str>)?;
+    let learning = MenuItem::with_id(app, "learning", "Обучение", true, None::<&str>)?;
     let onboarding = MenuItem::with_id(app, "onboarding", "Настройка и проверка…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&tasks, &order, &watchlist, &onboarding, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[&tasks, &order, &watchlist, &learning, &onboarding, &quit],
+    )?;
 
     let mut tray = TrayIconBuilder::with_id("sufler-tray")
         .tooltip("Суфлёр")
@@ -2123,6 +2137,11 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         "tasks" => {
             if let Err(err) = overlay::show_tasks(app) {
                 log::error!("не удалось открыть окно задач: {err}");
+            }
+        }
+        "learning" => {
+            if let Err(err) = overlay::show_learning(app) {
+                log::error!("не удалось открыть окно обучения: {err}");
             }
         }
         "watchlist" => {

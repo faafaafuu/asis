@@ -1021,6 +1021,64 @@ pub fn close_watchlist(app: AppHandle) {
     crate::overlay::hide_watchlist(&app);
 }
 
+/// Курсы и прогресс по ним.
+#[tauri::command]
+pub fn learn_overview() -> Vec<crate::learning::CourseCard> {
+    crate::learning::overview()
+}
+
+/// Тема: урок, задачи, прежние баллы и ошибки.
+#[tauri::command]
+pub fn learn_topic(course: String, topic: String) -> Result<crate::learning::TopicView, String> {
+    crate::learning::topic_view(&course, &topic)
+}
+
+/// Урок прочитан.
+#[tauri::command]
+pub fn learn_read(course: String, topic: String) -> Result<(), String> {
+    crate::learning::mark_read(&course, &topic)
+}
+
+/// Проверяет ответ на задачу или вопрос.
+#[tauri::command]
+pub async fn learn_check(
+    app: AppHandle,
+    course: String,
+    question: String,
+    answer: serde_json::Value,
+) -> Result<crate::learning::Verdict, String> {
+    crate::learning::check(&app, &course, &question, &answer).await
+}
+
+/// Оценка себя самим, когда модель не ответила.
+#[tauri::command]
+pub fn learn_self_grade(course: String, question: String, knew: bool) -> Result<(), String> {
+    crate::learning::self_grade(&course, &question, knew)
+}
+
+/// Экзамен: мини по теме или финальный (`scope` = `final`).
+#[tauri::command]
+pub fn learn_exam(course: String, scope: String) -> Result<crate::learning::Exam, String> {
+    crate::learning::exam(&course, &scope)
+}
+
+/// Сдаёт экзамен.
+#[tauri::command]
+pub async fn learn_submit(
+    app: AppHandle,
+    course: String,
+    scope: String,
+    answers: std::collections::BTreeMap<String, serde_json::Value>,
+) -> Result<crate::learning::ExamResult, String> {
+    crate::learning::submit(&app, &course, &scope, &answers).await
+}
+
+/// Закрывает окно обучения.
+#[tauri::command]
+pub fn close_learning(app: AppHandle) {
+    crate::overlay::hide_learning(&app);
+}
+
 /// Что сейчас с заказом. `null` — заказа ещё не было.
 #[tauri::command]
 pub fn order_state() -> Option<crate::order::Order> {

@@ -922,6 +922,35 @@ pub fn show_order(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+pub const LEARN_LABEL: &str = "learning";
+
+/// Показывает окно обучения. Если окно уже есть — поднимает его наверх.
+pub fn show_learning(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(LEARN_LABEL) {
+        window.show()?;
+        window.set_focus()?;
+        return Ok(());
+    }
+    // Посреди экрана и крупнее прочих окон: здесь читают уроки и пишут ответы.
+    WebviewWindowBuilder::new(app, LEARN_LABEL, WebviewUrl::App("learning.html".into()))
+        .initialization_script(theme_script(app))
+        .title("Суфлёр — обучение")
+        .inner_size(1000.0, 700.0)
+        .min_inner_size(720.0, 480.0)
+        .resizable(true)
+        .decorations(false)
+        .center()
+        .build()?;
+    Ok(())
+}
+
+/// Прячет окно обучения.
+pub fn hide_learning(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(LEARN_LABEL) {
+        let _ = window.hide();
+    }
+}
+
 pub const WATCH_LABEL: &str = "watchlist";
 
 /// Показывает список активов. Если окно уже есть — поднимает его наверх.

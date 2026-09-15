@@ -1752,7 +1752,7 @@ pub(crate) fn window_for(spoken: &str) -> Option<(isize, String)> {
     let mut best: Option<(&OpenWindow, f32)> = None;
     for window in &windows {
         let value = score(spoken, &window.exe).max(score(spoken, &window.title));
-        if value >= MATCH_THRESHOLD && best.is_none_or(|(_, top)| value > top) {
+        if value >= MATCH_THRESHOLD && best.map_or(true, |(_, top)| value > top) {
             best = Some((window, value));
         }
     }
