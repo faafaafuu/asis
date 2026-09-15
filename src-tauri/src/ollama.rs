@@ -555,7 +555,11 @@ pub fn pick(hw: &Hardware) -> &'static str {
     // Выбор проверен на одних и тех же терминах (ai_client::live_explain):
     // qwen2.5:7b путалась в фактах и мешала латиницу с кириллицей, qwen3.5:4b
     // точнее её при меньшем весе, qwen3.5:9b точнее всех, ответ около двух секунд.
-    if usable >= 7.0 {
+    //
+    // Рядом с моделью должно поместиться распознавание речи (~1.9 ГБ) и то, чем
+    // карта занята у человека: на карте в 10 ГБ с браузером и прочим 9b вместе
+    // с Whisper не влезала, и расшифровка фразы ползла минутами.
+    if usable >= 9.0 {
         // ~6.6 ГБ.
         "qwen3.5:9b"
     } else if usable >= 3.5 {
@@ -579,6 +583,25 @@ pub fn hardware() -> Hardware {
         vram_gb: vram_gb(),
         ram_gb: ram_gb(),
     }
+}
+
+/// Свободная сейчас видеопамять по данным nvidia-smi, в гигабайтах; `None` —
+/// узнать не удалось (не NVIDIA или нет nvidia-smi).
+pub fn vram_free_gb() -> Option<f64> {
+    let mut command = std::process::Command::new("nvidia-smi");
+    command.args(["--query-gpu=memory.free", "--format=csv,noheader,nounits"]);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = command.output().ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<f64>().ok())
+        .fold(None, |best: Option<f64>, mb| Some(best.map_or(mb, |b| b.max(mb))))
+        .map(|mb| mb / 1024.0)
 }
 
 /// Видеопамять по данным nvidia-smi.
@@ -832,7 +855,8 @@ mod tests {
     fn model_is_picked_by_video_memory() {
         // Запас в 2 ГБ учтён: 8 ГБ карта — это 6 ГБ под модель.
         assert_eq!(pick(&hw(12.0, 32.0)), "qwen3.5:9b");
-        assert_eq!(pick(&hw(10.0, 32.0)), "qwen3.5:9b");
+        // 10 ГБ: 9b не оставила бы места распознаванию речи.
+        assert_eq!(pick(&hw(10.0, 32.0)), "qwen3.5:4b");
         assert_eq!(pick(&hw(8.0, 32.0)), "qwen3.5:4b");
         assert_eq!(pick(&hw(6.0, 16.0)), "qwen3.5:4b");
         assert_eq!(pick(&hw(4.0, 16.0)), "qwen2.5:3b");

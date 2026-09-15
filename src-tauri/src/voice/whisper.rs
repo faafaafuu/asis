@@ -32,6 +32,13 @@ fn root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 /// в чужую программу и шлём ей записи с микрофона.
 const PORT: u16 = 8642;
 
+/// Столько видеопамяти нужно серверу: модель 1.6 ГБ, буферы и запас.
+///
+/// Если свободно меньше, сервер на видеокарте не падает, а переполняет её:
+/// драйвер Windows начинает гонять память через оперативку, и загрузка,
+/// обычно секундная, тянется минутами. На процессоре медленнее, но предсказуемо.
+const MIN_FREE_VRAM_GB: f64 = 2.3;
+
 /// Путь к программе. Имя менялось между выпусками (`main.exe` в старых,
 /// `whisper-cli.exe` в новых), поэтому ищем оба и в подпапках тоже.
 pub fn binary(app: &AppHandle) -> Option<std::path::PathBuf> {
@@ -249,6 +256,12 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
         return Err("модель распознавания ещё не скачана".into());
     }
 
+    let on_cpu = crate::ollama::vram_free_gb().is_some_and(|free| free < MIN_FREE_VRAM_GB);
+    // Вывод сервера — в файл: иначе причина, по которой он не поднялся, терялась.
+    let log_path = root(app)?.join("server.log");
+    let log_file = std::fs::File::create(&log_path)
+        .map_err(|err| format!("журнал сервера расшифровки не создался: {err}"))?;
+
     let mut command = std::process::Command::new(&exe);
     command
         .arg("-m")
@@ -275,7 +288,14 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
         .arg("--no-speech-thold")
         .arg("0.35")
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+        .stderr(log_file);
+    if on_cpu {
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get().min(8))
+            .unwrap_or(4);
+        command.arg("--no-gpu").arg("--threads").arg(threads.to_string());
+        log::warn!("видеопамяти свободно мало — распознавание пойдёт на процессоре, медленнее");
+    }
 
     #[cfg(target_os = "windows")]
     {
@@ -294,11 +314,26 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
 
     // Первый запуск на новой видеокарте дольше: драйвер компилирует ядра под
     // неё и складывает в свой кеш. Дальше это уже секунды.
-    for _ in 0..300 {
+    for step in 0..300 {
         std::thread::sleep(std::time::Duration::from_millis(500));
         if server_alive() {
-            log::info!("сервер расшифровки готов");
+            log::info!("сервер расшифровки готов{}", if on_cpu { " (на процессоре)" } else { "" });
             return Ok(());
+        }
+        // Процесс ушёл — ждать дальше нечего; причину он оставил в журнале.
+        let exited = SERVER
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .as_mut()
+            .and_then(|child| child.try_wait().ok().flatten());
+        if let Some(status) = exited {
+            let output = std::fs::read_to_string(&log_path).unwrap_or_default();
+            let tail: Vec<&str> = output.lines().filter(|l| !l.trim().is_empty()).collect();
+            let tail = tail[tail.len().saturating_sub(3)..].join(" / ");
+            return Err(format!("сервер расшифровки завершился ({status}): {tail}"));
+        }
+        if step == 40 {
+            log::warn!("сервер расшифровки поднимается дольше 20 с — видеокарта, похоже, переполнена");
         }
     }
     Err("сервер расшифровки не ответил".into())

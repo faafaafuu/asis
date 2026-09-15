@@ -243,6 +243,9 @@ pub fn show_hud(app: &AppHandle, mode: &str) {
         let _ = window.emit_to(HUD_LABEL, "hud:appear", ());
     }
     let _ = window.emit_to(HUD_LABEL, "hud:mode", mode.to_string());
+    // Свёрнутый индикатор (например, после «Свернуть все окна») показ не
+    // разворачивает: запись шла, а на экране ничего не было.
+    let _ = window.unminimize();
     let _ = window.show();
     // Пока индикатор на экране, голос занят: Esc его остановит.
     crate::voice::hotkey::voice_active(true);
@@ -845,10 +848,7 @@ pub const TASKS_LABEL: &str = "tasks";
 /// Показывает список задач. Если окно уже есть — поднимает его наверх.
 pub fn show_tasks(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(TASKS_LABEL) {
-        // Свёрнутое окно показ не разворачивает — разворачиваем сами.
-        let _ = window.unminimize();
-        window.show()?;
-        window.set_focus()?;
+        bring_forward(&window);
         return Ok(());
     }
 
@@ -903,10 +903,7 @@ pub const ORDER_LABEL: &str = "order";
 /// Показывает, что сейчас с заказом.
 pub fn show_order(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(ORDER_LABEL) {
-        // Свёрнутое окно показ не разворачивает — разворачиваем сами.
-        let _ = window.unminimize();
-        window.show()?;
-        window.set_focus()?;
+        bring_forward(&window);
         return Ok(());
     }
 
@@ -934,10 +931,7 @@ pub const LEARN_LABEL: &str = "learning";
 /// Показывает окно обучения. Если окно уже есть — поднимает его наверх.
 pub fn show_learning(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(LEARN_LABEL) {
-        // Свёрнутое окно показ не разворачивает — разворачиваем сами.
-        let _ = window.unminimize();
-        window.show()?;
-        window.set_focus()?;
+        bring_forward(&window);
         return Ok(());
     }
     // Посреди экрана и крупнее прочих окон: здесь читают уроки и пишут ответы.
@@ -965,10 +959,7 @@ pub const WATCH_LABEL: &str = "watchlist";
 /// Показывает список активов. Если окно уже есть — поднимает его наверх.
 pub fn show_watchlist(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(WATCH_LABEL) {
-        // Свёрнутое окно показ не разворачивает — разворачиваем сами.
-        let _ = window.unminimize();
-        window.show()?;
-        window.set_focus()?;
+        bring_forward(&window);
         return Ok(());
     }
 
@@ -1013,11 +1004,7 @@ pub fn hide_tasks(app: &AppHandle) {
 
 pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(ONBOARDING_LABEL) {
-        // Свёрнутое окно показ не разворачивает: щелчок по трею выглядел
-        // так, будто ничего не происходит.
-        let _ = window.unminimize();
-        window.show()?;
-        window.set_focus()?;
+        bring_forward(&window);
         return Ok(());
     }
 
@@ -1042,7 +1029,22 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
     .build()?;
 
     window.set_position(LogicalPosition::new(120.0, 120.0))?;
+    bring_forward(&window);
     Ok(())
+}
+
+/// Выводит окно наверх: разворачивает, показывает и отдаёт ему фокус.
+///
+/// Одного `set_focus` мало. Windows не отдаёт передний план программе, которая
+/// сейчас не на нём: окно остаётся под остальными, а на панели задач лишь
+/// мигает кнопка — щелчок по трею выглядел так, будто ничего не произошло.
+/// Короткое «поверх всех» поднимает окно в любом случае.
+pub fn bring_forward(window: &WebviewWindow) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_focus();
+    let _ = window.set_always_on_top(false);
 }
 
 /// Раздел настроек, который окно должно показать, когда загрузится.
