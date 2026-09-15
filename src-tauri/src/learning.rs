@@ -1048,6 +1048,49 @@ pub fn end_discussion() {
     DISCUSSION.lock().unwrap_or_else(|err| err.into_inner()).take();
 }
 
+/// Обсуждение одного вопроса.
+///
+/// Человек ответил, прочитал эталон и хочет разобраться. Модель получает сам
+/// вопрос, его ответ, верный вариант, эталон и ключевые пункты — иначе на
+/// «а почему не так?» ей было бы не от чего оттолкнуться.
+pub fn discuss_question(course_id: &str, question_id: &str, answer: &str) -> Result<String, String> {
+    let course = course(course_id)?;
+    let (q, topic) = question(&course, question_id).ok_or("Такого вопроса нет.")?;
+    let topic_title = topic.map(|t| t.title.clone()).unwrap_or_else(|| "итоговый экзамен".into());
+
+    let mut context = format!(
+        "Идёт обучение. Курс «{}», тема «{topic_title}».\nВопрос: {}\n",
+        course.title, q.q
+    );
+    if !q.options.is_empty() {
+        context.push_str(&format!("Варианты: {}\n", q.options.join("; ")));
+    }
+    if !answer.trim().is_empty() {
+        context.push_str(&format!("Ответ ученика: {}\n", answer.trim()));
+    }
+    if let Some(right) = q.answer.and_then(|at| q.options.get(at)) {
+        context.push_str(&format!("Верный вариант: {right}\n"));
+    }
+    if !q.reference.is_empty() {
+        context.push_str(&format!("Эталонный ответ: {}\n", q.reference));
+    }
+    if !q.explain.is_empty() {
+        context.push_str(&format!("Пояснение: {}\n", q.explain));
+    }
+    if !q.points.is_empty() {
+        context.push_str(&format!("Ключевые пункты: {}\n", q.points.join("; ")));
+    }
+
+    *DISCUSSION.lock().unwrap_or_else(|err| err.into_inner()) = Some(Discussion {
+        course: course.id.clone(),
+        topic: topic.map(|t| t.id.clone()).unwrap_or_default(),
+        title: format!("вопрос «{}»", q.q.chars().take(120).collect::<String>()),
+        context,
+    });
+    log::info!("обсуждаем вопрос «{}»", q.id);
+    Ok("Давай разберём этот вопрос. Что непонятно?".into())
+}
+
 /// Устный зачёт по теме (или по курсу): Ноа задаёт вопросы вслух.
 pub fn oral(course_id: &str, topic_id: Option<&str>) -> Result<String, String> {
     let course = course(course_id)?;

@@ -271,6 +271,7 @@ pub fn run() {
             commands::learn_dictate_stop,
             commands::learn_oral,
             commands::learn_discuss,
+            commands::learn_discuss_question,
             commands::delete_model,
             commands::watch_chart,
             commands::close_watchlist,
@@ -2324,6 +2325,11 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             ..
         } = event
         {
+            // Сначала — свёрнутые окна: человек свернул задачи или обучение и
+            // щёлкает по трею, чтобы вернуть их, а не открыть настройки.
+            if overlay::restore_minimized(tray.app_handle()) {
+                return;
+            }
             if let Err(err) = overlay::show_onboarding(tray.app_handle()) {
                 log::error!("не удалось открыть окно настройки: {err}");
             }

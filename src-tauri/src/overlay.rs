@@ -1075,6 +1075,20 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Разворачивает свёрнутые окна Суфлёра. `false` — свёрнутых нет.
+pub fn restore_minimized(app: &AppHandle) -> bool {
+    let mut restored = false;
+    for label in [LEARN_LABEL, TASKS_LABEL, WATCH_LABEL, ORDER_LABEL, ONBOARDING_LABEL] {
+        if let Some(window) = app.get_webview_window(label) {
+            if window.is_minimized().unwrap_or(false) {
+                bring_forward(&window);
+                restored = true;
+            }
+        }
+    }
+    restored
+}
+
 /// Выводит окно наверх: разворачивает, показывает и отдаёт ему фокус.
 ///
 /// Одного `set_focus` мало. Windows не отдаёт передний план программе, которая

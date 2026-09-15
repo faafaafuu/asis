@@ -408,7 +408,7 @@ function renderQuestions(root, questions, label) {
       check.textContent = q.kind === "choice" ? "Проверяю…" : "Проверяю… (модель читает ответ)";
       try {
         const verdict = await api.invoke("learn_check", { course: course.id, question: q.id, answer });
-        place.replaceChildren(renderVerdict(verdict, q, true));
+        place.replaceChildren(renderVerdict(verdict, q, true, answer));
         markOptions(field.node, verdict);
         await refreshOverview();
         renderSide();
@@ -434,8 +434,11 @@ function markOptions(box, verdict) {
   });
 }
 
-/** Разбор ответа: балл, отзыв, пункты эталона, сам эталон. */
-function renderVerdict(verdict, q, allowSelf) {
+/**
+ * Разбор ответа: балл, отзыв, пункты эталона, сам эталон — и кнопка обсудить
+ * вопрос голосом. `answer` — что ответил человек; без него обсуждать нечего.
+ */
+function renderVerdict(verdict, q, allowSelf, answer) {
   const unknown = verdict.score == null;
   const box = el("div", `verdict ${unknown ? "" : verdict.right ? "verdict--right" : "verdict--wrong"}`);
   const title =
@@ -474,6 +477,26 @@ function renderVerdict(verdict, q, allowSelf) {
     };
     actions.append(button("Знал", self(true)), button("Не знал", self(false), true));
     box.append(actions);
+  }
+  if (answer !== undefined) {
+    // Вариант уходит словами, а не номером: модели «ответил 2» ничего не скажет.
+    const said =
+      q.kind === "choice" && typeof answer === "number" ? (q.options?.[answer] ?? "") : String(answer ?? "");
+    const talk = el("div", "actions");
+    talk.append(
+      button(
+        "💬 Обсудить этот вопрос",
+        async () => {
+          try {
+            await api?.invoke("learn_discuss_question", { course: course.id, question: q.id, answer: said });
+          } catch (err) {
+            talk.append(el("p", "bad", String(err)));
+          }
+        },
+        true,
+      ),
+    );
+    box.append(talk);
   }
   return box;
 }

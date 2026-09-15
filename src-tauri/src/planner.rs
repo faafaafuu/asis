@@ -139,6 +139,11 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(show) = window_request(said) {
         return Some(crate::set_show_window(app, show));
     }
+    // «Привет», «ты тут?», «проверка связи» — ответ одной фразой, без модели:
+    // модель на такое представлялась и предлагала помощь.
+    if let Some(reply) = presence_reply(said) {
+        return Some(reply.into());
+    }
     // «Который час», «какое сегодня число» — по часам компьютера, без модели:
     // точно и сразу.
     if let Some(reply) = clock_answer(said, Local::now()) {
@@ -1314,6 +1319,34 @@ fn erases(said: &str) -> bool {
     ["удал", "убери", "убрать", "сотри", "стереть", "стер"]
         .iter()
         .any(|word| lower.contains(word))
+}
+
+/// Приветствие или проверка связи — и ничего больше.
+///
+/// Узнаётся, только если каждое слово из этого набора: «привет, открой
+/// телеграм» — уже поручение, и оно уходит дальше.
+fn presence_reply(said: &str) -> Option<&'static str> {
+    const WORDS: &[&str] = &[
+        "привет", "приветик", "здравствуй", "здравствуйте", "здорово", "хай", "салют", "добрый",
+        "доброе", "день", "утро", "вечер", "ты", "тут", "здесь", "слышишь", "слышно", "меня",
+        "алло", "на", "связи", "проверка", "связь", "а", "ну", "эй", "как", "дела", "ноа",
+    ];
+    let lower = said.to_lowercase();
+    let words: Vec<&str> = lower
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.is_empty() || !words.iter().all(|word| WORDS.contains(word)) {
+        return None;
+    }
+    let has = |word: &str| words.contains(&word);
+    Some(if has("дела") {
+        "Нормально, работаю."
+    } else if has("тут") || has("здесь") || has("слышишь") || has("слышно") || has("алло") || has("связи") || has("связь") {
+        "Тут, слышу."
+    } else {
+        "Привет!"
+    })
 }
 
 /// Что просят сделать со сделанными делами целиком.
@@ -3041,6 +3074,17 @@ mod tests {
         assert!(asked_for("find", "найди фото паспорта"));
         assert!(asked_for("type", "напечатай привет"));
         assert!(!asked_for("find", "звучит музыка"));
+    }
+
+    #[test]
+    fn greetings_are_answered_without_the_model() {
+        assert_eq!(presence_reply("Привет!"), Some("Привет!"));
+        assert_eq!(presence_reply("Ну, а ты тут?"), Some("Тут, слышу."));
+        assert_eq!(presence_reply("Проверка связи."), Some("Тут, слышу."));
+        assert_eq!(presence_reply("как дела"), Some("Нормально, работаю."));
+        // С поручением — не сюда.
+        assert_eq!(presence_reply("привет, открой телеграм"), None);
+        assert_eq!(presence_reply("ты тут посчитай сколько времени"), None);
     }
 
     #[test]

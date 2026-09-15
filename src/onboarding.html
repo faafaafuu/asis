@@ -160,9 +160,27 @@
           <span class="ob__select">
             <select class="ob__underline" data-el="voiceEngine">
               <option value="piper" data-i18n="voice.enginePiper">Свой голос — на этом компьютере, без интернета</option>
+              <!-- Azure готов, но спрятан: ключ Azure требует аккаунта с картой, для
+                   большинства это лишний шаг. Вернуть — убрать hidden. -->
+              <option value="azure" hidden>Нейроголоса Microsoft Azure — по ключу, до 0,5 млн знаков в месяц бесплатно</option>
             </select>
             <span class="ob__chevron" aria-hidden="true"></span>
           </span>
+
+          <!-- Ключ и регион — только для Azure. -->
+          <div data-el="azureFields" hidden>
+            <span class="ob__label">Ключ Azure Speech</span>
+            <p class="ob__hint">
+              portal.azure.com → «Создать ресурс» → «Служба речи» (Speech) → тариф Free F0.
+              Когда ресурс создан, откройте «Ключи и конечная точка»: «Ключ 1» — в это поле,
+              «Расположение/регион» — в поле ниже, латиницей, например westeurope.
+            </p>
+            <input class="ob__underline" data-el="azureKey" type="password" autocomplete="off"
+                   spellcheck="false" placeholder="ключ из «Ключи и конечная точка»" />
+            <span class="ob__label">Регион</span>
+            <input class="ob__underline" data-el="azureRegion" type="text" spellcheck="false"
+                   placeholder="westeurope" />
+          </div>
 
           <span class="ob__label" data-i18n="voice.voice">Голос</span>
           <span class="ob__select">

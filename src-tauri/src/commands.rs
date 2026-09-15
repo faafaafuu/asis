@@ -276,6 +276,11 @@ pub struct VoiceSettings {
     /// вместо обещания, что всё готово.
     #[serde(default)]
     pub ready: bool,
+    /// Ключ Azure: в окно — маской, из окна — новый ключ или пусто («не менять»).
+    #[serde(default)]
+    pub azure_key: String,
+    #[serde(default)]
+    pub azure_region: String,
 }
 
 #[cfg(desktop)]
@@ -292,6 +297,12 @@ pub fn voice_settings(app: AppHandle, state: State<'_, AppState>) -> VoiceSettin
         rate: config.voice.rate,
         speak_answers: config.voice.speak_answers,
         ready: crate::voice::assets::ready(&app, &config.voice.voice),
+        azure_key: if config.voice.azure_key.is_empty() {
+            String::new()
+        } else {
+            "••••••••".into()
+        },
+        azure_region: config.voice.azure_region.clone(),
     }
 }
 
@@ -312,6 +323,16 @@ pub fn save_voice_settings(
         config.voice.input_device = settings.input_device;
         config.voice.rate = settings.rate;
         config.voice.speak_answers = settings.speak_answers;
+        // Пустое поле и маска означают «не менять»: сохранить маску вместо
+        // ключа значило бы потерять ключ.
+        let key = settings.azure_key.trim();
+        if !key.is_empty() && !key.starts_with('•') {
+            config.voice.azure_key = crate::secret::protect(key);
+        }
+        let region = settings.azure_region.trim().to_lowercase();
+        if !region.is_empty() {
+            config.voice.azure_region = region;
+        }
     }
     persist(&app, &state)?;
     // Пробуждение включили или выключили — перестраиваем слушателя сразу,
@@ -332,8 +353,17 @@ pub fn voice_list() -> serde_json::Value {
     };
     serde_json::json!({
         "piper": to_json(crate::voice::assets::VOICES),
-        "edge": to_json(crate::voice::edge_voices()),
+        "azure": to_json(crate::voice::azure_voices()),
     })
+}
+
+/// Пробный запрос к Azure — для кнопки «Послушать»: озвучивание при неудаче
+/// тихо переходит на свой голос, а человеку нужна причина.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn azure_check(state: State<'_, AppState>) -> Result<(), String> {
+    let config = state.config().voice.clone();
+    crate::voice::check_azure(&config).await
 }
 
 /// Скачивает синтезатор и выбранный голос.
@@ -1206,6 +1236,19 @@ pub fn learn_oral(app: AppHandle, course: String, topic: Option<String>) -> Resu
 #[tauri::command]
 pub fn learn_discuss(app: AppHandle, course: String, topic: String) -> Result<(), String> {
     let text = crate::learning::discuss(&course, &topic)?;
+    crate::say_then_listen(&app, text);
+    Ok(())
+}
+
+/// Обсудить один вопрос: после проверки, прочитав эталон.
+#[tauri::command]
+pub fn learn_discuss_question(
+    app: AppHandle,
+    course: String,
+    question: String,
+    answer: String,
+) -> Result<(), String> {
+    let text = crate::learning::discuss_question(&course, &question, &answer)?;
     crate::say_then_listen(&app, text);
     Ok(())
 }

@@ -1142,7 +1142,7 @@ impl AiProvider for HttpProvider {
                              in English."
                         ),
                         "en" => format!(
-                            "Your name is Noa. The user is asking a follow-up about the term \
+                            "Your name is Noa. The user is asking a follow-up about \
                              “{term}”. Answer in one or two short casual sentences, plain \
                              text, no JSON, no offers of further help. \
                              Answer in English, even if the term itself is in another language."
@@ -1166,7 +1166,7 @@ impl AiProvider for HttpProvider {
                              по-русски."
                         ),
                         _ => format!(
-                            "Тебя зовут Ноа. Пользователь уточняет ранее объяснённый термин \
+                            "Тебя зовут Ноа. Пользователь уточняет то, о чём шла речь, — \
                              «{term}». Отвечай одной-двумя короткими фразами, разговорно, \
                              обычным текстом, без JSON и без предложений помочь ещё. \
                              Отвечай по-русски, даже если сам термин на другом языке."

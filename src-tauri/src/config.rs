@@ -355,7 +355,8 @@ impl Default for StartupConfig {
 pub struct VoiceConfig {
     /// Озвучивать ли вообще. Выключенный голос не качает ни синтезатор, ни голоса.
     pub enabled: bool,
-    /// `piper` — на своём компьютере, `edge` — нейроголоса Microsoft по сети.
+    /// `piper` — на своём компьютере, `azure` — нейроголоса Microsoft через
+    /// Azure Speech по ключу.
     pub engine: String,
     /// Голос Piper, например `ru_RU-irina-medium`.
     pub voice: String,
@@ -363,6 +364,10 @@ pub struct VoiceConfig {
     /// голосов у способов разные, и переключение туда-обратно не должно
     /// каждый раз сбрасывать выбор.
     pub edge_voice: String,
+    /// Ключ службы Azure Speech. Хранится зашифрованным (DPAPI), как токен бота.
+    pub azure_key: String,
+    /// Регион ресурса Azure Speech, например `westeurope`.
+    pub azure_region: String,
     /// Просыпаться на обращение «хэй, ноа», не дожидаясь клавиш.
     ///
     /// Означает постоянно открытый микрофон: программа режет поток на фразы
@@ -403,6 +408,8 @@ impl Default for VoiceConfig {
             // только для настольных систем, а настройки общие для всех.
             voice: "ru_RU-irina-medium".into(),
             edge_voice: "ru-RU-SvetlanaNeural".into(),
+            azure_key: String::new(),
+            azure_region: "westeurope".into(),
             wake_word: true,
             input_device: String::new(),
             rate: 1.0,

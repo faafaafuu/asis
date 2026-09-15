@@ -4,8 +4,8 @@
 //!
 //!   `piper` — на этом же компьютере. Ничего не уходит наружу, работает без
 //!     интернета. Голос живой, но слышно, что синтезированный.
-//!   `edge`  — нейроголоса Microsoft. Звучат почти неотличимо от человека, но
-//!     это сеть, чужой сервер и недокументированный протокол (см. edge.rs).
+//!   `azure` — нейроголоса Microsoft через Azure Speech по ключу. Звучат почти
+//!     неотличимо от человека, но это сеть и чужой сервер (см. azure.rs).
 //!
 //! Умолчание — `piper`, по той же причине, по какой объяснения по умолчанию даёт
 //! своя модель: работает всегда и ни от кого не зависит.
@@ -13,7 +13,7 @@
 pub mod assets;
 mod audio;
 pub mod hotkey;
-mod edge;
+mod azure;
 mod piper;
 pub mod stt;
 pub mod whisper;
@@ -30,17 +30,20 @@ pub async fn speak(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<
     }
 
     match config.engine.as_str() {
-        "edge" => match edge::speak(&config.edge_voice, &text).await {
-            Ok(()) => Ok(()),
-            // Онлайн-голоса ещё не написаны, и выбрать их в настройках можно.
-            // Молчать из-за этого нельзя: человек просил прочитать вслух, а не
-            // выбрать способ синтеза. Читаем своим голосом и говорим об этом
-            // в журнал — чтобы «почему звучит не тот голос» было объяснимо.
-            Err(err) => {
-                log::warn!("{err}; читаю своим голосом");
-                piper::speak(app, &config.voice, config.rate, &text)
+        "azure" => {
+            // Прежняя фраза обрывается, как и у Piper: новый ответ важнее.
+            stop();
+            let key = crate::secret::reveal(&config.azure_key);
+            match azure::speak(&key, &config.azure_region, &config.edge_voice, config.rate, &text).await {
+                Ok(()) => Ok(()),
+                // Сеть, ключ, лимит — молчать из-за этого нельзя: человек просил
+                // прочитать вслух. Читаем своим голосом, причину — в журнал.
+                Err(err) => {
+                    log::warn!("голос Azure: {err}; читаю своим голосом");
+                    piper::speak(app, &config.voice, config.rate, &text)
+                }
             }
-        },
+        }
         _ => piper::speak(app, &config.voice, config.rate, &text),
     }
 }
@@ -54,10 +57,19 @@ pub fn synthesize(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<V
     piper::synthesize(app, &config.voice, config.rate, &text)
 }
 
-/// Список онлайн-голосов. Через обёртку: сам модуль edge закрытый, наружу
+/// Список онлайн-голосов. Через обёртку: сам модуль azure закрытый, наружу
 /// торчит только то, что нужно окну настройки.
-pub fn edge_voices() -> &'static [(&'static str, &'static str)] {
-    edge::VOICES
+pub fn azure_voices() -> &'static [(&'static str, &'static str)] {
+    azure::VOICES
+}
+
+/// Пробный запрос к Azure. Озвучивание при неудаче тихо переходит на свой
+/// голос, а окну настройки нужна сама причина.
+pub async fn check_azure(config: &VoiceConfig) -> Result<(), String> {
+    let key = crate::secret::reveal(&config.azure_key);
+    azure::synthesize(&key, &config.azure_region, &config.edge_voice, config.rate, "Проверка.")
+        .await
+        .map(|_| ())
 }
 
 /// Насколько громко звучит речь прямо сейчас: от 0 до 1.
@@ -112,7 +124,7 @@ pub fn chime() {
 /// Замолчать: и звук, и работу, которая его готовит.
 pub fn stop() {
     piper::stop();
-    edge::stop();
+    azure::stop();
 }
 
 /// Готовит текст к произнесению.

@@ -358,10 +358,11 @@ ui.clipboardFallback.addEventListener("change", async () => {
 /* ── Голос ──────────────────────────────────────────────────────────────── */
 
 // Списки голосов приходят из Rust: там же лежит и то, что скачано.
-let voiceLists = { piper: [], edge: [] };
+let voiceLists = { piper: [], azure: [] };
 
 function fillVoiceList() {
-  const engine = ui.voiceEngine.value === "edge" ? "edge" : "piper";
+  const engine = ui.voiceEngine.value === "azure" ? "azure" : "piper";
+  ui.azureFields.hidden = engine !== "azure";
   const list = voiceLists[engine] ?? [];
   const chosen = ui.voiceName.value;
 
@@ -386,12 +387,15 @@ async function loadVoice() {
     ui.voiceEnabled.checked = settings.enabled;
     ui.voiceEngine.value = settings.engine;
     fillVoiceList();
-    ui.voiceName.value = settings.engine === "edge" ? settings.edgeVoice : settings.voice;
+    ui.voiceName.value = settings.engine === "azure" ? settings.edgeVoice : settings.voice;
+    ui.azureRegion.value = settings.azureRegion || "";
+    ui.azureKey.value = "";
+    ui.azureKey.placeholder = settings.azureKey ? "ключ сохранён" : "ключ из «Ключи и конечная точка»";
     ui.voiceRate.value = String(settings.rate ?? 1);
     ui.voiceRateValue.textContent = "×" + Number(ui.voiceRate.value).toFixed(1);
     ui.voiceFields.hidden = !settings.enabled;
     // Голос не скачан — предлагаем скачать, а не делаем вид, что всё готово.
-    ui.voiceDownload.hidden = settings.ready || settings.engine === "edge";
+    ui.voiceDownload.hidden = settings.ready || settings.engine === "azure";
   } catch {
     /* окно открыто вне приложения */
   }
@@ -406,7 +410,10 @@ async function saveVoice() {
     // Голос у каждого способа свой: пишем только тот, который сейчас виден,
     // второй оставляем как был.
     voice: engine === "piper" ? ui.voiceName.value : undefined,
-    edgeVoice: engine === "edge" ? ui.voiceName.value : undefined,
+    edgeVoice: engine === "azure" ? ui.voiceName.value : undefined,
+    // Пусто — ключ не меняется: в окно он приходит только маской.
+    azureKey: ui.azureKey.value.trim(),
+    azureRegion: ui.azureRegion.value.trim(),
     wakeWord: ui.wakeWord.checked,
     inputDevice: ui.speechDevice.value,
     rate: Number(ui.voiceRate.value),
@@ -418,7 +425,11 @@ async function saveVoice() {
     settings.edgeVoice ??= current.edgeVoice;
     settings.speakAnswers = current.speakAnswers;
     await api.invoke("save_voice_settings", { settings });
-    ui.voiceDownload.hidden = engine === "edge" || (await api.invoke("voice_settings")).ready;
+    if (settings.azureKey) {
+      ui.azureKey.value = "";
+      ui.azureKey.placeholder = "ключ сохранён";
+    }
+    ui.voiceDownload.hidden = engine === "azure" || (await api.invoke("voice_settings")).ready;
   } catch (err) {
     ui.voiceStatus.textContent = String(err);
   }
@@ -433,6 +444,8 @@ ui.voiceEngine.addEventListener("change", () => {
   saveVoice();
 });
 ui.voiceName.addEventListener("change", saveVoice);
+ui.azureKey.addEventListener("change", saveVoice);
+ui.azureRegion.addEventListener("change", saveVoice);
 ui.voiceRate.addEventListener("input", () => {
   ui.voiceRateValue.textContent = "×" + Number(ui.voiceRate.value).toFixed(1);
 });
@@ -443,6 +456,15 @@ ui.voiceTest.addEventListener("click", async () => {
   ui.voiceStatus.textContent = "";
   try {
     await saveVoice();
+    // У Azure сначала пробный запрос: при неудаче озвучивание тихо уйдёт на
+    // свой голос, и без этого человек не узнал бы почему.
+    if (ui.voiceEngine.value === "azure") {
+      try {
+        await api.invoke("azure_check");
+      } catch (err) {
+        ui.voiceStatus.textContent = `${err} — пока звучит свой голос.`;
+      }
+    }
     await api.invoke("voice_speak", { text: t("voice.sample") });
   } catch (err) {
     ui.voiceStatus.textContent = String(err);
