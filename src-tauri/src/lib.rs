@@ -595,6 +595,9 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             // Попрощались, не начав: разговор и не начинаем.
                             Some(text) if is_farewell(&text) => {
                                 log::info!("попрощались («{text}») — не начинаю разговор");
+                                if let Some(summary) = learning::stop_quiz() {
+                                    respond(&app, summary);
+                                }
                                 overlay::hide_hud(&app);
                                 voice::chime();
                             }
@@ -1369,6 +1372,10 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                 match hear(&app, wav) {
                     Some(text) if is_farewell(&text) => {
                         log::info!("попрощались («{text}») — разговор окончен");
+                        // Шёл опрос по курсу — прощание его заканчивает с итогом.
+                        if let Some(summary) = learning::stop_quiz() {
+                            respond(&app, summary);
+                        }
                         break;
                     }
                     // Распоряжение о задачах выполняется здесь же и до модели:
@@ -1980,7 +1987,12 @@ pub(crate) fn ask(app: &tauri::AppHandle, text: String) {
         .spawn(move || {
             log::info!("фраза из командной строки: «{text}»");
             begin_turn();
-            if !is_farewell(&text) && !handled_as_task(&app, &text) {
+            if is_farewell(&text) {
+                // Прощание заканчивает и опрос по курсу — с итогом.
+                if let Some(summary) = learning::stop_quiz() {
+                    respond(&app, summary);
+                }
+            } else if !handled_as_task(&app, &text) {
                 answer_aloud(&app, &text);
             }
             end_turn();

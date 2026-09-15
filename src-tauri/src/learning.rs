@@ -747,9 +747,9 @@ struct Quiz {
 
 static QUIZ: Mutex<Option<Quiz>> = Mutex::new(None);
 
-/// Опрос, брошенный на полуслове, забывается: через четверть часа ответ на
-/// него — уже просто фраза.
-const QUIZ_FORGET: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+/// Опрос, брошенный на полуслове, забывается: через пять минут без ответа
+/// сказанное — уже новая просьба, а не ответ на давний вопрос.
+const QUIZ_FORGET: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// Курс и тема по сказанному: «докер», «девопс», «кубер».
 pub fn find(said: &str) -> (Option<&'static Course>, Option<&'static Topic>) {
@@ -890,6 +890,29 @@ fn spoken(q: &Question) -> String {
     format!("{} Варианты — {options}.", q.q)
 }
 
+/// Заканчивает опрос и отдаёт итог. `None` — опроса не было.
+///
+/// Зовётся и на прощание: «хватит» и «спасибо» ловит проверка прощания
+/// раньше, чем фраза доходит до опроса, — итог всё равно должен прозвучать,
+/// а опрос — закончиться, иначе следующая фраза сошла бы за ответ.
+pub fn stop_quiz() -> Option<String> {
+    let quiz = QUIZ.lock().unwrap_or_else(|err| err.into_inner()).take()?;
+    if quiz.at.elapsed() >= QUIZ_FORGET {
+        return None;
+    }
+    let course = course(&quiz.course).ok()?;
+    Some(if quiz.asked == 0 {
+        "Закончили опрос.".into()
+    } else {
+        format!(
+            "Закончили: верно {} из {}. {}",
+            quiz.right,
+            quiz.asked,
+            summary(course)
+        )
+    })
+}
+
 /// Ответ на вопрос опроса. `None` — опроса нет, фраза не к нему.
 pub async fn quiz_answer(app: &AppHandle, said: &str) -> Option<String> {
     let (course_id, topic_id, question_id, asked, right) = {
@@ -917,12 +940,7 @@ pub async fn quiz_answer(app: &AppHandle, said: &str) -> Option<String> {
 
     const STOP: &[&str] = &["хватит", "стоп", "закончим", "заканчиваем", "достаточно", "устал"];
     if words.len() <= 4 && words.iter().any(|word| STOP.contains(word)) {
-        *QUIZ.lock().unwrap_or_else(|err| err.into_inner()) = None;
-        return Some(if asked == 0 {
-            "Закончили.".into()
-        } else {
-            format!("Закончили: верно {right} из {asked}. {}", summary(course))
-        });
+        return stop_quiz();
     }
 
     let skip = lower.contains("не знаю") || lower.contains("пропус") || lower.contains("дальше");
@@ -933,7 +951,9 @@ pub async fn quiz_answer(app: &AppHandle, said: &str) -> Option<String> {
             q.reference.clone()
         };
         let _ = self_grade(&course_id, &q.id, false);
-        (format!("Правильный ответ: {answer}"), false)
+        let answer = answer.trim_end();
+        let end = if answer.ends_with(['.', '!', '?']) { "" } else { "." };
+        (format!("Правильный ответ: {answer}{end}"), false)
     } else {
         let answer = serde_json::Value::String(said.to_string());
         let verdict = check(app, &course_id, &q.id, &answer).await.ok()?;
