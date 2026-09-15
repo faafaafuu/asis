@@ -252,7 +252,8 @@ unsafe extern "system" fn keyboard_proc(
         && down
         && (VOICE_ACTIVE.load(Ordering::Relaxed)
             || RECORDING.load(Ordering::Relaxed)
-            || crate::voice::speaking())
+            || crate::voice::speaking()
+            || crate::alarms::ringing())
     {
         if let Some(tx) = CANCELS.get() {
             let _ = tx.send(());

@@ -294,6 +294,16 @@ function renderLesson(root, topic) {
   root.append(lesson);
   const actions = el("div", "actions");
   actions.append(
+    button("💬 Обсудить тему", async () => {
+      try {
+        await api?.invoke("learn_discuss", { course: course.id, topic: topic.id });
+        showNote(root, "Ноа говорит — спрашивай голосом. «Спроси меня» — вопрос по теме, «спасибо» — закончить.");
+      } catch (err) {
+        showNote(root, String(err));
+      }
+    }, true),
+  );
+  actions.append(
     button("Прочитал — к задачам", async () => {
       await api?.invoke("learn_read", { course: course.id, topic: topic.id }).catch(() => {});
       await refreshOverview();
@@ -325,9 +335,49 @@ function answerField(q, name) {
     };
     return { node: box, read };
   }
+  const box = el("div", "answer-box");
   const area = el("textarea", "answer");
-  area.placeholder = "Ваш ответ своими словами — как на собеседовании";
-  return { node: area, read: () => area.value.trim() };
+  area.placeholder = "Ваш ответ своими словами — как на собеседовании. Можно надиктовать.";
+  box.append(area, dictateButton(area));
+  return { node: box, read: () => area.value.trim() };
+}
+
+/** Запись идёт — вторая кнопка не начинает новую. */
+let dictating = null;
+
+/**
+ * «Надиктовать»: первый щелчок начинает запись, второй — останавливает;
+ * расшифровка дописывается в поле ответа.
+ */
+function dictateButton(area) {
+  const node = button("🎙 Надиктовать", async () => {
+    if (!api) return;
+    if (dictating && dictating !== node) return;
+    if (!dictating) {
+      try {
+        await api.invoke("learn_dictate_start");
+        dictating = node;
+        node.textContent = "■ Готово — распознать";
+      } catch (err) {
+        node.textContent = String(err);
+      }
+      return;
+    }
+    node.disabled = true;
+    node.textContent = "Распознаю…";
+    try {
+      const text = await api.invoke("learn_dictate_stop");
+      if (text) area.value = area.value ? `${area.value.trim()} ${text}` : text;
+      node.textContent = "🎙 Надиктовать ещё";
+    } catch (err) {
+      node.textContent = `🎙 ${err}`;
+    } finally {
+      dictating = null;
+      node.disabled = false;
+    }
+  }, true);
+  node.classList.add("dictate");
+  return node;
 }
 
 function renderQuestions(root, questions, label) {
@@ -440,7 +490,27 @@ function renderExamIntro(root, scope, best, pass) {
   root.append(lines);
   const actions = el("div", "actions");
   actions.append(button("Начать", () => startExam(scope)));
+  actions.append(
+    button("🎙 Сдать устно", async () => {
+      try {
+        await api?.invoke("learn_oral", { course: course.id, topic: scope === "final" ? null : scope });
+        showNote(root, "Ноа задаёт вопросы вслух — отвечай голосом, без клавиш. «Не знаю» — скажет ответ, «хватит» — итог.");
+      } catch (err) {
+        showNote(root, String(err));
+      }
+    }, true),
+  );
   root.append(actions);
+}
+
+/** Строка-подсказка под действиями страницы. */
+function showNote(root, text) {
+  let note = root.querySelector(".page-note");
+  if (!note) {
+    note = el("p", "note page-note");
+    root.append(note);
+  }
+  note.textContent = text;
 }
 
 async function startExam(scope) {

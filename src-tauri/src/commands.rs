@@ -1079,6 +1079,46 @@ pub fn close_learning(app: AppHandle) {
     crate::overlay::hide_learning(&app);
 }
 
+/// Начинает запись ответа голосом — кнопка «Надиктовать» в окне обучения.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn learn_dictate_start(app: AppHandle) -> Result<(), String> {
+    // Микрофон один: ожидание имени уступает записи.
+    crate::stop_wake();
+    crate::voice::whisper::warm(&app);
+    crate::voice::stt::start(&crate::input_device(&app));
+    Ok(())
+}
+
+/// Останавливает запись и отдаёт расшифровку.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn learn_dictate_stop(app: AppHandle) -> Result<String, String> {
+    let wav = crate::voice::stt::stop();
+    crate::start_wake(&app);
+    let wav = wav.ok_or("Ничего не записалось — проверьте микрофон в настройках.")?;
+    let text = crate::voice::whisper::transcribe(&app, wav, "ru", "").await?;
+    Ok(text.trim().to_string())
+}
+
+/// Устный зачёт: Ноа задаёт вопросы темы вслух и слушает ответы.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn learn_oral(app: AppHandle, course: String, topic: Option<String>) -> Result<(), String> {
+    let text = crate::learning::oral(&course, topic.as_deref())?;
+    crate::say_then_listen(&app, text);
+    Ok(())
+}
+
+/// Обсуждение темы голосом: модель отвечает, зная урок.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn learn_discuss(app: AppHandle, course: String, topic: String) -> Result<(), String> {
+    let text = crate::learning::discuss(&course, &topic)?;
+    crate::say_then_listen(&app, text);
+    Ok(())
+}
+
 /// Что сейчас с заказом. `null` — заказа ещё не было.
 #[tauri::command]
 pub fn order_state() -> Option<crate::order::Order> {

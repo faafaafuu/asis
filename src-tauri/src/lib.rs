@@ -31,6 +31,8 @@ mod telegram;
 mod timers;
 mod shots;
 mod learning;
+mod alarms;
+mod mcp;
 mod review;
 mod secret;
 mod tasks;
@@ -54,6 +56,14 @@ pub fn run() {
         // а работающая по нему закрывается сама и убирает за собой значок в трее.
         if std::env::args().any(|arg| arg == "--quit") {
             instance::request_quit();
+            return;
+        }
+
+        // `--mcp` — Ноа как MCP-сервер для Claude и других клиентов: без окон
+        // и голоса, только инструменты через стандартные ввод и вывод. Отдельный
+        // процесс рядом с работающей копией, поэтому — до проверки «уже запущена».
+        if std::env::args().any(|arg| arg == "--mcp") {
+            mcp::serve();
             return;
         }
 
@@ -129,7 +139,8 @@ pub fn run() {
                 spend::load(dir.clone());
                 tasks::load(dir.clone());
                 watchlist::load(dir.clone());
-                learning::load(dir);
+                learning::load(dir.clone());
+                alarms::load(dir);
             }
             let config = Config::load(config_dir);
             log::info!("AI-провайдер: {}", config.ai.provider);
@@ -197,6 +208,7 @@ pub fn run() {
                 review::watch(app.handle());
                 watchlist::watch_alerts(app.handle().clone());
                 telegram::listen(app.handle().clone());
+                alarms::watch(app.handle().clone());
                 start_wake(app.handle());
             }
 
@@ -254,6 +266,10 @@ pub fn run() {
             commands::learn_exam,
             commands::learn_submit,
             commands::close_learning,
+            commands::learn_dictate_start,
+            commands::learn_dictate_stop,
+            commands::learn_oral,
+            commands::learn_discuss,
             commands::watch_chart,
             commands::close_watchlist,
             commands::order_state,
@@ -395,6 +411,7 @@ fn cancel_everything(app: &tauri::AppHandle) {
     use tauri::Emitter;
 
     log::info!("Esc: останавливаю речь, разговор и ожидание ответа");
+    alarms::stop();
     CANCELS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     // Запись по клавише ещё идёт — выбрасываем её. Отпущенный пробел после
     // этого вопроса уже не отправит: иначе он забрал бы звук у ожидания имени
@@ -600,6 +617,9 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             // Попрощались, не начав: разговор и не начинаем.
                             Some(text) if is_farewell(&text) => {
                                 log::info!("попрощались («{text}») — не начинаю разговор");
+                                if alarms::stop() {
+                                    respond(&app, "Выключил будильник.".into());
+                                }
                                 if let Some(summary) = learning::stop_quiz() {
                                     respond(&app, summary);
                                 }
@@ -727,7 +747,7 @@ fn show_speaking(app: &tauri::AppHandle) {
 
 /// Микрофон из настроек.
 #[cfg(desktop)]
-fn input_device(app: &tauri::AppHandle) -> String {
+pub(crate) fn input_device(app: &tauri::AppHandle) -> String {
     let state = app.state::<AppState>();
     let device = state.config().voice.input_device.clone();
     device
@@ -826,8 +846,9 @@ fn hear_hinted(app: &tauri::AppHandle, wav: Vec<u8>, hint: &str) -> Option<Strin
 fn answer_aloud(app: &tauri::AppHandle, text: &str) {
     use tauri::Emitter;
 
-    // Окно с ответами выключено — отвечаем только голосом.
-    if !show_window(app) {
+    // Окно с ответами выключено или идёт обсуждение темы курса — отвечаем
+    // голосом: обсуждение знает урок, а окно ответов о нём не знает.
+    if !show_window(app) || learning::discussion().is_some() {
         answer_without_window(app, text);
         return;
     }
@@ -1326,6 +1347,21 @@ fn ambient_task(app: &tauri::AppHandle, text: &str) -> bool {
     handled
 }
 
+/// Говорит и сразу начинает разговор без рук — для устного зачёта и
+/// обсуждения темы из окна обучения.
+#[cfg(desktop)]
+pub(crate) fn say_then_listen(app: &tauri::AppHandle, text: String) {
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-oral".into())
+        .spawn(move || {
+            stop_wake();
+            speak_with_hud(&app, text, true);
+            start_conversation(&app);
+        })
+        .ok();
+}
+
 /// Начинает разговор без рук: слушаем, отвечаем, снова слушаем.
 #[cfg(desktop)]
 pub(crate) fn start_conversation(app: &tauri::AppHandle) {
@@ -1393,6 +1429,9 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                 match hear(&app, wav) {
                     Some(text) if is_farewell(&text) => {
                         log::info!("попрощались («{text}») — разговор окончен");
+                        if alarms::stop() {
+                            respond(&app, "Выключил будильник.".into());
+                        }
                         // Шёл опрос по курсу — прощание его заканчивает с итогом.
                         if let Some(summary) = learning::stop_quiz() {
                             respond(&app, summary);
@@ -1770,6 +1809,7 @@ pub(crate) fn stop_conversation(app: &tauri::AppHandle) {
 /// звали бы друг друга по кругу.
 #[cfg(desktop)]
 fn finish_conversation(app: &tauri::AppHandle) {
+    learning::end_discussion();
     end_conversation(app, true, true);
 }
 
@@ -2039,6 +2079,10 @@ pub(crate) fn ask(app: &tauri::AppHandle, text: String) {
             log::info!("фраза из командной строки: «{text}»");
             begin_turn();
             if is_farewell(&text) {
+                // «Стоп» выключает звонящий будильник.
+                if alarms::stop() {
+                    respond(&app, "Выключил будильник.".into());
+                }
                 // Прощание заканчивает и опрос по курсу — с итогом.
                 if let Some(summary) = learning::stop_quiz() {
                     respond(&app, summary);
@@ -2106,8 +2150,10 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
         (state.provider(), limit)
     };
     let history = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner()).clone();
+    // Обсуждают тему курса — модель отвечает, зная урок.
+    let (term, context) = learning::discussion().unwrap_or_default();
     let asked = tauri::async_runtime::block_on(async {
-        tokio::time::timeout(limit, provider.ask("", "", &history, question)).await
+        tokio::time::timeout(limit, provider.ask(&term, &context, &history, question)).await
     });
     let answer = match asked {
         Ok(Ok(answer)) if !answer.trim().is_empty() => answer.trim().to_string(),

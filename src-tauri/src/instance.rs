@@ -55,6 +55,23 @@ pub fn request_ask(text: &str) {
     }
 }
 
+/// Запущена ли программа: занят ли её мьютекс единственной копии.
+pub fn running() -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
+
+    // SAFETY: только открывает чужой мьютекс по имени и сразу закрывает.
+    unsafe {
+        match OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, MUTEX_NAME) {
+            Ok(handle) => {
+                let _ = CloseHandle(handle);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+}
+
 /// Занимает право быть единственной копией.
 ///
 /// `false` — программа уже запущена, этой копии следует завершиться; первой при этом

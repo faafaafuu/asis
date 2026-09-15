@@ -125,6 +125,10 @@ pub fn forget_pending() {
 ///
 /// `None` означает «это был обычный вопрос» — фразу надо обработать как всегда.
 pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
+    // Звонит будильник — сказанное почти наверняка к нему.
+    if let Some(reply) = ringing_reply(said) {
+        return Some(reply);
+    }
     // Напечатанное ждёт подтверждения: «да» — отправить, «нет» — оставить.
     if let Some(reply) = confirm_send(said) {
         return Some(reply);
@@ -1384,7 +1388,16 @@ fn timer_request(app: &AppHandle, said: &str, now: DateTime<Local>) -> Option<St
     if !timer && !alarm {
         return None;
     }
-    if starts(&["отмен", "выключ", "убер", "сними", "останов", "стоп"]) {
+    if starts(&["отмен", "выключ", "убер", "сними", "останов", "стоп", "удали"]) {
+        if alarm {
+            use chrono::Timelike;
+            let time = clock_time(&words, now).map(|at| (at.hour(), at.minute()));
+            return Some(match crate::alarms::remove(time) {
+                0 => "Таких будильников нет.".into(),
+                1 => "Убрал будильник.".into(),
+                count => format!("Убрал будильников: {count}."),
+            });
+        }
         return Some(match crate::timers::cancel_all() {
             0 => "Таймеров нет.".into(),
             1 => "Отменил.".into(),
@@ -1397,15 +1410,44 @@ fn timer_request(app: &AppHandle, said: &str, now: DateTime<Local>) -> Option<St
             Some(next) => format!("Осталось: {}.", spoken_span((next.at - now).num_seconds().max(1))),
         });
     }
+    if alarm && starts(&["каки", "покаж", "спис", "назов", "сколько"]) {
+        let list = crate::alarms::list();
+        return Some(if list.is_empty() {
+            "Будильников нет.".into()
+        } else {
+            let all = list.iter().map(|alarm| alarm.describe()).collect::<Vec<_>>();
+            format!("Будильники: {}.", all.join("; "))
+        });
+    }
     // «Таймеры в JavaScript» — вопрос, а не просьба: нужна просьба завести.
     if !starts(&["постав", "завед", "засек", "запуст", "включ", "сделай", "разбуд", "нужен", "давай"]) {
         return None;
     }
     if alarm {
-        let Some(at) = clock_time(&words, now) else {
+        use chrono::Timelike;
+        // «Разбуди через двадцать минут» — тот же будильник, только время
+        // названо не на часах.
+        let after = words
+            .iter()
+            .position(|word| *word == "через")
+            .and_then(|at| span_seconds(&words[at + 1..]))
+            // Будильник помнит время до минуты, поэтому округляем вверх:
+            // «через минуту» в 20:46:54 — это 20:48, а не 20:47, иначе он
+            // зазвонил бы через шесть секунд.
+            .map(|seconds| {
+                let at = now + Duration::seconds(seconds);
+                match at.second() {
+                    0 => at,
+                    second => at + Duration::seconds(60 - i64::from(second)),
+                }
+            });
+        let Some(at) = clock_time(&words, now).or(after) else {
             return Some("Во сколько разбудить? Скажите, например: «разбуди в семь утра».".into());
         };
-        crate::timers::start(app, at, format!("Будильник — {}.", at.format("%H:%M")));
+        let added = crate::alarms::add(at.hour(), at.minute(), crate::alarms::days_of(said), "", now);
+        if !added.days.is_empty() {
+            return Some(format!("Будильник: {}.", added.describe()));
+        }
         let day = if at.date_naive() == now.date_naive() { "" } else { "завтра " };
         return Some(format!("Разбужу {day}в {}.", at.format("%H:%M")));
     }
@@ -1421,6 +1463,30 @@ fn timer_request(app: &AppHandle, said: &str, now: DateTime<Local>) -> Option<St
     let at = now + Duration::seconds(seconds);
     crate::timers::start(app, at, format!("Время вышло — таймер на {span}."));
     Some(format!("Засёк {span}. Позвоню в {}.", at.format("%H:%M")))
+}
+
+/// Звонит будильник: «стоп», «встаю» — выключить, «отложи на десять минут»,
+/// «ещё пять минут» — отложить. Пока звенит, любая фраза — к нему.
+fn ringing_reply(said: &str) -> Option<String> {
+    if !crate::alarms::ringing() {
+        return None;
+    }
+    let owned = words_of(said);
+    let words: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let later = words
+        .iter()
+        .any(|word| word.starts_with("отлож") || matches!(*word, "еще" | "через" | "попозже" | "позже"));
+    if later {
+        let minutes = words
+            .iter()
+            .position(|word| matches!(*word, "на" | "через" | "еще"))
+            .and_then(|at| span_seconds(&words[at + 1..]))
+            .map(|seconds| (seconds / 60).max(1))
+            .unwrap_or(crate::alarms::SNOOZE_MINUTES);
+        return crate::alarms::snooze(minutes).map(|at| format!("Отложил до {at}."));
+    }
+    crate::alarms::stop();
+    Some("Выключил будильник.".into())
 }
 
 /// Длительность в секундах в начале слов: «10 минут», «полчаса», «час»,

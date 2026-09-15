@@ -109,13 +109,14 @@ pub struct Course {
     /// Сквозные вопросы финального экзамена — на стык тем.
     #[serde(default, rename = "final")]
     pub final_exam: Vec<Question>,
-    #[serde(skip_deserializing)]
+    /// Во встроенных курсах темы лежат отдельными файлами, в своих — здесь.
+    #[serde(default)]
     pub topics: Vec<Topic>,
 }
 
-/// Все курсы. Разбираются один раз; испорченный файл пропускается с записью
-/// в журнал — остальные курсы работают.
-pub fn courses() -> &'static [Course] {
+/// Встроенные курсы. Разбираются один раз; испорченный файл пропускается с
+/// записью в журнал — остальные курсы работают.
+fn builtin() -> &'static [Course] {
     static COURSES: OnceLock<Vec<Course>> = OnceLock::new();
     COURSES.get_or_init(|| {
         BUILT_IN
@@ -140,12 +141,230 @@ pub fn courses() -> &'static [Course] {
     })
 }
 
-fn course(id: &str) -> Result<&'static Course, String> {
+/// Все курсы: встроенные и свои — созданные через MCP (Claude и другие
+/// клиенты) и лежащие в папке `courses` рядом с прогрессом. Свои читаются при
+/// каждом обращении: курс, собранный в Claude, появляется в окне сразу.
+pub fn courses() -> Vec<Course> {
+    let mut all = builtin().to_vec();
+    for course in user_courses() {
+        all.retain(|known| known.id != course.id);
+        all.push(course);
+    }
+    all
+}
+
+/// Папка своих курсов — рядом с файлом прогресса.
+fn user_dir() -> Option<PathBuf> {
+    let guard = STORE.lock().unwrap_or_else(|err| err.into_inner());
+    let (path, _) = guard.as_ref()?;
+    path.parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map(|dir| dir.join("courses"))
+}
+
+fn user_courses() -> Vec<Course> {
+    let Some(dir) = user_dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<Course> = entries
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                return None;
+            }
+            let text = std::fs::read_to_string(&path).ok()?;
+            match serde_json::from_str::<Course>(&text) {
+                Ok(course) => Some(course),
+                Err(err) => {
+                    log::warn!("свой курс {} не разобрался: {err}", path.display());
+                    None
+                }
+            }
+        })
+        .collect();
+    found.sort_by(|a, b| a.title.cmp(&b.title));
+    found
+}
+
+fn course(id: &str) -> Result<Course, String> {
     courses()
-        .iter()
+        .into_iter()
         .find(|course| course.id == id)
         .ok_or_else(|| "Такого курса нет.".to_string())
 }
+
+/// Что не так с курсом. Пусто — курс годится.
+pub fn validate(course: &Course) -> Vec<String> {
+    let mut problems = Vec::new();
+    let id_ok = |id: &str| {
+        !id.trim().is_empty()
+            && id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    };
+    if !id_ok(&course.id) {
+        problems.push("id курса — латиница, цифры, дефис или подчёркивание".to_string());
+    }
+    if course.title.trim().is_empty() {
+        problems.push("у курса нет названия (title)".into());
+    }
+    if course.topics.is_empty() {
+        problems.push("в курсе нет тем (topics)".into());
+    }
+    let mut topic_ids = std::collections::HashSet::new();
+    for topic in &course.topics {
+        if !id_ok(&topic.id) {
+            problems.push(format!("тема «{}»: id — латиница, цифры, дефис", topic.title));
+        }
+        if !topic_ids.insert(topic.id.clone()) {
+            problems.push(format!("тема {} повторяется", topic.id));
+        }
+        if topic.lesson.trim().chars().count() < 200 {
+            problems.push(format!("{}: урок слишком короткий (меньше 200 знаков)", topic.id));
+        }
+        if topic.tasks.is_empty() {
+            problems.push(format!("{}: нет практических задач (tasks)", topic.id));
+        }
+        if topic.exam.is_empty() {
+            problems.push(format!("{}: нет вопросов мини-экзамена (exam)", topic.id));
+        }
+    }
+    let mut ids = std::collections::HashSet::new();
+    let questions = course
+        .topics
+        .iter()
+        .flat_map(|topic| topic.tasks.iter().chain(&topic.exam))
+        .chain(&course.final_exam);
+    for q in questions {
+        if !ids.insert(q.id.clone()) {
+            problems.push(format!("номер вопроса {} повторяется", q.id));
+        }
+        if q.q.trim().is_empty() {
+            problems.push(format!("{}: пустой вопрос", q.id));
+        }
+        match q.kind.as_str() {
+            "choice" => {
+                if q.options.len() < 2 {
+                    problems.push(format!("{}: меньше двух вариантов", q.id));
+                }
+                if !q.answer.is_some_and(|at| at < q.options.len()) {
+                    problems.push(format!("{}: answer — номер верного варианта, считая с нуля", q.id));
+                }
+            }
+            "open" => {
+                if q.points.is_empty() {
+                    problems.push(format!("{}: нет ключевых пунктов (points)", q.id));
+                }
+                if q.reference.trim().is_empty() {
+                    problems.push(format!("{}: нет образцового ответа (reference)", q.id));
+                }
+            }
+            other => problems.push(format!("{}: kind «{other}» — нужен choice или open", q.id)),
+        }
+    }
+    problems
+}
+
+/// Сохраняет свой курс — из MCP. Отдаёт итог или список ошибок.
+pub fn save_course(course: Course) -> Result<String, String> {
+    if builtin().iter().any(|known| known.id == course.id) {
+        return Err(format!("id «{}» занят встроенным курсом — выбери другой.", course.id));
+    }
+    let problems = validate(&course);
+    if !problems.is_empty() {
+        return Err(format!("Курс не принят:\n- {}", problems.join("\n- ")));
+    }
+    let dir = user_dir().ok_or("папка курсов не найдена")?;
+    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    let text = serde_json::to_string_pretty(&course).map_err(|err| err.to_string())?;
+    std::fs::write(dir.join(format!("{}.json", course.id)), text).map_err(|err| err.to_string())?;
+    let questions: usize = course
+        .topics
+        .iter()
+        .map(|topic| topic.tasks.len() + topic.exam.len())
+        .sum::<usize>()
+        + course.final_exam.len();
+    log::info!("свой курс «{}»: тем {}", course.title, course.topics.len());
+    Ok(format!(
+        "Курс «{}» сохранён: тем {}, вопросов {}. Он уже в окне «Обучение» Ноа.",
+        course.title,
+        course.topics.len(),
+        questions
+    ))
+}
+
+/// Добавляет тему в свой курс или заменяет тему с тем же id.
+pub fn add_topic(course_id: &str, topic: Topic) -> Result<String, String> {
+    if builtin().iter().any(|known| known.id == course_id) {
+        return Err("Во встроенный курс темы не добавляются — создай свой курс.".into());
+    }
+    let mut course = user_courses()
+        .into_iter()
+        .find(|course| course.id == course_id)
+        .ok_or_else(|| format!("Своего курса «{course_id}» нет — сначала create_course."))?;
+    let title = topic.title.clone();
+    match course.topics.iter_mut().find(|known| known.id == topic.id) {
+        Some(known) => *known = topic,
+        None => course.topics.push(topic),
+    }
+    save_course(course).map(|saved| format!("Тема «{title}» на месте. {saved}"))
+}
+
+/// Удаляет свой курс. Прогресс по нему остаётся — вдруг курс вернётся.
+pub fn delete_course(course_id: &str) -> Result<String, String> {
+    if builtin().iter().any(|known| known.id == course_id) {
+        return Err("Встроенный курс удалить нельзя.".into());
+    }
+    let dir = user_dir().ok_or("папка курсов не найдена")?;
+    let path = dir.join(format!("{course_id}.json"));
+    if !path.exists() {
+        return Err(format!("Своего курса «{course_id}» нет."));
+    }
+    std::fs::remove_file(&path).map_err(|err| err.to_string())?;
+    Ok(format!("Курс «{course_id}» удалён."))
+}
+
+/// Формат курса — для клиентов MCP, которые собирают курсы.
+pub const FORMAT: &str = r#"Курс Ноа — JSON-объект:
+{
+  "id": "chinese",                        // латиница, цифры, - и _; уникален
+  "title": "Китайский язык",
+  "aliases": ["китайский", "chinese"],    // как курс назовут голосом
+  "description": "Для кого курс и что внутри — пара предложений.",
+  "final": [ ...вопросы финального экзамена на стык тем... ],
+  "topics": [ тема, тема, ... ]
+}
+
+Тема:
+{
+  "id": "tones",
+  "title": "Тоны",
+  "aliases": ["тоны", "тон"],             // как тему назовут голосом: «погоняй меня по тонам»
+  "summary": "Одна строка: о чём тема.",
+  "lesson": "Урок в Markdown: ## подзаголовки, списки, `код`, **жирный**. 300–900 слов, по делу, с примерами.",
+  "tasks": [ 3–5 практических вопросов ],
+  "exam":  [ 6–10 вопросов мини-экзамена ]
+}
+
+Вопрос — одного из двух видов. id уникальны во всём курсе (например tones-t1, tones-e1).
+
+С вариантами:
+{ "id": "tones-e1", "kind": "choice", "q": "Сколько тонов в путунхуа?",
+  "options": ["Два", "Четыре", "Шесть", "Восемь"], "answer": 1,
+  "explain": "Четыре основных тона и нейтральный." }
+answer — номер верного варианта, СЧИТАЯ С НУЛЯ.
+
+Ответ своими словами:
+{ "id": "tones-t1", "kind": "open", "q": "Чем третий тон отличается от второго?",
+  "points": ["ключевой пункт 1", "ключевой пункт 2", "ключевой пункт 3"],
+  "reference": "Образцовый ответ целиком." }
+points — 2–5 ключевых пунктов: по ним Ноа ставит балл. reference — образцовый ответ.
+
+Проходной балл мини-экзамена — 70%, финального — 75%. В финал попадают вопросы "final"
+и по два вопроса из каждой темы. Задачи и ответы своими словами можно отвечать и голосом.
+Большой курс создавай по частям: create_course с одной-двумя темами, затем add_topic для
+каждой следующей."#;
 
 fn topic<'a>(course: &'a Course, id: &str) -> Result<&'a Topic, String> {
     course
@@ -370,7 +589,7 @@ pub struct TopicView {
 
 pub fn topic_view(course_id: &str, topic_id: &str) -> Result<TopicView, String> {
     let course = course(course_id)?;
-    let topic = topic(course, topic_id)?;
+    let topic = topic(&course, topic_id)?;
     with(course_id, |progress| progress.current = Some(topic_id.to_string()));
     let own = progress(course_id).topics.get(topic_id).cloned().unwrap_or_default();
     let mut shown = topic.clone();
@@ -380,7 +599,7 @@ pub fn topic_view(course_id: &str, topic_id: &str) -> Result<TopicView, String> 
         mistakes: own
             .mistakes
             .iter()
-            .filter_map(|id| question(course, id).map(|(q, _)| q.clone()))
+            .filter_map(|id| question(&course, id).map(|(q, _)| q.clone()))
             .collect(),
         scores: own.tasks,
         topic: shown,
@@ -390,7 +609,7 @@ pub fn topic_view(course_id: &str, topic_id: &str) -> Result<TopicView, String> 
 /// Урок прочитан.
 pub fn mark_read(course_id: &str, topic_id: &str) -> Result<(), String> {
     let course = course(course_id)?;
-    topic(course, topic_id)?;
+    topic(&course, topic_id)?;
     with(course_id, |progress| {
         progress.topics.entry(topic_id.to_string()).or_default().read = true;
         progress.current = Some(topic_id.to_string());
@@ -583,7 +802,7 @@ pub async fn check(
     answer: &serde_json::Value,
 ) -> Result<Verdict, String> {
     let course = course(course_id)?;
-    let (q, topic) = question(course, question_id).ok_or("Такого вопроса нет.")?;
+    let (q, topic) = question(&course, question_id).ok_or("Такого вопроса нет.")?;
     let verdict = grade(app, q, answer).await;
     if let Some(score) = verdict.score {
         let is_task = topic.is_some_and(|topic| topic.tasks.iter().any(|task| task.id == q.id));
@@ -607,7 +826,7 @@ pub async fn check(
 /// Оценка себя самим — когда модель не ответила.
 pub fn self_grade(course_id: &str, question_id: &str, knew: bool) -> Result<(), String> {
     let course = course(course_id)?;
-    let (q, topic) = question(course, question_id).ok_or("Такого вопроса нет.")?;
+    let (q, topic) = question(&course, question_id).ok_or("Такого вопроса нет.")?;
     let score = if knew { 100 } else { 0 };
     with(course_id, |progress| {
         if let Some(topic) = topic {
@@ -661,7 +880,7 @@ pub fn exam(course_id: &str, scope: &str) -> Result<Exam, String> {
             questions,
         });
     }
-    let topic = topic(course, scope)?;
+    let topic = topic(&course, scope)?;
     Ok(Exam {
         scope: topic.id.clone(),
         title: format!("Мини-экзамен: {}", topic.title),
@@ -697,7 +916,7 @@ pub async fn submit(
     };
     let mut items = Vec::new();
     for id in &asked {
-        let Some((q, _)) = question(course, id) else { continue };
+        let Some((q, _)) = question(&course, id) else { continue };
         let answer = answers.get(id).cloned().unwrap_or(serde_json::Value::Null);
         items.push(grade(app, q, &answer).await);
     }
@@ -710,7 +929,7 @@ pub async fn submit(
     let pass = exam.pass;
     with(course_id, |progress| {
         for item in &items {
-            if let (Some(score), Some((_, topic))) = (item.score, question(course, &item.id)) {
+            if let (Some(score), Some((_, topic))) = (item.score, question(&course, &item.id)) {
                 note_answer(progress, topic.map(|t| t.id.as_str()), &item.id, score);
             }
         }
@@ -752,7 +971,7 @@ static QUIZ: Mutex<Option<Quiz>> = Mutex::new(None);
 const QUIZ_FORGET: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// Курс и тема по сказанному: «докер», «девопс», «кубер».
-pub fn find(said: &str) -> (Option<&'static Course>, Option<&'static Topic>) {
+pub fn find(said: &str) -> (Option<Course>, Option<Topic>) {
     let lower = said.to_lowercase().replace('ё', "е");
     let matches = |title: &str, aliases: &[String]| {
         let title = title.to_lowercase().replace('ё', "е");
@@ -762,27 +981,103 @@ pub fn find(said: &str) -> (Option<&'static Course>, Option<&'static Topic>) {
                 !alias.is_empty() && lower.contains(&alias)
             })
     };
-    for course in courses() {
+    let all = courses();
+    for course in &all {
         if let Some(topic) = course.topics.iter().find(|t| matches(&t.title, &t.aliases)) {
-            return (Some(course), Some(topic));
+            return (Some(course.clone()), Some(topic.clone()));
         }
     }
-    let course = courses()
+    let course = all
         .iter()
         .find(|c| matches(&c.title, &c.aliases))
-        .or_else(|| courses().first());
+        .or_else(|| all.first())
+        .cloned();
     (course, None)
+}
+
+/// Тема, которую сейчас обсуждают голосом: курс, тема и что знает модель.
+struct Discussion {
+    course: String,
+    topic: String,
+    title: String,
+    context: String,
+}
+
+static DISCUSSION: Mutex<Option<Discussion>> = Mutex::new(None);
+
+/// Начинает обсуждение темы: модель отвечает, зная урок. Отдаёт, что сказать.
+pub fn discuss(course_id: &str, topic_id: &str) -> Result<String, String> {
+    let course = course(course_id)?;
+    let topic = topic(&course, topic_id)?;
+    // Урок целиком не нужен и не влезет в память маленькой модели: берётся
+    // начало — там главное — и ключевые пункты задач.
+    let lesson: String = topic.lesson.chars().take(2500).collect();
+    let points = topic
+        .tasks
+        .iter()
+        .flat_map(|task| task.points.iter())
+        .take(12)
+        .map(|point| format!("- {point}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    *DISCUSSION.lock().unwrap_or_else(|err| err.into_inner()) = Some(Discussion {
+        course: course.id.clone(),
+        topic: topic.id.clone(),
+        title: format!("{} (курс «{}»)", topic.title, course.title),
+        context: format!("Урок:\n{lesson}\n\nГлавное из задач:\n{points}"),
+    });
+    log::info!("обсуждаем тему «{}»", topic.title);
+    Ok(format!(
+        "Давай обсудим «{}». Спрашивай что угодно по теме — объясню и приведу примеры. \
+         Скажи «спроси меня» — задам вопрос; «спасибо» — закончим.",
+        topic.title
+    ))
+}
+
+/// О чём сейчас разговор: название и знания для модели.
+pub fn discussion() -> Option<(String, String)> {
+    DISCUSSION
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .as_ref()
+        .map(|talk| (talk.title.clone(), talk.context.clone()))
+}
+
+/// Разговор кончился — обсуждение тоже.
+pub fn end_discussion() {
+    DISCUSSION.lock().unwrap_or_else(|err| err.into_inner()).take();
+}
+
+/// Устный зачёт по теме (или по курсу): Ноа задаёт вопросы вслух.
+pub fn oral(course_id: &str, topic_id: Option<&str>) -> Result<String, String> {
+    let course = course(course_id)?;
+    let topic = match topic_id {
+        Some(id) => Some(topic(&course, id)?.clone()),
+        None => None,
+    };
+    Ok(format!("Устный зачёт. {}", start_quiz(&course, topic.as_ref())))
 }
 
 /// Распоряжение голосом: открыть, прогресс, опрос.
 pub async fn voice(app: &AppHandle, action: &str, about: &str) -> String {
     let (course, topic) = find(about);
+    // Идёт обсуждение темы, а тему не назвали — «спроси меня» про неё же.
+    let (course, topic) = match (&topic, discussion_topic()) {
+        (None, Some((course_id, topic_id))) => match self::course(&course_id) {
+            Ok(found) => {
+                let topic = found.topics.iter().find(|t| t.id == topic_id).cloned();
+                (Some(found), topic)
+            }
+            Err(_) => (course, topic),
+        },
+        _ => (course, topic),
+    };
     let Some(course) = course else {
         return "Курсов пока нет.".into();
     };
     match action.trim() {
-        "quiz" => start_quiz(course, topic),
-        "progress" => summary(course),
+        "quiz" => start_quiz(&course, topic.as_ref()),
+        "progress" => summary(&course),
         _ => {
             if let Some(topic) = topic {
                 with(&course.id, |progress| progress.current = Some(topic.id.clone()));
@@ -790,9 +1085,17 @@ pub async fn voice(app: &AppHandle, action: &str, about: &str) -> String {
             if let Err(err) = crate::overlay::show_learning(app) {
                 log::warn!("окно обучения не открылось: {err}");
             }
-            summary(course)
+            summary(&course)
         }
     }
+}
+
+fn discussion_topic() -> Option<(String, String)> {
+    DISCUSSION
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .as_ref()
+        .map(|talk| (talk.course.clone(), talk.topic.clone()))
 }
 
 /// Прогресс словами.
@@ -908,7 +1211,7 @@ pub fn stop_quiz() -> Option<String> {
             "Закончили: верно {} из {}. {}",
             quiz.right,
             quiz.asked,
-            summary(course)
+            summary(&course)
         )
     })
 }
@@ -936,7 +1239,7 @@ pub async fn quiz_answer(app: &AppHandle, said: &str) -> Option<String> {
         .filter(|word| !word.is_empty())
         .collect();
     let course = course(&course_id).ok()?;
-    let (q, _) = question(course, &question_id)?;
+    let (q, _) = question(&course, &question_id)?;
 
     const STOP: &[&str] = &["хватит", "стоп", "закончим", "заканчиваем", "достаточно", "устал"];
     if words.len() <= 4 && words.iter().any(|word| STOP.contains(word)) {
@@ -978,7 +1281,7 @@ pub async fn quiz_answer(app: &AppHandle, said: &str) -> Option<String> {
         (reply, verdict.right)
     };
 
-    let next = next_question(course, topic_id.as_deref(), Some(&q.id));
+    let next = next_question(&course, topic_id.as_deref(), Some(&q.id));
     let mut guard = QUIZ.lock().unwrap_or_else(|err| err.into_inner());
     match (next, guard.as_mut()) {
         (Some(next), Some(quiz)) => {
@@ -1000,8 +1303,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn built_in_courses_pass_validation() {
+        for course in builtin() {
+            let problems = validate(course);
+            assert!(problems.is_empty(), "{}: {problems:?}", course.id);
+        }
+    }
+
+    #[test]
+    fn a_broken_course_is_explained() {
+        let course: Course = serde_json::from_str(
+            r#"{"id":"x y","title":"","description":"","topics":[{"id":"t","title":"T","summary":"",
+               "lesson":"коротко","tasks":[],"exam":[{"id":"q","kind":"choice","q":"?","options":["a"],"answer":3}]}]}"#,
+        )
+        .expect("разбор");
+        let problems = validate(&course).join("\n");
+        assert!(problems.contains("id курса"));
+        assert!(problems.contains("урок слишком короткий"));
+        assert!(problems.contains("answer"));
+    }
+
+    #[test]
     fn built_in_courses_are_whole() {
-        let courses = courses();
+        let courses = builtin();
         assert!(!courses.is_empty());
         for course in courses {
             assert_eq!(course.topics.len(), BUILT_IN[0].1.len(), "все темы разобрались");
@@ -1064,6 +1388,6 @@ mod tests {
     fn a_topic_is_found_by_name() {
         let (course, topic) = find("погоняй меня по докеру");
         assert!(course.is_some());
-        assert_eq!(topic.map(|t| t.id.as_str()), Some("docker"));
+        assert_eq!(topic.map(|t| t.id).as_deref(), Some("docker"));
     }
 }

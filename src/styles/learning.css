@@ -383,6 +383,18 @@ button {
   border-color: var(--accent);
 }
 
+.answer-box {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.dictate {
+  padding: 5px 12px;
+  font-size: var(--size-secondary);
+}
+
 .options {
   display: flex;
   flex-direction: column;
