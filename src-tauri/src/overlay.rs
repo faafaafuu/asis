@@ -284,8 +284,50 @@ fn ensure_hud_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 
     // Сквозь него можно щёлкать: это картинка, а не орган управления.
     let _ = window.set_ignore_cursor_events(true);
+    #[cfg(target_os = "windows")]
+    make_passive(&window);
     place_hud(&window);
     Ok(window)
+}
+
+/// Делает индикатор картинкой поверх экрана, а не окном приложения.
+///
+/// `skip_taskbar` у Tauri держится не всегда: после скрытия и показа индикатор
+/// снова числился обычным окном в группе Суфлёра на панели задач, и щелчок по
+/// группе сворачивал его вместо окна настройки. Стиль «окно-инструмент» убирает
+/// его с панели задач и из Alt+Tab насовсем, «не активируется» не даёт ему
+/// забирать фокус, а без кнопок «свернуть» и «развернуть» свернуть его нечем.
+#[cfg(target_os = "windows")]
+fn make_passive(window: &WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW,
+        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+    };
+
+    let Ok(raw) = window.hwnd() else { return };
+    let hwnd = HWND(raw.0 as _);
+    // SAFETY: окно наше и живое; меняются только биты стиля.
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let ex = (ex | (WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) as isize)
+            & !(WS_EX_APPWINDOW.0 as isize);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE)
+            & !((WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0) as isize);
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+        // Новые стили вступают в силу только после пересчёта рамки.
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
 }
 
 /// Голосовые из Telegram, ждущие разбора: номер и куда отдать результат.

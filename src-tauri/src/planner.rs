@@ -164,6 +164,11 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(reply) = crate::learning::quiz_answer(app, said).await {
         return Some(reply);
     }
+    // «Убери всё сделанное», «что в разделе сделано» — по словам, без модели:
+    // разбор такие просьбы путал с удалением одного дела и сносил не то.
+    if let Some(reply) = done_tasks_request(app, said) {
+        return Some(reply);
+    }
 
     let open = open_tasks();
     match read_intent(app, said, &open).await {
@@ -1311,6 +1316,92 @@ fn erases(said: &str) -> bool {
         .any(|word| lower.contains(word))
 }
 
+/// Что просят сделать со сделанными делами целиком.
+#[derive(Debug, PartialEq)]
+enum DoneRequest {
+    /// Убрать все сделанные.
+    Clear,
+    /// Перечислить сделанные.
+    List,
+    /// «Очисти задачи» без уточнения — сделанные или все.
+    Which,
+}
+
+/// Узнаёт просьбы про сделанные дела целиком.
+///
+/// Разбор моделью для них не годится: «удали всё, что сделано» он записывал
+/// удалением одного дела, и под руку попадало невыполненное. Все дела подряд
+/// голосом не удаляются — только сделанные: снести нужное одной фразой
+/// слишком легко.
+fn done_request(said: &str) -> Option<DoneRequest> {
+    let lower = said.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|word| lower.contains(word));
+    let about_done = has(&["сделан", "выполнен", "отмечен", "закрыт"]);
+    let clearing = has(&[
+        "удал", "убер", "убра", "очист", "отчист", "почист", "сотр", "стер", "снес", "архив",
+        "выкин",
+    ]);
+
+    if about_done && clearing {
+        return Some(DoneRequest::Clear);
+    }
+    // «Отметь уборку сделанной», «я сделал уборку» — это про одно дело.
+    let reports = has(&["отметь", "отметить", "пометь", "сделал", "выполнил", "закрой", "закончил"]);
+    if about_done && !reports && has(&["какие", "что", "покажи", "список", "есть", "перечисл"]) {
+        return Some(DoneRequest::List);
+    }
+    if clearing && has(&["задач", "дела", "список"]) && has(&["все", "всё", "очист", "отчист", "почист"]) {
+        return Some(DoneRequest::Which);
+    }
+    None
+}
+
+fn done_tasks_request(app: &AppHandle, said: &str) -> Option<String> {
+    let request = done_request(said)?;
+    if let Err(err) = crate::overlay::show_tasks(app) {
+        log::warn!("окно задач не открылось: {err}");
+    }
+    Some(match request {
+        DoneRequest::Clear => {
+            let removed = tasks::clear_done();
+            log::info!("убраны сделанные дела: {}", removed.len());
+            if removed.is_empty() {
+                "Сделанных дел нет — убирать нечего.".into()
+            } else {
+                format!("Убрал сделанные: {}.", titles_of(&removed))
+            }
+        }
+        DoneRequest::List => {
+            let done: Vec<Task> = tasks::all()
+                .into_iter()
+                .filter(|task| task.done_at.is_some())
+                .collect();
+            if done.is_empty() {
+                "В сделанных пусто.".into()
+            } else {
+                format!("Сделано: {}.", titles_of(&done))
+            }
+        }
+        DoneRequest::Which => "Убрать сделанные или вообще все? Сделанные — скажи «убери сделанные». \
+                               Все подряд голосом не удаляю, чтобы не снести нужное: это можно в окне задач."
+            .into(),
+    })
+}
+
+/// Названия дел для ответа вслух: первые пять и сколько ещё.
+fn titles_of(list: &[Task]) -> String {
+    let mut text = list
+        .iter()
+        .take(5)
+        .map(|task| task.title.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if list.len() > 5 {
+        text.push_str(&format!(" и ещё {}", list.len() - 5));
+    }
+    text
+}
+
 /// «Сними задачу», «убей процесс» — завершить программу целиком.
 fn forced(said: &str) -> bool {
     let lower = said.to_lowercase();
@@ -2010,7 +2101,10 @@ fn asked_for(intent: &str, said: &str) -> bool {
             "вотч", "watch", "актив", "портфел", "монет", "акци", "отслежива", "списк", "алерт",
             "оповещ", "уведом",
         ],
-        "remove" => &["удал", "убер", "убра", "сотр", "стер", "не просил", "не надо было", "лишн"],
+        "remove" => &[
+            "удал", "убер", "убра", "сотр", "стер", "не просил", "не надо было", "лишн", "очист",
+            "отчист", "почист", "архив", "снес", "выкин",
+        ],
         "screen" => &[
             "скрин", "экран", "фейк", "правд", "написан", "переведи", "картинк", "снимк",
             "снимок", "провер", "вброс", "достовер", "врут", "что тут", "что здесь",
@@ -2343,7 +2437,25 @@ fn list() -> String {
     let due = tasks::today(now);
 
     if due.is_empty() {
-        return "На сегодня ничего не запланировано.".into();
+        // Пустой сегодняшний день — не пустой список: о завтрашнем деле
+        // промолчать значило бы сказать, что его нет.
+        let mut ahead: Vec<Task> = tasks::all()
+            .into_iter()
+            .filter(|task| task.done_at.is_none())
+            .collect();
+        if ahead.is_empty() {
+            return "Дел нет.".into();
+        }
+        ahead.sort_by_key(|task| task.due);
+        let next: Vec<String> = ahead
+            .iter()
+            .take(3)
+            .map(|task| match task.due {
+                Some(_) => format!("{} — {}", task.title, spoken_due(task.due)),
+                None => task.title.clone(),
+            })
+            .collect();
+        return format!("На сегодня ничего. Дальше: {}.", next.join("; "));
     }
 
     let overdue = due.iter().filter(|task| task.overdue(now)).count();
@@ -2929,6 +3041,21 @@ mod tests {
         assert!(asked_for("find", "найди фото паспорта"));
         assert!(asked_for("type", "напечатай привет"));
         assert!(!asked_for("find", "звучит музыка"));
+    }
+
+    #[test]
+    fn done_tasks_are_cleared_as_a_whole() {
+        use super::DoneRequest::*;
+        assert_eq!(done_request("Все, что в разделе сделано, удали."), Some(Clear));
+        assert_eq!(done_request("убери в архив всё, что отмечено как сделано"), Some(Clear));
+        assert_eq!(done_request("Хорошо, перенеси сделанные в архив"), Some(Clear));
+        assert_eq!(done_request("Какие дела есть в разделе «Сделано»"), Some(List));
+        assert_eq!(done_request("что в разделе сделано"), Some(List));
+        assert_eq!(done_request("Можешь очистить мои задачи."), Some(Which));
+        // Про одно дело — не сюда.
+        assert_eq!(done_request("отметь уборку как сделанную"), None);
+        assert_eq!(done_request("удали задачу про уборку"), None);
+        assert!(asked_for("remove", "можешь очистить мои задачи"));
     }
 
     /// Какая модель лучше разбирает реплики — на одних и тех же фразах.
