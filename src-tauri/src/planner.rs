@@ -2552,14 +2552,18 @@ static LOCAL_INTENT: Mutex<LocalIntent> = Mutex::new(None);
 /// при облачном источнике разбор уходит в Ollama, если в ней есть модель.
 async fn intent_provider(app: &AppHandle) -> Arc<dyn crate::ai_client::AiProvider> {
     let state = app.state::<AppState>();
-    let (cloud, language) = {
+    // Только для бесплатных моделей: платная лимитов не знает, и занимать ради
+    // экономии запросов видеокарту — а с ней и распознаванию речи — незачем.
+    let (free_cloud, language) = {
         let config = state.config();
         (
-            config.ai.provider == "http" && !crate::config::is_local(&config.ai.endpoint),
+            config.ai.provider == "http"
+                && !crate::config::is_local(&config.ai.endpoint)
+                && config.ai.model.ends_with(":free"),
             config.ui.language.clone(),
         )
     };
-    if !cloud {
+    if !free_cloud {
         return state.provider();
     }
 
