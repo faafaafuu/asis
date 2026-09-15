@@ -47,6 +47,9 @@ pub enum AiError {
     Timeout,
     #[error("Сервис ответил ошибкой {0}")]
     Http(u16),
+    /// Отказ с объяснением сервиса — его текст из тела ответа.
+    #[error("Сервис ответил ошибкой {0}: {1}")]
+    Refused(u16, String),
     #[error("Не удалось разобрать ответ модели")]
     Parse,
     #[error("{0}")]
@@ -63,7 +66,7 @@ impl AiError {
     fn retryable(&self) -> bool {
         match self {
             AiError::Network | AiError::Timeout => true,
-            AiError::Http(status) => *status == 408 || *status >= 500,
+            AiError::Http(status) | AiError::Refused(status, _) => *status == 408 || *status >= 500,
             _ => false,
         }
     }
@@ -89,6 +92,24 @@ impl AiError {
             AiError::Http(401) | AiError::Http(403) => {
                 "Сервис не принял ключ — проверьте его в настройках".to_string()
             }
+            AiError::Refused(429, _) => {
+                "Сервис ограничил частоту запросов — попробуйте позже".to_string()
+            }
+            AiError::Refused(402, _) => {
+                "У сервиса модели кончились деньги на счету. Пополните счёт \
+                 или выберите модель на этом компьютере в настройках"
+                    .to_string()
+            }
+            AiError::Refused(401 | 403, _) => {
+                "Сервис не принял ключ — проверьте его в настройках".to_string()
+            }
+            // OpenRouter отвечает 404, когда модели с таким именем нет или
+            // бесплатная модель закрыта настройками приватности аккаунта.
+            AiError::Refused(404, message) => format!(
+                "Сервис не нашёл модель ({message}). Проверьте имя модели в настройках; \
+                 для бесплатных моделей OpenRouter включите бесплатные эндпоинты на \
+                 openrouter.ai/settings/privacy"
+            ),
             other => other.to_string(),
         }
     }
@@ -413,7 +434,7 @@ impl HttpProvider {
             // Ollama по умолчанию отвечает потоком построчного JSON — разобрать его
             // как один объект нельзя. Для OpenAI-совместимых API поле безвредно.
             "stream": false,
-            "max_tokens": ANSWER_LIMIT,
+            "max_tokens": answer_limit(&self.endpoint),
             "temperature": TEMPERATURE,
         });
 
@@ -484,9 +505,165 @@ impl HttpProvider {
         let status = response.status();
         log::info!("модель ответила {status}");
         if !status.is_success() {
-            return Err(AiError::Http(status.as_u16()));
+            // Сервис объясняет отказ в теле ответа: «модели нет», «ключ не тот»,
+            // «закрыто настройками приватности». Без этого в журнале оставалась
+            // одна цифра, и понять, что чинить, было нельзя.
+            let body = response.text().await.unwrap_or_default();
+            let message = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|value| {
+                    value["error"]["message"]
+                        .as_str()
+                        .or(value["error"].as_str())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| body.chars().take(200).collect());
+            let message = message.trim().to_string();
+            log::warn!("отказ сервиса {status}: {message}");
+            return Err(AiError::Refused(status.as_u16(), message));
         }
         response.json().await.map_err(|_| AiError::Parse)
+    }
+}
+
+/// Лимит ответа. У облачных моделей — вчетверо больше: новые Gemini и многие
+/// модели OpenRouter сначала думают, и размышление тратит тот же лимит. С
+/// лимитом своей модели на сам ответ не оставалось ничего — сервис
+/// возвращал пустой текст. Краткость ответа держит подсказка, а не лимит.
+fn answer_limit(endpoint: &str) -> u32 {
+    if endpoint.contains("googleapis.com") || endpoint.contains("openrouter.ai") {
+        ANSWER_LIMIT * 4
+    } else {
+        ANSWER_LIMIT
+    }
+}
+
+/// Модели, которые есть у облачного сервиса: его список по ключу.
+///
+/// Адрес списка — рядом с адресом ответов: `…/chat/completions` → `…/models`.
+/// Так устроены OpenRouter, Groq и OpenAI-совместимый вход Google.
+pub async fn list_models(config: &AiConfig) -> Result<Vec<String>, String> {
+    let base = config
+        .endpoint
+        .trim_end_matches('/')
+        .trim_end_matches("/chat/completions");
+    let client = with_proxy(crate::net::client_builder(), &config.proxy)
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|err| format!("HTTP-клиент не собрался: {err}"))?;
+    let mut request = client.get(format!("{base}/models"));
+    if !config.api_key.is_empty() {
+        request = request.bearer_auth(&config.api_key);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format!("список моделей не пришёл: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("список моделей: ошибка {}", response.status()));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|_| "список моделей не разобрался".to_string())?;
+    Ok(body["data"]
+        .as_array()
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|model| model["id"].as_str())
+                // Google отдаёт имена с приставкой `models/`, а принимает без неё.
+                .map(|id| id.trim_start_matches("models/").to_string())
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// Живая замена модели, которой у сервиса больше нет. `None` — выбрать не из чего.
+///
+/// Бесплатную меняем на бесплатную: человек, выбравший `:free`, платить не
+/// собирался. Среди прочих берём разговорные модели, а не картинки, речь и
+/// «эмбеддинги» — у них те же имена рядом, но на вопрос они не ответят.
+pub fn pick_model(endpoint: &str, current: &str, available: &[String]) -> Option<String> {
+    let has = |id: &str| available.iter().any(|known| known == id);
+    let chat = |id: &str| {
+        let id = id.to_lowercase();
+        ![
+            "image", "tts", "embed", "audio", "vision", "-vl", "safety", "guard", "live", "batch",
+            "code",
+        ]
+        .iter()
+        .any(|word| id.contains(word))
+    };
+    let first = |wanted: &[&str], keep: &dyn Fn(&str) -> bool| {
+        wanted
+            .iter()
+            .find(|id| has(id))
+            .map(|id| id.to_string())
+            .or_else(|| available.iter().find(|id| keep(id) && chat(id)).cloned())
+    };
+    if endpoint.contains("openrouter.ai") {
+        if current.ends_with(":free") {
+            return first(
+                &[
+                    "google/gemma-4-31b-it:free",
+                    "z-ai/glm-5.2:free",
+                    "nvidia/nemotron-3-super-120b-a12b:free",
+                ],
+                &|id| id.ends_with(":free"),
+            );
+        }
+        return first(&["google/gemini-3.5-flash"], &|id| id.contains("flash"));
+    }
+    if endpoint.contains("googleapis.com") {
+        if has("gemini-flash-latest") {
+            return Some("gemini-flash-latest".into());
+        }
+        // Самая новая Flash — по имени: версии растут, и последняя по
+        // алфавиту — последняя по времени.
+        return available
+            .iter()
+            .filter(|id| id.starts_with("gemini") && id.contains("flash") && !id.contains("lite") && chat(id))
+            .max()
+            .cloned();
+    }
+    if endpoint.contains("groq.com") {
+        return first(&["llama-3.3-70b-versatile"], &|id| id.contains("llama"));
+    }
+    available.iter().find(|id| chat(id)).cloned()
+}
+
+#[cfg(test)]
+mod model_pick_tests {
+    use super::pick_model;
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn a_free_model_is_replaced_by_a_free_one() {
+        let available = ids(&["google/gemini-3.5-flash", "z-ai/glm-5.2:free", "liquid/lfm-2.5-2.6b:free"]);
+        let pick = pick_model("https://openrouter.ai/api/v1/chat/completions", "openai/gpt-oss-20b:free", &available);
+        assert_eq!(pick.as_deref(), Some("z-ai/glm-5.2:free"));
+    }
+
+    #[test]
+    fn google_gets_the_newest_flash() {
+        let endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+        let available = ids(&[
+            "gemini-3.5-flash",
+            "gemini-3.7-flash",
+            "gemini-3.7-flash-image",
+            "gemini-3.5-flash-lite",
+            "text-embedding-004",
+        ]);
+        assert_eq!(pick_model(endpoint, "gemini-2.0-flash", &available).as_deref(), Some("gemini-3.7-flash"));
+        let with_alias = ids(&["gemini-flash-latest", "gemini-3.7-flash"]);
+        assert_eq!(
+            pick_model(endpoint, "gemini-2.0-flash", &with_alias).as_deref(),
+            Some("gemini-flash-latest")
+        );
     }
 }
 

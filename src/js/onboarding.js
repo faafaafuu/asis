@@ -649,6 +649,25 @@ api?.listen("voice:install", (event) => {
   ui.voiceStatus.textContent = done ? t("voice.ready") : `${status}… ${percent}%`;
 });
 
+/**
+ * Микрофон Bluetooth-наушников. Пока он открыт, Windows переводит наушники в
+ * режим гарнитуры: музыка становится тише и хуже и «гуляет», когда Ноа
+ * начинает и перестаёт слушать. Изменить это программа не может — только
+ * предупредить.
+ */
+function updateMicHint() {
+  if (!ui.micHint) return;
+  const name = ui.speechDevice.value || "";
+  ui.micHint.hidden = !/головной телефон|headset|hands-?free|airpods|buds/i.test(name);
+  ui.micHint.textContent =
+    "Это микрофон Bluetooth-наушников. Пока он открыт, Windows переводит наушники в режим " +
+    "гарнитуры: музыка становится тише и хуже, а громкость скачет. Поэтому с ним Ноа сама " +
+    "не слушает — ни имени, ни разговора после ответа, только по Alt+пробел. Чтобы звать по " +
+    "имени, выберите другой микрофон — встроенный, в веб-камере, USB.";
+}
+
+ui.speechDevice?.addEventListener("change", updateMicHint);
+
 async function loadSpeech() {
   if (!api) return;
 
@@ -669,6 +688,7 @@ async function loadSpeech() {
     }
     ui.speechDevice.value = devices.includes(chosen) ? chosen : "";
     ui.wakeWord.checked = Boolean((await api.invoke("voice_settings")).wakeWord);
+    updateMicHint();
   } catch {
     /* окно открыто вне приложения */
   }
@@ -781,14 +801,18 @@ const PRESETS = {
   google: {
     provider: "http",
     endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-    model: "gemini-2.0-flash",
+    // Имя-указатель на новейшую Flash-модель: конкретные версии Google
+    // закрывает, и пресет с ними через год отвечал 404.
+    model: "gemini-flash-latest",
     key: true,
     hintKey: "hint.google",
   },
   openrouter: {
     provider: "http",
     endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "openai/gpt-oss-20b:free",
+    // Бесплатные модели у OpenRouter приходят и уходят. Эта есть в списке на
+    // осень 2026; пропадёт — «Проверить» сама подберёт живую.
+    model: "google/gemma-4-31b-it:free",
     key: true,
     hintKey: "hint.openrouter",
   },
@@ -1003,6 +1027,32 @@ function makeRow({ name, note, size, installed, chosen }) {
     // кнопкой, и понять, что уже лежит на диске, было нельзя.
     state.textContent = chosen ? t("model.chosen") : t("model.downloaded");
     row.append(state);
+    // Невыбранную скачанную модель можно удалить: они весят гигабайты, а
+    // пользуются обычно одной.
+    if (!chosen) {
+      const drop = document.createElement("button");
+      drop.type = "button";
+      drop.className = "ob__link ob__model-delete";
+      drop.textContent = "удалить";
+      drop.title = `Удалить ${name} с диска`;
+      drop.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const ok = confirm(
+          `Удалить модель ${name} с диска? Освободится ${size}. Понадобится снова — скачаете заново.`,
+        );
+        if (!ok) return;
+        drop.disabled = true;
+        drop.textContent = "удаляю…";
+        try {
+          await api?.invoke("delete_model", { model: name });
+          modelsProblem = "";
+        } catch (err) {
+          modelsProblem = String(err);
+        }
+        refreshModels();
+      });
+      row.append(drop);
+    }
   } else {
     state.textContent = t("model.absent");
     const button = document.createElement("button");
@@ -1316,6 +1366,11 @@ ui.test.addEventListener("click", async () => {
     ui.aiStatus.textContent = `${t("action.works")} ${answer}`;
   } catch (err) {
     ui.aiStatus.textContent = `Не получилось: ${err}`;
+  } finally {
+    // Проверка сама меняет модель, которой у сервиса больше нет, — в поле
+    // должно быть то имя, которым программа теперь пользуется.
+    const fresh = await api?.invoke("ai_settings").catch(() => null);
+    if (fresh?.model) ui.model.value = fresh.model;
   }
 });
 

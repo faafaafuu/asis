@@ -772,22 +772,72 @@ pub async fn pull_model(app: AppHandle, model: String) -> Result<(), String> {
     crate::ollama::pull(app.clone(), host, model).await
 }
 
+/// Удаляет скачанную модель с диска. Выбранную — нельзя: ей сейчас отвечают.
+#[tauri::command]
+pub async fn delete_model(app: AppHandle, model: String) -> Result<(), String> {
+    let (host, chosen) = {
+        let state = app.state::<AppState>();
+        let config = state.config();
+        (crate::ollama::host_from(&config.ai.endpoint), config.ai.model.clone())
+    };
+    if model == chosen {
+        return Err("Эта модель сейчас выбрана — сначала выберите другую.".into());
+    }
+    crate::ollama::delete(&host, &model).await
+}
+
 /// Пробный запрос: пользователь должен увидеть, что ключ рабочий, до того как
 /// начнёт выделять текст и получать «Сбой сети».
 #[tauri::command]
-pub async fn test_ai(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn test_ai(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    const NO_ANSWER: &str =
+        "Ответ не пришёл. Проверьте соединение, а если нужен VPN — впишите прокси в настройке.";
     let provider = state.provider();
     let fallback = state.error_text();
     let limit = state.config().ai.call_limit();
     log::info!("проверка провайдера");
-    guarded(
-        "проверка провайдера",
-        async move { provider.explain("альбедо", "").await },
-        fallback,
-        limit,
-    )
-    .await
-    .map(|explanation| explanation.def)
+    match tokio::time::timeout(limit, provider.explain("альбедо", "")).await {
+        Ok(Ok(explanation)) => return Ok(explanation.def),
+        // Модели с таким именем у сервиса нет — чиним ниже.
+        Ok(Err(AiError::Refused(404, _) | AiError::Http(404))) => {}
+        Ok(Err(err)) => {
+            log::warn!("проверка провайдера: {err}");
+            return Err(err.user_text(&fallback));
+        }
+        Err(_) => return Err(NO_ANSWER.into()),
+    }
+
+    // Облачные сервисы закрывают модели, и имя из пресета через год уже не
+    // отвечает. Берём у сервиса его список и переходим на живую модель сами:
+    // искать новое имя руками человек не обязан.
+    let ai = state.config().ai.clone();
+    let available = crate::ai_client::list_models(&ai).await.map_err(|err| {
+        format!("Модели «{}» у сервиса нет, а список моделей он не отдал: {err}", ai.model)
+    })?;
+    let Some(pick) = crate::ai_client::pick_model(&ai.endpoint, &ai.model, &available) else {
+        let some = available.iter().take(8).cloned().collect::<Vec<_>>().join(", ");
+        return Err(format!("Модели «{}» у сервиса нет. Есть, например: {some}.", ai.model));
+    };
+    log::info!("модели «{}» у сервиса нет — переключаюсь на «{pick}»", ai.model);
+    state.config_mut().ai.model = pick.clone();
+    persist(&app, &state)?;
+    {
+        let config = state.config();
+        state.rebuild_provider(&config.ai, &config.ui.language);
+    }
+    let provider = state.provider();
+    match tokio::time::timeout(limit, provider.explain("альбедо", "")).await {
+        Ok(Ok(explanation)) => Ok(format!(
+            "Модели «{}» у сервиса больше нет — переключил на «{pick}». {}",
+            ai.model, explanation.def
+        )),
+        Ok(Err(err)) => Err(format!(
+            "Модели «{}» у сервиса нет; переключил на «{pick}», но и она не ответила: {}",
+            ai.model,
+            err.user_text(&fallback)
+        )),
+        Err(_) => Err(NO_ANSWER.into()),
+    }
 }
 
 /// Состояние системной интеграции — для окна онбординга.

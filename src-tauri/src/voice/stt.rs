@@ -106,14 +106,16 @@ impl Listening {
 
     /// Ниже какой громкости не считаем речью вовсе.
     fn floor(self) -> f32 {
-        match self {
+        // Тихий микрофон — ниже и порог: см. `sensitivity`.
+        let base = match self {
             Listening::Talk => SILENCE_LEVEL,
             // Обращение произносят внятно и в сторону компьютера, но микрофоны
             // бывают тихие: на здешнем речь идёт по трети шкалы, и порог в
             // девять сотых съедал половину зовов. Пять — это вдвое выше порога
             // разговора и всё ещё ниже любой внятной речи.
             Listening::Wake => 0.05,
-        }
+        };
+        base * sensitivity()
     }
 
     /// Короче этого фразу даже не рассматриваем.
@@ -342,6 +344,7 @@ fn open_input(preferred: &str) -> Option<(cpal::Stream, std::sync::Arc<Mutex<Vec
 
 /// Начать запись с названного устройства (пусто — с основного).
 pub fn start(device: &str) {
+    remember_device(device);
     if let Some(tx) = commands() {
         let _ = tx.send(Command::Start(device.to_string()));
     }
@@ -368,6 +371,7 @@ pub fn stop() -> Option<Vec<u8>> {
 
 /// Начинает разговор: микрофон открыт, фразы приходят в возвращённый канал.
 pub fn start_conversation(device: &str, mode: Listening) -> Option<Receiver<Heard>> {
+    remember_device(device);
     let tx = commands()?;
     let (utterances, rx) = channel();
     PAUSED.store(false, Ordering::Relaxed);
@@ -613,6 +617,79 @@ fn ms(samples: usize, rate: u32) -> u64 {
     samples as u64 * 1000 / rate.max(1) as u64
 }
 
+/* ── Чувствительность микрофона ───────────────────────────────────────────── */
+
+/// Насколько громко человек звучит в каждый из своих микрофонов: пик записи по
+/// клавише, сглаженный. Хранится в `microphones.json` рядом с настройками.
+static CALIBRATION: std::sync::Mutex<Option<(std::path::PathBuf, std::collections::BTreeMap<String, f32>)>> =
+    std::sync::Mutex::new(None);
+
+/// Микрофон, с которого пишем сейчас. Пусто — основной в системе.
+static DEVICE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Пик внятной речи в обычный микрофон — от него отсчитываются пороги.
+const NORMAL_PEAK: f32 = 0.5;
+
+/// Самое большее, во сколько раз снижаются пороги. Ниже трети обычного шум
+/// комнаты начинает сходить за речь.
+const MIN_SENSITIVITY: f32 = 0.3;
+
+/// Читает, кто как звучит. Зовётся при запуске.
+pub fn load_calibration(dir: std::path::PathBuf) {
+    let path = dir.join("microphones.json");
+    let known = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    *CALIBRATION.lock().unwrap_or_else(|err| err.into_inner()) = Some((path, known));
+}
+
+fn remember_device(device: &str) {
+    *DEVICE.lock().unwrap_or_else(|err| err.into_inner()) = device.to_string();
+}
+
+/// Запоминает, насколько громко прозвучала речь в нынешний микрофон.
+fn note_speech_peak(peak: f32) {
+    let device = DEVICE.lock().unwrap_or_else(|err| err.into_inner()).clone();
+    let mut guard = CALIBRATION.lock().unwrap_or_else(|err| err.into_inner());
+    let Some((path, known)) = guard.as_mut() else {
+        return;
+    };
+    let before = known.get(&device).copied();
+    let now = match before {
+        Some(old) => old * 0.7 + peak * 0.3,
+        None => peak,
+    };
+    known.insert(device.clone(), now);
+    if let Ok(text) = serde_json::to_string_pretty(&*known) {
+        let _ = std::fs::write(&*path, text);
+    }
+    let share = |peak: f32| ((peak / NORMAL_PEAK).clamp(MIN_SENSITIVITY, 1.0) * 100.0).round();
+    if before.map_or(true, |old| share(old) != share(now)) && share(now) < 100.0 {
+        log::info!(
+            "микрофон «{}» тихий: пороги слышимости — {}% от обычных",
+            if device.is_empty() { "основной" } else { &device },
+            share(now)
+        );
+    }
+}
+
+/// Во сколько раз снизить пороги слышимости для нынешнего микрофона.
+///
+/// Микрофоны отличаются по громкости в разы. У Bluetooth-наушников в режиме
+/// гарнитуры речь идёт по трём сотым шкалы, а порог имени стоял на пяти: Ноа
+/// не отзывалась вовсе, хотя по клавише слышала. Пороги подстраиваются под то,
+/// как человек звучит в свой микрофон, — это видно по записям по клавише.
+fn sensitivity() -> f32 {
+    let device = DEVICE.lock().unwrap_or_else(|err| err.into_inner()).clone();
+    CALIBRATION
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .as_ref()
+        .and_then(|(_, known)| known.get(&device).copied())
+        .map_or(1.0, |peak| (peak / NORMAL_PEAK).clamp(MIN_SENSITIVITY, 1.0))
+}
+
 /* ── Общая подготовка записи ──────────────────────────────────────────────── */
 
 /// Приводит запись к тому виду, в котором её лучше всего разбирает whisper.
@@ -637,6 +714,11 @@ fn prepare(samples: Vec<f32>, rate: u32, complain: bool, verbose: bool) -> Optio
             log::warn!("в записи тишина — проверьте, тот ли микрофон выбран");
         }
         return None;
+    }
+    // Запись по клавише — это точно речь, и по ней видно, насколько громко
+    // человек звучит в этот микрофон.
+    if complain {
+        note_speech_peak(peak);
     }
 
     let mut samples = resample(&samples, rate, WHISPER_RATE);

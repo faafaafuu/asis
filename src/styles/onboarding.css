@@ -582,3 +582,9 @@ body {
   font-size: 13px;
   color: var(--text-muted);
 }
+
+/* «удалить» у скачанной модели — ссылкой, чтобы не спорить с выбором строки. */
+.ob__model-delete {
+  margin-left: 10px;
+  color: var(--error-text);
+}

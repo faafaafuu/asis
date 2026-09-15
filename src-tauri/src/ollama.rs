@@ -696,6 +696,24 @@ pub async fn status(host: &str) -> Status {
     }
 }
 
+/// Удаляет модель с диска — место под другие.
+pub async fn delete(host: &str, model: &str) -> Result<(), String> {
+    let client = crate::net::client_builder().build().unwrap_or_default();
+    let response = client
+        .delete(format!("{host}/api/delete"))
+        // Имя поля менялось между версиями Ollama — шлём оба.
+        .json(&serde_json::json!({ "model": model, "name": model }))
+        .send()
+        .await
+        .map_err(|err| format!("Ollama не ответила: {err}"))?;
+    if response.status().is_success() {
+        log::info!("модель {model} удалена с диска");
+        Ok(())
+    } else {
+        Err(format!("Ollama не удалила модель: {}", response.status()))
+    }
+}
+
 /// Скачивает модель, докладывая о ходе событиями.
 ///
 /// Поток, а не один запрос: файл на несколько гигабайт качается минутами, и

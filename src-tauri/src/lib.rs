@@ -140,6 +140,7 @@ pub fn run() {
                 tasks::load(dir.clone());
                 watchlist::load(dir.clone());
                 learning::load(dir.clone());
+                voice::stt::load_calibration(dir.clone());
                 alarms::load(dir);
             }
             let config = Config::load(config_dir);
@@ -270,6 +271,7 @@ pub fn run() {
             commands::learn_dictate_stop,
             commands::learn_oral,
             commands::learn_discuss,
+            commands::delete_model,
             commands::watch_chart,
             commands::close_watchlist,
             commands::order_state,
@@ -1347,6 +1349,21 @@ fn ambient_task(app: &tauri::AppHandle, text: &str) -> bool {
     handled
 }
 
+/// Разговор без клавиш попросили явно — открыть микрофон, даже если это
+/// Bluetooth-наушники. См. `start_conversation`.
+#[cfg(desktop)]
+static EXPLICIT_TALK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Микрофон — Bluetooth-наушники в режиме гарнитуры: пока он открыт, Windows
+/// переключает наушники с музыки на разговор, и громкость скачет.
+#[cfg(desktop)]
+fn headset_mic(app: &tauri::AppHandle) -> bool {
+    let device = input_device(app).to_lowercase();
+    ["головной телефон", "headset", "hands-free", "handsfree", "airpods", "buds"]
+        .iter()
+        .any(|word| device.contains(word))
+}
+
 /// Говорит и сразу начинает разговор без рук — для устного зачёта и
 /// обсуждения темы из окна обучения.
 #[cfg(desktop)]
@@ -1357,6 +1374,7 @@ pub(crate) fn say_then_listen(app: &tauri::AppHandle, text: String) {
         .spawn(move || {
             stop_wake();
             speak_with_hud(&app, text, true);
+            EXPLICIT_TALK.store(true, std::sync::atomic::Ordering::SeqCst);
             start_conversation(&app);
         })
         .ok();
@@ -1367,6 +1385,16 @@ pub(crate) fn say_then_listen(app: &tauri::AppHandle, text: String) {
 pub(crate) fn start_conversation(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
     use tauri::Emitter;
+
+    // Разговор без клавиш держит микрофон открытым. Если это микрофон
+    // Bluetooth-наушников, Windows всё это время держит их в режиме
+    // гарнитуры — музыка тише и хуже, а громкость скачет при каждом
+    // открытии и закрытии. Сама Ноа такой микрофон не открывает; только
+    // когда разговор попросили явно — устный зачёт, обсуждение темы.
+    if !EXPLICIT_TALK.swap(false, Ordering::SeqCst) && headset_mic(app) {
+        log::info!("микрофон — Bluetooth-наушники: разговор без клавиш не начинаю, только Alt+пробел");
+        return;
+    }
 
     if CONVERSATION.swap(true, Ordering::SeqCst) {
         return;
@@ -1491,6 +1519,16 @@ static WAKE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(
 #[cfg(desktop)]
 pub(crate) fn start_wake(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
+
+    // Ожидание имени слушает часами — с микрофоном Bluetooth-наушников это
+    // часы в режиме гарнитуры и скачущая громкость. См. `start_conversation`.
+    if headset_mic(app) {
+        static TOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !TOLD.swap(true, Ordering::SeqCst) {
+            log::info!("микрофон — Bluetooth-наушники: ожидание имени не включаю, чтобы не переключать их в режим гарнитуры");
+        }
+        return;
+    }
 
     let (enabled, device) = {
         let state = app.state::<AppState>();
@@ -2159,7 +2197,12 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
         Ok(Ok(answer)) if !answer.trim().is_empty() => answer.trim().to_string(),
         Ok(Err(err)) => {
             log::warn!("ответ без окна не пришёл: {err}");
-            "Не получилось ответить: модель не ответила.".to_string()
+            // Причину — словами: «модель не ответила» одинаково звучало и при
+            // неверном ключе, и при неверном имени модели.
+            format!(
+                "Не получилось ответить: {}.",
+                err.user_text("модель не ответила").trim_end_matches('.')
+            )
         }
         _ => "Не получилось ответить: модель не успела.".to_string(),
     };

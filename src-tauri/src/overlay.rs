@@ -1013,6 +1013,9 @@ pub fn hide_tasks(app: &AppHandle) {
 
 pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(ONBOARDING_LABEL) {
+        // Свёрнутое окно показ не разворачивает: щелчок по трею выглядел
+        // так, будто ничего не происходит.
+        let _ = window.unminimize();
         window.show()?;
         window.set_focus()?;
         return Ok(());
