@@ -189,7 +189,20 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
             sandbox_box,
         } => Some(match own_window(&program) {
             Some(window) => open_own(app, window),
-            None => blocking(move || crate::pc::launch(&program, sandbox, &sandbox_box)).await,
+            None => {
+                let reply =
+                    blocking(move || crate::pc::launch(&program, sandbox, &sandbox_box)).await;
+                // В разговоре без рук «открой то, чего нет» — почти всегда
+                // ослышка: музыка или чужая речь, из которой распознавание
+                // сложило «открой». Молча, и ход засчитывается пустым.
+                if ambient() && reply.starts_with("Не нашёл") {
+                    log::info!("{reply} — в разговоре без рук, не произношу");
+                    JUNK.store(true, std::sync::atomic::Ordering::SeqCst);
+                    String::new()
+                } else {
+                    reply
+                }
+            }
         }),
         Intent::Close { program, force } => {
             Some(blocking(move || crate::pc::close(&program, force)).await)
@@ -1495,6 +1508,29 @@ fn spoken_span(seconds: i64) -> String {
     } else {
         parts.join(" ")
     }
+}
+
+/// Идёт разговор без рук: фраза могла быть музыкой или чужой речью.
+static AMBIENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Ход разговора ушёл впустую: ответ не произнесён.
+static JUNK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Отмечает, что сказанное услышано в разговоре без рук, а не по клавише.
+pub fn set_ambient(on: bool) {
+    use std::sync::atomic::Ordering;
+    AMBIENT.store(on, Ordering::SeqCst);
+    if on {
+        JUNK.store(false, Ordering::SeqCst);
+    }
+}
+
+fn ambient() -> bool {
+    AMBIENT.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Ушёл ли последний ход впустую — один раз.
+pub fn take_junk() -> bool {
+    JUNK.swap(false, std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Последний снимок экрана. Попросили из Telegram — он уходит туда

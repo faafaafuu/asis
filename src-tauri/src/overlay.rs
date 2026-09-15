@@ -188,11 +188,12 @@ static HUD_SINCE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mute
 /// Висит ли «думаю» дольше предела.
 #[cfg(desktop)]
 pub fn hud_stuck_thinking(limit: std::time::Duration) -> bool {
+    // «Загрузка» тоже в счёт: распознавание могло так и не подняться.
     let thinking = HUD_MODE
         .lock()
         .unwrap_or_else(|err| err.into_inner())
         .as_deref()
-        == Some("thinking");
+        .is_some_and(|mode| mode == "thinking" || mode == "loading");
     let since = *HUD_SINCE.lock().unwrap_or_else(|err| err.into_inner());
     thinking && since.is_some_and(|at| at.elapsed() > limit)
 }
@@ -844,6 +845,8 @@ pub const TASKS_LABEL: &str = "tasks";
 /// Показывает список задач. Если окно уже есть — поднимает его наверх.
 pub fn show_tasks(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(TASKS_LABEL) {
+        // Свёрнутое окно показ не разворачивает — разворачиваем сами.
+        let _ = window.unminimize();
         window.show()?;
         window.set_focus()?;
         return Ok(());
@@ -860,7 +863,8 @@ pub fn show_tasks(app: &AppHandle) -> tauri::Result<()> {
             // Рамки нет: окно должно читаться как карточка, а не как программа.
             // Двигают его за заголовок — см. tasks.js.
             .decorations(false)
-            .skip_taskbar(true)
+            // На панели задач: свёрнутое окно возвращают оттуда.
+            .skip_taskbar(false)
             .build()?;
 
     // У правого края экрана, ближе к верху: список задач смотрят краем глаза,
@@ -899,6 +903,8 @@ pub const ORDER_LABEL: &str = "order";
 /// Показывает, что сейчас с заказом.
 pub fn show_order(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(ORDER_LABEL) {
+        // Свёрнутое окно показ не разворачивает — разворачиваем сами.
+        let _ = window.unminimize();
         window.show()?;
         window.set_focus()?;
         return Ok(());
@@ -912,7 +918,8 @@ pub fn show_order(app: &AppHandle) -> tauri::Result<()> {
             .min_inner_size(320.0, 300.0)
             .resizable(true)
             .decorations(false)
-            .skip_taskbar(true)
+            // На панели задач: свёрнутое окно возвращают оттуда.
+            .skip_taskbar(false)
             .build()?;
 
     // Там же, где список задач: у правого края, ближе к верху. Оба окна —
@@ -927,6 +934,8 @@ pub const LEARN_LABEL: &str = "learning";
 /// Показывает окно обучения. Если окно уже есть — поднимает его наверх.
 pub fn show_learning(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(LEARN_LABEL) {
+        // Свёрнутое окно показ не разворачивает — разворачиваем сами.
+        let _ = window.unminimize();
         window.show()?;
         window.set_focus()?;
         return Ok(());
@@ -956,6 +965,8 @@ pub const WATCH_LABEL: &str = "watchlist";
 /// Показывает список активов. Если окно уже есть — поднимает его наверх.
 pub fn show_watchlist(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(WATCH_LABEL) {
+        // Свёрнутое окно показ не разворачивает — разворачиваем сами.
+        let _ = window.unminimize();
         window.show()?;
         window.set_focus()?;
         return Ok(());
@@ -969,7 +980,8 @@ pub fn show_watchlist(app: &AppHandle) -> tauri::Result<()> {
             .min_inner_size(480.0, 280.0)
             .resizable(true)
             .decorations(false)
-            .skip_taskbar(true)
+            // На панели задач: свёрнутое окно возвращают оттуда.
+            .skip_taskbar(false)
             .build()?;
 
     // Там же, где задачи и заказ: у правого края, ближе к верху.

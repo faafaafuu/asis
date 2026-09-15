@@ -541,6 +541,8 @@ function closeWindow() {
 // Рамки у окна нет — двигают его за заголовок. Кнопка закрытия живёт там же,
 // и нажатие на неё окно не таскает.
 const win = appWindow();
+// Свернуть — окно уходит на панель задач и возвращается оттуда или из трея.
+ui.minimize?.addEventListener("click", () => win?.minimize());
 ui.head.addEventListener("pointerdown", (event) => {
   if (event.button !== 0 || event.target.closest("button")) return;
   event.preventDefault();

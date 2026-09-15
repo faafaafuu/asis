@@ -98,6 +98,11 @@ pub fn run() {
                 tauri_plugin_log::TargetKind::Stdout,
             ))
             .level(log::LevelFilter::Info)
+            // По умолчанию файл ротируется на сорока килобайтах и хранится
+            // один — полдня работы, и история, по которой разбирают сбой,
+            // пропадала раньше, чем до неё доходили руки.
+            .max_file_size(4 * 1024 * 1024)
+            .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
             .build(),
     );
 
@@ -1311,6 +1316,16 @@ fn closed_with_goodbye(lower: &str) -> bool {
     false
 }
 
+/// Распоряжение, услышанное в разговоре без рук: неудачи вроде «не нашёл, что
+/// открыть» здесь не произносятся — скорее всего, это ослышка, а не просьба.
+#[cfg(desktop)]
+fn ambient_task(app: &tauri::AppHandle, text: &str) -> bool {
+    planner::set_ambient(true);
+    let handled = handled_as_task(app, text);
+    planner::set_ambient(false);
+    handled
+}
+
 /// Начинает разговор без рук: слушаем, отвечаем, снова слушаем.
 #[cfg(desktop)]
 pub(crate) fn start_conversation(app: &tauri::AppHandle) {
@@ -1338,6 +1353,12 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
             overlay::show_hud(&app, "listening");
             let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
 
+            // Сколько ходов подряд ушло впустую: обрывки, тишина, «открой»
+            // того, чего нет. Музыка и чужая речь в комнате держат разговор
+            // живым — распознавание слышит в них слова, и Ноа отвечала
+            // невпопад и открывала что попало. Два пустых хода подряд значат,
+            // что говорят не с ней.
+            let mut junk = 0;
             for heard in phrases {
                 if !CONVERSATION.load(Ordering::SeqCst) {
                     break;
@@ -1381,17 +1402,31 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                     // Распоряжение о задачах выполняется здесь же и до модели:
                     // «напомни завтра позвонить» — не вопрос, отвечать на него
                     // объяснением было бы нелепо.
-                    Some(text) if handled_as_task(&app, &text) => {}
+                    Some(text) if ambient_task(&app, &text) => {
+                        if planner::take_junk() {
+                            junk += 1;
+                        } else {
+                            junk = 0;
+                        }
+                    }
                     // Обрывок в одно-два слова без вопроса — скорее ослышка,
                     // чем вопрос: отвечать на него полминуты незачем.
                     Some(text) if fragment(&text) => {
                         log::info!("«{text}» — обрывок, не отвечаю");
+                        junk += 1;
                     }
-                    Some(text) => answer_aloud(&app, &text),
-                    None => {}
+                    Some(text) => {
+                        junk = 0;
+                        answer_aloud(&app, &text);
+                    }
+                    None => junk += 1,
                 }
                 end_turn();
 
+                if junk >= 2 {
+                    log::info!("два хода подряд не к Ноа — похоже, это музыка или чужая речь; разговор окончен");
+                    break;
+                }
                 if !CONVERSATION.load(Ordering::SeqCst) {
                     break;
                 }
@@ -1641,6 +1676,8 @@ fn speak_with_hud(app: &tauri::AppHandle, text: String, wait: bool) {
     }
     log::info!("говорю: «{}»", text.chars().take(90).collect::<String>());
 
+    // Сколько можно ждать конца речи: с большим запасом на длину фразы.
+    let limit = std::time::Duration::from_secs(30 + text.chars().count() as u64 / 8);
     let handle = app.clone();
     let speaking = move || {
         let config = handle.state::<AppState>().config().voice.clone();
@@ -1650,7 +1687,17 @@ fn speak_with_hud(app: &tauri::AppHandle, text: String, wait: bool) {
         }
         // Индикатор относится к речи, а не к окну, которое человек читает
         // дальше, — убираем его, когда речь отзвучит.
+        //
+        // С пределом: застрявшая отметка «говорю» иначе держала бы этот
+        // поток вечно, а с ним — весь голос: Ноа переставала слышать клавиши
+        // и отзываться, хотя программа работала.
+        let started = std::time::Instant::now();
         while voice::speaking() {
+            if started.elapsed() > limit {
+                log::warn!("речь не закончилась за {} с — останавливаю", limit.as_secs());
+                voice::stop();
+                break;
+            }
             std::thread::sleep(std::time::Duration::from_millis(120));
         }
         overlay::hide_hud(&handle);
@@ -1686,6 +1733,10 @@ fn handled_as_task(app: &tauri::AppHandle, text: &str) -> bool {
         return false;
     };
     log::info!("распоряжение о задачах: «{text}» → «{reply}»");
+    // Пустой ответ — сказать нечего: например, ослышка посреди разговора.
+    if reply.is_empty() {
+        return true;
+    }
     respond(app, reply);
     // Разговор передан Claude: Ноа замолкает и уходит. Ход считается
     // оконченным — разговор после него не начинается, — а окно закрывается.

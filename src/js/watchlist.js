@@ -631,6 +631,8 @@ ui.refresh.addEventListener("click", () => refresh());
 /* ── Окно ──────────────────────────────────────────────────────────────── */
 
 const win = appWindow();
+// Свернуть — окно уходит на панель задач и возвращается оттуда или из трея.
+ui.minimize?.addEventListener("click", () => win?.minimize());
 ui.head.addEventListener("pointerdown", (event) => {
   // Кнопки живут в заголовке — за них окно не таскают.
   if (event.button !== 0 || event.target.closest("button")) return;

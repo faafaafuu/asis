@@ -7,6 +7,12 @@
   --down: var(--error);
 }
 
+/* Спрятанное прячется всегда. Без этого правило `display: flex` у меню колонок
+   перебивало атрибут hidden, и меню, закрытое по щелчку, оставалось на экране. */
+[hidden] {
+  display: none !important;
+}
+
 html,
 body {
   margin: 0;
