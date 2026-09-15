@@ -796,18 +796,21 @@ pub async fn test_ai(app: AppHandle, state: State<'_, AppState>) -> Result<Strin
     let fallback = state.error_text();
     let limit = state.config().ai.call_limit();
     log::info!("проверка провайдера");
-    match tokio::time::timeout(limit, provider.explain("альбедо", "")).await {
+    // 404 — модели с таким именем нет; 400 «про модель» — пустое или неверное имя.
+    let about_model = |err: &AiError| match err {
+        AiError::Refused(404, _) | AiError::Http(404) => true,
+        AiError::Refused(400, message) => message.to_lowercase().contains("model"),
+        _ => false,
+    };
+    let refused = match tokio::time::timeout(limit, provider.explain("альбедо", "")).await {
         Ok(Ok(explanation)) => return Ok(explanation.def),
-        // Модели с таким именем у сервиса нет — чиним ниже.
-        Ok(Err(AiError::Refused(404, _) | AiError::Http(404))) => {}
-        // 400 «про модель» — пустое или неверное имя: чиним так же.
-        Ok(Err(AiError::Refused(400, message))) if message.to_lowercase().contains("model") => {}
+        Ok(Err(err)) if about_model(&err) => err,
         Ok(Err(err)) => {
             log::warn!("проверка провайдера: {err}");
             return Err(err.user_text(&fallback));
         }
         Err(_) => return Err(NO_ANSWER.into()),
-    }
+    };
 
     // Облачные сервисы закрывают модели, и имя из пресета через год уже не
     // отвечает. Берём у сервиса его список и переходим на живую модель сами:
@@ -816,6 +819,13 @@ pub async fn test_ai(app: AppHandle, state: State<'_, AppState>) -> Result<Strin
     let available = crate::ai_client::list_models(&ai).await.map_err(|err| {
         format!("Модели «{}» у сервиса нет, а список моделей он не отдал: {err}", ai.model)
     })?;
+    // Модель в списке есть — значит, дело не в имени. У OpenRouter так отвечают
+    // бесплатные модели, пока в настройках приватности аккаунта они не разрешены;
+    // подменять модель тогда нельзя, нужна настоящая причина.
+    if available.iter().any(|name| *name == ai.model) {
+        log::warn!("проверка провайдера: модель «{}» у сервиса есть, отказ: {refused}", ai.model);
+        return Err(refused.user_text(&fallback));
+    }
     let Some(pick) = crate::ai_client::pick_model(&ai.endpoint, &ai.model, &available) else {
         let some = available.iter().take(8).cloned().collect::<Vec<_>>().join(", ");
         return Err(format!("Модели «{}» у сервиса нет. Есть, например: {some}.", ai.model));
