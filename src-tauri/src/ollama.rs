@@ -552,12 +552,15 @@ pub fn pick(hw: &Hardware) -> &'static str {
     // потолок и половину слоёв считала на процессоре.
     let usable = hw.vram_gb - 2.0;
 
-    if usable >= 5.0 {
-        // ~4.7 ГБ. Заметно грамотнее в терминах и определениях.
-        "qwen2.5:7b"
+    // Выбор проверен на одних и тех же терминах (ai_client::live_explain):
+    // qwen2.5:7b путалась в фактах и мешала латиницу с кириллицей, qwen3.5:4b
+    // точнее её при меньшем весе, qwen3.5:9b точнее всех, ответ около двух секунд.
+    if usable >= 7.0 {
+        // ~6.6 ГБ.
+        "qwen3.5:9b"
     } else if usable >= 3.5 {
-        // ~3.3 ГБ. Ровно то, что нужно для коротких объяснений.
-        "gemma3:4b"
+        // ~3.4 ГБ.
+        "qwen3.5:4b"
     } else if usable >= 2.0 {
         // ~1.9 ГБ.
         "qwen2.5:3b"
@@ -828,9 +831,10 @@ mod tests {
     #[test]
     fn model_is_picked_by_video_memory() {
         // Запас в 2 ГБ учтён: 8 ГБ карта — это 6 ГБ под модель.
-        assert_eq!(pick(&hw(12.0, 32.0)), "qwen2.5:7b");
-        assert_eq!(pick(&hw(10.0, 32.0)), "qwen2.5:7b");
-        assert_eq!(pick(&hw(6.0, 16.0)), "gemma3:4b");
+        assert_eq!(pick(&hw(12.0, 32.0)), "qwen3.5:9b");
+        assert_eq!(pick(&hw(10.0, 32.0)), "qwen3.5:9b");
+        assert_eq!(pick(&hw(8.0, 32.0)), "qwen3.5:4b");
+        assert_eq!(pick(&hw(6.0, 16.0)), "qwen3.5:4b");
         assert_eq!(pick(&hw(4.0, 16.0)), "qwen2.5:3b");
     }
 

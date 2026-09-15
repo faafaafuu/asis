@@ -2585,10 +2585,19 @@ async fn intent_provider(app: &AppHandle) -> Arc<dyn crate::ai_client::AiProvide
     local.unwrap_or_else(|| state.provider())
 }
 
-/// Установленная модель Ollama для разбора: сначала qwen (правила разбора
+/// Установленная модель Ollama для разбора: та, что программа выбирает для этой
+/// машины по видеопамяти (`ollama::pick`); нет её — qwen (правила разбора
 /// выверены на ней), затем самая крупная из тех, что помещаются в 6 ГБ.
 async fn local_intent_model() -> Option<String> {
     let status = crate::ollama::status(crate::ollama::DEFAULT_HOST).await;
+    let preferred = tokio::task::spawn_blocking(|| crate::ollama::pick(&crate::ollama::hardware()))
+        .await
+        .ok();
+    if let Some(preferred) = preferred {
+        if status.installed.iter().any(|m| m.name == preferred) {
+            return Some(preferred.to_string());
+        }
+    }
     let mut models: Vec<&crate::ollama::Model> = status
         .installed
         .iter()

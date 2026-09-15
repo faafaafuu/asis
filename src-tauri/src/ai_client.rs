@@ -456,6 +456,9 @@ impl HttpProvider {
             // правильно. Срок один на всё приложение: тем же значением модель
             // прогревается при запуске (см. ollama::preload).
             body["keep_alive"] = serde_json::json!(crate::ollama::KEEP_ALIVE);
+            // Qwen 3 и новее сначала рассуждают, а потом отвечают: для голоса это
+            // лишние секунды. Модели без размышлений этот ключ просто не замечают.
+            body["think"] = serde_json::json!(false);
         }
 
         // OpenRouter умеет не присылать размышление — просим его об этом.
@@ -693,6 +696,58 @@ pub fn pick_model(endpoint: &str, current: &str, available: &[String]) -> Option
         return first(&["llama-3.3-70b-versatile"], &|id| id.contains("llama"));
     }
     available.iter().find(|id| chat(id)).cloned()
+}
+
+#[cfg(test)]
+mod live_explain {
+    use super::*;
+
+    /// Какая модель толковее объясняет термины — на одних и тех же словах.
+    ///
+    /// `cargo test --lib ai_client::live_explain -- --ignored --nocapture`;
+    /// модели — через `SUFLER_MODELS=qwen2.5:7b,qwen3.5:9b`.
+    #[test]
+    #[ignore = "ходит в локальную модель"]
+    fn compare_explanations() {
+        let terms = [
+            "альбедо",
+            "литосфера",
+            "Kubernetes",
+            "инфляция",
+            "квантовая запутанность",
+            "эмбеддинг",
+        ];
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let models: Vec<String> = std::env::var("SUFLER_MODELS")
+            .map(|list| list.split(',').map(str::to_string).collect())
+            .unwrap_or_else(|_| vec!["qwen2.5:7b".into()]);
+
+        for model in models {
+            let config = AiConfig {
+                endpoint: crate::ollama::DEFAULT_ENDPOINT.into(),
+                model: model.clone(),
+                ..Default::default()
+            };
+            let provider = HttpProvider::new(&config, "ru").expect("провайдер");
+            // Первый запрос грузит модель в память — его время не в счёт.
+            let _ = runtime.block_on(provider.explain("прогрев", ""));
+            let started = std::time::Instant::now();
+            for term in terms {
+                match runtime.block_on(provider.explain(term, "")) {
+                    Ok(found) => println!("{model:>11} {term}: {} | проще: {}", found.def, found.simple),
+                    Err(err) => println!("{model:>11} {term}: ошибка — {err}"),
+                }
+            }
+            println!(
+                "{model}: в среднем {} мс на термин\n",
+                started.elapsed().as_millis() / terms.len() as u128
+            );
+            runtime.block_on(crate::ollama::unload(crate::ollama::DEFAULT_HOST, &model));
+        }
+    }
 }
 
 #[cfg(test)]

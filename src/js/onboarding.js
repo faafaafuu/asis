@@ -1044,15 +1044,15 @@ ui.save.addEventListener("click", async () => {
 // утверждать наверняка: чьё семейство и насколько крупная. Придумывать им
 // достоинства значило бы выдать догадку за рекомендацию.
 const CATALOG = [
-  { name: "qwen2.5:7b", size: "4.7 ГБ", note: "точнее всех, знает термины", top: true },
-  { name: "gemma3:4b", size: "3.3 ГБ", note: "быстрее, на редких словах слабее", top: true },
+  { name: "qwen3.5:9b", size: "6.6 ГБ", note: "точнее всех, ответ около двух секунд", top: true },
+  { name: "qwen3.5:4b", size: "3.4 ГБ", note: "легче и быстрее, в фактах слабее первой", top: true },
   { name: "gemma3:1b", size: "0.8 ГБ", note: "для слабых машин, чаще ошибается", top: true },
-  { name: "qwen2.5:3b", size: "1.9 ГБ", note: "то же семейство, что и первая, но меньше" },
+  { name: "qwen2.5:7b", size: "4.7 ГБ", note: "прежнее поколение: быстрая, но путается в фактах" },
+  { name: "gemma3:4b", size: "3.3 ГБ", note: "Gemma от Google, компактная" },
+  { name: "qwen2.5:3b", size: "1.9 ГБ", note: "прежнее поколение Qwen, маленькая" },
   { name: "llama3.2:3b", size: "2.0 ГБ", note: "Llama от Meta, компактная" },
   { name: "phi4-mini", size: "2.5 ГБ", note: "Phi от Microsoft, компактная" },
-  { name: "mistral:7b", size: "4.4 ГБ", note: "Mistral, размером с первую" },
-  { name: "qwen3:4b", size: "2.5 ГБ", note: "новее qwen2.5, но думает перед ответом дольше" },
-  { name: "gemma3:12b", size: "8.1 ГБ", note: "самая крупная здесь, нужна мощная машина" },
+  { name: "gemma3:12b", size: "8.1 ГБ", note: "крупная, нужна мощная машина" },
 ];
 
 /**
