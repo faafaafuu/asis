@@ -297,6 +297,7 @@ pub fn run() {
             commands::ai_settings,
             commands::save_ai_settings,
             commands::test_ai,
+            commands::cloud_models,
             commands::integration_status,
             commands::open_permission_settings,
             commands::trigger_settings,

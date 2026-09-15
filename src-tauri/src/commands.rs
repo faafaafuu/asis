@@ -229,6 +229,35 @@ pub fn save_ai_settings(
     Ok(())
 }
 
+/// Свежий каталог моделей облачного сервиса — по тому, что сейчас введено в окне,
+/// ещё до сохранения.
+///
+/// Сохранённый ключ подставляется, только если адрес сервиса тот же: иначе ключ
+/// одного сервиса ушёл бы другому.
+#[tauri::command]
+pub async fn cloud_models(
+    state: State<'_, AppState>,
+    endpoint: String,
+    api_key: String,
+    proxy: String,
+) -> Result<Vec<crate::ai_client::ModelInfo>, String> {
+    let mut ai = state.config().ai.clone();
+    if ai.endpoint.trim() != endpoint.trim() {
+        ai.api_key = String::new();
+    }
+    if !api_key.is_empty() && !api_key.starts_with('•') {
+        ai.api_key = api_key;
+    }
+    ai.endpoint = endpoint;
+    ai.proxy = proxy;
+    if ai.endpoint.trim().is_empty() {
+        return Err("Сначала укажите адрес сервиса".into());
+    }
+    let models = crate::ai_client::catalog(&ai).await?;
+    log::info!("каталог моделей: {} шт.", models.len());
+    Ok(models)
+}
+
 /* ── Голос ───────────────────────────────────────────────────────────────── */
 
 /// Настройки голоса для окна.

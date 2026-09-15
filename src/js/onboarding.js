@@ -941,12 +941,16 @@ async function loadSettings() {
     ui.proxy.value = settings.proxy || "";
     ui.apiKey.value = "";
     ui.apiKey.placeholder = settings.apiKey ? t("key.saved") : t("key.placeholder");
+    loadFreeModels();
   } catch (err) {
     ui.aiStatus.textContent = `Не удалось прочитать настройки: ${err}`;
   }
 }
 
-ui.preset.addEventListener("change", () => applyPreset(ui.preset.value));
+ui.preset.addEventListener("change", () => {
+  applyPreset(ui.preset.value);
+  loadFreeModels();
+});
 
 async function saveAi() {
   const preset = PRESETS[ui.preset.value];
@@ -962,6 +966,59 @@ async function saveAi() {
   });
   ui.apiKey.value = "";
 }
+
+/* ── Бесплатные модели облачного сервиса ────────────────────────────────── */
+
+/**
+ * Заполняет выпадающий список бесплатными моделями выбранного сервиса — свежими,
+ * от него самого. Где сервис цен не публикует (Groq, Google), показываются все:
+ * там бесплатен сам тариф.
+ */
+async function loadFreeModels() {
+  ui.freeWrap.hidden = true;
+  ui.catalogStatus.textContent = "";
+  const asked = ui.preset.value;
+  const endpoint = ui.endpoint.value.trim();
+  if (!api || asked === "ollama" || PRESETS[asked].provider !== "http" || !endpoint) return;
+
+  let models;
+  try {
+    models = await api.invoke("cloud_models", {
+      endpoint,
+      apiKey: ui.apiKey.value.trim(),
+      proxy: ui.proxy.value.trim(),
+    });
+  } catch (err) {
+    ui.catalogStatus.textContent = `Список моделей не пришёл: ${err}`;
+    return;
+  }
+  // Пока ждали ответа, человек мог уйти на другой источник.
+  if (ui.preset.value !== asked) return;
+
+  const free = models.filter((model) => model.free !== false);
+  if (!free.length) return;
+  const current = ui.model.value.trim();
+  ui.freeModels.replaceChildren(
+    new Option(`Бесплатные модели (${free.length})`, ""),
+    ...free.map((model) => new Option(model.name === model.id ? model.id : `${model.name} — ${model.id}`, model.id)),
+  );
+  ui.freeModels.value = free.some((model) => model.id === current) ? current : "";
+  ui.freeWrap.hidden = false;
+}
+
+// Выбор в списке сразу сохраняется: отдельное «Сохранить» здесь лишний шаг.
+ui.freeModels.addEventListener("change", async () => {
+  const id = ui.freeModels.value;
+  if (!id) return;
+  ui.model.value = id;
+  try {
+    await saveAi();
+    ui.catalogStatus.textContent = `Теперь отвечает «${id}». «Проверить» — пробный вопрос.`;
+  } catch (err) {
+    ui.catalogStatus.textContent = `Не сохранилось: ${err}`;
+  }
+});
+ui.apiKey.addEventListener("change", loadFreeModels);
 
 ui.save.addEventListener("click", async () => {
   ui.aiStatus.textContent = t("action.saving");

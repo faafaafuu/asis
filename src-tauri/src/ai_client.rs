@@ -547,6 +547,71 @@ fn answer_limit(endpoint: &str) -> u32 {
 /// Адрес списка — рядом с адресом ответов: `…/chat/completions` → `…/models`.
 /// Так устроены OpenRouter, Groq и OpenAI-совместимый вход Google.
 pub async fn list_models(config: &AiConfig) -> Result<Vec<String>, String> {
+    Ok(fetch_models(config)
+        .await?
+        .iter()
+        .filter_map(|model| model["id"].as_str())
+        // Google отдаёт имена с приставкой `models/`, а принимает без неё.
+        .map(|id| id.trim_start_matches("models/").to_string())
+        .collect())
+}
+
+/// Модель из каталога сервиса — для выбора в окне настройки.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    /// Длина контекста в токенах; 0 — сервис не сообщил.
+    pub context: u64,
+    /// Бесплатна ли модель; `None` — сервис цен не публикует (Groq, Google).
+    pub free: Option<bool>,
+}
+
+/// Каталог разговорных моделей сервиса в его собственном порядке (у OpenRouter —
+/// новые первыми). Картинки, речь, эмбеддинги и фильтры модерации отброшены:
+/// на вопрос они не ответят.
+pub async fn catalog(config: &AiConfig) -> Result<Vec<ModelInfo>, String> {
+    const NOT_CHAT: &[&str] = &[
+        "embed", "whisper", "tts", "imagen", "veo", "guard", "moderation", "rerank", "aqa",
+        "content-safety", "image-generation",
+    ];
+    Ok(fetch_models(config)
+        .await?
+        .iter()
+        .filter_map(|model| {
+            let id = model["id"].as_str()?.trim_start_matches("models/").to_string();
+            let lower = id.to_lowercase();
+            if NOT_CHAT.iter().any(|word| lower.contains(word)) {
+                return None;
+            }
+            let pricing = &model["pricing"];
+            let free = if id.ends_with(":free") {
+                Some(true)
+            } else if pricing.is_object() {
+                let zero = |key: &str| {
+                    pricing[key].as_str().and_then(|p| p.parse::<f64>().ok()) == Some(0.0)
+                };
+                Some(zero("prompt") && zero("completion"))
+            } else {
+                None
+            };
+            let name = model["name"]
+                .as_str()
+                .or_else(|| model["display_name"].as_str())
+                .unwrap_or(&id)
+                .to_string();
+            let context = model["context_length"]
+                .as_u64()
+                .or_else(|| model["context_window"].as_u64())
+                .unwrap_or(0);
+            Some(ModelInfo { id, name, context, free })
+        })
+        .collect())
+}
+
+/// Сырой список `data` из `{base}/models` OpenAI-совместимого сервиса.
+async fn fetch_models(config: &AiConfig) -> Result<Vec<serde_json::Value>, String> {
     let base = config
         .endpoint
         .trim_end_matches('/')
@@ -570,17 +635,7 @@ pub async fn list_models(config: &AiConfig) -> Result<Vec<String>, String> {
         .json()
         .await
         .map_err(|_| "список моделей не разобрался".to_string())?;
-    Ok(body["data"]
-        .as_array()
-        .map(|models| {
-            models
-                .iter()
-                .filter_map(|model| model["id"].as_str())
-                // Google отдаёт имена с приставкой `models/`, а принимает без неё.
-                .map(|id| id.trim_start_matches("models/").to_string())
-                .collect()
-        })
-        .unwrap_or_default())
+    Ok(body["data"].as_array().cloned().unwrap_or_default())
 }
 
 /// Живая замена модели, которой у сервиса больше нет. `None` — выбрать не из чего.

@@ -128,7 +128,15 @@
 
         <section class="ob__block" data-el="modelField">
           <span class="ob__label" data-i18n="model.label">Модель</span>
-          <input class="ob__underline" data-el="model" type="text" spellcheck="false" />
+          <!-- Бесплатные модели — списком, свежим от самого сервиса: они приходят
+               и уходят без предупреждения. Платную вписывают в поле ниже. -->
+          <span class="ob__select" data-el="freeWrap" hidden>
+            <select class="ob__underline" data-el="freeModels"></select>
+            <span class="ob__chevron" aria-hidden="true"></span>
+          </span>
+          <input class="ob__underline" data-el="model" type="text" spellcheck="false"
+                 placeholder="или имя платной модели" />
+          <p class="ob__hint" data-el="catalogStatus"></p>
         </section>
       </div>
 
