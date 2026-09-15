@@ -485,6 +485,23 @@ impl Config {
         if self.voice.engine == "edge" {
             self.voice.engine = "piper".into();
         }
+        // Облачный сервис без имени модели запрос не примет — OpenRouter
+        // отвечает 400, и Ноа молчала. Пустое имя подставляется рабочим.
+        if self.ai.provider == "http" && self.ai.model.trim().is_empty() {
+            let fallback = if self.ai.endpoint.contains("openrouter.ai") {
+                "z-ai/glm-5.2:free"
+            } else if self.ai.endpoint.contains("googleapis.com") {
+                "gemini-flash-latest"
+            } else if self.ai.endpoint.contains("groq.com") {
+                "llama-3.3-70b-versatile"
+            } else {
+                ""
+            };
+            if !fallback.is_empty() {
+                log::info!("имя модели пустое — беру «{fallback}»");
+                self.ai.model = fallback.into();
+            }
+        }
         // Двенадцать секунд — прежнее умолчание. Своей модели их не хватает даже
         // на загрузку в память (около тринадцати), и первый запрос обрывался
         // всегда. Поднимаем только заведомо непригодные значения и только для

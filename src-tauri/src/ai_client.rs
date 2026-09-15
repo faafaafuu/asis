@@ -603,12 +603,15 @@ pub fn pick_model(endpoint: &str, current: &str, available: &[String]) -> Option
             .or_else(|| available.iter().find(|id| keep(id) && chat(id)).cloned())
     };
     if endpoint.contains("openrouter.ai") {
-        if current.ends_with(":free") {
+        // Пустое имя — тоже бесплатная: платить никто не соглашался. Gemma —
+        // последней: у OpenRouter её часто обслуживает Google, а тот для Gemma
+        // не принимает системную инструкцию и отвечает 400.
+        if current.is_empty() || current.ends_with(":free") {
             return first(
                 &[
-                    "google/gemma-4-31b-it:free",
                     "z-ai/glm-5.2:free",
                     "nvidia/nemotron-3-super-120b-a12b:free",
+                    "google/gemma-4-31b-it:free",
                 ],
                 &|id| id.ends_with(":free"),
             );

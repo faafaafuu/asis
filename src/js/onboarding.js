@@ -811,8 +811,10 @@ const PRESETS = {
     provider: "http",
     endpoint: "https://openrouter.ai/api/v1/chat/completions",
     // Бесплатные модели у OpenRouter приходят и уходят. Эта есть в списке на
-    // осень 2026; пропадёт — «Проверить» сама подберёт живую.
-    model: "google/gemma-4-31b-it:free",
+    // осень 2026; пропадёт — «Проверить» сама подберёт живую. Не Gemma: её
+    // OpenRouter часто отдаёт Google, а тот для Gemma не принимает системную
+    // инструкцию и отвечает 400.
+    model: "z-ai/glm-5.2:free",
     key: true,
     hintKey: "hint.openrouter",
   },
@@ -909,7 +911,8 @@ async function saveAi() {
       provider: preset.provider,
       endpoint: ui.endpoint.value.trim(),
       apiKey: ui.apiKey.value.trim(),
-      model: ui.model.value.trim(),
+      // Пустое имя модели облачный сервис не примет — берём из пресета.
+      model: ui.model.value.trim() || preset.model,
       proxy: ui.proxy.value.trim(),
     },
   });

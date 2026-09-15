@@ -800,6 +800,8 @@ pub async fn test_ai(app: AppHandle, state: State<'_, AppState>) -> Result<Strin
         Ok(Ok(explanation)) => return Ok(explanation.def),
         // Модели с таким именем у сервиса нет — чиним ниже.
         Ok(Err(AiError::Refused(404, _) | AiError::Http(404))) => {}
+        // 400 «про модель» — пустое или неверное имя: чиним так же.
+        Ok(Err(AiError::Refused(400, message))) if message.to_lowercase().contains("model") => {}
         Ok(Err(err)) => {
             log::warn!("проверка провайдера: {err}");
             return Err(err.user_text(&fallback));
