@@ -108,6 +108,40 @@ body {
   color: var(--text-muted);
 }
 
+/* Пояснение под «?»: заголовок и кнопка в одну строку. */
+.ob__tip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ob__tip {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: none;
+  font: 10.5px/1 var(--font-mono);
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.ob__tip:hover,
+.ob__tip[aria-expanded="true"] {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.ob__tip-body[hidden] {
+  display: none !important;
+}
+
 .ob__note {
   font-size: 12.5px;
   line-height: 1.6;

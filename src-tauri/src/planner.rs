@@ -17,6 +17,8 @@
 //! через сравнение слов.
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDateTime, TimeZone};
+use std::sync::{Arc, Mutex};
+
 use tauri::{AppHandle, Manager};
 
 use crate::state::AppState;
@@ -2537,13 +2539,89 @@ fn only_one_or<'a>(id: Option<&str>, open: &'a [Task]) -> Option<&'a Task> {
 
 /* ── Разговор с моделью ──────────────────────────────────────────────────── */
 
+/// Своя модель для разбора команд, когда ответы идут из облака: время проверки
+/// и найденный провайдер (`None` — Ollama не запущена или моделей нет).
+type LocalIntent = Option<(std::time::Instant, Option<Arc<dyn crate::ai_client::AiProvider>>)>;
+static LOCAL_INTENT: Mutex<LocalIntent> = Mutex::new(None);
+
+/// Модель, которой разбирать реплику.
+///
+/// Разбор — короткий JSON с намерением, и своя модель справляется с ним не хуже
+/// облачной. Когда ответы идут из облака, каждая фраза стоила бы там двух
+/// запросов, а у бесплатных тарифов лимит — десятки запросов в сутки. Поэтому
+/// при облачном источнике разбор уходит в Ollama, если в ней есть модель.
+async fn intent_provider(app: &AppHandle) -> Arc<dyn crate::ai_client::AiProvider> {
+    let state = app.state::<AppState>();
+    let (cloud, language) = {
+        let config = state.config();
+        (
+            config.ai.provider == "http" && !crate::config::is_local(&config.ai.endpoint),
+            config.ui.language.clone(),
+        )
+    };
+    if !cloud {
+        return state.provider();
+    }
+
+    let cached = LOCAL_INTENT.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let local = match cached {
+        Some((checked, local)) if checked.elapsed() < std::time::Duration::from_secs(60) => local,
+        _ => {
+            let local = local_intent_model().await.and_then(|model| {
+                let config = crate::config::AiConfig {
+                    endpoint: crate::ollama::DEFAULT_ENDPOINT.into(),
+                    model: model.clone(),
+                    ..Default::default()
+                };
+                let provider = crate::ai_client::HttpProvider::new(&config, &language).ok()?;
+                log::info!("команды разбирает своя модель «{model}», ответы — облако");
+                Some(Arc::new(provider) as Arc<dyn crate::ai_client::AiProvider>)
+            });
+            *LOCAL_INTENT.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some((std::time::Instant::now(), local.clone()));
+            local
+        }
+    };
+    local.unwrap_or_else(|| state.provider())
+}
+
+/// Установленная модель Ollama для разбора: сначала qwen (правила разбора
+/// выверены на ней), затем самая крупная из тех, что помещаются в 6 ГБ.
+async fn local_intent_model() -> Option<String> {
+    let status = crate::ollama::status(crate::ollama::DEFAULT_HOST).await;
+    let mut models: Vec<&crate::ollama::Model> = status
+        .installed
+        .iter()
+        .filter(|m| m.size_gb <= 6.0 && !m.name.contains("embed"))
+        .collect();
+    // Крупные первыми: из подходящих по памяти берём самую толковую.
+    models.sort_by(|a, b| b.size_gb.total_cmp(&a.size_gb));
+    models
+        .iter()
+        .find(|m| m.name.starts_with("qwen"))
+        .or(models.first())
+        .map(|m| m.name.clone())
+}
+
 async fn interpret(app: &AppHandle, rules: &str, said: &str) -> Option<serde_json::Value> {
-    let provider = app.state::<AppState>().provider();
+    let provider = intent_provider(app).await;
     let raw = match provider.interpret(rules, said).await {
         Ok(raw) => raw,
         Err(err) => {
             log::warn!("разбор реплики не удался: {err}");
-            return None;
+            // Своя модель не ответила — облако разберёт само.
+            let main = app.state::<AppState>().provider();
+            if Arc::ptr_eq(&provider, &main) {
+                return None;
+            }
+            *LOCAL_INTENT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            match main.interpret(rules, said).await {
+                Ok(raw) => raw,
+                Err(err) => {
+                    log::warn!("разбор в облаке тоже не удался: {err}");
+                    return None;
+                }
+            }
         }
     };
 

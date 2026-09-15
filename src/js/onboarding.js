@@ -10,6 +10,50 @@ const api = tauri();
 const ui = {};
 for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] = node;
 
+/* ── Пояснения под «?» ──────────────────────────────────────────────────── */
+
+/**
+ * Постоянные пояснения к полям прячутся за кнопкой «?» рядом с заголовком.
+ * Строки состояния (с data-el) остаются на виду: их пишет код, и они сообщают,
+ * что происходит сейчас.
+ */
+function tuckHints() {
+  const groups = new Map();
+  const bodies = document.querySelectorAll(
+    ".ob__lead:not([data-el]):not([data-keep]), .ob__hint:not([data-el])",
+  );
+  for (const body of bodies) {
+    const check = body.closest(".ob__check-text");
+    let anchor = check ? check.firstElementChild : body.previousElementSibling;
+    while (anchor?.classList.contains("ob__tip-body")) anchor = anchor.previousElementSibling;
+    if (!anchor || anchor === body) continue;
+    body.classList.add("ob__tip-body");
+    body.hidden = true;
+    if (!groups.has(anchor)) groups.set(anchor, []);
+    groups.get(anchor).push(body);
+  }
+  for (const [anchor, parts] of groups) {
+    const row = document.createElement("div");
+    row.className = "ob__tip-row";
+    anchor.before(row);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "ob__tip";
+    button.textContent = "?";
+    button.setAttribute("aria-expanded", "false");
+    // Кнопка бывает внутри <label>: без preventDefault щелчок переключил бы флажок.
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const open = parts[0].hidden;
+      for (const part of parts) part.hidden = !open;
+      button.setAttribute("aria-expanded", String(open));
+    });
+    row.append(anchor, button);
+  }
+}
+tuckHints();
+
 // Тему и язык Rust проставил до первого кадра — здесь только подхватываем,
 // чтобы не сбросить их обратно на значения по умолчанию.
 const injected = globalThis.__SUFLER_VIEW__;
