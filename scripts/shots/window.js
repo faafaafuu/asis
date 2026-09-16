@@ -18,6 +18,15 @@ for (const { name, value } of doc.documentElement.attributes) {
   document.documentElement.setAttribute(name, value);
 }
 document.documentElement.dataset.theme = params.get("theme") ?? "neon";
+// Headless Chrome не делает окно уже ~500 px, поэтому размер окна программы
+// задаётся самой странице, а снимок потом обрезается до него.
+if (params.get("w") && params.get("h")) {
+  Object.assign(document.documentElement.style, {
+    width: `${params.get("w")}px`,
+    height: `${params.get("h")}px`,
+    overflow: "hidden",
+  });
+}
 for (const node of doc.head.querySelectorAll('link[rel="stylesheet"], style')) {
   const copy = node.cloneNode(true);
   if (copy.tagName === "LINK") copy.href = new URL(node.getAttribute("href"), src).href;

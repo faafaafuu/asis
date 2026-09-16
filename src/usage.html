@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ru" data-theme="neon">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <title>Суфлёр — расход</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/usage.css" />
+  </head>
+  <body>
+    <!-- Одна строка на рабочем столе: токены сегодня / за месяц и деньги за
+         месяц. Подробности — при наведении, двойной щелчок — поверх окон. -->
+    <div class="line" data-el="line" data-tauri-drag-region>
+      <span class="tokens" data-el="tokens" data-tauri-drag-region>—</span>
+      <span class="money" data-el="money" data-tauri-drag-region></span>
+    </div>
+    <script type="module" src="./js/usage.js"></script>
+  </body>
+</html>

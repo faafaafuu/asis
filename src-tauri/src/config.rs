@@ -22,6 +22,30 @@ pub struct Config {
     pub review: ReviewConfig,
     pub food: FoodConfig,
     pub telegram: TelegramConfig,
+    pub widget: WidgetConfig,
+}
+
+/// Виджет расхода на рабочем столе.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WidgetConfig {
+    pub enabled: bool,
+    /// Где его оставили, в физических пикселях. `None` — ещё не двигали.
+    pub x: Option<i32>,
+    pub y: Option<i32>,
+    /// Поверх окон. Иначе живёт на рабочем столе, под окнами.
+    pub on_top: bool,
+}
+
+impl Default for WidgetConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            x: None,
+            y: None,
+            on_top: false,
+        }
+    }
 }
 
 /// Заказ продуктов через FoodPilot.

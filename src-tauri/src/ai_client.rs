@@ -476,6 +476,8 @@ impl HttpProvider {
         // него ошибкой, а `minimal` понимают все.
         if self.endpoint.contains("openrouter.ai") {
             body["reasoning"] = serde_json::json!({ "effort": "minimal", "exclude": true });
+            // Стоимость запроса — в самом ответе: по ней считает виджет расхода.
+            body["usage"] = serde_json::json!({ "include": true });
         }
         // Gemini через совместимый интерфейс Google думает по умолчанию.
         if self.endpoint.contains("googleapis.com") {
@@ -538,7 +540,9 @@ impl HttpProvider {
             log::warn!("отказ сервиса {status}: {message}");
             return Err(AiError::Refused(status.as_u16(), message));
         }
-        response.json().await.map_err(|_| AiError::Parse)
+        let value: serde_json::Value = response.json().await.map_err(|_| AiError::Parse)?;
+        crate::usage::record(&value);
+        Ok(value)
     }
 }
 

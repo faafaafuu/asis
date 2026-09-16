@@ -806,6 +806,22 @@ async function loadChips() {
   }
 }
 
+/* ── Виджет расхода ─────────────────────────────────────────────────────── */
+
+let widgetOnTop = false;
+api
+  ?.invoke("widget_settings")
+  .then((settings) => {
+    ui.widgetEnabled.checked = settings.enabled;
+    widgetOnTop = settings.onTop;
+  })
+  .catch(() => {});
+ui.widgetEnabled.addEventListener("change", () => {
+  api
+    ?.invoke("save_widget_settings", { settings: { enabled: ui.widgetEnabled.checked, onTop: widgetOnTop } })
+    .catch(() => {});
+});
+
 let startTab = "modules";
 try {
   startTab = localStorage.getItem(TAB_KEY) ?? "modules";

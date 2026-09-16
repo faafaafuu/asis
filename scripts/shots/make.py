@@ -60,6 +60,9 @@ TOURS = [
     ("tasks.webp", "tasks", 400, 560, [
         ("", 3.0),
     ]),
+    ("usage.webp", "usage", 200, 30, [
+        ("", 3.0),
+    ]),
 ]
 
 FADE_FRAMES = 4
@@ -143,9 +146,12 @@ def make_tour(chrome: str, port: int, work: Path, spec) -> None:
     for i, (steps, _) in enumerate(states):
         url = (
             f"http://127.0.0.1:{port}/scripts/shots/window.html"
-            f"?page={page}&theme={THEME}&steps={quote(steps)}"
+            f"?page={page}&theme={THEME}&w={width}&h={height}&steps={quote(steps)}"
         )
-        shots.append(shoot(chrome, url, width, height, 8000, work / f"{i:02d}.png"))
+        # Окно браузера не уже 600 px — иначе Chrome раскладывает шире, чем
+        # снимает. Страница сама держит размер окна программы, лишнее срезается.
+        shot = shoot(chrome, url, max(width, 600), height, 8000, work / f"{i:02d}.png")
+        shots.append(shot.crop((0, 0, width * SCALE, height * SCALE)))
         print(".", end="", flush=True)
     print()
 

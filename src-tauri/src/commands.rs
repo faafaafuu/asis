@@ -376,6 +376,53 @@ pub async fn silero_install(app: AppHandle) -> Result<(), String> {
     crate::voice::silero_install(app).await
 }
 
+/// Расход модели для виджета.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn usage_summary(app: AppHandle) -> crate::usage::Summary {
+    crate::usage::summary(&app)
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetSettings {
+    pub enabled: bool,
+    pub on_top: bool,
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn widget_settings(state: State<'_, AppState>) -> WidgetSettings {
+    let config = state.config();
+    WidgetSettings {
+        enabled: config.widget.enabled,
+        on_top: config.widget.on_top,
+    }
+}
+
+/// Включает или выключает виджет и закрепляет его поверх окон.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn save_widget_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: WidgetSettings,
+) -> Result<(), String> {
+    {
+        let mut config = state.config_mut();
+        config.widget.enabled = settings.enabled;
+        config.widget.on_top = settings.on_top;
+    }
+    persist(&app, &state)?;
+    if settings.enabled {
+        crate::overlay::show_usage_widget(&app).map_err(|err| err.to_string())?;
+        crate::overlay::pin_usage_widget(&app, settings.on_top);
+    } else {
+        crate::overlay::hide_usage_widget(&app);
+    }
+    Ok(())
+}
+
 /// Модули и их состояние — для главного окна.
 #[cfg(desktop)]
 #[tauri::command]

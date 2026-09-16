@@ -1023,6 +1023,105 @@ pub fn show_watchlist(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+pub const USAGE_LABEL: &str = "usage";
+const USAGE_WIDTH: f64 = 200.0;
+const USAGE_HEIGHT: f64 = 30.0;
+
+/// Виджет расхода: маленькая карточка на рабочем столе, живёт, пока работает
+/// программа. Перетаскивается за любое место; место запоминается.
+pub fn show_usage_widget(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(USAGE_LABEL) {
+        window.show()?;
+        return Ok(());
+    }
+    let widget = app.state::<AppState>().config().widget.clone();
+    let window = WebviewWindowBuilder::new(app, USAGE_LABEL, WebviewUrl::App("usage.html".into()))
+        .initialization_script(&theme_script(app))
+        .title("Суфлёр — расход")
+        .inner_size(USAGE_WIDTH, USAGE_HEIGHT)
+        .resizable(false)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .skip_taskbar(true)
+        .always_on_top(widget.on_top)
+        .always_on_bottom(!widget.on_top)
+        .focused(false)
+        .visible(false)
+        .build()?;
+    #[cfg(target_os = "windows")]
+    make_passive(&window);
+
+    let position = match (widget.x, widget.y) {
+        (Some(x), Some(y)) => PhysicalPosition::new(x, y),
+        // Впервые — в правом верхнем углу основного экрана.
+        _ => match window.primary_monitor()? {
+            Some(monitor) => {
+                let scale = monitor.scale_factor();
+                PhysicalPosition::new(
+                    monitor.position().x + monitor.size().width as i32 - ((USAGE_WIDTH + 24.0) * scale) as i32,
+                    monitor.position().y + (64.0 * scale) as i32,
+                )
+            }
+            None => PhysicalPosition::new(40, 40),
+        },
+    };
+    window.set_position(position)?;
+    window.show()?;
+
+    let handle = app.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::Moved(to) = event {
+            remember_widget_position(&handle, to.x, to.y);
+        }
+    });
+    Ok(())
+}
+
+pub fn hide_usage_widget(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(USAGE_LABEL) {
+        let _ = window.close();
+    }
+}
+
+/// Поверх окон или на рабочем столе.
+pub fn pin_usage_widget(app: &AppHandle, on_top: bool) {
+    if let Some(window) = app.get_webview_window(USAGE_LABEL) {
+        let _ = window.set_always_on_bottom(!on_top);
+        let _ = window.set_always_on_top(on_top);
+    }
+}
+
+static WIDGET_MOVE: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
+static WIDGET_SAVING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Запоминает, куда перетащили виджет. На диск — один раз, когда движение
+/// улеглось: событие приходит на каждый пиксель пути.
+fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
+    use std::sync::atomic::Ordering;
+    *WIDGET_MOVE.lock().unwrap_or_else(|err| err.into_inner()) = Some((x, y));
+    if WIDGET_SAVING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        WIDGET_SAVING.store(false, Ordering::SeqCst);
+        let Some((x, y)) = WIDGET_MOVE.lock().unwrap_or_else(|err| err.into_inner()).take() else {
+            return;
+        };
+        let state = app.state::<AppState>();
+        {
+            let mut config = state.config_mut();
+            config.widget.x = Some(x);
+            config.widget.y = Some(y);
+        }
+        if let Err(err) = crate::commands::persist(&app, &state) {
+            log::warn!("место виджета не сохранилось: {err}");
+        }
+    });
+}
+
 /// Прячет окно активов.
 pub fn hide_watchlist(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(WATCH_LABEL) {

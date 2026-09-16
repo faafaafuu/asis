@@ -179,6 +179,15 @@
       ],
     }),
     recommended_model: () => "qwen3.5:4b",
+    usage_summary: () => ({
+      today: { requests: 46, prompt: 118400, completion: 6150, cost: 0.0214 },
+      month: { requests: 1210, prompt: 3120000, completion: 162000, cost: 0.587 },
+      balance: 9.41,
+      model: "deepseek/deepseek-v4-flash",
+      cloud: true,
+      service: "OpenRouter",
+    }),
+    widget_settings: () => ({ enabled: true, onTop: false }),
   });
   // Тема окна — так же, как её подставляет программа до первого кадра.
   globalThis.__SUFLER_VIEW__ = {

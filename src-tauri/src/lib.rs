@@ -35,6 +35,7 @@ mod alarms;
 mod mcp;
 mod modules;
 mod review;
+mod usage;
 mod secret;
 mod tasks;
 mod selection;
@@ -142,6 +143,7 @@ pub fn run() {
                 watchlist::load(dir.clone());
                 learning::load(dir.clone());
                 voice::stt::load_calibration(dir.clone());
+                usage::load(dir.clone());
                 alarms::load(dir);
             }
             let config = Config::load(config_dir);
@@ -211,6 +213,12 @@ pub fn run() {
                 watchlist::watch_alerts(app.handle().clone());
                 telegram::listen(app.handle().clone());
                 alarms::watch(app.handle().clone());
+                usage::watch(app.handle().clone());
+                if app.state::<AppState>().config().widget.enabled {
+                    if let Err(err) = overlay::show_usage_widget(app.handle()) {
+                        log::warn!("виджет расхода не открылся: {err}");
+                    }
+                }
                 start_wake(app.handle());
             }
 
@@ -329,6 +337,12 @@ pub fn run() {
             commands::modules_overview,
             #[cfg(desktop)]
             commands::open_module,
+            #[cfg(desktop)]
+            commands::usage_summary,
+            #[cfg(desktop)]
+            commands::widget_settings,
+            #[cfg(desktop)]
+            commands::save_widget_settings,
             #[cfg(desktop)]
             commands::azure_check,
             #[cfg(desktop)]

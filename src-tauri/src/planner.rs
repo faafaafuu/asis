@@ -1790,14 +1790,18 @@ fn screenshot_request(app: &AppHandle, said: &str) -> Option<String> {
 /// жанра. С уточнением это уже поиск, и его разбирает модель.
 fn asks_for_music(said: &str) -> bool {
     const VERBS: &[&str] = &["включ", "постав", "вруб", "запуст", "давай", "хочу"];
+    /// Чем называют свою станцию.
+    const NOUNS: &[&str] = &["музык", "музычк", "музон", "радио", "станци", "трансляц"];
     const FILLER: &[&str] = &[
         "ноа", "мне", "нам", "пожалуйста", "какую", "нибудь", "немного", "фоном", "фоновую",
-        "что", "то", "ка", "эй", "можешь", "можно", "плиз",
+        "что", "то", "ка", "эй", "можешь", "можно", "плиз", "мою", "свою", "моё", "мое", "эту",
+        "клод", "клода", "клауде", "клауд", "клоуд", "claude", "лофи", "lofi", "радио",
+        "станцию", "трансляцию",
     ];
     let words = words_of(said);
     let Some(music) = words
         .iter()
-        .position(|word| word.starts_with("музык") || word.starts_with("музычк"))
+        .position(|word| NOUNS.iter().any(|noun| word.starts_with(noun)))
     else {
         return false;
     };
@@ -1817,7 +1821,9 @@ fn music_request(app: &AppHandle, said: &str) -> Option<String> {
     if url.is_empty() {
         return None;
     }
+    let radio = said.to_lowercase().contains("радио");
     Some(match crate::pc::open(&url) {
+        Ok(()) if radio => "Включаю радио.".into(),
         Ok(()) => "Включаю музыку.".into(),
         Err(err) => format!("Не смог открыть музыку: {err}"),
     })
@@ -3076,6 +3082,18 @@ mod tests {
         assert!(asked_for("find", "найди фото паспорта"));
         assert!(asked_for("type", "напечатай привет"));
         assert!(!asked_for("find", "звучит музыка"));
+    }
+
+    #[test]
+    fn music_and_radio_requests_are_recognised() {
+        assert!(asks_for_music("включи музыку"));
+        assert!(asks_for_music("Ноа, включи мне музыку"));
+        assert!(asks_for_music("включи радио"));
+        assert!(asks_for_music("включи клауде радио"));
+        assert!(asks_for_music("поставь трансляцию claude радио"));
+        assert!(asks_for_music("включи мою станцию"));
+        assert!(!asks_for_music("выключи радио на кухне и открой почту"));
+        assert!(!asks_for_music("радио сегодня говорило про погоду"));
     }
 
     #[test]
