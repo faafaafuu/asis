@@ -419,7 +419,12 @@ impl HttpProvider {
 
     /// Один заход за ответом на вопрос: отправить и достать текст.
     async fn answer_once(&self, messages: Vec<Message<'_>>) -> Result<String, AiError> {
-        let value = self.send(messages).await?;
+        self.answer_as(messages, false).await
+    }
+
+    /// `json` — ответ обязан быть объектом JSON (разбор реплик).
+    async fn answer_as(&self, messages: Vec<Message<'_>>, json: bool) -> Result<String, AiError> {
+        let value = self.send_as(messages, json).await?;
         let text = extract_text(&value)
             .map(|text| strip_reasoning(&text))
             .map(|text| strip_code_fence(&text).to_string())
@@ -439,6 +444,10 @@ impl HttpProvider {
     }
 
     async fn send(&self, messages: Vec<Message<'_>>) -> Result<serde_json::Value, AiError> {
+        self.send_as(messages, false).await
+    }
+
+    async fn send_as(&self, messages: Vec<Message<'_>>, json: bool) -> Result<serde_json::Value, AiError> {
         let mut body = serde_json::json!({
             "model": (!self.model.is_empty()).then(|| self.model.clone()),
             "messages": messages,
@@ -491,9 +500,33 @@ impl HttpProvider {
             body["reasoning_effort"] = serde_json::json!("low");
         }
 
+        // Разбор реплик обязан вернуть JSON, а просьба в тексте правил для
+        // облачных моделей — не гарантия: Mistral, увидев подходящий модуль,
+        // отвечал прозой и сам выдумывал результат. Режим JSON сервиса это
+        // исключает.
+        let ollama = self.endpoint.contains("/api/chat");
+        if json {
+            if ollama {
+                body["format"] = serde_json::json!("json");
+            } else {
+                body["response_format"] = serde_json::json!({ "type": "json_object" });
+            }
+        }
+        match self.send_retrying(&body).await {
+            // Сервис без режима JSON отвечает отказом — тогда как раньше, без него.
+            Err(err @ (AiError::Http(400 | 422) | AiError::Refused(400 | 422, _))) if json && !ollama => {
+                log::info!("режим JSON сервис не принял ({err}) — повторяю без него");
+                body.as_object_mut().map(|fields| fields.remove("response_format"));
+                self.send_retrying(&body).await
+            }
+            other => other,
+        }
+    }
+
+    async fn send_retrying(&self, body: &serde_json::Value) -> Result<serde_json::Value, AiError> {
         let mut last = AiError::Network;
         for attempt in 0..=self.retries {
-            match self.send_once(&body).await {
+            match self.send_once(body).await {
                 Ok(value) => return Ok(value),
                 Err(err) => {
                     let retryable = err.retryable();
@@ -1087,7 +1120,7 @@ fn strip_foreign(text: &str) -> String {
 #[async_trait]
 impl AiProvider for HttpProvider {
     async fn interpret(&self, rules: &str, said: &str) -> Result<String, AiError> {
-        self.answer_once(vec![
+        self.answer_as(vec![
             Message {
                 role: "system",
                 content: rules.to_string(),
@@ -1096,7 +1129,7 @@ impl AiProvider for HttpProvider {
                 role: "user",
                 content: said.to_string(),
             },
-        ])
+        ], true)
         .await
     }
 

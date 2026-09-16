@@ -1102,19 +1102,56 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
         // Инструмент — только из тех, что модули действительно отдали: имя,
         // придуманное моделью, вызвать нечего.
         "tool" => {
-            let tool = text("tool");
-            if crate::plugins::tools().iter().any(|known| known.full_name() == tool) {
-                Intent::Tool {
+            let named = text("tool");
+            match resolve_tool(&named) {
+                Some(tool) => Intent::Tool {
                     tool,
                     args: parsed["args"].clone(),
+                },
+                None => {
+                    log::info!("модель назвала инструмент «{named}», а такого нет — считаю разговором");
+                    Intent::Chat
                 }
-            } else {
-                log::info!("модель назвала инструмент «{tool}», а такого нет — считаю разговором");
-                Intent::Chat
             }
         }
-        _ => Intent::Chat,
+        // Облачные модели порой пишут в intent сам инструмент или модуль —
+        // {"intent":"weather","city":"Казань"} — вместо intent tool. Если такой
+        // инструмент есть, это его вызов, а поля рядом — его аргументы.
+        other => match resolve_tool(other) {
+            Some(tool) => {
+                let args = if parsed["args"].is_object() {
+                    parsed["args"].clone()
+                } else {
+                    let mut fields = parsed.as_object().cloned().unwrap_or_default();
+                    fields.remove("intent");
+                    serde_json::Value::Object(fields)
+                };
+                log::info!("намерение «{other}» — это инструмент «{tool}»");
+                Intent::Tool { tool, args }
+            }
+            None => Intent::Chat,
+        },
     }
+}
+
+/// Полное имя инструмента по тому, как его назвала модель: полностью
+/// («weather.weather»), одним именем инструмента или именем модуля, если
+/// инструмент у модуля один.
+fn resolve_tool(named: &str) -> Option<String> {
+    let named = named.trim();
+    if named.is_empty() {
+        return None;
+    }
+    let tools = crate::plugins::tools();
+    if let Some(tool) = tools.iter().find(|tool| tool.full_name() == named) {
+        return Some(tool.full_name());
+    }
+    let by_name: Vec<_> = tools.iter().filter(|tool| tool.name == named).collect();
+    if by_name.len() == 1 {
+        return Some(by_name[0].full_name());
+    }
+    let by_module: Vec<_> = tools.iter().filter(|tool| tool.module == named).collect();
+    (by_module.len() == 1).then(|| by_module[0].full_name())
 }
 
 /// Товары из разбора: `items` с количеством, а у старого вида — `dishes`.

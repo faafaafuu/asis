@@ -423,8 +423,10 @@ pub fn widget_settings(state: State<'_, AppState>) -> WidgetSettings {
 
 /// Включает или выключает виджет и закрепляет его поверх окон.
 #[cfg(desktop)]
+// Асинхронная: окно, созданное из синхронной команды, на Windows вешает
+// программу — команда ждёт главный поток, а он ждёт команду.
 #[tauri::command]
-pub fn save_widget_settings(
+pub async fn save_widget_settings(
     app: AppHandle,
     state: State<'_, AppState>,
     settings: WidgetSettings,
@@ -524,8 +526,10 @@ pub fn modules_overview(app: AppHandle) -> Vec<crate::modules::ModuleCard> {
 
 /// Открывает окно модуля.
 #[cfg(desktop)]
+// Асинхронная: окно, созданное из синхронной команды, на Windows вешает
+// программу — команда ждёт главный поток, а он ждёт команду.
 #[tauri::command]
-pub fn open_module(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn open_module(app: AppHandle, id: String) -> Result<(), String> {
     crate::modules::open(&app, &id)
 }
 
@@ -1106,8 +1110,10 @@ pub fn open_permission_settings(app: AppHandle) -> bool {
 /* ── Задачи ──────────────────────────────────────────────────────────────── */
 
 /// Открывает окно со списком задач.
+// Асинхронная: окно, созданное из синхронной команды, на Windows вешает
+// программу — команда ждёт главный поток, а он ждёт команду.
 #[tauri::command]
-pub fn open_tasks(app: AppHandle) -> Result<(), String> {
+pub async fn open_tasks(app: AppHandle) -> Result<(), String> {
     crate::overlay::show_tasks(&app).map_err(|err| err.to_string())
 }
 
@@ -1118,8 +1124,10 @@ pub fn close_tasks(app: AppHandle) {
 }
 
 /// Открывает окно заказа.
+// Асинхронная: окно, созданное из синхронной команды, на Windows вешает
+// программу — команда ждёт главный поток, а он ждёт команду.
 #[tauri::command]
-pub fn open_order(app: AppHandle) -> Result<(), String> {
+pub async fn open_order(app: AppHandle) -> Result<(), String> {
     crate::overlay::show_order(&app).map_err(|err| err.to_string())
 }
 

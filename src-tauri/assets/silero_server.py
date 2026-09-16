@@ -44,6 +44,57 @@ def rate_word(rate: float) -> str:
     return "x-fast"
 
 
+# Латиницу модель не знает вовсе: одно английское слово — и вся фраза
+# отвергается, а Суфлёр читает её другим голосом. Поэтому латиница
+# переписывается кириллицей: частые слова — как их произносят, остальные —
+# по буквосочетаниям.
+WORDS = {
+    "devops": "девопс", "linux": "линукс", "windows": "виндоус", "telegram": "телеграм",
+    "youtube": "ютуб", "google": "гугл", "chrome": "хром", "openrouter": "опенроутер",
+    "ollama": "оллама", "claude": "клод", "docker": "докер", "kubernetes": "кубернетис",
+    "git": "гит", "github": "гитхаб", "python": "пайтон", "mcp": "эм си пи",
+    "ai": "эй ай", "api": "апи", "vpn": "впн", "wi": "вай", "fi": "фай", "ok": "окей",
+    "iphone": "айфон", "apple": "эпл", "microsoft": "майкрософт", "steam": "стим",
+    "the": "зе", "and": "энд", "of": "оф", "to": "ту", "sre": "эс эр и", "ci": "си ай",
+    "cd": "си ди", "usd": "долларов", "eur": "евро", "btc": "биткоин",
+}
+PAIRS = [
+    ("sch", "ш"), ("tch", "ч"), ("sh", "ш"), ("ch", "ч"), ("zh", "ж"), ("th", "т"),
+    ("ph", "ф"), ("kh", "х"), ("ts", "ц"), ("ck", "к"), ("oo", "у"), ("ee", "и"),
+    ("ea", "и"), ("ou", "ау"), ("qu", "кв"), ("ya", "я"), ("yu", "ю"), ("yo", "ё"),
+]
+LETTERS = dict(zip("abcdefghijklmnopqrstuvwxyz", [
+    "а", "б", "к", "д", "е", "ф", "г", "х", "и", "дж", "к", "л", "м",
+    "н", "о", "п", "к", "р", "с", "т", "у", "в", "в", "кс", "и", "з",
+]))
+
+
+def spell_word(word: str) -> str:
+    lower = word.lower()
+    if lower in WORDS:
+        out = WORDS[lower]
+    else:
+        out, i = "", 0
+        while i < len(lower):
+            for latin, cyr in PAIRS:
+                if lower.startswith(latin, i):
+                    out += cyr
+                    i += len(latin)
+                    break
+            else:
+                ch = lower[i]
+                if ch == "c" and lower[i + 1:i + 2] in ("e", "i", "y"):
+                    out += "с"
+                else:
+                    out += LETTERS.get(ch, "")
+                i += 1
+    return out.capitalize() if word[:1].isupper() else out
+
+
+def speakable(text: str) -> str:
+    return re.sub(r"[A-Za-z]+", lambda m: spell_word(m.group(0)), text)
+
+
 def chunks(text: str, limit: int = 800):
     """Длинный текст — кусками по границам предложений: у модели есть предел."""
     part = ""
@@ -60,7 +111,7 @@ def synthesize(text: str, speaker: str, rate: float) -> bytes:
     speaker = speaker if speaker in SPEAKERS else "xenia"
     pieces = []
     with lock:
-        for part in chunks(text):
+        for part in chunks(speakable(text)):
             ssml = f'<speak><prosody rate="{rate_word(rate)}">{escape(part)}</prosody></speak>'
             pieces.append(model.apply_tts(ssml_text=ssml, speaker=speaker, sample_rate=SAMPLE_RATE))
     if not pieces:

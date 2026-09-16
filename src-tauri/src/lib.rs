@@ -215,7 +215,7 @@ pub fn run() {
                 telegram::listen(app.handle().clone());
                 alarms::watch(app.handle().clone());
                 usage::watch(app.handle().clone());
-                plugins::start_all(app.handle());
+                plugins::watch(app.handle());
                 if app.state::<AppState>().config().widget.enabled {
                     if let Err(err) = overlay::show_usage_widget(app.handle()) {
                         log::warn!("виджет расхода не открылся: {err}");

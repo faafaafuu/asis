@@ -106,7 +106,7 @@ fn root(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Имя модуля — латиница, цифры и дефис: из него складывается путь к папке.
-fn valid_id(id: &str) -> bool {
+pub fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 40
         && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
@@ -183,6 +183,10 @@ fn spawn(app: &AppHandle, manifest: &Manifest) -> Result<Server, String> {
     let log = std::fs::File::create(dir.join("server.log")).map_err(|err| err.to_string())?;
 
     // npx, uvx и прочие на Windows — это .cmd: без cmd /C их не запустить.
+    // %MODULE_DIR% — папка модуля: там лежат файлы сервера, который написала
+    // нейросеть пользователя через `sufler.exe --mcp`.
+    let module_dir = dir.to_string_lossy().to_string();
+    let expand = |text: &str| expand(&text.replace("%MODULE_DIR%", &module_dir));
     #[cfg(target_os = "windows")]
     let mut command = {
         let mut command = std::process::Command::new("cmd");
@@ -296,11 +300,52 @@ fn start_in_background(app: &AppHandle, manifest: Manifest) {
         });
 }
 
-/// Запускает все установленные модули. Зовётся при старте программы.
-pub fn start_all(app: &AppHandle) {
-    for manifest in installed(app) {
-        start_in_background(app, manifest);
-    }
+/// Когда менялось описание модуля — чтобы заметить правку со стороны.
+fn stamp(app: &AppHandle, id: &str) -> Option<std::time::SystemTime> {
+    let path = root(app).ok()?.join(id).join("module.json");
+    std::fs::metadata(path).and_then(|meta| meta.modified()).ok()
+}
+
+/// Запускает модули и дальше следит за их папкой.
+///
+/// Модуль может появиться не из окна: его создаёт нейросеть пользователя через
+/// `sufler.exe --mcp` — отдельный процесс, который до работающей программы не
+/// дотягивается. Поэтому папка проверяется раз в несколько секунд: новый
+/// модуль запускается, изменённый перезапускается, удалённый останавливается.
+pub fn watch(app: &AppHandle) {
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("sufler-modules".into()).spawn(move || {
+        let mut known: HashMap<String, Option<std::time::SystemTime>> = HashMap::new();
+        loop {
+            let present = installed(&app);
+            for manifest in &present {
+                let changed = stamp(&app, &manifest.id);
+                match known.get(&manifest.id) {
+                    Some(seen) if *seen == changed => {}
+                    seen => {
+                        if seen.is_some() {
+                            log::info!("модуль «{}» изменён — перезапускаю", manifest.title);
+                            stop(&manifest.id);
+                        }
+                        known.insert(manifest.id.clone(), changed);
+                        start_in_background(&app, manifest.clone());
+                    }
+                }
+            }
+            let gone: Vec<String> = known
+                .keys()
+                .filter(|id| !present.iter().any(|m| &m.id == *id))
+                .cloned()
+                .collect();
+            for id in gone {
+                log::info!("модуль «{id}» удалён — останавливаю");
+                stop(&id);
+                known.remove(&id);
+                lock(&STATUS).as_mut().map(|all| all.remove(&id));
+            }
+            std::thread::sleep(std::time::Duration::from_secs(4));
+        }
+    });
 }
 
 /// Инструменты всех запущенных модулей.
@@ -379,7 +424,9 @@ pub fn install(app: &AppHandle, manifest: Manifest) -> Result<(), String> {
     let text = serde_json::to_string_pretty(&manifest).map_err(|err| err.to_string())?;
     std::fs::write(dir.join("module.json"), text).map_err(|err| err.to_string())?;
     log::info!("модуль «{}» установлен", manifest.title);
-    start_in_background(app, manifest);
+    // Запустит его `watch` — через несколько секунд, как и модуль, созданный
+    // нейросетью. Запуск отсюда же дал бы второй экземпляр сервера.
+    set_status(&manifest.id, "запускается…".into());
     Ok(())
 }
 

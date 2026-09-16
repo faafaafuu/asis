@@ -8,6 +8,9 @@
 //! - курсы обучения: формат, создать курс, добавить тему, удалить, список с
 //!   прогрессом. «Составь мне курс по китайскому» — Claude пишет материал,
 //!   Ноа кладёт его к себе и показывает в окне «Обучение» как встроенный;
+//! - свои модули: формат, создать (описание и файлы сервера), список, удалить.
+//!   Нейросеть пользователя пишет MCP-сервер под его задачу, работающая Ноа
+//!   замечает новую папку и запускает модуль;
 //! - передать фразу работающей Ноа — как сказанную вслух: так клиенту
 //!   доступны дела, активы, таймеры и всё остальное, что Ноа умеет.
 //!
@@ -85,11 +88,16 @@ fn error(id: Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
-const INSTRUCTIONS: &str = "Ноа — голосовой ассистент на компьютере пользователя. \
-Через эти инструменты можно создавать курсы обучения, которые Ноа показывает в окне \
-«Обучение» (урок, задачи, мини-экзамен в каждой теме, финальный экзамен), и передавать \
-Ноа распоряжения как сказанные голосом. Перед созданием курса вызови course_format. \
-Большой курс создавай по частям: create_course с первой темой, потом add_topic.";
+const INSTRUCTIONS: &str = "Ноа — голосовой помощник на компьютере пользователя, \
+оболочка для модулей. Главное, что здесь можно сделать, — собрать пользователю свой \
+модуль под его задачу: напиши небольшой MCP-сервер, положи его через create_module — \
+и Ноа запустит его и станет вызывать его инструменты по голосу. Перед этим вызови \
+module_format, после — list_modules, чтобы убедиться, что модуль запустился. \
+Ещё можно создавать курсы обучения (сначала course_format; большой курс — по частям: \
+create_course с первой темой, потом add_topic) и передавать Ноа распоряжения как \
+сказанные голосом (ask_noa).";
+
+const MODULE_FORMAT: &str = include_str!("module_format.md");
 
 /// Описание инструментов для клиента.
 fn tools() -> Value {
@@ -139,6 +147,41 @@ fn tools() -> Value {
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
+            "name": "module_format",
+            "description": "Как устроен модуль Ноа: описание module.json и требования к MCP-серверу модуля, с готовым примером. Вызови перед create_module.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "create_module",
+            "description": "Создать или заменить модуль Ноа: описание и файлы его MCP-сервера. Работающая Ноа запустит модуль сама через несколько секунд, и его инструменты станут доступны голосом.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "module": { "type": "object", "description": "module.json в формате из module_format" },
+                    "files": {
+                        "type": "object",
+                        "description": "Файлы сервера: имя файла → содержимое. Кладутся в папку модуля (%MODULE_DIR%).",
+                        "additionalProperties": { "type": "string" }
+                    }
+                },
+                "required": ["module"]
+            }
+        },
+        {
+            "name": "list_modules",
+            "description": "Установленные модули Ноа: id, название, команда запуска и хвост журнала сервера — чтобы понять, почему модуль не запустился.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "delete_module",
+            "description": "Удалить модуль Ноа вместе с его папкой.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+        },
+        {
             "name": "ask_noa",
             "description": "Передать работающей Ноа фразу, как будто её сказали вслух: «напомни завтра в 10 позвонить в банк», «покажи мои активы», «поставь таймер на 20 минут». Ноа ответит вслух на компьютере; сюда ответ не возвращается.",
             "inputSchema": {
@@ -162,6 +205,10 @@ fn call(name: &str, args: &Value) -> Value {
             .and_then(|topic| crate::learning::add_topic(args["course"].as_str().unwrap_or_default(), topic)),
         "delete_course" => crate::learning::delete_course(args["course"].as_str().unwrap_or_default()),
         "list_courses" => Ok(list_courses()),
+        "module_format" => Ok(MODULE_FORMAT.to_string()),
+        "create_module" => create_module(&args["module"], &args["files"]),
+        "list_modules" => Ok(list_modules()),
+        "delete_module" => delete_module(args["id"].as_str().unwrap_or_default()),
         "ask_noa" => ask_noa(args["text"].as_str().unwrap_or_default()),
         other => Err(format!("Нет инструмента «{other}».")),
     };
@@ -201,6 +248,124 @@ fn list_courses() -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+fn modules_dir() -> Result<PathBuf, String> {
+    data_dir()
+        .map(|dir| dir.join("modules"))
+        .ok_or_else(|| "не нашёл папку данных Ноа".to_string())
+}
+
+/// Имя файла сервера — без путей, чтобы запись не вышла из папки модуля.
+fn safe_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 80
+        && name != "module.json"
+        && name != "server.log"
+        && !name.starts_with('.')
+        && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
+fn create_module(module: &Value, files: &Value) -> Result<String, String> {
+    let manifest: crate::plugins::Manifest = serde_json::from_value(module.clone())
+        .map_err(|err| format!("module.json не разобрался: {err}"))?;
+    if !crate::plugins::valid_id(&manifest.id) {
+        return Err("id — латиница в нижнем регистре, цифры и дефис, до 40 знаков.".into());
+    }
+    if manifest.title.trim().is_empty() || manifest.mcp.command.trim().is_empty() {
+        return Err("Нужны title и mcp.command.".into());
+    }
+    let files: Vec<(String, String)> = match files {
+        Value::Null => Vec::new(),
+        Value::Object(map) => map
+            .iter()
+            .map(|(name, text)| match text.as_str() {
+                Some(text) if safe_file_name(name) => Ok((name.clone(), text.to_string())),
+                Some(_) => Err(format!(
+                    "Имя файла «{name}» не подходит: только буквы, цифры, точка, дефис и подчёркивание."
+                )),
+                None => Err(format!("Содержимое «{name}» должно быть строкой.")),
+            })
+            .collect::<Result<_, _>>()?,
+        _ => return Err("files — объект «имя файла → содержимое».".into()),
+    };
+
+    let dir = modules_dir()?.join(&manifest.id);
+    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    for (name, text) in &files {
+        std::fs::write(dir.join(name), text).map_err(|err| format!("{name}: {err}"))?;
+    }
+    // Описание — последним: по нему Ноа запускает модуль, и файлы сервера к
+    // этому моменту уже должны лежать на месте.
+    let text = serde_json::to_string_pretty(&manifest).map_err(|err| err.to_string())?;
+    std::fs::write(dir.join("module.json"), text).map_err(|err| err.to_string())?;
+
+    let next = if crate::instance::running() {
+        "Ноа запустит его через несколько секунд — проверь list_modules."
+    } else {
+        "Ноа сейчас не запущена — модуль заработает при следующем запуске."
+    };
+    Ok(format!("Модуль «{}» сохранён в {}. {next}", manifest.title, dir.display()))
+}
+
+fn list_modules() -> String {
+    let Ok(entries) = modules_dir().and_then(|root| std::fs::read_dir(root).map_err(|err| err.to_string()))
+    else {
+        return "Модулей нет.".into();
+    };
+    let mut lines = Vec::new();
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let Ok(text) = std::fs::read_to_string(dir.join("module.json")) else { continue };
+        let Ok(manifest) = serde_json::from_str::<crate::plugins::Manifest>(&text) else { continue };
+        let log = std::fs::read_to_string(dir.join("server.log")).unwrap_or_default();
+        let mut tail: Vec<&str> = log.lines().rev().take(8).collect();
+        tail.reverse();
+        let journal = if tail.is_empty() {
+            "пусто".to_string()
+        } else {
+            format!("\n    {}", tail.join("\n    "))
+        };
+        lines.push(format!(
+            "{} (id: {}) — {}\n  запуск: {} {}\n  журнал: {journal}",
+            manifest.title,
+            manifest.id,
+            manifest.about,
+            manifest.mcp.command,
+            manifest.mcp.args.join(" "),
+        ));
+    }
+    if lines.is_empty() {
+        return "Модулей нет.".into();
+    }
+    let state = if crate::instance::running() {
+        "Число инструментов запущенного модуля видно на его плитке в главном окне Ноа."
+    } else {
+        "Ноа сейчас не запущена."
+    };
+    format!("{}\n\n{state}", lines.join("\n\n"))
+}
+
+fn delete_module(id: &str) -> Result<String, String> {
+    if !crate::plugins::valid_id(id) {
+        return Err("Нет такого модуля.".into());
+    }
+    let dir = modules_dir()?.join(id);
+    if !dir.join("module.json").exists() {
+        return Err(format!("Модуля «{id}» нет."));
+    }
+    // Сначала описание: Ноа остановит сервер, и его файлы освободятся.
+    std::fs::remove_file(dir.join("module.json")).map_err(|err| err.to_string())?;
+    for _ in 0..20 {
+        if std::fs::remove_dir_all(&dir).is_ok() {
+            return Ok(format!("Модуль «{id}» удалён."));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    Ok(format!(
+        "Модуль «{id}» отключён; папку {} удалите вручную — файлы ещё заняты.",
+        dir.display()
+    ))
 }
 
 /// Передаёт фразу работающей Ноа — тем же путём, что `sufler.exe --ask`.
