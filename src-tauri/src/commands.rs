@@ -276,6 +276,8 @@ pub struct VoiceSettings {
     /// вместо обещания, что всё готово.
     #[serde(default)]
     pub ready: bool,
+    #[serde(default)]
+    pub silero_voice: String,
     /// Ключ Azure: в окно — маской, из окна — новый ключ или пусто («не менять»).
     #[serde(default)]
     pub azure_key: String,
@@ -296,7 +298,13 @@ pub fn voice_settings(app: AppHandle, state: State<'_, AppState>) -> VoiceSettin
         input_device: config.voice.input_device.clone(),
         rate: config.voice.rate,
         speak_answers: config.voice.speak_answers,
-        ready: crate::voice::assets::ready(&app, &config.voice.voice),
+        // Готовность — того способа, что выбран: кнопка «Скачать» относится к нему.
+        ready: match config.voice.engine.as_str() {
+            "silero" => crate::voice::silero_ready(&app),
+            "azure" => true,
+            _ => crate::voice::assets::ready(&app, &config.voice.voice),
+        },
+        silero_voice: config.voice.silero_voice.clone(),
         azure_key: if config.voice.azure_key.is_empty() {
             String::new()
         } else {
@@ -323,6 +331,9 @@ pub fn save_voice_settings(
         config.voice.input_device = settings.input_device;
         config.voice.rate = settings.rate;
         config.voice.speak_answers = settings.speak_answers;
+        if !settings.silero_voice.trim().is_empty() {
+            config.voice.silero_voice = settings.silero_voice.trim().to_string();
+        }
         // Пустое поле и маска означают «не менять»: сохранить маску вместо
         // ключа значило бы потерять ключ.
         let key = settings.azure_key.trim();
@@ -354,7 +365,15 @@ pub fn voice_list() -> serde_json::Value {
     serde_json::json!({
         "piper": to_json(crate::voice::assets::VOICES),
         "azure": to_json(crate::voice::azure_voices()),
+        "silero": to_json(crate::voice::silero_voices()),
     })
+}
+
+/// Скачивает Python, PyTorch и голоса Silero. Ход — событием `voice:install`.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn silero_install(app: AppHandle) -> Result<(), String> {
+    crate::voice::silero_install(app).await
 }
 
 /// Пробный запрос к Azure — для кнопки «Послушать»: озвучивание при неудаче

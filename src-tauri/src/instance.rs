@@ -143,6 +143,10 @@ pub fn listen(app: tauri::AppHandle) {
             if signaled == WAIT_OBJECT_0 {
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || {
+                    // Как и щелчок по трею: сначала вернуть свёрнутые окна.
+                    if crate::overlay::restore_minimized(&handle) {
+                        return;
+                    }
                     if let Err(err) = crate::overlay::show_onboarding(&handle) {
                         log::error!("не удалось показать окно по повторному запуску: {err}");
                     }

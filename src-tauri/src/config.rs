@@ -364,6 +364,8 @@ pub struct VoiceConfig {
     /// голосов у способов разные, и переключение туда-обратно не должно
     /// каждый раз сбрасывать выбор.
     pub edge_voice: String,
+    /// Голос Silero, например `xenia`.
+    pub silero_voice: String,
     /// Ключ службы Azure Speech. Хранится зашифрованным (DPAPI), как токен бота.
     pub azure_key: String,
     /// Регион ресурса Azure Speech, например `westeurope`.
@@ -408,6 +410,7 @@ impl Default for VoiceConfig {
             // только для настольных систем, а настройки общие для всех.
             voice: "ru_RU-irina-medium".into(),
             edge_voice: "ru-RU-SvetlanaNeural".into(),
+            silero_voice: "xenia".into(),
             azure_key: String::new(),
             azure_region: "westeurope".into(),
             wake_word: true,

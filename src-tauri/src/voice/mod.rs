@@ -14,6 +14,7 @@ pub mod assets;
 mod audio;
 pub mod hotkey;
 mod azure;
+mod silero;
 mod piper;
 pub mod stt;
 pub mod whisper;
@@ -30,6 +31,16 @@ pub async fn speak(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<
     }
 
     match config.engine.as_str() {
+        "silero" => {
+            stop();
+            match silero::speak(app, &config.silero_voice, config.rate, &text).await {
+                Ok(()) => Ok(()),
+                Err(err) => {
+                    log::warn!("голос Silero: {err}; читаю своим голосом");
+                    piper::speak(app, &config.voice, config.rate, &text)
+                }
+            }
+        }
         "azure" => {
             // Прежняя фраза обрывается, как и у Piper: новый ответ важнее.
             stop();
@@ -61,6 +72,30 @@ pub fn synthesize(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<V
 /// торчит только то, что нужно окну настройки.
 pub fn azure_voices() -> &'static [(&'static str, &'static str)] {
     azure::VOICES
+}
+
+pub fn silero_voices() -> &'static [(&'static str, &'static str)] {
+    silero::VOICES
+}
+
+/// Скачаны ли голоса Silero.
+pub fn silero_ready(app: &AppHandle) -> bool {
+    silero::ready(app)
+}
+
+/// Скачивает Python, PyTorch и голоса Silero.
+pub async fn silero_install(app: AppHandle) -> Result<(), String> {
+    silero::install(app).await
+}
+
+/// Готовит голос заранее, пока человек ещё говорит: Silero поднимает сервер
+/// и прогревает модель, остальным способам готовиться не нужно.
+pub fn warm(app: &AppHandle) {
+    use tauri::Manager;
+    let engine = app.state::<crate::state::AppState>().config().voice.engine.clone();
+    if engine == "silero" {
+        silero::warm(app);
+    }
 }
 
 /// Пробный запрос к Azure. Озвучивание при неудаче тихо переходит на свой
@@ -125,6 +160,7 @@ pub fn chime() {
 pub fn stop() {
     piper::stop();
     azure::stop();
+    silero::stop();
 }
 
 /// Готовит текст к произнесению.

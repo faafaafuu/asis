@@ -323,6 +323,10 @@ pub fn run() {
             #[cfg(desktop)]
             commands::voice_install,
             #[cfg(desktop)]
+            commands::silero_install,
+            #[cfg(desktop)]
+            commands::azure_check,
+            #[cfg(desktop)]
             commands::voice_speak,
             #[cfg(desktop)]
             commands::voice_stop,
@@ -567,6 +571,7 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         // человек ещё говорит: иначе первая фраза ждала бы его
                         // запуска уже после того, как её произнесли.
                         voice::whisper::warm(&app);
+                        voice::warm(&app);
                         // И модель: за простоем её могли выгрузить, а пока
                         // человек говорит и пока идёт расшифровка, она успевает
                         // подняться в память. Но после распознавания, а не
@@ -1871,7 +1876,8 @@ fn end_conversation(app: &tauri::AppHandle, signal: bool, close_window: bool) {
     // кончился — ждать больше нечего, иначе следующая же фраза через час была
     // бы принята за срок.
     planner::forget_pending();
-    VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner()).clear();
+    // История разговора не стирается: следующий вызов обычно о том же.
+    // Забывается она сама — через THREAD_TTL тишины.
     review::stop();
     let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
     overlay::hide_hud(app);
@@ -2174,11 +2180,29 @@ fn respond(app: &tauri::AppHandle, text: String) {
 }
 
 /// Последние вопросы и ответы разговора без окна — чтобы «а сколько это
-/// стоит?» было понятно, о чём. Три обмена: на большем маленькая модель
-/// начинает пересказывать прежнее вместо ответа на новое.
+/// стоит?» было понятно, о чём.
+///
+/// Разговор кончается от паузы, а тема — нет: следующий вызов через минуту
+/// обычно о том же. Поэтому история живёт `THREAD_TTL` после последнего
+/// обмена, а не до конца разговора.
 #[cfg(desktop)]
-static VOICE_THREAD: std::sync::Mutex<Vec<ai_client::ThreadItem>> =
-    std::sync::Mutex::new(Vec::new());
+static VOICE_THREAD: std::sync::Mutex<(Vec<ai_client::ThreadItem>, Option<std::time::Instant>)> =
+    std::sync::Mutex::new((Vec::new(), None));
+
+#[cfg(desktop)]
+const THREAD_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Сколько обменов помнить. Своей маленькой модели — три: на большем она
+/// начинает пересказывать прежнее вместо ответа на новое. Облачной — шесть.
+#[cfg(desktop)]
+fn thread_depth(app: &tauri::AppHandle) -> usize {
+    let local = crate::config::is_local(&app.state::<AppState>().config().ai.endpoint);
+    if local {
+        3
+    } else {
+        6
+    }
+}
 
 /// Отвечает на вопрос только голосом: без окна, с индикатором.
 #[cfg(desktop)]
@@ -2189,7 +2213,15 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
         let limit = state.config().ai.call_limit();
         (state.provider(), limit)
     };
-    let history = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner()).clone();
+    let depth = thread_depth(app);
+    let history = {
+        let mut thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
+        if thread.1.is_some_and(|at| at.elapsed() > THREAD_TTL) {
+            thread.0.clear();
+        }
+        let skip = thread.0.len().saturating_sub(depth);
+        thread.0[skip..].to_vec()
+    };
     // Обсуждают тему курса — модель отвечает, зная урок.
     let (term, context) = learning::discussion().unwrap_or_default();
     let asked = tauri::async_runtime::block_on(async {
@@ -2214,12 +2246,13 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
     }
     {
         let mut thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
-        thread.push(ai_client::ThreadItem {
+        thread.0.push(ai_client::ThreadItem {
             q: question.to_string(),
             a: answer.clone(),
         });
-        let excess = thread.len().saturating_sub(3);
-        thread.drain(..excess);
+        let excess = thread.0.len().saturating_sub(6);
+        thread.0.drain(..excess);
+        thread.1 = Some(std::time::Instant::now());
     }
     speak_with_hud(app, answer, true);
 }

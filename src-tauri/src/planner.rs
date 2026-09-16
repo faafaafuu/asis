@@ -2301,9 +2301,11 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          {}\n\
          \n\
          {}",
-        context,
+        // Меняющееся — в конце. Облачные сервисы кешируют совпадающее начало
+        // запроса; время в середине сбрасывало кеш на примерах каждую минуту.
+        EXAMPLES,
         list,
-        EXAMPLES
+        context
     )
 }
 

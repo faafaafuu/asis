@@ -358,10 +358,13 @@ ui.clipboardFallback.addEventListener("change", async () => {
 /* ── Голос ──────────────────────────────────────────────────────────────── */
 
 // Списки голосов приходят из Rust: там же лежит и то, что скачано.
-let voiceLists = { piper: [], azure: [] };
+let voiceLists = { piper: [], azure: [], silero: [] };
+
+/** Каким полем настроек хранится голос у каждого способа. */
+const VOICE_FIELD = { piper: "voice", azure: "edgeVoice", silero: "sileroVoice" };
 
 function fillVoiceList() {
-  const engine = ui.voiceEngine.value === "azure" ? "azure" : "piper";
+  const engine = voiceLists[ui.voiceEngine.value] ? ui.voiceEngine.value : "piper";
   ui.azureFields.hidden = engine !== "azure";
   const list = voiceLists[engine] ?? [];
   const chosen = ui.voiceName.value;
@@ -387,7 +390,7 @@ async function loadVoice() {
     ui.voiceEnabled.checked = settings.enabled;
     ui.voiceEngine.value = settings.engine;
     fillVoiceList();
-    ui.voiceName.value = settings.engine === "azure" ? settings.edgeVoice : settings.voice;
+    ui.voiceName.value = settings[VOICE_FIELD[settings.engine] ?? "voice"];
     ui.azureRegion.value = settings.azureRegion || "";
     ui.azureKey.value = "";
     ui.azureKey.placeholder = settings.azureKey ? "ключ сохранён" : "ключ из «Ключи и конечная точка»";
@@ -411,6 +414,7 @@ async function saveVoice() {
     // второй оставляем как был.
     voice: engine === "piper" ? ui.voiceName.value : undefined,
     edgeVoice: engine === "azure" ? ui.voiceName.value : undefined,
+    sileroVoice: engine === "silero" ? ui.voiceName.value : "",
     // Пусто — ключ не меняется: в окно он приходит только маской.
     azureKey: ui.azureKey.value.trim(),
     azureRegion: ui.azureRegion.value.trim(),
@@ -476,7 +480,11 @@ ui.voiceDownload.addEventListener("click", async () => {
   ui.voiceDownload.disabled = true;
   ui.voiceStatus.textContent = t("voice.downloading");
   try {
-    await api.invoke("voice_install", { voice: ui.voiceName.value });
+    if (ui.voiceEngine.value === "silero") {
+      await api.invoke("silero_install");
+    } else {
+      await api.invoke("voice_install", { voice: ui.voiceName.value });
+    }
     ui.voiceStatus.textContent = t("voice.ready");
     ui.voiceDownload.hidden = true;
   } catch (err) {

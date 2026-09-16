@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// Событие с ходом загрузки. Отдельное от моделей и от Ollama: три разных
 /// прогресса в одном событии окно не разберёт.
-const EVENT: &str = "voice:install";
+pub(crate) const EVENT: &str = "voice:install";
 
 /// Программа синтеза. Версия закреплена намеренно: это исполняемый файл, который
 /// мы запускаем на машине человека, и «последний релиз» тут означал бы, что
@@ -213,7 +213,7 @@ fn emit(app: &AppHandle, percent: u8, status: &str, done: bool, error: Option<St
 
 /// Событие о ходе загрузки. Имя события — параметром: тем же загрузчиком
 /// качается и голос, и распознавание, а окно должно их различать.
-fn emit_to(
+pub(crate) fn emit_to(
     app: &AppHandle,
     event: &str,
     percent: u8,

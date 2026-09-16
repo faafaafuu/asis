@@ -112,9 +112,9 @@ fn escape(text: &str) -> String {
 
 /// Разбирает WAV с 16-битным PCM в отсчёты от -1 до 1 и частоту. Каналы
 /// сводятся к первому: речь моно.
-fn decode_wav(bytes: &[u8]) -> Result<(Vec<f32>, u32), String> {
+pub(super) fn decode_wav(bytes: &[u8]) -> Result<(Vec<f32>, u32), String> {
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
-        return Err("Azure прислал не WAV".into());
+        return Err("пришёл не WAV".into());
     }
     let u16_at = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
     let u32_at = |at: usize| u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]);

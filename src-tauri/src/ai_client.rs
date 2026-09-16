@@ -469,8 +469,17 @@ impl HttpProvider {
         // целиком, и на сам ответ не остаётся ничего — сервис возвращает пустой
         // текст. Поле нестандартное, поэтому отправляем его только тем, кто его
         // понимает: чужие API на неизвестный ключ отвечают ошибкой.
+        //
+        // Скрыть размышление мало: модель всё равно думает — это и секунды
+        // ожидания, и оплаченные токены. Поэтому думать просим как можно меньше.
+        // Не `none`: модели, которые без размышления не работают, отвечают на
+        // него ошибкой, а `minimal` понимают все.
         if self.endpoint.contains("openrouter.ai") {
-            body["reasoning"] = serde_json::json!({ "exclude": true });
+            body["reasoning"] = serde_json::json!({ "effort": "minimal", "exclude": true });
+        }
+        // Gemini через совместимый интерфейс Google думает по умолчанию.
+        if self.endpoint.contains("googleapis.com") {
+            body["reasoning_effort"] = serde_json::json!("low");
         }
 
         let mut last = AiError::Network;
