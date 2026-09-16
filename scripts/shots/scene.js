@@ -44,9 +44,9 @@ function buildPage(highlight) {
   mark.textContent = TERM;
   // Выделение наползает на слово слева направо — так же, как его тянут мышью.
   mark.style.background = `linear-gradient(90deg,
-      rgba(122,162,247,0.34) ${highlight * 100}%,
-      rgba(122,162,247,0) ${highlight * 100}%)`;
-  if (highlight > 0.99) mark.style.background = "rgba(122,162,247,0.34)";
+      rgba(0,240,255,0.34) ${highlight * 100}%,
+      rgba(0,240,255,0) ${highlight * 100}%)`;
+  if (highlight > 0.99) mark.style.background = "rgba(0,240,255,0.34)";
   page.append(mark);
   page.append(document.createTextNode(TEXT_AFTER));
   return mark;

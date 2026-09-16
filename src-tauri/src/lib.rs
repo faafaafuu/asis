@@ -33,6 +33,7 @@ mod shots;
 mod learning;
 mod alarms;
 mod mcp;
+mod modules;
 mod review;
 mod secret;
 mod tasks;
@@ -324,6 +325,10 @@ pub fn run() {
             commands::voice_install,
             #[cfg(desktop)]
             commands::silero_install,
+            #[cfg(desktop)]
+            commands::modules_overview,
+            #[cfg(desktop)]
+            commands::open_module,
             #[cfg(desktop)]
             commands::azure_check,
             #[cfg(desktop)]

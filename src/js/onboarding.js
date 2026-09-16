@@ -332,7 +332,11 @@ async function refreshCapture() {
     // Диагностика нужна ровно тогда, когда перехват не сработал, — тогда и
     // показываем её сами. Закрывать раздел обратно не станем: человек его уже
     // увидел и вправе решать сам, когда свернуть.
-    if (state === "warn") ui.advanced.open = true;
+    if (state === "warn") {
+      ui.advanced.open = true;
+      // Вкладка «Помощь» может быть закрыта — отметка на ней зовёт туда.
+      if (ui.tabHelp.getAttribute("aria-selected") !== "true") ui.tabHelp.classList.add("ob__tab--alert");
+    }
   } catch {
     // Молча: команда опрашивается раз в секунду, и сыпать ошибками в окно,
     // пока пользователь читает соседний раздел, — только мешать.
@@ -703,8 +707,113 @@ ui.foodLogin?.addEventListener("click", async () => {
  */
 function showSection(section) {
   if (!section) return;
+  showTab("settings");
   document.getElementById(section)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
+
+/* ── Вкладки и модули ───────────────────────────────────────────────────── */
+
+const TAB_KEY = "ob.tab";
+
+function showTab(name) {
+  for (const pane of document.querySelectorAll("[data-pane]")) pane.hidden = pane.dataset.pane !== name;
+  for (const tab of document.querySelectorAll("[data-tab]")) {
+    tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
+  }
+  if (name === "help") ui.tabHelp.classList.remove("ob__tab--alert");
+  try {
+    localStorage.setItem(TAB_KEY, name);
+  } catch {
+    /* выбор просто не запомнится */
+  }
+  if (name === "modules") loadModules();
+}
+
+for (const tab of document.querySelectorAll("[data-tab]")) {
+  tab.addEventListener("click", () => showTab(tab.dataset.tab));
+}
+
+/** Где в настройках живёт раздел модуля. */
+const MODULE_SETTINGS = { telegram: "telegram", order: "food" };
+
+function moduleCard(module) {
+  const card = document.createElement("article");
+  card.className = "mod";
+  const line = (className, text) => {
+    const node = document.createElement(className === "mod__title" || className === "mod__icon" ? "span" : "p");
+    node.className = className;
+    node.textContent = text;
+    return node;
+  };
+  const head = document.createElement("div");
+  head.className = "mod__head";
+  head.append(line("mod__icon", module.icon), line("mod__title", module.title));
+  const actions = document.createElement("div");
+  actions.className = "mod__actions";
+  if (module.window) {
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "ob__btn ob__btn--primary mod__btn";
+    open.textContent = "Открыть";
+    open.addEventListener("click", () => api?.invoke("open_module", { id: module.id }).catch(() => {}));
+    actions.append(open);
+  }
+  const section = MODULE_SETTINGS[module.id];
+  if (section) {
+    const tune = document.createElement("button");
+    tune.type = "button";
+    tune.className = "ob__btn ob__btn--quiet mod__btn";
+    tune.textContent = "Настроить";
+    tune.addEventListener("click", () => showSection(section));
+    actions.append(tune);
+  }
+  card.append(head, line("mod__about", module.about), line("mod__status", module.status), line("mod__voice", module.voice), actions);
+  return card;
+}
+
+async function loadModules() {
+  if (!api) return;
+  try {
+    const modules = await api.invoke("modules_overview");
+    // «Свой модуль» — последней плиткой той же сетки.
+    ui.modules.replaceChildren(...modules.map(moduleCard), ui.moduleAdd);
+  } catch {
+    /* окно открыто вне приложения */
+  }
+}
+
+/** Состояние одной строкой: какая модель, чем говорит, слушает ли имя. */
+async function loadChips() {
+  if (!api) return;
+  const chip = (text, on) => {
+    const node = document.createElement("span");
+    node.className = on ? "ob__chip ob__chip--on" : "ob__chip";
+    node.textContent = text;
+    return node;
+  };
+  try {
+    const [ai, voice] = await Promise.all([api.invoke("ai_settings"), api.invoke("voice_settings")]);
+    const local = /127\.0\.0\.1|localhost/.test(ai.endpoint || "");
+    const brain = ai.provider === "wikipedia" ? "Википедия" : `${ai.model || "модель"}${local ? "" : " · облако"}`;
+    const engines = { piper: "голос Piper", silero: "голос Silero", azure: "голос Azure" };
+    ui.chips.replaceChildren(
+      chip(brain, true),
+      chip(voice.enabled ? engines[voice.engine] ?? "голос" : "голос выключен", voice.enabled),
+      chip(voice.wakeWord ? "слушает «Ноа»" : "имя не слушает", voice.wakeWord),
+    );
+  } catch {
+    /* окно открыто вне приложения */
+  }
+}
+
+let startTab = "modules";
+try {
+  startTab = localStorage.getItem(TAB_KEY) ?? "modules";
+} catch {
+  /* хранилище недоступно */
+}
+showTab(["modules", "settings", "help"].includes(startTab) ? startTab : "modules");
+loadChips();
 
 loadFood();
 api?.invoke("settings_section").then(showSection).catch(() => {});

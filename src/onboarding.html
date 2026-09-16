@@ -44,6 +44,16 @@
         </div>
       </header>
 
+      <!-- Главное: кто такой Ноа и в каком он состоянии. -->
+      <section class="ob__hero">
+        <h1 class="ob__hero-title">Ноа</h1>
+        <p class="ob__hero-lead" data-keep>
+          Голосовой помощник и его модули. Позовите по имени, нажмите левый Alt с пробелом
+          или откройте модуль ниже.
+        </p>
+        <div class="ob__chips" data-el="chips"></div>
+      </section>
+
       <!-- Виден только тогда, когда доступа нет: тогда это главное сообщение окна.
            Когда всё работает, «Всё готово» сообщать незачем — человек это и так
            видит по тому, что программа работает. -->
@@ -58,10 +68,35 @@
         </div>
       </section>
 
+      <nav class="ob__tabs" role="tablist">
+        <button class="ob__tab" type="button" role="tab" data-tab="modules" aria-selected="true">Модули</button>
+        <button class="ob__tab" type="button" role="tab" data-tab="settings" aria-selected="false">Настройки</button>
+        <button class="ob__tab" type="button" role="tab" data-tab="help" data-el="tabHelp" aria-selected="false">Помощь</button>
+      </nav>
+
+      <!-- Модули — инструменты Ноа: у каждого своё окно и свои команды голосом
+           и в Telegram. Карточки собираются из modules_overview. -->
+      <div class="ob__pane" data-pane="modules">
+        <div class="ob__modules" data-el="modules"></div>
+        <article class="mod mod--add" data-el="moduleAdd">
+          <div class="mod__head">
+            <span class="mod__icon" aria-hidden="true">＋</span>
+            <span class="mod__title">Свой модуль</span>
+          </div>
+          <p class="mod__about">
+            Модуль собирается по единым правилам: описание, окно, голосовые команды и
+            инструменты через MCP. Подключите готовый MCP-сервер или соберите свой — он
+            встанет рядом с остальными, и им можно будет поделиться.
+          </p>
+          <p class="mod__status">скоро — библиотека модулей</p>
+        </article>
+      </div>
+
+      <div class="ob__pane" data-pane="settings" hidden>
       <section class="ob__block">
-        <h1 class="ob__title" data-i18n="source.title">Откуда брать объяснения</h1>
+        <h2 class="ob__subtitle" data-i18n="source.title">Мозг Ноа</h2>
         <p class="ob__lead" data-i18n="source.lead">
-          Википедия работает без ключа. Модель нужна для «простыми словами», примеров и вопросов.
+          Модель, которая понимает команды и отвечает.
         </p>
       </section>
 
@@ -160,7 +195,7 @@
           <span class="ob__select">
             <select class="ob__underline" data-el="voiceEngine">
               <option value="piper" data-i18n="voice.enginePiper">Свой голос — на этом компьютере, без интернета</option>
-              <option value="silero">Silero — живые голоса на этом компьютере (скачается ~350 МБ)</option>
+              <option value="silero">Silero — живые голоса на этом компьютере</option>
               <!-- Azure готов, но спрятан: ключ Azure требует аккаунта с картой, для
                    большинства это лишний шаг. Вернуть — убрать hidden. -->
               <option value="azure" hidden>Нейроголоса Microsoft Azure — по ключу, до 0,5 млн знаков в месяц бесплатно</option>
@@ -382,7 +417,10 @@
         </div>
       </div>
 
-      <details class="ob__more" data-el="advanced">
+      </div>
+
+      <div class="ob__pane" data-pane="help" hidden>
+      <details class="ob__more" data-el="advanced" open>
         <summary class="ob__more-head">
           <span class="ob__chevron ob__chevron--right" aria-hidden="true"></span>
           <span data-i18n="advanced.title">Если что-то не работает</span>
@@ -433,6 +471,7 @@
         Приложение остаётся в трее. Выделение текста с зажатым левым Ctrl открывает
         объяснение рядом с выделенным словом.
       </p>
+      </div>
     </main>
     <script type="module" src="./js/onboarding.js"></script>
   </body>

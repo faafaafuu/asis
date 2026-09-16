@@ -21,8 +21,8 @@ const STRINGS = {
   ru: {
     "app.name": "Суфлёр",
 
-    "source.title": "Откуда брать объяснения",
-    "source.lead": "Википедия работает без ключа. Модель нужна для «простыми словами», примеров и вопросов.",
+    "source.title": "Мозг Ноа",
+    "source.lead": "Модель, которая понимает команды и отвечает. Своя — на этом компьютере, без ключей и интернета; облачная — по ключу, быстрее и умнее.",
     "source.label": "Источник",
     "source.wikipedia": "Википедия — без ключа, только определения",
     "source.groq": "Groq — бесплатный ключ, быстрые ответы",
@@ -160,8 +160,8 @@ const STRINGS = {
   en: {
     "app.name": "Sufler",
 
-    "source.title": "Where explanations come from",
-    "source.lead": "Wikipedia works without a key. A model is needed for plain words, examples and questions.",
+    "source.title": "Noa's brain",
+    "source.lead": "The model that understands commands and answers. Local — on this computer, no keys or internet; cloud — with a key, faster and smarter.",
     "source.label": "Source",
     "source.wikipedia": "Wikipedia — no key, definitions only",
     "source.groq": "Groq — free key, fast answers",

@@ -376,6 +376,20 @@ pub async fn silero_install(app: AppHandle) -> Result<(), String> {
     crate::voice::silero_install(app).await
 }
 
+/// Модули и их состояние — для главного окна.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn modules_overview(app: AppHandle) -> Vec<crate::modules::ModuleCard> {
+    crate::modules::overview(&app)
+}
+
+/// Открывает окно модуля.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn open_module(app: AppHandle, id: String) -> Result<(), String> {
+    crate::modules::open(&app, &id)
+}
+
 /// Пробный запрос к Azure — для кнопки «Послушать»: озвучивание при неудаче
 /// тихо переходит на свой голос, а человеку нужна причина.
 #[cfg(desktop)]

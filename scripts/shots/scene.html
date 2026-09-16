@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-theme="dark" data-surface="opaque">
+<html lang="ru" data-theme="neon" data-surface="opaque">
   <head>
     <meta charset="utf-8" />
     <title>Кадр для README</title>
@@ -19,9 +19,9 @@
         overflow: hidden;
       }
       body {
-        background: #14110f;
+        background: var(--bg-solid);
         font-family: var(--font-ui);
-        color: #8f8779;
+        color: var(--text-muted);
         -webkit-font-smoothing: antialiased;
       }
       .page {
@@ -35,7 +35,7 @@
       }
       .page b {
         font-weight: inherit;
-        color: #b6ada0;
+        color: var(--text-body);
       }
       .sel {
         background: rgba(120, 160, 255, 0);
@@ -63,13 +63,13 @@
         top: 172px;
         transform: translateX(-50%);
         font-size: 15px;
-        color: #cdc5b8;
+        color: var(--text);
         white-space: nowrap;
         opacity: 0;
       }
       .caption i {
         font-style: normal;
-        color: oklch(0.86 0.09 68);
+        color: var(--accent);
       }
       canvas {
         display: block;
