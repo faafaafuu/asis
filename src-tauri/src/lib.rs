@@ -34,6 +34,7 @@ mod learning;
 mod alarms;
 mod mcp;
 mod modules;
+mod plugins;
 mod review;
 mod usage;
 mod secret;
@@ -214,6 +215,7 @@ pub fn run() {
                 telegram::listen(app.handle().clone());
                 alarms::watch(app.handle().clone());
                 usage::watch(app.handle().clone());
+                plugins::start_all(app.handle());
                 if app.state::<AppState>().config().widget.enabled {
                     if let Err(err) = overlay::show_usage_widget(app.handle()) {
                         log::warn!("виджет расхода не открылся: {err}");
@@ -337,6 +339,14 @@ pub fn run() {
             commands::modules_overview,
             #[cfg(desktop)]
             commands::open_module,
+            #[cfg(desktop)]
+            commands::plugins_connect,
+            #[cfg(desktop)]
+            commands::plugins_install,
+            #[cfg(desktop)]
+            commands::plugins_remove,
+            #[cfg(desktop)]
+            commands::plugins_library,
             #[cfg(desktop)]
             commands::usage_summary,
             #[cfg(desktop)]

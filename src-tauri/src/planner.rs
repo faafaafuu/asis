@@ -98,6 +98,8 @@ pub enum Intent {
     Watch { action: String, asset: String, tab: String, price: String },
     /// Обучение: открыть курс, узнать прогресс, опрос голосом.
     Learn { action: String, topic: String },
+    /// Инструмент своего модуля (MCP): `модуль.инструмент` и аргументы.
+    Tool { tool: String, args: serde_json::Value },
     /// Готовый ответ без действия: переспросить, пояснить.
     Say(String),
 }
@@ -255,6 +257,7 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
             Some(watch(app, &action, &asset, &tab, &price).await)
         }
         Intent::Learn { action, topic } => Some(crate::learning::voice(app, &action, &topic).await),
+        Intent::Tool { tool, args } => Some(use_tool(app, said, tool, args).await),
         Intent::Claude { text } => {
             // Разговор уходит в Claude — Ноа после ответа замолкает и уходит.
             HANDOFF.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1096,6 +1099,20 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
                 .or_else(|| parsed["price"].as_str().map(str::to_string))
                 .unwrap_or_default(),
         },
+        // Инструмент — только из тех, что модули действительно отдали: имя,
+        // придуманное моделью, вызвать нечего.
+        "tool" => {
+            let tool = text("tool");
+            if crate::plugins::tools().iter().any(|known| known.full_name() == tool) {
+                Intent::Tool {
+                    tool,
+                    args: parsed["args"].clone(),
+                }
+            } else {
+                log::info!("модель назвала инструмент «{tool}», а такого нет — считаю разговором");
+                Intent::Chat
+            }
+        }
         _ => Intent::Chat,
     }
 }
@@ -1829,6 +1846,36 @@ fn music_request(app: &AppHandle, said: &str) -> Option<String> {
     })
 }
 
+/// Вызывает инструмент своего модуля и пересказывает ответ голосом.
+///
+/// Инструменты отвечают для программ — JSON, списки, длинный текст. Вслух
+/// это не читается, поэтому ответ пересказывает модель, зная, что спросили.
+async fn use_tool(app: &AppHandle, said: &str, tool: String, args: serde_json::Value) -> String {
+    let name = tool.clone();
+    let called = tauri::async_runtime::spawn_blocking(move || crate::plugins::call(&name, &args)).await;
+    let text = match called {
+        Ok(Ok(text)) => text,
+        Ok(Err(err)) => {
+            log::warn!("инструмент {tool}: {err}");
+            return format!("Модуль не справился: {err}");
+        }
+        Err(_) => return "Модуль не ответил.".into(),
+    };
+    log::info!("инструмент {tool} ответил, {} знаков", text.chars().count());
+    if text.trim().is_empty() {
+        return "Готово.".into();
+    }
+    let context: String = text.chars().take(4000).collect();
+    let provider = app.state::<AppState>().provider();
+    match provider
+        .ask(&format!("ответ инструмента {tool}"), &context, &[], said)
+        .await
+    {
+        Ok(answer) if !answer.trim().is_empty() => answer.trim().to_string(),
+        _ => context.chars().take(300).collect(),
+    }
+}
+
 /// Список активов голосом: показать, добавить, убрать. Окно открывается при
 /// любом из трёх — сразу видно, что получилось.
 async fn watch(app: &AppHandle, action: &str, asset: &str, tab: &str, price: &str) -> String {
@@ -2306,7 +2353,11 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
          \n\
          {}\n\
          \n\
+         {}\n\
+         \n\
          {}",
+        // Инструменты своих модулей меняются только при установке модуля.
+        crate::plugins::rules_section(),
         // Меняющееся — в конце. Облачные сервисы кешируют совпадающее начало
         // запроса; время в середине сбрасывало кеш на примерах каждую минуту.
         EXAMPLES,

@@ -188,6 +188,8 @@
       service: "OpenRouter",
     }),
     widget_settings: () => ({ enabled: true, onTop: false }),
+    plugins_library: async () =>
+      (await fetch(new URL("../../modules/index.json", document.baseURI)).then((r) => r.json())).modules,
   });
   // Тема окна — так же, как её подставляет программа до первого кадра.
   globalThis.__SUFLER_VIEW__ = {

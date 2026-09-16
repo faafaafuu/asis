@@ -1,0 +1,56 @@
+{
+  "about": "Библиотека модулей Ноа. Модуль — описание module.json с MCP-сервером; формат — в modules/README.md.",
+  "modules": [
+    {
+      "id": "memory",
+      "title": "Память",
+      "icon": "◎",
+      "about": "Запоминает факты о людях, делах и связях между ними",
+      "voice": "«Ноа, запомни, что Маша любит тюльпаны»",
+      "mcp": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] }
+    },
+    {
+      "id": "files",
+      "title": "Файлы",
+      "icon": "▤",
+      "about": "Читает, ищет и пишет файлы в папке «Документы»",
+      "voice": "«Ноа, что лежит в документах про договор»",
+      "mcp": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "%USERPROFILE%\\Documents"]
+      }
+    },
+    {
+      "id": "fetch",
+      "title": "Страницы",
+      "icon": "⇩",
+      "about": "Читает веб-страницу по адресу и пересказывает",
+      "voice": "«Ноа, прочитай страницу habr.com и скажи, о чём главная статья»",
+      "mcp": { "command": "npx", "args": ["-y", "mcp-fetch-server"] }
+    },
+    {
+      "id": "browser",
+      "title": "Браузер",
+      "icon": "◐",
+      "about": "Управляет браузером: открыть, нажать, заполнить, прочитать",
+      "voice": "«Ноа, открой сайт погоды и скажи, что завтра»",
+      "mcp": { "command": "npx", "args": ["-y", "@playwright/mcp"] }
+    },
+    {
+      "id": "docs",
+      "title": "Документация",
+      "icon": "✎",
+      "about": "Свежая документация библиотек и фреймворков",
+      "voice": "«Ноа, как в React сделать ленивую загрузку»",
+      "mcp": { "command": "npx", "args": ["-y", "@upstash/context7-mcp"] }
+    },
+    {
+      "id": "thinking",
+      "title": "Пошаговое мышление",
+      "icon": "⋯",
+      "about": "Разбирает сложную задачу по шагам",
+      "voice": "«Ноа, разложи по шагам, как переехать в другой город»",
+      "mcp": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"] }
+    }
+  ]
+}

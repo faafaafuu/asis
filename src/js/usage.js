@@ -19,9 +19,10 @@ function tokens(n) {
   return `${(n / 1_000_000).toFixed(1)}m`;
 }
 
+/** Доллары: у сумм меньше цента — четыре знака, иначе они выглядели бы нулём. */
 function money(value) {
   if (!value) return "$0";
-  return `$${value.toFixed(value < 0.1 ? 3 : 2)}`;
+  return `$${value.toFixed(value < 0.01 ? 4 : value < 0.1 ? 3 : 2)}`;
 }
 
 const total = (tally) => (tally?.prompt ?? 0) + (tally?.completion ?? 0);

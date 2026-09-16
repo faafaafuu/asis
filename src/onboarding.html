@@ -84,12 +84,37 @@
             <span class="mod__title">Свой модуль</span>
           </div>
           <p class="mod__about">
-            Модуль собирается по единым правилам: описание, окно, голосовые команды и
-            инструменты через MCP. Подключите готовый MCP-сервер или соберите свой — он
-            встанет рядом с остальными, и им можно будет поделиться.
+            Модуль — MCP-сервер с описанием: Ноа запускает его и управляет его
+            инструментами голосом. Возьмите готовый из библиотеки или подключите свой.
           </p>
-          <p class="mod__status">скоро — библиотека модулей</p>
+          <div class="mod__actions">
+            <button class="ob__btn ob__btn--primary mod__btn" type="button" data-el="libraryOpen">Библиотека</button>
+            <button class="ob__btn ob__btn--quiet mod__btn" type="button" data-el="connectOpen">Подключить MCP</button>
+          </div>
         </article>
+
+        <section class="ob__block mod-panel" data-el="libraryPanel" hidden>
+          <h2 class="ob__subtitle">Библиотека модулей</h2>
+          <div class="ob__modules" data-el="libraryList"></div>
+          <p class="ob__hint" data-el="libraryStatus"></p>
+        </section>
+
+        <section class="ob__block mod-panel" data-el="connectPanel" hidden>
+          <h2 class="ob__subtitle">Подключить MCP-сервер</h2>
+          <span class="ob__label">Название</span>
+          <input class="ob__underline" data-el="connectTitle" type="text" placeholder="Погода" />
+          <span class="ob__label">Команда запуска</span>
+          <input class="ob__underline" data-el="connectCommand" type="text" spellcheck="false"
+                 placeholder="npx -y @scope/mcp-server" />
+          <span class="ob__label">Что умеет</span>
+          <input class="ob__underline" data-el="connectAbout" type="text" placeholder="Прогноз погоды по городам" />
+          <span class="ob__label">Пример фразы</span>
+          <input class="ob__underline" data-el="connectVoice" type="text" placeholder="«Ноа, какая погода завтра»" />
+          <div class="ob__actions">
+            <button class="ob__btn ob__btn--primary" type="button" data-el="connectSave">Подключить</button>
+          </div>
+          <p class="ob__hint" data-el="connectStatus"></p>
+        </section>
       </div>
 
       <div class="ob__pane" data-pane="settings" hidden>

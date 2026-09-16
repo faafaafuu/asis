@@ -758,6 +758,18 @@ function moduleCard(module) {
     open.addEventListener("click", () => api?.invoke("open_module", { id: module.id }).catch(() => {}));
     actions.append(open);
   }
+  if (module.custom) {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ob__btn ob__btn--quiet mod__btn";
+    remove.textContent = "Удалить";
+    remove.addEventListener("click", async () => {
+      remove.disabled = true;
+      await api?.invoke("plugins_remove", { id: module.id }).catch(() => {});
+      loadModules();
+    });
+    actions.append(remove);
+  }
   const section = MODULE_SETTINGS[module.id];
   if (section) {
     const tune = document.createElement("button");
@@ -771,16 +783,101 @@ function moduleCard(module) {
   return card;
 }
 
+/** Установленные модули — по последнему ответу; библиотека сверяется с ними. */
+let knownModules = [];
+
 async function loadModules() {
   if (!api) return;
   try {
     const modules = await api.invoke("modules_overview");
+    knownModules = modules;
     // «Свой модуль» — последней плиткой той же сетки.
     ui.modules.replaceChildren(...modules.map(moduleCard), ui.moduleAdd);
   } catch {
     /* окно открыто вне приложения */
   }
 }
+
+/** Пока модули запускаются, плитки обновляются сами. */
+function watchModules() {
+  let left = 40;
+  const timer = setInterval(async () => {
+    await loadModules();
+    const starting = knownModules.some((module) => module.custom && module.status.startsWith("запускается"));
+    if (!starting || --left <= 0) clearInterval(timer);
+  }, 3000);
+}
+
+function libraryCard(manifest) {
+  const installed = knownModules.some((module) => module.custom && module.id === manifest.id);
+  const card = moduleCard({ ...manifest, status: installed ? "установлен" : "", window: false, custom: false });
+  const actions = card.querySelector(".mod__actions");
+  const install = document.createElement("button");
+  install.type = "button";
+  install.className = "ob__btn ob__btn--primary mod__btn";
+  install.textContent = installed ? "Установлен" : "Поставить";
+  install.disabled = installed;
+  install.addEventListener("click", async () => {
+    install.disabled = true;
+    install.textContent = "Ставлю…";
+    ui.libraryStatus.textContent = "Первый запуск скачивает пакет модуля — это может занять минуту.";
+    try {
+      await api.invoke("plugins_install", { manifest });
+      install.textContent = "Установлен";
+      await loadModules();
+      watchModules();
+    } catch (err) {
+      install.disabled = false;
+      install.textContent = "Поставить";
+      ui.libraryStatus.textContent = String(err);
+    }
+  });
+  actions.replaceChildren(install);
+  return card;
+}
+
+ui.libraryOpen.addEventListener("click", async () => {
+  ui.connectPanel.hidden = true;
+  ui.libraryPanel.hidden = !ui.libraryPanel.hidden;
+  if (ui.libraryPanel.hidden || !api) return;
+  ui.libraryStatus.textContent = "Загружаю библиотеку…";
+  try {
+    const library = await api.invoke("plugins_library");
+    ui.libraryList.replaceChildren(...library.map(libraryCard));
+    ui.libraryStatus.textContent = "Модулям из npm нужен Node.js (nodejs.org).";
+    ui.libraryPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (err) {
+    ui.libraryStatus.textContent = String(err);
+  }
+});
+
+ui.connectOpen.addEventListener("click", () => {
+  ui.libraryPanel.hidden = true;
+  ui.connectPanel.hidden = !ui.connectPanel.hidden;
+  if (!ui.connectPanel.hidden) {
+    ui.connectPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    ui.connectTitle.focus();
+  }
+});
+
+ui.connectSave.addEventListener("click", async () => {
+  if (!api) return;
+  ui.connectStatus.textContent = "Подключаю…";
+  try {
+    await api.invoke("plugins_connect", {
+      title: ui.connectTitle.value,
+      command: ui.connectCommand.value,
+      about: ui.connectAbout.value,
+      voice: ui.connectVoice.value,
+    });
+    ui.connectStatus.textContent = "Модуль добавлен и запускается — его плитка появилась выше.";
+    for (const field of [ui.connectTitle, ui.connectCommand, ui.connectAbout, ui.connectVoice]) field.value = "";
+    await loadModules();
+    watchModules();
+  } catch (err) {
+    ui.connectStatus.textContent = String(err);
+  }
+});
 
 /** Состояние одной строкой: какая модель, чем говорит, слушает ли имя. */
 async function loadChips() {

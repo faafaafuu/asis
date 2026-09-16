@@ -423,6 +423,77 @@ pub fn save_widget_settings(
     Ok(())
 }
 
+/// Имя папки модуля из команды: пакет `@scope/server-memory` → `server-memory`.
+fn module_id(title: &str, parts: &[String]) -> String {
+    let source = parts
+        .iter()
+        .rev()
+        .find(|part| !part.starts_with('-') && (part.contains('/') || part.contains("mcp") || part.contains("server")))
+        .map(|part| part.rsplit('/').next().unwrap_or(part).to_string())
+        .unwrap_or_else(|| title.to_string());
+    let id: String = source
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if id.is_empty() {
+        format!("module-{}", chrono::Local::now().format("%H%M%S"))
+    } else {
+        id.chars().take(40).collect()
+    }
+}
+
+/// Подключает MCP-сервер как свой модуль: название, командная строка, пример фразы.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn plugins_connect(
+    app: AppHandle,
+    title: String,
+    command: String,
+    about: String,
+    voice: String,
+) -> Result<(), String> {
+    let parts = crate::plugins::split_command(&command);
+    let (program, args) = parts.split_first().ok_or("укажите команду запуска MCP-сервера")?;
+    let manifest = crate::plugins::Manifest {
+        id: module_id(&title, &parts),
+        title: title.trim().to_string(),
+        icon: "✦".into(),
+        about: about.trim().to_string(),
+        voice: voice.trim().to_string(),
+        mcp: crate::plugins::McpSpec {
+            command: program.clone(),
+            args: args.to_vec(),
+            env: Default::default(),
+        },
+    };
+    crate::plugins::install(&app, manifest)
+}
+
+/// Ставит модуль из библиотеки.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn plugins_install(app: AppHandle, manifest: crate::plugins::Manifest) -> Result<(), String> {
+    crate::plugins::install(&app, manifest)
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn plugins_remove(app: AppHandle, id: String) -> Result<(), String> {
+    crate::plugins::uninstall(&app, &id)
+}
+
+/// Библиотека модулей из репозитория.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn plugins_library() -> Result<Vec<crate::plugins::Manifest>, String> {
+    crate::plugins::library().await
+}
+
 /// Модули и их состояние — для главного окна.
 #[cfg(desktop)]
 #[tauri::command]

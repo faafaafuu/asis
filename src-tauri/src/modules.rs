@@ -2,8 +2,9 @@
 //!
 //! Ноа — помощник, модули — его инструменты: у каждого своё окно, свои
 //! команды голосом и в Telegram. Здесь — список модулей и их состояние одной
-//! строкой. Всё берётся из того, что уже лежит в памяти и на диске: главное
-//! окно открывается мгновенно и в сеть не ходит.
+//! строкой. Встроенные берут состояние из того, что уже лежит в памяти и на
+//! диске; свои модули (`plugins`) — из состояния их MCP-сервера. Главное окно
+//! открывается мгновенно и в сеть не ходит.
 
 use serde::Serialize;
 use tauri::AppHandle;
@@ -11,16 +12,31 @@ use tauri::AppHandle;
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModuleCard {
-    pub id: &'static str,
-    pub title: &'static str,
-    pub icon: &'static str,
-    pub about: &'static str,
+    pub id: String,
+    pub title: String,
+    pub icon: String,
+    pub about: String,
     /// Состояние одной строкой: «3 дела, 1 просрочено».
     pub status: String,
     /// Как позвать голосом.
-    pub voice: &'static str,
+    pub voice: String,
     /// Есть ли у модуля своё окно.
     pub window: bool,
+    /// Свой модуль — его можно удалить.
+    pub custom: bool,
+}
+
+fn builtin(id: &str, title: &str, icon: &str, about: &str, status: String, voice: &str, window: bool) -> ModuleCard {
+    ModuleCard {
+        id: id.into(),
+        title: title.into(),
+        icon: icon.into(),
+        about: about.into(),
+        status,
+        voice: voice.into(),
+        window,
+        custom: false,
+    }
 }
 
 /// Русское множественное число: 1 дело, 2 дела, 5 дел.
@@ -102,68 +118,34 @@ fn alarms_status() -> String {
     }
 }
 
-/// Все модули с состоянием.
+/// Все модули с состоянием: встроенные, затем свои.
 pub fn overview(app: &AppHandle) -> Vec<ModuleCard> {
-    vec![
-        ModuleCard {
-            id: "tasks",
-            title: "Задачи",
-            icon: "✓",
-            about: "Дела со сроками, шаги и напоминания",
-            status: tasks_status(),
-            voice: "«Ноа, напомни завтра в десять позвонить в банк»",
-            window: true,
-        },
-        ModuleCard {
-            id: "watchlist",
-            title: "Активы",
-            icon: "◆",
-            about: "Крипта, акции, валюты и оповещения о цене",
-            status: watchlist_status(),
-            voice: "«Ноа, поставь алерт на биткоин на 100 тысяч»",
-            window: true,
-        },
-        ModuleCard {
-            id: "learning",
-            title: "Обучение",
-            icon: "◈",
-            about: "Курсы с уроками, задачами и экзаменами",
-            status: learning_status(),
-            voice: "«Ноа, погоняй меня по докеру»",
-            window: true,
-        },
-        ModuleCard {
-            id: "order",
-            title: "Заказы",
-            icon: "▣",
-            about: "Продукты по лучшей цене, корзина одним голосом",
-            status: order_status(),
-            voice: "«Ноа, закажи молоко, хлеб и яйца»",
-            window: true,
-        },
-        ModuleCard {
-            id: "alarms",
-            title: "Будильники",
-            icon: "◷",
-            about: "Будильники по дням недели и таймеры",
-            status: alarms_status(),
-            voice: "«Ноа, разбуди в семь по будням»",
-            window: false,
-        },
-        ModuleCard {
-            id: "telegram",
-            title: "Telegram",
-            icon: "➤",
-            about: "Ноа в мессенджере: текстом и голосовыми",
-            status: if crate::telegram::ready(app) {
-                "подключён".into()
-            } else {
-                "не подключён".into()
-            },
-            voice: "Пишите своему боту — отвечает тем же",
-            window: false,
-        },
-    ]
+    let telegram = if crate::telegram::ready(app) { "подключён" } else { "не подключён" };
+    let mut cards = vec![
+        builtin("tasks", "Задачи", "✓", "Дела со сроками, шаги и напоминания", tasks_status(),
+            "«Ноа, напомни завтра в десять позвонить в банк»", true),
+        builtin("watchlist", "Активы", "◆", "Крипта, акции, валюты и оповещения о цене", watchlist_status(),
+            "«Ноа, поставь алерт на биткоин на 100 тысяч»", true),
+        builtin("learning", "Обучение", "◈", "Курсы с уроками, задачами и экзаменами", learning_status(),
+            "«Ноа, погоняй меня по докеру»", true),
+        builtin("order", "Заказы", "▣", "Продукты по лучшей цене, корзина одним голосом", order_status(),
+            "«Ноа, закажи молоко, хлеб и яйца»", true),
+        builtin("alarms", "Будильники", "◷", "Будильники по дням недели и таймеры", alarms_status(),
+            "«Ноа, разбуди в семь по будням»", false),
+        builtin("telegram", "Telegram", "➤", "Ноа в мессенджере: текстом и голосовыми", telegram.into(),
+            "Пишите своему боту — отвечает тем же", false),
+    ];
+    cards.extend(crate::plugins::installed(app).into_iter().map(|manifest| ModuleCard {
+        status: crate::plugins::status(&manifest.id),
+        id: manifest.id,
+        title: manifest.title,
+        icon: if manifest.icon.is_empty() { "✦".into() } else { manifest.icon },
+        about: manifest.about,
+        voice: manifest.voice,
+        window: false,
+        custom: true,
+    }));
+    cards
 }
 
 /// Открывает окно модуля.

@@ -508,6 +508,7 @@ impl HttpProvider {
             request = request.bearer_auth(&self.api_key);
         }
         log::info!("запрос к модели: {}", self.endpoint);
+        let started = std::time::Instant::now();
         let response = request.send().await.map_err(|err| {
             // Подробность нужна именно здесь: «Сбой сети» на экране одинаково выглядит
             // и при отказе TLS, и при недоступном хосте, и при таймауте, а чинятся они
@@ -540,7 +541,10 @@ impl HttpProvider {
             log::warn!("отказ сервиса {status}: {message}");
             return Err(AiError::Refused(status.as_u16(), message));
         }
+        // Заголовки приходят сразу, а текст — когда модель договорит: время
+        // ответа видно только здесь.
         let value: serde_json::Value = response.json().await.map_err(|_| AiError::Parse)?;
+        log::info!("ответ модели получен за {} мс", started.elapsed().as_millis());
         crate::usage::record(&value);
         Ok(value)
     }
