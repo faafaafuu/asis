@@ -167,7 +167,7 @@ fn with_proxy(builder: reqwest::ClientBuilder, proxy: &str) -> reqwest::ClientBu
 
 /// Собирает провайдера по конфигурации. Неизвестное имя — это mock, а не паника:
 /// приложение уже запущено, ронять его из-за опечатки в конфиге нельзя.
-pub fn build_provider(config: &AiConfig, language: &str) -> Box<dyn AiProvider> {
+pub fn build_provider(config: &AiConfig, language: &str, wake_name: &str) -> Box<dyn AiProvider> {
     match config.provider.as_str() {
         "wikipedia" => match WikipediaProvider::new(config) {
             Ok(provider) => Box::new(provider),
@@ -176,7 +176,7 @@ pub fn build_provider(config: &AiConfig, language: &str) -> Box<dyn AiProvider> 
                 Box::new(MockProvider::default())
             }
         },
-        "http" => match HttpProvider::new(config, language) {
+        "http" => match HttpProvider::new(config, language, wake_name) {
             Ok(provider) => Box::new(provider),
             Err(err) => {
                 log::error!("HTTP-провайдер не собрался ({err}) — работаем на mock");
@@ -380,6 +380,8 @@ pub struct HttpProvider {
     retry_backoff_ms: u64,
     /// Язык, на котором модель обязана отвечать. См. `system_prompt`.
     language: String,
+    /// Как модель представляется человеку — своё у каждого, по умолчанию «Ноа».
+    wake_name: String,
 }
 
 #[derive(Serialize)]
@@ -389,7 +391,7 @@ struct Message<'a> {
 }
 
 impl HttpProvider {
-    pub fn new(config: &AiConfig, language: &str) -> Result<Self, AiError> {
+    pub fn new(config: &AiConfig, language: &str, wake_name: &str) -> Result<Self, AiError> {
         if config.endpoint.is_empty() {
             return Err(AiError::Config("не задан endpoint AI-провайдера".into()));
         }
@@ -407,6 +409,11 @@ impl HttpProvider {
             retries: config.retries,
             retry_backoff_ms: config.retry_backoff_ms,
             language: language.to_string(),
+            wake_name: if wake_name.trim().is_empty() {
+                crate::config::DEFAULT_WAKE_NAME.to_string()
+            } else {
+                wake_name.to_string()
+            },
         })
     }
 
@@ -748,7 +755,7 @@ mod live_explain {
                 model: model.clone(),
                 ..Default::default()
             };
-            let provider = HttpProvider::new(&config, "ru").expect("провайдер");
+            let provider = HttpProvider::new(&config, "ru", "Ноа").expect("провайдер");
             // Первый запрос грузит модель в память — его время не в счёт.
             let _ = runtime.block_on(provider.explain("прогрев", ""));
             let started = std::time::Instant::now();
@@ -1148,9 +1155,10 @@ impl AiProvider for HttpProvider {
                 Message {
                     role: "system",
                     content: {
+                        let name = self.wake_name.as_str();
                         let persona = match self.language.as_str() {
                         "en" if term.trim().is_empty() => format!(
-                            "Your name is Noa, you are a voice assistant talking out loud. \
+                            "Your name is {name}, you are a voice assistant talking out loud. \
                              Get to the point: usually one or two short sentences, casual \
                              and relaxed, like a friend. Never offer further help or ask \
                              what else you can do, no intros, caveats, summaries or \
@@ -1159,7 +1167,7 @@ impl AiProvider for HttpProvider {
                              in English."
                         ),
                         "en" => format!(
-                            "Your name is Noa. The user is asking a follow-up about \
+                            "Your name is {name}. The user is asking a follow-up about \
                              “{term}”. Answer in one or two short casual sentences, plain \
                              text, no JSON, no offers of further help. \
                              Answer in English, even if the term itself is in another language."
@@ -1173,7 +1181,7 @@ impl AiProvider for HttpProvider {
                         // фразы. «Чем ещё помочь?» и вступления в голосе раздражают —
                         // запрет на них назван прямо, иначе модели добавляют их сами.
                         _ if term.trim().is_empty() => format!(
-                            "Тебя зовут Ноа, ты голосовой помощник и говоришь с человеком \
+                            "Тебя зовут {name}, ты голосовой помощник и говоришь с человеком \
                              вслух. Отвечай по делу и коротко — обычно одной-двумя фразами, \
                              живым разговорным языком, легко и непринуждённо, как друг. \
                              Не предлагай помощь и не спрашивай, чем ещё помочь; без \
@@ -1183,7 +1191,7 @@ impl AiProvider for HttpProvider {
                              по-русски."
                         ),
                         _ => format!(
-                            "Тебя зовут Ноа. Пользователь уточняет то, о чём шла речь, — \
+                            "Тебя зовут {name}. Пользователь уточняет то, о чём шла речь, — \
                              «{term}». Отвечай одной-двумя короткими фразами, разговорно, \
                              обычным текстом, без JSON и без предложений помочь ещё. \
                              Отвечай по-русски, даже если сам термин на другом языке."

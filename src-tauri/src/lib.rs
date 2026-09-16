@@ -330,6 +330,8 @@ pub fn run() {
             #[cfg(desktop)]
             commands::save_voice_settings,
             #[cfg(desktop)]
+            commands::default_wake_name,
+            #[cfg(desktop)]
             commands::voice_list,
             #[cfg(desktop)]
             commands::voice_install,
@@ -653,7 +655,7 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         begin_turn();
                         match hear(&app, wav) {
                             // Попрощались, не начав: разговор и не начинаем.
-                            Some(text) if is_farewell(&text) => {
+                            Some(text) if is_farewell(&text, &app.state::<AppState>().wake_name()) => {
                                 log::info!("попрощались («{text}») — не начинаю разговор");
                                 if alarms::stop() {
                                     respond(&app, "Выключил будильник.".into());
@@ -835,8 +837,12 @@ fn hear_quietly(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
 /// модель пляшет дальше; увидев в нём нужное написание, она выбирает его и в
 /// расшифровке.
 #[cfg(desktop)]
-const WAKE_HINT: &str =
-    "Ноа — имя голосового помощника. Ноа, слышишь? Ноа, открой телеграм. Ноа, закажи семечки.";
+fn wake_hint(name: &str) -> String {
+    format!(
+        "{name} — имя голосового помощника. {name}, слышишь? {name}, открой телеграм. \
+         {name}, закажи семечки."
+    )
+}
 
 /// То же, но с подсказкой о том, что мы ждём услышать.
 #[cfg(desktop)]
@@ -1151,7 +1157,99 @@ fn clipped_name(words: &[(String, usize)]) -> Option<usize> {
 /// «что такое альбедо». Пустая строка — значит позвали и замолчали, тогда
 /// помощник просто начинает слушать.
 #[cfg(desktop)]
-fn wake_split(text: &str) -> Option<String> {
+fn wake_split(text: &str, name: &str) -> Option<String> {
+    // «Ноа» разобрана по буквам — таблицы образцов, обрезанные окликом «Но»/«Ну»,
+    // слипшиеся написания. Своё имя такой разборки не получало и вряд ли
+    // получит на каждое возможное имя: у него нет типичных ослышек, есть только
+    // общее правило «на одну-две буквы мимо».
+    if name.eq_ignore_ascii_case(crate::config::DEFAULT_WAKE_NAME) {
+        wake_split_default(text)
+    } else {
+        wake_split_custom(text, name)
+    }
+}
+
+/// Допуск в буквах для своего имени: длиннее имя — больше запас, оно всё
+/// равно останется собой. Короче двух букв — только точное совпадение,
+/// иначе однобуквенный допуск цепляет половину обычной речи.
+#[cfg(desktop)]
+fn name_tolerance(name: &str) -> usize {
+    match name.chars().count() {
+        0..=2 => 0,
+        3..=5 => 1,
+        _ => 2,
+    }
+}
+
+/// То же самое для имени, которое человек выбрал сам.
+///
+/// Строже, чем разбор «Ноа»: там за каждым исключением стоит наблюдение вживую,
+/// а для чужого имени таких наблюдений нет и взять их неоткуда. Поэтому вместо
+/// таблицы типичных ослышек — общее правило: точное имя годится всегда, а
+/// нечёткое (см. `close_enough`) — после оклика или паузы, как и с «Ноа».
+#[cfg(desktop)]
+fn wake_split_custom(text: &str, name: &str) -> Option<String> {
+    let name_lower = name.to_lowercase();
+    let tolerance = name_tolerance(&name_lower);
+
+    let mut words: Vec<(String, usize)> = Vec::new();
+    let mut word = String::new();
+    for (at, letter) in text.char_indices() {
+        if letter.is_alphanumeric() {
+            word.extend(letter.to_lowercase());
+        } else if !word.is_empty() {
+            words.push((std::mem::take(&mut word), at));
+        }
+    }
+    if !word.is_empty() {
+        words.push((word, text.len()));
+    }
+    if words.is_empty() {
+        return None;
+    }
+
+    let tail = |ends_at: usize| -> String {
+        text[ends_at..]
+            .trim_start_matches(|c: char| !c.is_alphanumeric())
+            .trim()
+            .to_string()
+    };
+
+    // Имя в начале фразы: точно — всегда, нечёткое написание — только с паузой
+    // за ним. Без паузы «Марс приближается» не должно будить помощника по
+    // имени «Марс».
+    let paused_after_first = text[words[0].1..]
+        .chars()
+        .next()
+        .map(|c| !c.is_alphanumeric() && !c.is_whitespace())
+        .unwrap_or(true);
+    let first_is_name = words[0].0 == name_lower
+        || (paused_after_first && close_enough(&words[0].0, &name_lower, tolerance));
+    if first_is_name {
+        return Some(tail(words[0].1));
+    }
+
+    // Оклик и имя среди первых слов: «эй, {имя}», «привет, {имя}».
+    for i in 0..words.len().saturating_sub(1).min(3) {
+        let greeted = is_call(&words[i].0) || WAKE_GREETINGS.contains(&words[i].0.as_str());
+        let named = words[i + 1].0 == name_lower || close_enough(&words[i + 1].0, &name_lower, tolerance);
+        if greeted && named {
+            return Some(tail(words[i + 1].1));
+        }
+    }
+
+    // Слипшиеся оклик и имя одним словом: «хэй{имя}».
+    for greeting in WAKE_CALLS.iter().chain(WAKE_GREETINGS.iter()) {
+        let glued = format!("{greeting}{name_lower}");
+        if close_enough(&words[0].0, &glued, tolerance) {
+            return Some(tail(words[0].1));
+        }
+    }
+    None
+}
+
+#[cfg(desktop)]
+fn wake_split_default(text: &str) -> Option<String> {
     // Слова — для узнавания, границы — чтобы вернуть вопрос как он был сказан.
     //
     // Возвращать разобранные слова нельзя: обращение отрезается вместе со
@@ -1300,9 +1398,10 @@ const FILLER: &[&str] = &[
     "ну", "всё", "все", "ладно", "хорошо", "ок", "окей", "давай", "тогда", "и", "а", "так",
 ];
 
-/// Прощаются ли с программой.
+/// Прощаются ли с программой. `name` — как зовут помощника: имя в обращении
+/// не должно мешать распознать прощание («{Имя}, хватит» — это «хватит»).
 #[cfg(desktop)]
-fn is_farewell(text: &str) -> bool {
+fn is_farewell(text: &str, name: &str) -> bool {
     let lower = text.to_lowercase();
     if FAREWELL_ANYWHERE.iter().any(|word| lower.contains(word)) {
         return true;
@@ -1320,10 +1419,21 @@ fn is_farewell(text: &str) -> bool {
         return true;
     }
 
+    // Своё имя ли это — точно (список типичных написаний «Ноа») или похоже на
+    // выбранное человеком (см. `wake_split_custom`).
+    let is_name = |w: &str| -> bool {
+        if name.eq_ignore_ascii_case(crate::config::DEFAULT_WAKE_NAME) {
+            NAMES.contains(&w)
+        } else {
+            let lower = name.to_lowercase();
+            w == lower || close_enough(w, &lower, name_tolerance(&lower))
+        }
+    };
+
     // Убираем знаки и незначащие слова — остаться должно только прощание.
     let words: Vec<&str> = lower
         .split(|c: char| !c.is_alphabetic())
-        .filter(|w| !w.is_empty() && !FILLER.contains(w) && !NAMES.contains(w))
+        .filter(|w| !w.is_empty() && !FILLER.contains(w) && !is_name(w))
         .collect();
 
     if !words.is_empty()
@@ -1491,7 +1601,7 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
 
                 begin_turn();
                 match hear(&app, wav) {
-                    Some(text) if is_farewell(&text) => {
+                    Some(text) if is_farewell(&text, &app.state::<AppState>().wake_name()) => {
                         log::info!("попрощались («{text}») — разговор окончен");
                         if alarms::stop() {
                             respond(&app, "Выключил будильник.".into());
@@ -1566,12 +1676,13 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
         return;
     }
 
-    let (enabled, device) = {
+    let (enabled, device, name) = {
         let state = app.state::<AppState>();
         let config = state.config();
         (
             config.voice.enabled && config.voice.wake_word,
             config.voice.input_device.clone(),
+            config.voice.wake_name().to_string(),
         )
     };
     // И пока идёт запись по Alt+пробелу: микрофон один, и отложенный перезапуск
@@ -1600,7 +1711,8 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
     std::thread::Builder::new()
         .name("sufler-wake".into())
         .spawn(move || {
-            log::info!("слушаю обращение по имени «Ноа»");
+            log::info!("слушаю обращение по имени «{name}»");
+            let hint = wake_hint(&name);
 
             for heard in phrases {
                 if !WAKE.load(Ordering::SeqCst) {
@@ -1615,10 +1727,10 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
                     continue;
                 }
 
-                let Some(text) = hear_hinted(&app, wav, WAKE_HINT) else {
+                let Some(text) = hear_hinted(&app, wav, &hint) else {
                     continue;
                 };
-                let Some(question) = wake_split(&text) else {
+                let Some(question) = wake_split(&text, &name) else {
                     // Говорили не с нами — забываем и слушаем дальше.
                     continue;
                 };
@@ -2071,7 +2183,7 @@ pub(crate) fn wake_local_model(app: &tauri::AppHandle) {
                     log::warn!("выбранная модель не сохранилась: {err}");
                 }
                 let config = state.config();
-                state.rebuild_provider(&config.ai, &config.ui.language);
+                state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
             }
 
             chosen.to_string()
@@ -2153,7 +2265,7 @@ pub(crate) fn ask(app: &tauri::AppHandle, text: String) {
         .spawn(move || {
             log::info!("фраза из командной строки: «{text}»");
             begin_turn();
-            if is_farewell(&text) {
+            if is_farewell(&text, &app.state::<AppState>().wake_name()) {
                 // «Стоп» выключает звонящий будильник.
                 if alarms::stop() {
                     respond(&app, "Выключил будильник.".into());
@@ -2407,126 +2519,143 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wake_split_answers_to_a_chosen_name() {
+        assert_eq!(wake_split("Джарвис, открой почту", "Джарвис").as_deref(), Some("открой почту"));
+        assert_eq!(wake_split("Эй, Джарвис, ты тут?", "Джарвис").as_deref(), Some("ты тут?"));
+        assert_eq!(wake_split("Джарвиз, привет", "Джарвис").as_deref(), Some("привет"));
+        assert_eq!(wake_split("хэйджарвис что нового", "Джарвис").as_deref(), Some("что нового"));
+        assert_eq!(wake_split("Марс", "Марс").as_deref(), Some(""));
+        // Своё имя не должно отзываться на «Ноа», а «Ноа» — только на себя.
+        assert!(wake_split("Ноа, открой почту", "Джарвис").is_none());
+        assert!(wake_split("Джарвис, открой почту", "Ноа").is_none());
+        // Без паузы похожее слово — просто начало фразы.
+        assert!(wake_split("Марш играл весь вечер", "Марс").is_none());
+        assert!(wake_split("вчера говорил с Джарвисом", "Джарвис").is_none());
+        assert!(is_farewell("Джарвис, хватит", "Джарвис"));
+        assert!(!is_farewell("Джарвис", "Джарвис"));
+    }
+
+    #[test]
     fn calling_by_name_splits_off_the_question() {
         // Вопрос возвращается как сказан — со знаками и заглавными.
         assert_eq!(
-            wake_split("Хэй, Ноа, что такое альбедо?").as_deref(),
+            wake_split("Хэй, Ноа, что такое альбедо?", "Ноа").as_deref(),
             Some("что такое альбедо?")
         );
         assert_eq!(
-            wake_split("Хэй, Ноа. Что такое альбедо?").as_deref(),
+            wake_split("Хэй, Ноа. Что такое альбедо?", "Ноа").as_deref(),
             Some("Что такое альбедо?")
         );
         // Распознавание пишет имя как придётся — ловим все написания.
-        assert_eq!(wake_split("Эй, Ной, привет").as_deref(), Some("привет"));
-        assert_eq!(wake_split("Hey Noah, what is albedo").as_deref(), Some("what is albedo"));
+        assert_eq!(wake_split("Эй, Ной, привет", "Ноа").as_deref(), Some("привет"));
+        assert_eq!(wake_split("Hey Noah, what is albedo", "Ноа").as_deref(), Some("what is albedo"));
         // Позвали и замолчали — вопроса нет, но обращение есть.
-        assert_eq!(wake_split("Хэй, Ноа").as_deref(), Some(""));
+        assert_eq!(wake_split("Хэй, Ноа", "Ноа").as_deref(), Some(""));
         // Имя в начале — уже обращение.
-        assert_eq!(wake_split("Ноа, объясни").as_deref(), Some("объясни"));
+        assert_eq!(wake_split("Ноа, объясни", "Ноа").as_deref(), Some("объясни"));
         // Имени одного достаточно — оклик не обязателен.
-        assert_eq!(wake_split("Ноа").as_deref(), Some(""));
+        assert_eq!(wake_split("Ноа", "Ноа").as_deref(), Some(""));
         assert_eq!(
-            wake_split("Ноа, что такое альбедо?").as_deref(),
+            wake_split("Ноа, что такое альбедо?", "Ноа").as_deref(),
             Some("что такое альбедо?")
         );
         // Близкое написание проходит, когда за именем пауза.
-        assert_eq!(wake_split("Ноя, слышишь?").as_deref(), Some("слышишь?"));
+        assert_eq!(wake_split("Ноя, слышишь?", "Ноа").as_deref(), Some("слышишь?"));
         // Так это слышится на самом деле — из живого разговора с программой.
-        assert_eq!(wake_split("Эй, НО, привет!").as_deref(), Some("привет!"));
-        assert_eq!(wake_split("Эй, ну привет.").as_deref(), Some("привет."));
+        assert_eq!(wake_split("Эй, НО, привет!", "Ноа").as_deref(), Some("привет!"));
+        assert_eq!(wake_split("Эй, ну привет.", "Ноа").as_deref(), Some("привет."));
         // Оклик расслышан неточно — это всё равно оклик.
-        assert_eq!(wake_split("Ай, Ноа, меня слышно?").as_deref(), Some("меня слышно?"));
-        assert_eq!(wake_split("Хей Ноя, объясни").as_deref(), Some("объясни"));
+        assert_eq!(wake_split("Ай, Ноа, меня слышно?", "Ноа").as_deref(), Some("меня слышно?"));
+        assert_eq!(wake_split("Хей Ноя, объясни", "Ноа").as_deref(), Some("объясни"));
         // Всё, во что распознаватель успел превратить «хэй, ноа» вживую.
-        assert_eq!(wake_split("Эй, НО, привет").as_deref(), Some("привет"));
-        assert_eq!(wake_split("Ой, ну, что там").as_deref(), Some("что там"));
-        assert_eq!(wake_split("хэйноа что такое альбедо").as_deref(), Some("что такое альбедо"));
-        assert_eq!(wake_split("Хай, Ноу, слышишь?").as_deref(), Some("слышишь?"));
+        assert_eq!(wake_split("Эй, НО, привет", "Ноа").as_deref(), Some("привет"));
+        assert_eq!(wake_split("Ой, ну, что там", "Ноа").as_deref(), Some("что там"));
+        assert_eq!(wake_split("хэйноа что такое альбедо", "Ноа").as_deref(), Some("что такое альбедо"));
+        assert_eq!(wake_split("Хай, Ноу, слышишь?", "Ноа").as_deref(), Some("слышишь?"));
         // Имя, обрезанное распознаванием, — так оно и приходило вживую.
-        assert_eq!(wake_split("Но закрой Телеграм.").as_deref(), Some("закрой Телеграм."));
-        assert_eq!(wake_split("Ну, а ты тут?").as_deref(), Some("ты тут?"));
-        assert_eq!(wake_split("Но, закажи семечки").as_deref(), Some("закажи семечки"));
+        assert_eq!(wake_split("Но закрой Телеграм.", "Ноа").as_deref(), Some("закрой Телеграм."));
+        assert_eq!(wake_split("Ну, а ты тут?", "Ноа").as_deref(), Some("ты тут?"));
+        assert_eq!(wake_split("Но, закажи семечки", "Ноа").as_deref(), Some("закажи семечки"));
         assert_eq!(
-            wake_split("Эй, но а ты слышишь меня?").as_deref(),
+            wake_split("Эй, но а ты слышишь меня?", "Ноа").as_deref(),
             Some("а ты слышишь меня?")
         );
     }
 
     #[test]
     fn a_room_conversation_is_not_a_summons() {
-        assert!(wake_split("что такое альбедо").is_none());
-        assert!(wake_split("").is_none());
+        assert!(wake_split("что такое альбедо", "Ноа").is_none());
+        assert!(wake_split("", "Ноа").is_none());
         // Имя посреди чужого разговора обращением не считается.
-        assert!(wake_split("вчера я говорил с Ноа про работу").is_none());
-        assert!(wake_split("привет, как дела").is_none());
+        assert!(wake_split("вчера я говорил с Ноа про работу", "Ноа").is_none());
+        assert!(wake_split("привет, как дела", "Ноа").is_none());
         // Слова, которые распознаватель подсовывает вместо имени, сами по себе
         // обращением не считаются — иначе сработает половина фраз в комнате.
-        assert!(wake_split("ну и что теперь").is_none());
-        assert!(wake_split("но это же неправда").is_none());
-        assert!(wake_split("на выходных поедем").is_none());
+        assert!(wake_split("ну и что теперь", "Ноа").is_none());
+        assert!(wake_split("но это же неправда", "Ноа").is_none());
+        assert!(wake_split("на выходных поедем", "Ноа").is_none());
         // Спорное написание идёт после обычного приветствия, а не после оклика.
-        assert!(wake_split("привет, ну как дела").is_none());
-        assert!(wake_split("окей, но зачем").is_none());
+        assert!(wake_split("привет, ну как дела", "Ноа").is_none());
+        assert!(wake_split("окей, но зачем", "Ноа").is_none());
         // Похожие на оклик обрывки обычной речи обращением не становятся.
-        assert!(wake_split("он ноутбук принёс").is_none());
-        assert!(wake_split("да нет, наверное").is_none());
+        assert!(wake_split("он ноутбук принёс", "Ноа").is_none());
+        assert!(wake_split("да нет, наверное", "Ноа").is_none());
         // После оклика именем считается только короткое слово на «н».
-        assert!(wake_split("эй, наверное не стоит").is_none());
-        assert!(wake_split("эй, Настя, подожди").is_none());
-        assert!(wake_split("эй, послушай").is_none());
+        assert!(wake_split("эй, наверное не стоит", "Ноа").is_none());
+        assert!(wake_split("эй, Настя, подожди", "Ноа").is_none());
+        assert!(wake_split("эй, послушай", "Ноа").is_none());
         // Похожие слова без паузы за ними именем не считаются.
-        assert!(wake_split("ночь была тихая").is_none());
-        assert!(wake_split("нога болит").is_none());
-        assert!(wake_split("но это же неправда").is_none());
-        assert!(wake_split("ну ладно, поехали").is_none());
+        assert!(wake_split("ночь была тихая", "Ноа").is_none());
+        assert!(wake_split("нога болит", "Ноа").is_none());
+        assert!(wake_split("но это же неправда", "Ноа").is_none());
+        assert!(wake_split("ну ладно, поехали", "Ноа").is_none());
         // «Но» и «ну» без просьбы следом — обычная речь.
-        assert!(wake_split("Но всё по-прежнему открыто.").is_none());
-        assert!(wake_split("ну а ты что думаешь").is_none());
+        assert!(wake_split("Но всё по-прежнему открыто.", "Ноа").is_none());
+        assert!(wake_split("ну а ты что думаешь", "Ноа").is_none());
     }
 
     #[test]
     fn a_goodbye_with_a_tail_still_ends_the_talk() {
         // Живая речь редко кончается ровно на прощании — за ним тянется
         // объяснение, и разговор всё равно закончен.
-        assert!(is_farewell("давай, пока, раз все хорошо"));
-        assert!(is_farewell("Все, прощаемся с тобой"));
-        assert!(is_farewell("ну ладно, пока!"));
-        assert!(is_farewell("удачи тебе"));
+        assert!(is_farewell("давай, пока, раз все хорошо", "Ноа"));
+        assert!(is_farewell("Все, прощаемся с тобой", "Ноа"));
+        assert!(is_farewell("ну ладно, пока!", "Ноа"));
+        assert!(is_farewell("удачи тебе", "Ноа"));
         // Живьём сказанное — из настоящего разговора, где помощник не понял.
-        assert!(is_farewell("Давай прощаться."));
-        assert!(is_farewell("Все, заканчивай, хватит анекдотов."));
+        assert!(is_farewell("Давай прощаться.", "Ноа"));
+        assert!(is_farewell("Все, заканчивай, хватит анекдотов.", "Ноа"));
     }
 
     #[test]
     fn pauseless_poka_is_a_conjunction() {
         // То же слово без паузы за ним — союз, а не прощание.
-        assert!(!is_farewell("пока я думал, ты уже ответил"));
-        assert!(!is_farewell("подожди, пока объяснишь до конца"));
+        assert!(!is_farewell("пока я думал, ты уже ответил", "Ноа"));
+        assert!(!is_farewell("подожди, пока объяснишь до конца", "Ноа"));
         // И оно же внутри другого слова.
-        assert!(!is_farewell("покажи это на примере"));
+        assert!(!is_farewell("покажи это на примере", "Ноа"));
     }
 
     #[test]
     fn goodbyes_end_the_talk() {
-        assert!(is_farewell("Спасибо"));
-        assert!(is_farewell("понял, спасибо большое"));
-        assert!(is_farewell("До связи"));
-        assert!(is_farewell("ну всё, до завтра"));
-        assert!(is_farewell("Пока"));
-        assert!(is_farewell("ну всё, пока"));
-        assert!(is_farewell("ладно, пока-пока"));
+        assert!(is_farewell("Спасибо", "Ноа"));
+        assert!(is_farewell("понял, спасибо большое", "Ноа"));
+        assert!(is_farewell("До связи", "Ноа"));
+        assert!(is_farewell("ну всё, до завтра", "Ноа"));
+        assert!(is_farewell("Пока", "Ноа"));
+        assert!(is_farewell("ну всё, пока", "Ноа"));
+        assert!(is_farewell("ладно, пока-пока", "Ноа"));
     }
 
     #[test]
     fn a_conjunction_is_not_a_goodbye() {
         // «Пока» в середине фразы — союз, а не прощание. Обрывать на нём
         // разговор значило бы бросать человека посреди вопроса.
-        assert!(!is_farewell("пока я думал, забыл вопрос"));
-        assert!(!is_farewell("подожди, пока объяснишь"));
-        assert!(!is_farewell("а что было пока меня не было"));
-        assert!(!is_farewell("расскажи про альбедо"));
-        assert!(!is_farewell(""));
+        assert!(!is_farewell("пока я думал, забыл вопрос", "Ноа"));
+        assert!(!is_farewell("подожди, пока объяснишь", "Ноа"));
+        assert!(!is_farewell("а что было пока меня не было", "Ноа"));
+        assert!(!is_farewell("расскажи про альбедо", "Ноа"));
+        assert!(!is_farewell("", "Ноа"));
     }
 }
 
@@ -2536,27 +2665,27 @@ mod farewell_tests {
 
     #[test]
     fn stop_words_end_only_a_phrase_of_their_own() {
-        assert!(is_farewell("Хватит."));
-        assert!(is_farewell("Ноа, хватит"));
-        assert!(is_farewell("ну всё, стоп"));
-        assert!(is_farewell("Замолчи!"));
-        assert!(!is_farewell("Стоп, подожди, я про другое"));
-        assert!(!is_farewell("хватит ли денег на заказ"));
+        assert!(is_farewell("Хватит.", "Ноа"));
+        assert!(is_farewell("Ноа, хватит", "Ноа"));
+        assert!(is_farewell("ну всё, стоп", "Ноа"));
+        assert!(is_farewell("Замолчи!", "Ноа"));
+        assert!(!is_farewell("Стоп, подожди, я про другое", "Ноа"));
+        assert!(!is_farewell("хватит ли денег на заказ", "Ноа"));
     }
 
     #[test]
     fn the_name_alone_is_a_call_not_a_goodbye() {
-        assert!(!is_farewell("Ноа"));
-        assert!(!is_farewell("Ноа, открой телеграм"));
-        assert!(is_farewell("Ноа, пока"));
+        assert!(!is_farewell("Ноа", "Ноа"));
+        assert!(!is_farewell("Ноа, открой телеграм", "Ноа"));
+        assert!(is_farewell("Ноа, пока", "Ноа"));
     }
 
     #[test]
     fn that_is_all_ends_the_talk() {
-        assert!(is_farewell("Это все."));
-        assert!(is_farewell("Всё."));
-        assert!(is_farewell("Больше ничего"));
-        assert!(!is_farewell("Это все книги Толстого?"));
+        assert!(is_farewell("Это все.", "Ноа"));
+        assert!(is_farewell("Всё.", "Ноа"));
+        assert!(is_farewell("Больше ничего", "Ноа"));
+        assert!(!is_farewell("Это все книги Толстого?", "Ноа"));
     }
 
     #[test]

@@ -97,71 +97,10 @@ function selectScene() {
   view.render();
 }
 
-/* ── Сцена «позвал по имени» ──────────────────────────────────────────────── */
-
-const SPOKEN = "Ноа, что такое альбедо?";
-const ANSWER =
-  "Доля света, которую поверхность отражает обратно. У свежего снега почти единица, у асфальта около одной десятой.";
-
-/** Состояние индикатора на этом кадре — как его меняет программа по ходу разговора. */
-function hudMode() {
-  if (frame < 26) return "listening";
-  if (frame < 40) return "thinking";
-  return "speaking";
-}
-
-function voiceScene() {
-  // Индикатор берём настоящий: он ждёт события из Rust, и мы их ему даём.
-  globalThis.__TAURI__ = {
-    core: { invoke: async () => hudMode() },
-    event: {
-      listen: (event, handler) => {
-        if (event === "hud:mode") handler({ payload: hudMode() });
-        return Promise.resolve(() => {});
-      },
-    },
-  };
-
-  const wrap = document.getElementById("hudwrap");
-  wrap.style.opacity = String(ease((frame - 2) / 4));
-
-  const caption = document.getElementById("caption");
-  if (frame >= 6) {
-    caption.style.opacity = String(ease((frame - 6) / 4));
-    caption.innerHTML = `<i>«</i>${typed(SPOKEN, 6, 14)}<i>»</i>`;
-  }
-
-  if (frame >= 34) {
-    const view = new PopupView({
-      client: { explain: () => new Promise(() => {}), ask: () => new Promise(() => {}) },
-    });
-    view.dialogue = true;
-    const stage = document.getElementById("stage");
-    stage.append(view.el);
-    stage.style.left = "50%";
-    stage.style.top = "212px";
-    stage.style.transformOrigin = "50% 0";
-
-    const appear = ease((frame - 34) / 4);
-    stage.style.opacity = String(appear);
-    stage.style.transform = `translateX(-50%) translateY(${(1 - appear) * 8}px) scale(${
-      0.985 + appear * 0.015
-    })`;
-
-    const state = view.state;
-    state.term = "";
-    state.phase = frame < 40 ? "loading" : "success";
-    state.data = { def: typed(ANSWER, 40, 22), simple: "", examples: [] };
-    view.render();
-  }
-
-  return import("../../src/js/hud.js");
-}
-
 /* ── Запуск ───────────────────────────────────────────────────────────────── */
 
-if (scene === "voice") {
-  await voiceScene();
+if (scene === "modes") {
+  (await import("./modes.js")).render();
 } else {
   selectScene();
 }

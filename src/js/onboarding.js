@@ -423,6 +423,7 @@ async function saveVoice() {
     azureKey: ui.azureKey.value.trim(),
     azureRegion: ui.azureRegion.value.trim(),
     wakeWord: ui.wakeWord.checked,
+    wakeName: ui.wakeName.value.trim(),
     inputDevice: ui.speechDevice.value,
     rate: Number(ui.voiceRate.value),
     speakAnswers: false,
@@ -896,7 +897,7 @@ async function loadChips() {
     ui.chips.replaceChildren(
       chip(brain, true),
       chip(voice.enabled ? engines[voice.engine] ?? "голос" : "голос выключен", voice.enabled),
-      chip(voice.wakeWord ? "слушает «Ноа»" : "имя не слушает", voice.wakeWord),
+      chip(voice.wakeWord ? `слушает «${voice.wakeName || "Ноа"}»` : "имя не слушает", voice.wakeWord),
     );
   } catch {
     /* окно открыто вне приложения */
@@ -983,7 +984,10 @@ async function loadSpeech() {
       ui.speechDevice.append(option);
     }
     ui.speechDevice.value = devices.includes(chosen) ? chosen : "";
-    ui.wakeWord.checked = Boolean((await api.invoke("voice_settings")).wakeWord);
+    const voice = await api.invoke("voice_settings");
+    ui.wakeWord.checked = Boolean(voice.wakeWord);
+    ui.wakeName.value = voice.wakeName ?? "";
+    ui.wakeName.placeholder = (await api.invoke("default_wake_name")) ?? "Ноа";
     updateMicHint();
   } catch {
     /* окно открыто вне приложения */
@@ -1007,6 +1011,10 @@ async function loadSpeech() {
 
 ui.speechDevice.addEventListener("change", saveVoice);
 ui.wakeWord.addEventListener("change", saveVoice);
+ui.wakeName.addEventListener("change", async () => {
+  await saveVoice();
+  loadChips();
+});
 
 ui.speechDownload.addEventListener("click", async () => {
   if (!api) return;

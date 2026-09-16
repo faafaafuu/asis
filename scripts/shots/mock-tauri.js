@@ -34,73 +34,108 @@
   });
 
   const ROWS = [
-    asset("bitcoin", "crypto", "BTC", "Bitcoin", 97350, "USD", [1.8, 4.2, -3.1, 58.4, 1250], ["Избранное", "Крипто"], 1, [
-      { price: 100000, above: true, fired: null },
+    asset("AAPL", "stock", "AAPL", "Apple", 231.6, "USD", [0.4, -1.2, 2.9, 18.7, 640], ["Избранное"], 4, [
+      { price: 250, above: true, fired: null },
     ]),
-    asset("ethereum", "crypto", "ETH", "Ethereum", 3412, "USD", [-0.9, 2.7, 6.3, 21.5, 812], ["Крипто"], 2),
-    asset("solana", "crypto", "SOL", "Solana", 186.4, "USD", [3.4, 9.1, 14.2, 96.8, 4210], ["Крипто"], 3, [
-      { price: 150, above: false, fired: null },
-    ]),
-    asset("AAPL", "stock", "AAPL", "Apple", 231.6, "USD", [0.4, -1.2, 2.9, 18.7, 640], ["Избранное"], 4),
-    asset("SBER", "moex", "SBER", "Сбербанк", 312.45, "RUB", [-0.6, 1.1, 4.8, 12.3, 355], ["Избранное", "РФ фонды"], 5),
-    asset("EURUSD=X", "stock", "EURUSD", "Евро / доллар", 1.1596, "USD", [0.1, -0.3, 0.8, 4.2, -12.4], [], 6),
+    asset("MSFT", "stock", "MSFT", "Microsoft", 468.2, "USD", [0.9, 2.1, 3.4, 22.1, 910], ["Избранное"], 1),
+    asset("EURUSD=X", "stock", "EURUSD", "Евро / доллар", 1.1596, "USD", [0.1, -0.3, 0.8, 4.2, -12.4], ["Валюты"], 6),
+    asset("GC=F", "stock", "GOLD", "Золото", 2410, "USD", [0.3, 1.4, 2.2, 19.8, 230], ["Избранное"], 2),
   ];
 
   const TASKS = [
     { id: "t1", title: "Оплатить интернет", due: at(-1, 18), done: false, overdue: true, steps: [], advice: null, postponed: 0, inCalendar: false },
-    { id: "t2", title: "Позвонить в банк", due: at(0, 23, 30), done: false, overdue: false, steps: [], advice: null, postponed: 0, inCalendar: true },
+    { id: "t2", title: "Забрать посылку", due: at(0, 19, 30), done: false, overdue: false, steps: [], advice: null, postponed: 0, inCalendar: true },
     {
       id: "t3",
-      title: "Обновить резюме",
+      title: "Подготовить доклад",
       due: at(1, 10),
       done: false,
       overdue: false,
       steps: [
-        { title: "Собрать проекты за последний год", done: true },
-        { title: "Переписать раздел «Опыт» под DevOps", done: false },
-        { title: "Отправить на ревью другу", done: false },
+        { title: "Собрать материалы", done: true },
+        { title: "Набросать план на пять слайдов", done: false },
+        { title: "Прогнать вслух за десять минут", done: false },
       ],
-      advice: "Начните с проектов: из них раздел «Опыт» пишется почти сам.",
+      advice: "Начните с плана: по нему слайды собираются почти сами.",
       postponed: 0,
       inCalendar: false,
     },
-    { id: "t4", title: "Записаться к стоматологу", due: at(3, 18), done: false, overdue: false, steps: [], advice: null, postponed: 3, inCalendar: false },
-    { id: "t5", title: "Разобрать Kubernetes Operators", due: null, done: false, overdue: false, steps: [], advice: null, postponed: 0, inCalendar: false },
+    { id: "t4", title: "Полить цветы", due: at(3, 18), done: false, overdue: false, steps: [], advice: null, postponed: 2, inCalendar: false },
+    { id: "t5", title: "Выбрать подарок", due: null, done: false, overdue: false, steps: [], advice: null, postponed: 0, inCalendar: false },
     { id: "t6", title: "Уборка", due: at(0, 9), done: true, overdue: false, steps: [], advice: null, postponed: 0, inCalendar: false },
   ];
 
-  const COURSE_TOPICS = ["linux", "network", "git", "bash", "docker", "kubernetes", "cicd", "iac", "cloud", "monitoring", "security", "sre"];
-  const STATUS = { linux: "done", network: "done", git: "done", bash: "practice", docker: "reading" };
-  const base = new URL("../../src-tauri/courses/devops/", document.baseURI);
-  const load = (name) => fetch(new URL(`${name}.json`, base)).then((r) => r.json());
+  // Курс для кадров — выдуманный, к курсам программы отношения не имеет.
+  const question = (id, q, points, reference) => ({ id, kind: "open", q, options: [], answer: null, explain: "", points, reference });
+  const LESSON = [
+    "# Термодинамика",
+    "",
+    "Термодинамика описывает, как теплота превращается в работу и обратно.",
+    "",
+    "## Первое начало",
+    "",
+    "Теплота, переданная системе, идёт на изменение её внутренней энергии и на работу против внешних сил: **Q = ΔU + A**. Это закон сохранения энергии для тепловых процессов.",
+    "",
+    "## Второе начало",
+    "",
+    "Теплота сама переходит только от горячего к холодному. Энтропия замкнутой системы не убывает, поэтому тепловой двигатель всегда отдаёт часть теплоты холодильнику.",
+    "",
+    "## Цикл Карно",
+    "",
+    "Идеальный цикл из двух изотерм и двух адиабат. Его КПД зависит только от температур нагревателя и холодильника: **η = 1 − T₂ / T₁**.",
+  ].join("\n");
+  const PHYSICS = [
+    { id: "mechanics", title: "Механика", summary: "Движение, силы и законы Ньютона", status: "done" },
+    { id: "molecular", title: "Молекулярная физика", summary: "Газы, давление и температура", status: "done" },
+    {
+      id: "thermo",
+      title: "Термодинамика",
+      summary: "Теплота, работа и энтропия",
+      status: "practice",
+      lesson: LESSON,
+      tasks: [
+        question(
+          "th-1",
+          "Почему невозможен вечный двигатель второго рода?",
+          ["Энтропия замкнутой системы не убывает", "Часть теплоты неизбежно уходит холодильнику"],
+          "Второе начало запрещает процесс, единственный итог которого — превращение теплоты целиком в работу: часть теплоты всегда уходит холодильнику, а энтропия замкнутой системы не убывает.",
+        ),
+        question("th-2", "Чему равен КПД цикла Карно при 500 K и 300 K?", ["η = 1 − T₂/T₁", "Ответ — 40%"], "η = 1 − 300/500 = 0,4, то есть 40%."),
+        question("th-3", "Что происходит с внутренней энергией газа при адиабатном сжатии?", ["Теплообмена нет", "Работа над газом увеличивает энергию"], "Теплообмена нет, работа внешних сил целиком идёт на рост внутренней энергии — газ нагревается."),
+      ],
+    },
+    { id: "electricity", title: "Электричество", summary: "Заряд, поле, ток и цепи", status: "reading" },
+    { id: "magnetism", title: "Магнетизм", summary: "Магнитное поле и индукция", status: "new" },
+    { id: "optics", title: "Оптика", summary: "Свет, линзы и интерференция", status: "new" },
+    { id: "atomic", title: "Атомная физика", summary: "Строение атома и спектры", status: "new" },
+  ];
+  const lessonOf = (t) => t.lesson ?? `# ${t.title}\n\n${t.summary}.`;
+  const tasksOf = (t) => t.tasks ?? [question(`${t.id}-1`, `Главная идея темы «${t.title}»?`, ["Суть темы"], t.summary)];
 
   async function overview() {
-    const course = await load("course");
-    const topics = await Promise.all(COURSE_TOPICS.map(load));
     return [
       {
-        id: course.id,
-        title: course.title,
-        description: course.description,
-        topics: topics.map((t) => {
-          const status = STATUS[t.id] ?? "new";
-          const total = t.tasks.length;
+        id: "physics",
+        title: "Общая физика",
+        description: "Ознакомительный курс: от механики до атома.",
+        topics: PHYSICS.map((t) => {
+          const total = tasksOf(t).length;
           return {
             id: t.id,
             title: t.title,
             summary: t.summary,
-            status,
-            read: status !== "new",
-            tasksDone: status === "done" ? total : status === "practice" ? 1 : 0,
+            status: t.status,
+            read: t.status !== "new",
+            tasksDone: t.status === "done" ? total : t.status === "practice" ? 1 : 0,
             tasksTotal: total,
-            examBest: status === "done" ? 80 + t.id.length : null,
-            mistakes: status === "practice" ? 2 : 0,
+            examBest: t.status === "done" ? 86 : null,
+            mistakes: t.status === "practice" ? 1 : 0,
           };
         }),
         percent: 31,
         finalBest: null,
         finalUnlocked: false,
-        current: "docker",
+        current: "thermo",
         topicPass: 70,
         finalPass: 75,
       },
@@ -108,30 +143,30 @@
   }
 
   async function topic(id) {
-    const t = await load(id);
-    return { topic: { ...t, exam: [] }, scores: {}, mistakes: [] };
+    const t = PHYSICS.find((x) => x.id === id) ?? PHYSICS[2];
+    return {
+      topic: { id: t.id, title: t.title, aliases: [], summary: t.summary, lesson: lessonOf(t), tasks: tasksOf(t), exam: [] },
+      scores: {},
+      mistakes: [],
+    };
   }
 
   async function check(questionId) {
-    for (const name of COURSE_TOPICS) {
-      const t = await load(name);
-      const q = t.tasks.find((task) => task.id === questionId);
-      if (!q) continue;
-      return {
-        id: q.id,
-        q: q.q,
-        score: 45,
-        right: false,
-        feedback: "Главное названо, но не сказано, что слои кешируются и порядок инструкций на это влияет.",
-        reference: q.reference || q.explain || "",
-        covered: q.points?.length ? [1] : [],
-        points: q.points ?? [],
-        options: q.options ?? [],
-        chosen: null,
-        answer: q.answer ?? null,
-      };
-    }
-    return null;
+    const q = PHYSICS.flatMap(tasksOf).find((task) => task.id === questionId);
+    if (!q) return null;
+    return {
+      id: q.id,
+      q: q.q,
+      score: 55,
+      right: false,
+      feedback: "Про холодильник сказано верно, но не хватает главного — роста энтропии замкнутой системы.",
+      reference: q.reference,
+      covered: [1],
+      points: q.points,
+      options: [],
+      chosen: null,
+      answer: null,
+    };
   }
 
   const HANDLERS = {
@@ -143,7 +178,7 @@
       language: "ru",
     }),
     watch_rows: () => ROWS,
-    watch_tabs: () => ["Избранное", "Крипто", "РФ фонды"],
+    watch_tabs: () => ["Избранное", "Валюты"],
     watch_telegram_ready: () => true,
     watch_open_tab: () => null,
     task_list: () => TASKS,
@@ -153,17 +188,17 @@
   };
 
   const MODULES = [
-    { id: "tasks", title: "Задачи", icon: "✓", about: "Дела со сроками, шаги и напоминания", status: "5 дел, просрочено 1", voice: "«Ноа, напомни завтра в десять позвонить в банк»", window: true },
-    { id: "watchlist", title: "Активы", icon: "◆", about: "Крипта, акции, валюты и оповещения о цене", status: "6 активов · 2 оповещения", voice: "«Ноа, поставь алерт на биткоин на 100 тысяч»", window: true },
-    { id: "learning", title: "Обучение", icon: "◈", about: "Курсы с уроками, задачами и экзаменами", status: "DevOps — 31%", voice: "«Ноа, погоняй меня по докеру»", window: true },
-    { id: "order", title: "Заказы", icon: "▣", about: "Продукты по лучшей цене, корзина одним голосом", status: "3 товара в корзине, ВкусВилл", voice: "«Ноа, закажи молоко, хлеб и яйца»", window: true },
+    { id: "tasks", title: "Задачи", icon: "✓", about: "Дела со сроками, шаги и напоминания", status: "5 дел, просрочено 1", voice: "«Ноа, напомни завтра в десять забрать посылку»", window: true },
+    { id: "learning", title: "Обучение", icon: "◈", about: "Курсы с уроками, задачами и экзаменами", status: "Общая физика — 31%", voice: "«Ноа, погоняй меня по термодинамике»", window: true },
+    { id: "order", title: "Заказы", icon: "▣", about: "Продукты по лучшей цене, корзина одним голосом", status: "3 товара в корзине", voice: "«Ноа, закажи молоко, хлеб и яйца»", window: true },
     { id: "alarms", title: "Будильники", icon: "◷", about: "Будильники по дням недели и таймеры", status: "2 будильника, ближний на 07:00", voice: "«Ноа, разбуди в семь по будням»", window: false },
+    { id: "watchlist", title: "Активы", icon: "◆", about: "Акции, валюты и оповещения о цене", status: "4 позиции · 1 оповещение", voice: "«Ноа, какой курс евро»", window: true },
     { id: "telegram", title: "Telegram", icon: "➤", about: "Ноа в мессенджере: текстом и голосовыми", status: "подключён", voice: "Пишите своему боту — отвечает тем же", window: false },
   ];
   Object.assign(HANDLERS, {
     modules_overview: () => MODULES,
     ai_settings: () => ({ provider: "http", endpoint: "http://127.0.0.1:11434/api/chat", apiKey: "", model: "qwen3.5:4b", proxy: "" }),
-    voice_settings: () => ({ enabled: true, engine: "silero", voice: "ru_RU-irina-medium", edgeVoice: "ru-RU-SvetlanaNeural", sileroVoice: "xenia", wakeWord: true, inputDevice: "", rate: 1.2, speakAnswers: false, ready: true, azureKey: "", azureRegion: "westeurope" }),
+    voice_settings: () => ({ enabled: true, engine: "silero", voice: "ru_RU-irina-medium", edgeVoice: "ru-RU-SvetlanaNeural", sileroVoice: "xenia", wakeWord: true, wakeName: "", inputDevice: "", rate: 1.2, speakAnswers: false, ready: true, azureKey: "", azureRegion: "westeurope" }),
     voice_list: () => ({
       piper: [{ id: "ru_RU-irina-medium", label: "Ирина — женский, спокойный" }],
       azure: [],
@@ -179,6 +214,7 @@
       ],
     }),
     recommended_model: () => "qwen3.5:4b",
+    default_wake_name: () => "Ноа",
     usage_summary: () => ({
       today: { requests: 46, prompt: 118400, completion: 6150, cost: 0.0214 },
       month: { requests: 1210, prompt: 3120000, completion: 162000, cost: 0.587 },

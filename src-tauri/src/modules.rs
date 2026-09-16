@@ -7,7 +7,7 @@
 //! открывается мгновенно и в сеть не ходит.
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -121,18 +121,20 @@ fn alarms_status() -> String {
 /// Все модули с состоянием: встроенные, затем свои.
 pub fn overview(app: &AppHandle) -> Vec<ModuleCard> {
     let telegram = if crate::telegram::ready(app) { "подключён" } else { "не подключён" };
+    let name = app.state::<crate::state::AppState>().wake_name();
+    let say = |phrase: &str| format!("«{name}, {phrase}»");
     let mut cards = vec![
         builtin("tasks", "Задачи", "✓", "Дела со сроками, шаги и напоминания", tasks_status(),
-            "«Ноа, напомни завтра в десять позвонить в банк»", true),
-        builtin("watchlist", "Активы", "◆", "Крипта, акции, валюты и оповещения о цене", watchlist_status(),
-            "«Ноа, поставь алерт на биткоин на 100 тысяч»", true),
+            &say("напомни завтра в десять забрать посылку"), true),
+        builtin("watchlist", "Активы", "◆", "Акции, валюты и оповещения о цене", watchlist_status(),
+            &say("какой курс евро"), true),
         builtin("learning", "Обучение", "◈", "Курсы с уроками, задачами и экзаменами", learning_status(),
-            "«Ноа, погоняй меня по докеру»", true),
+            &say("погоняй меня по курсу"), true),
         builtin("order", "Заказы", "▣", "Продукты по лучшей цене, корзина одним голосом", order_status(),
-            "«Ноа, закажи молоко, хлеб и яйца»", true),
+            &say("закажи молоко, хлеб и яйца"), true),
         builtin("alarms", "Будильники", "◷", "Будильники по дням недели и таймеры", alarms_status(),
-            "«Ноа, разбуди в семь по будням»", false),
-        builtin("telegram", "Telegram", "➤", "Ноа в мессенджере: текстом и голосовыми", telegram.into(),
+            &say("разбуди в семь по будням"), false),
+        builtin("telegram", "Telegram", "➤", &format!("{name} в мессенджере: текстом и голосовыми"), telegram.into(),
             "Пишите своему боту — отвечает тем же", false),
     ];
     cards.extend(crate::plugins::installed(app).into_iter().map(|manifest| ModuleCard {
@@ -141,7 +143,7 @@ pub fn overview(app: &AppHandle) -> Vec<ModuleCard> {
         title: manifest.title,
         icon: if manifest.icon.is_empty() { "✦".into() } else { manifest.icon },
         about: manifest.about,
-        voice: manifest.voice,
+        voice: manifest.voice.replace("Ноа", &name),
         window: false,
         custom: true,
     }));

@@ -74,6 +74,80 @@
       canvas {
         display: block;
       }
+      .modes {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background:
+          radial-gradient(ellipse 60% 55% at 50% 42%, color-mix(in oklab, var(--accent) 9%, transparent), transparent 70%),
+          var(--bg-solid);
+      }
+      .modes__brand {
+        position: absolute;
+        left: 28px;
+        top: 22px;
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+        font-size: 13px;
+        color: var(--text-muted);
+      }
+      .modes__brand b {
+        font-size: 20px;
+        font-weight: 600;
+        color: var(--text);
+        letter-spacing: 0.02em;
+      }
+      .modes__hud {
+        width: 540px;
+        height: 270px;
+        margin-top: 24px;
+      }
+      .modes__line {
+        height: 34px;
+        margin-top: 6px;
+        font-size: 21px;
+        color: var(--text);
+        white-space: nowrap;
+      }
+      .modes__line i {
+        font-style: normal;
+        color: var(--accent);
+      }
+      .modes__line--note {
+        font-size: 16px;
+        color: var(--text-muted);
+      }
+      .modes__line--answer {
+        color: oklch(0.85 0.1 290);
+      }
+      .modes__steps {
+        display: flex;
+        gap: 10px;
+        margin: 26px 0 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: step;
+      }
+      .modes__steps li {
+        padding: 7px 14px;
+        border: 1px solid color-mix(in oklab, var(--text-muted) 30%, transparent);
+        border-radius: 999px;
+        font-size: 13.5px;
+        color: var(--text-muted);
+      }
+      .modes__steps li.is-done {
+        color: var(--text-body);
+        border-color: color-mix(in oklab, var(--accent) 35%, transparent);
+      }
+      .modes__steps li.is-on {
+        color: var(--bg-solid);
+        background: var(--accent);
+        border-color: var(--accent);
+        box-shadow: 0 0 18px color-mix(in oklab, var(--accent) 60%, transparent);
+      }
     </style>
   </head>
   <body>

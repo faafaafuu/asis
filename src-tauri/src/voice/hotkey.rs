@@ -336,6 +336,9 @@ unsafe extern "system" fn keyboard_proc(
             // Повтор от удержания — глотаем, но ничего не делаем.
             return LRESULT(1);
         }
+        if alt || ctrl || shift {
+            mask_modifiers();
+        }
         // Все три модификатора — не разговор, а переключатель ожидания
         // обращения. Проверяется первым: иначе сочетание, в котором Alt тоже
         // зажат, считалось бы обычным «Alt с пробелом».
@@ -361,6 +364,33 @@ unsafe extern "system" fn keyboard_proc(
     }
 
     pass(())
+}
+
+/// Прячет от Windows, что модификаторы нажимали «вхолостую».
+///
+/// Пробел мы проглатываем, и система видит: Alt с Shift или Ctrl с Shift
+/// нажали и отпустили, не нажав ничего между ними. Это её сочетание смены
+/// раскладки — язык переключался при каждом вызове помощника; одиночный Alt
+/// к тому же открывает меню окна. Пустая клавиша 0xE8 (ни за чем не
+/// закреплена) между нажатием и отпусканием снимает оба эффекта — тем же
+/// приёмом пользуется AutoHotkey.
+#[cfg(target_os = "windows")]
+fn mask_modifiers() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        VIRTUAL_KEY,
+    };
+    let key = |flags: KEYBD_EVENT_FLAGS| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT { wVk: VIRTUAL_KEY(0xE8), wScan: 0, dwFlags: flags, time: 0, dwExtraInfo: 0 },
+        },
+    };
+    let inputs = [key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)];
+    // SAFETY: посылает два нажатия несуществующей клавиши, состояние не читает.
+    unsafe {
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
 }
 
 /// Окно, которое сейчас впереди, числом. Ноль — такого нет.

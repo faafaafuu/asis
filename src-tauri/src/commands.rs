@@ -219,7 +219,7 @@ pub fn save_ai_settings(
 
     {
         let config = state.config();
-        state.rebuild_provider(&config.ai, &config.ui.language);
+        state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
     }
 
     // Новую модель греем, старую отпускаем: иначе в видеопамяти копятся все, что
@@ -269,6 +269,11 @@ pub struct VoiceSettings {
     pub voice: String,
     pub edge_voice: String,
     pub wake_word: bool,
+    /// Пустая строка в окне — значит «имя по умолчанию»; настоящее имя для
+    /// этого случая окно берёт отдельным вызовом (`default_wake_name`), не
+    /// отсюда, чтобы поле оставалось пустым и подсказка в нём не терялась.
+    #[serde(default)]
+    pub wake_name: String,
     pub input_device: String,
     pub rate: f32,
     pub speak_answers: bool,
@@ -295,6 +300,9 @@ pub fn voice_settings(app: AppHandle, state: State<'_, AppState>) -> VoiceSettin
         voice: config.voice.voice.clone(),
         edge_voice: config.voice.edge_voice.clone(),
         wake_word: config.voice.wake_word,
+        // Пусто, если ещё не переименовывали: своё имя пользователь видит,
+        // введённое им самим, а не «Ноа» из общего умолчания.
+        wake_name: config.voice.wake_name.clone(),
         input_device: config.voice.input_device.clone(),
         rate: config.voice.rate,
         speak_answers: config.voice.speak_answers,
@@ -328,6 +336,7 @@ pub fn save_voice_settings(
         config.voice.voice = settings.voice;
         config.voice.edge_voice = settings.edge_voice;
         config.voice.wake_word = settings.wake_word;
+        config.voice.wake_name = settings.wake_name.trim().to_string();
         config.voice.input_device = settings.input_device;
         config.voice.rate = settings.rate;
         config.voice.speak_answers = settings.speak_answers;
@@ -346,10 +355,22 @@ pub fn save_voice_settings(
         }
     }
     persist(&app, &state)?;
-    // Пробуждение включили или выключили — перестраиваем слушателя сразу,
-    // а не со следующего запуска.
+    // Имя поменялось — модель должна представляться им сразу, а не после
+    // перезапуска: та же причина, что и для смены языка в save_appearance.
+    {
+        let config = state.config();
+        state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
+    }
+    // Пробуждение включили, выключили или переименовали — перестраиваем
+    // слушателя сразу, а не со следующего запуска.
     crate::restart_wake(&app);
     Ok(())
+}
+
+/// Имя по умолчанию — для подсказки в пустом поле окна.
+#[tauri::command]
+pub fn default_wake_name() -> &'static str {
+    crate::config::DEFAULT_WAKE_NAME
 }
 
 /// Голоса, между которыми можно выбирать. Оба списка сразу: окно показывает
@@ -834,7 +855,7 @@ pub fn save_appearance(
     persist(&app, &state)?;
 
     let config = state.config();
-    state.rebuild_provider(&config.ai, &config.ui.language);
+    state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
     Ok(())
 }
 
@@ -1045,7 +1066,7 @@ pub async fn test_ai(app: AppHandle, state: State<'_, AppState>) -> Result<Strin
     persist(&app, &state)?;
     {
         let config = state.config();
-        state.rebuild_provider(&config.ai, &config.ui.language);
+        state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
     }
     let provider = state.provider();
     match tokio::time::timeout(limit, provider.explain("альбедо", "")).await {

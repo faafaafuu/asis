@@ -308,8 +308,9 @@ pub async fn lookup(app: &AppHandle, question: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n\n");
 
+    let name = app.state::<AppState>().wake_name();
     let rules = format!(
-        "Ты — Ноа, голосовой помощник. Ответь на вопрос человека по фрагментам из \
+        "Ты — {name}, голосовой помощник. Ответь на вопрос человека по фрагментам из \
          поиска ниже: одним-двумя короткими предложениями, по-русски, обычным \
          текстом, без списков и ссылок. Опирайся только на фрагменты; если ответа \
          в них нет, так и скажи — не выдумывай. {} Источник, если он важен, назови \
@@ -1101,7 +1102,7 @@ mod live {
             model: "qwen2.5:7b".into(),
             ..Default::default()
         };
-        let provider = crate::ai_client::HttpProvider::new(&config, "ru").expect("провайдер");
+        let provider = crate::ai_client::HttpProvider::new(&config, "ru", "Ноа").expect("провайдер");
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1133,7 +1134,7 @@ mod live {
             model: "qwen2.5:7b".into(),
             ..Default::default()
         };
-        let provider = crate::ai_client::HttpProvider::new(&config, "ru").expect("провайдер");
+        let provider = crate::ai_client::HttpProvider::new(&config, "ru", "Ноа").expect("провайдер");
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

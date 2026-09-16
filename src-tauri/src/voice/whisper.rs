@@ -440,6 +440,8 @@ const HALLUCINATIONS: &[&str] = &[
     "dimatorzok",
     "торжок",
     "продолжение следует",
+    "в следующей серии",
+    "в следующем видео",
     "спасибо за просмотр",
     "спасибо за внимание",
     "подписывайтесь",
@@ -480,7 +482,8 @@ fn is_hallucination(text: &str) -> bool {
     let wrapped = [('[', ']'), ('(', ')'), ('「', '」'), ('『', '』'), ('*', '*')]
         .iter()
         .any(|(open, close)| bare.starts_with(*open) && bare.ends_with(*close));
-    if wrapped || lower.contains('♪') {
+    // Одинокое «Смотрите.» — начало той же подписи из роликов.
+    if wrapped || lower.contains('♪') || bare == "смотрите" {
         return true;
     }
 

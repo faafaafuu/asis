@@ -34,7 +34,8 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: Config) -> Self {
-        let provider: Arc<dyn AiProvider> = Arc::from(build_provider(&config.ai, &config.ui.language));
+        let provider: Arc<dyn AiProvider> =
+            Arc::from(build_provider(&config.ai, &config.ui.language, config.voice.wake_name()));
         Self {
             config: RwLock::new(config),
             provider: RwLock::new(provider),
@@ -58,9 +59,14 @@ impl AppState {
     /// эту функцию, уже держа гварду настроек, и второй захват той же блокировки
     /// на том же потоке под Windows встаёт намертво, стоит писателю выстроиться
     /// между ними.
-    pub fn rebuild_provider(&self, config: &crate::config::AiConfig, language: &str) {
-        let provider: Arc<dyn AiProvider> = Arc::from(build_provider(config, language));
+    pub fn rebuild_provider(&self, config: &crate::config::AiConfig, language: &str, wake_name: &str) {
+        let provider: Arc<dyn AiProvider> = Arc::from(build_provider(config, language, wake_name));
         *unpoison(self.provider.write()) = provider;
+    }
+
+    /// Имя помощника — коротким путём оттуда, где не нужна вся конфигурация.
+    pub fn wake_name(&self) -> String {
+        self.config().voice.wake_name().to_string()
     }
 
     pub fn provider(&self) -> Arc<dyn AiProvider> {

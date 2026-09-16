@@ -889,7 +889,7 @@ fn open_tasks() -> Vec<Task> {
 /* ── Разбор реплики ──────────────────────────────────────────────────────── */
 
 async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
-    let Some(parsed) = interpret(app, &intent_rules(open), said).await else {
+    let Some(parsed) = interpret(app, &intent_rules(app, open), said).await else {
         // Не разобрали — считаем обычным вопросом. Промолчать в ответ на
         // вопрос хуже, чем не завести задачу: задачу человек повторит.
         return Intent::Chat;
@@ -2213,9 +2213,10 @@ fn pick_task(parsed: &serde_json::Value, open: &[Task]) -> Option<String> {
     open.get((number - 1) as usize).map(|task| task.id.clone())
 }
 
-fn intent_rules(open: &[Task]) -> String {
+fn intent_rules(app: &AppHandle, open: &[Task]) -> String {
     rules_with_context(
         open,
+        &app.state::<AppState>().wake_name(),
         &[
             now_line(),
             crate::web::site_line(),
@@ -2228,7 +2229,7 @@ fn intent_rules(open: &[Task]) -> String {
 
 /// Правила разбора с заданной строкой обстановки: время, открытый сайт,
 /// текущий заказ. Отдельно — ради сравнения моделей на одной обстановке.
-fn rules_with_context(open: &[Task], context: &str) -> String {
+fn rules_with_context(open: &[Task], name: &str, context: &str) -> String {
     let list = if open.is_empty() {
         "Открытых дел нет.".to_string()
     } else {
@@ -2241,7 +2242,7 @@ fn rules_with_context(open: &[Task], context: &str) -> String {
     };
 
     format!(
-        "Ты — Ноа, голосовой помощник. Определи, чего хочет человек, и ответь \
+        "Ты — {name}, голосовой помощник. Определи, чего хочет человек, и ответь \
          одним объектом JSON без пояснений.\n\
          \n\
          Поле intent — одно из:\n\
@@ -2758,13 +2759,14 @@ async fn intent_provider(app: &AppHandle) -> Arc<dyn crate::ai_client::AiProvide
     let state = app.state::<AppState>();
     // Только для бесплатных моделей: платная лимитов не знает, и занимать ради
     // экономии запросов видеокарту — а с ней и распознаванию речи — незачем.
-    let (free_cloud, language) = {
+    let (free_cloud, language, wake_name) = {
         let config = state.config();
         (
             config.ai.provider == "http"
                 && !crate::config::is_local(&config.ai.endpoint)
                 && config.ai.model.ends_with(":free"),
             config.ui.language.clone(),
+            config.voice.wake_name().to_string(),
         )
     };
     if !free_cloud {
@@ -2781,7 +2783,7 @@ async fn intent_provider(app: &AppHandle) -> Arc<dyn crate::ai_client::AiProvide
                     model: model.clone(),
                     ..Default::default()
                 };
-                let provider = crate::ai_client::HttpProvider::new(&config, &language).ok()?;
+                let provider = crate::ai_client::HttpProvider::new(&config, &language, &wake_name).ok()?;
                 log::info!("команды разбирает своя модель «{model}», ответы — облако");
                 Some(Arc::new(provider) as Arc<dyn crate::ai_client::AiProvider>)
             });
@@ -3232,13 +3234,13 @@ mod tests {
                 model: model.clone(),
                 ..Default::default()
             };
-            let provider = crate::ai_client::HttpProvider::new(&config, "ru").expect("провайдер");
+            let provider = crate::ai_client::HttpProvider::new(&config, "ru", "Ноа").expect("провайдер");
             // Первый запрос грузит модель в память — его время не в счёт.
             let _ = runtime.block_on(provider.interpret("Ответь: {}", "прогрев"));
             let started = std::time::Instant::now();
             let mut right = 0;
             for (said, context, expected) in cases {
-                let rules = rules_with_context(&[], &format!("{} {context}", now_line()));
+                let rules = rules_with_context(&[], "Ноа", &format!("{} {context}", now_line()));
                 let raw = runtime
                     .block_on(provider.interpret(&rules, said))
                     .unwrap_or_default();
