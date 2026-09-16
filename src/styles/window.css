@@ -28,7 +28,7 @@ body {
   -webkit-user-select: text;
 }
 
-/* Фолбэк без настоящего blur: сплошной фон вместо полупрозрачного (SPEC §5, §12.6). */
+/* Фолбэк без настоящего blur: сплошной фон вместо полупрозрачного. */
 :root[data-surface="opaque"] .popup {
   background: var(--bg-solid);
   backdrop-filter: none;

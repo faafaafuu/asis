@@ -2,7 +2,7 @@ import MobileCoreServices
 import UIKit
 import UniformTypeIdentifiers
 
-/// Share Extension «Объяснить» (SPEC §9.5, §12.2).
+/// Share Extension «Объяснить».
 ///
 /// Единственный способ дотянуться до выделения в чужих приложениях на iOS:
 /// пользователь выделяет текст → «Поделиться» → «Объяснить». Расширение забирает

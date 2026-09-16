@@ -193,7 +193,7 @@ pub fn run() {
                 instance::listen(app.handle().clone());
                 // Наблюдатель за системным выделением есть только на десктопе:
                 // на мобильных вход — пункт меню «Объяснить» из нативного плагина
-                // (SPEC §9.4, §9.5).
+                //.
                 let integration = watcher::spawn(app.handle());
                 app.manage(integration);
 

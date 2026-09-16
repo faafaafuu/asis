@@ -42,8 +42,8 @@ for (const file of files.filter((f) => f.endsWith(".js"))) {
 }
 if (!failures) ok("все модули разбираются");
 
-// 2. Дизайн-токены из SPEC §11 — значения должны присутствовать буквально.
-console.log("Дизайн-токены (SPEC §11):");
+// 2. Дизайн-токены — значения должны присутствовать буквально.
+console.log("Дизайн-токены:");
 const tokens = await readFile(join(SRC, "styles/tokens.css"), "utf8");
 const REQUIRED = [
   ["радиус окна 10px", "--pop-radius: 10px"],

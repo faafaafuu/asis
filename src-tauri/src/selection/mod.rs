@@ -1,5 +1,5 @@
 //! Системное выделение текста: единый интерфейс поверх очень разных API платформ
-//! (SPEC §9). Ядро приложения не должно знать, что на Windows это UI Automation,
+//!. Ядро приложения не должно знать, что на Windows это UI Automation,
 //! на macOS — Accessibility API, а на Linux — в лучшем случае PRIMARY selection.
 
 use serde::Serialize;
@@ -50,7 +50,7 @@ impl ScreenRect {
 #[serde(rename_all = "camelCase")]
 pub struct Selection {
     pub text: String,
-    /// Последний прямоугольник выделения (SPEC §4). `None` там, где система отдаёт
+    /// Последний прямоугольник выделения. `None` там, где система отдаёт
     /// только текст без геометрии — тогда попап встаёт у курсора.
     pub rect: Option<ScreenRect>,
     /// Позиция курсора на момент срабатывания — запасной якорь.
@@ -83,9 +83,9 @@ impl Selection {
 pub enum Capability {
     /// Всё доступно.
     Ready,
-    /// Нужно разрешение пользователя (macOS Accessibility — SPEC §9.2, §12.4).
+    /// Нужно разрешение пользователя (macOS Accessibility).
     NeedsPermission { title: String, hint: String },
-    /// Платформа не даёт нужного API. Не баг, а свойство окружения (SPEC §9.3, §12.1).
+    /// Платформа не даёт нужного API. Не баг, а свойство окружения.
     Unavailable { title: String, hint: String },
 }
 
@@ -125,7 +125,7 @@ pub trait PlatformIntegration: Send + Sync {
     fn poll_trigger(&self, config: &TriggerConfig) -> Option<Selection>;
 
     /// Нажат ли сейчас Esc. Нужен глобально: попап намеренно не забирает фокус,
-    /// поэтому обычный keydown в окне до него не дойдёт (SPEC §8).
+    /// поэтому обычный keydown в окне до него не дойдёт.
     /// Перехватывать Esc системным глобальным шорткатом нельзя — он сломает Esc
     /// во всех остальных приложениях.
     fn is_escape_pressed(&self) -> bool {

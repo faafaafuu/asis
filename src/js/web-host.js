@@ -1,5 +1,5 @@
 // Веб-хост попапа: триггер, жизненный цикл и позиционирование внутри одного документа
-// (SPEC §3 Desktop, §4, §8).
+//.
 //
 // Используется в двух местах:
 //   • демо-документ `demo.html` — проверка вёрстки и поведения без сборки Tauri;
@@ -76,7 +76,7 @@ export class WebHost {
     this.container.append(this.menuLayer);
 
     this.onKeyDown = (e) => {
-      // Различаем именно левый Ctrl: правый попап не открывает (SPEC §3, §12.5).
+      // Различаем именно левый Ctrl: правый попап не открывает.
       if (e.code === "ControlLeft") this.leftCtrlDown = true;
       if (e.key === "Escape") {
         this.hideMenu();
@@ -128,7 +128,7 @@ export class WebHost {
     if (this.menu.el.contains(e.target)) return; // клик внутри мини-меню
     if (e.target.closest?.("button, a, input, textarea, select, [role='button']")) return;
 
-    // На тач-устройствах вход другой — мини-меню по selectionchange (SPEC §3 Mobile).
+    // На тач-устройствах вход другой — мини-меню по selectionchange.
     if (this.isTouch()) return;
     if (this.requireLeftCtrl && !(e.ctrlKey && this.leftCtrlDown)) return;
 
@@ -153,13 +153,13 @@ export class WebHost {
 
   /**
    * Показ попапа у готового якоря. Повторное открытие при уже открытом окне —
-   * без анимации закрытия, просто новый якорь и сброс состояния (SPEC §8).
+   * без анимации закрытия, просто новый якорь и сброс состояния.
    */
   showAt(anchor, term, context = "") {
     this.anchor = anchor;
     this.open = true;
     this.layer.hidden = false;
-    // Замер скрытым: пока позиция не посчитана, окно не должно быть видно (SPEC §4).
+    // Замер скрытым: пока позиция не посчитана, окно не должно быть видно.
     this.layer.style.visibility = "hidden";
     this.placed = false;
     this.view.open({ term, context });
@@ -258,7 +258,7 @@ export class WebHost {
 
 /**
  * Якорь — ПОСЛЕДНИЙ прямоугольник выделения, а не bounding box: для многострочного
- * выделения окно должно вставать у конца текста, а не у геометрического центра (SPEC §4).
+ * выделения окно должно вставать у конца текста, а не у геометрического центра.
  * Мини-меню, наоборот, привязывается к первому rect — к началу выделения.
  * @param {Range} range @param {'first'|'last'} [which]
  */

@@ -1,4 +1,4 @@
-//! Linux: best-effort (SPEC §9.3, §12.1).
+//! Linux: best-effort.
 //!
 //! Портируемого способа узнать выделение в чужом приложении здесь нет. Что реально
 //! доступно:
@@ -7,7 +7,7 @@
 //!   • Wayland — по соображениям безопасности протокола нет ни глобальных хуков,
 //!     ни координат; остаётся `wl-paste --primary` на тех композиторах, где он работает.
 //!
-//! Факт нажатия Ctrl в момент выделения не определяется ни там, ни там. По SPEC §12.5
+//! Факт нажатия Ctrl в момент выделения не определяется ни там, ни там. По
 //! безопасное поведение — НЕ открывать попап, поэтому режим «только PRIMARY» выключен
 //! по умолчанию и включается явным флагом `trigger.linuxPrimaryWithoutCtrl`.
 
@@ -156,7 +156,7 @@ impl PlatformIntegration for Platform {
     fn poll_trigger(&self, config: &TriggerConfig) -> Option<Selection> {
         let reader = self.reader?;
 
-        // Безопасное поведение по умолчанию (SPEC §12.5): раз Ctrl не различить —
+        // Безопасное поведение по умолчанию: раз Ctrl не различить —
         // не открываем ничего, пока пользователь явно не разрешил.
         if config.require_left_ctrl && !config.linux_primary_without_ctrl {
             return None;
@@ -182,7 +182,7 @@ impl PlatformIntegration for Platform {
         Some(Selection {
             text: text.trim().to_string(),
             // PRIMARY отдаёт только текст: геометрии выделения здесь нет по устройству
-            // протокола, поэтому якорь — курсор (SPEC §9.3).
+            // протокола, поэтому якорь — курсор.
             rect: None,
             cursor: cursor_position().unwrap_or((0.0, 0.0)),
             context: String::new(),

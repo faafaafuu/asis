@@ -1,9 +1,9 @@
 //! macOS: выделение через Accessibility API, триггер через состояние клавиш HID
-//! (SPEC §9.2).
+//!.
 //!
 //! Без разрешения «Универсальный доступ» (System Settings → Privacy & Security →
 //! Accessibility) API не отдаёт ничего вообще — это не деградация, а полный отказ,
-//! поэтому статус проверяется явно и приводит к экрану онбординга (SPEC §12.4).
+//! поэтому статус проверяется явно и приводит к экрану онбординга.
 
 use std::ffi::c_void;
 use std::sync::Mutex;
@@ -22,7 +22,7 @@ const K_AX_VALUE_TYPE_CG_RECT: u32 = 3;
 const K_AX_VALUE_TYPE_CF_RANGE: u32 = 4;
 
 /// Идентификаторы клавиш в раскладке-независимой нумерации macOS.
-/// Именно так различаются левый и правый Ctrl (SPEC §9.2, §12.5).
+/// Именно так различаются левый и правый Ctrl.
 const KEY_LEFT_CONTROL: u16 = 59;
 const KEY_ESCAPE: u16 = 53;
 /// kCGEventSourceStateHIDSystemState — реальное состояние железа.
@@ -154,7 +154,7 @@ fn selected_text_and_rect() -> Option<(String, Option<ScreenRect>)> {
 
 /// Прямоугольник КОНЦА выделения, а не всего выделения целиком: для многострочного
 /// текста AXBoundsForRange вернул бы объединяющий прямоугольник, и попап встал бы
-/// по центру абзаца вместо конца выделенного фрагмента (SPEC §4).
+/// по центру абзаца вместо конца выделенного фрагмента.
 unsafe fn selection_rect(element: AXUIElementRef) -> Option<ScreenRect> {
     let range_value = copy_attribute(element, "AXSelectedTextRange")?;
 

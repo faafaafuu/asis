@@ -8,7 +8,7 @@ import { TauriProvider, MockProvider, DEFAULT_ERROR_TEXT } from "./ai-client.js"
 import { tauri, appWindow, applyTheme } from "./bridge.js";
 import { attachMobileEntry } from "./mobile-entry.js";
 
-/** Поле вокруг попапа внутри окна — под тень (SPEC §5). Должно совпадать с CSS. */
+/** Поле вокруг попапа внутри окна — под тень. Должно совпадать с CSS. */
 const SHADOW_INSET = 48;
 
 const api = tauri();
@@ -192,7 +192,7 @@ if (api) {
   });
 
   // Пробел: прочитать вслух. Клавишу ловит и забирает себе Rust — окно
-  // намеренно не держит фокус, и до него нажатия не доходят (SPEC §8).
+  // намеренно не держит фокус, и до него нажатия не доходят.
   api.listen("voice:speak", () => {
     const text = view.spokenText();
     if (!text) return;
@@ -230,7 +230,7 @@ if (api) {
 
 // Esc внутри окна: работает, когда фокус всё-таки здесь (пользователь кликнул в поле
 // «Спросить ещё…»). Esc при фокусе в чужом приложении ловит Rust — окно намеренно
-// не забирает фокус, и до него клавиатурные события не доходят (SPEC §8).
+// не забирает фокус, и до него клавиатурные события не доходят.
 document.addEventListener(
   "keydown",
   (e) => {

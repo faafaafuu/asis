@@ -9,7 +9,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.Plugin
 
 /**
- * Плагин Tauri для Android (SPEC §9.4).
+ * Плагин Tauri для Android.
  *
  * Отдаёт фронтенду текст, выбранный пользователем через системный пункт меню
  * «Объяснить», двумя путями:

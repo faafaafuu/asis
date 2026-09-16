@@ -31,7 +31,7 @@
 }
 
 /* Слой попапа в веб-режиме. В приложении его нет: попап там — отдельное системное
-   окно, поэтому ни transform, ни overflow родителей на него не влияют (SPEC §8). */
+   окно, поэтому ни transform, ни overflow родителей на него не влияют. */
 .popup-layer {
   position: fixed;
   left: 0;
@@ -62,7 +62,7 @@
   width: var(--pop-width-expanded);
 }
 
-/* Фолбэк по SPEC §5 и §12.6: без blur — сплошной фон, а не полупрозрачная каша. */
+/* Фолбэк по и §12.6: без blur — сплошной фон, а не полупрозрачная каша. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .popup {
     background: var(--bg-solid);

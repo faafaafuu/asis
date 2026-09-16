@@ -5,7 +5,7 @@ let package = Package(
     name: "sufler-plugin",
     platforms: [
         // UIEditMenuInteraction — iOS 16+. Ниже работает legacy-путь через
-        // UIMenuController, поэтому минимальная версия остаётся 14 (SPEC §9.5).
+        // UIMenuController, поэтому минимальная версия остаётся 14.
         .iOS(.v14)
     ],
     products: [

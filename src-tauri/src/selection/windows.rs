@@ -1,6 +1,6 @@
-//! Windows: получение выделения через UI Automation и хук на левый Ctrl (SPEC §9.1).
+//! Windows: получение выделения через UI Automation и хук на левый Ctrl.
 //!
-//! Известное ограничение (SPEC §12.3): UI Automation реализован не во всех
+//! Известное ограничение: UI Automation реализован не во всех
 //! приложениях — часть Electron- и кастомных тулкитов не отдаёт TextPattern.
 //! Для них предусмотрен фолбэк через буфер обмена, выключенный по умолчанию:
 //! он читает чужой буфер и требует явного согласия пользователя в конфигурации.
@@ -157,7 +157,7 @@ unsafe fn text_pattern_of(
 }
 
 /// Из массива прямоугольников выделения берём ПОСЛЕДНИЙ: для многострочного
-/// выделения окно должно встать у конца текста, а не по центру (SPEC §4).
+/// выделения окно должно встать у конца текста, а не по центру.
 unsafe fn last_bounding_rect(
     range: &windows::Win32::UI::Accessibility::IUIAutomationTextRange,
 ) -> Option<ScreenRect> {
@@ -189,7 +189,7 @@ unsafe fn last_bounding_rect(
     (rect.width > 0.0 || rect.height > 0.0).then_some(rect)
 }
 
-/// Фолбэк для приложений без поддержки UI Automation (SPEC §9.1, §12.3):
+/// Фолбэк для приложений без поддержки UI Automation:
 /// симулируем Ctrl+C и читаем буфер обмена. Координат выделения этот путь не даёт —
 /// попап встанет у курсора.
 ///
@@ -353,7 +353,7 @@ impl PlatformIntegration for Platform {
         gesture.left_ctrl_seen = false;
         drop(gesture);
 
-        // Именно левый Ctrl. Правый попап не открывает (SPEC §3, §12.5).
+        // Именно левый Ctrl. Правый попап не открывает.
         if config.require_left_ctrl && !had_left_ctrl {
             return None;
         }
