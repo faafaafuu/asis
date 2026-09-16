@@ -36,7 +36,7 @@ const INSTALL = `## Скачать
 Windows 10 / 11, файл \`.exe\`. Не подписан — SmartScreen покажет предупреждение,
 «Выполнить в любом случае».
 
-Выделите текст с левым Ctrl. Программа живёт в трее.`;
+Программа живёт в трее. Позовите «Ноа» или зажмите левый Alt с пробелом.`;
 
 export function releaseNotes(changelog, tag) {
   const version = tag.replace(/^v/, "");
