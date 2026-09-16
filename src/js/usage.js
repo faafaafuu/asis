@@ -1,5 +1,6 @@
-// Виджет расхода: «124k / 3.3m  $0.59» — токены сегодня / за месяц и деньги за
-// месяц. Считает Rust (usage.rs), здесь — только показ.
+// Виджет расхода: «всего 3.3m · $0.59» — сколько токенов и денег модель
+// потратила за всё время. Разбивка по дням — при наведении. Считает Rust
+// (usage.rs), здесь — только показ.
 
 import { tauri, applyTheme } from "./bridge.js";
 
@@ -25,20 +26,24 @@ function money(value) {
   return `$${value.toFixed(value < 0.01 ? 4 : value < 0.1 ? 3 : 2)}`;
 }
 
-const total = (tally) => (tally?.prompt ?? 0) + (tally?.completion ?? 0);
+const count = (tally) => (tally?.prompt ?? 0) + (tally?.completion ?? 0);
+const known = (value) => value !== null && value !== undefined;
 
 function render(s) {
-  ui.tokens.textContent = `${tokens(total(s.today))} / ${tokens(total(s.month))}`;
-  ui.money.textContent = s.cloud ? money(s.month.cost) : "";
-  const low = s.balance !== null && s.balance !== undefined && s.balance < 1;
-  ui.money.classList.toggle("low", low);
+  ui.tokens.textContent = `всего ${tokens(count(s.total))}`;
+  ui.money.textContent = s.cloud ? money(s.total.cost) : "";
+  ui.money.classList.toggle("low", known(s.balance) && s.balance < 1);
 
+  const period = (label, tally) =>
+    `${label} — ${count(tally).toLocaleString("ru-RU")} токенов${s.cloud ? `, ${money(tally.cost)}` : ""}`;
   const lines = [
     `${s.service}: ${s.model || "модель не выбрана"}`,
-    `сегодня — ${total(s.today).toLocaleString("ru-RU")} токенов${s.cloud ? `, ${money(s.today.cost)}` : ""}`,
-    `за месяц — ${total(s.month).toLocaleString("ru-RU")} токенов${s.cloud ? `, ${money(s.month.cost)}` : ""}`,
+    period("всего через Суфлёр", s.total),
+    period("за месяц", s.month),
+    period("сегодня", s.today),
   ];
-  if (s.balance !== null && s.balance !== undefined) lines.push(`на счёте — ${money(s.balance)}`);
+  if (known(s.spent)) lines.push(`на счёте OpenRouter потрачено всего — ${money(s.spent)}`);
+  if (known(s.balance)) lines.push(`остаток на счёте — ${money(s.balance)}`);
   lines.push(onTop ? "двойной щелчок — на рабочий стол" : "двойной щелчок — поверх окон");
   ui.line.title = lines.join("\n");
 }

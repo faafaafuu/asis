@@ -1052,8 +1052,24 @@ pub fn show_usage_widget(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "windows")]
     make_passive(&window);
 
+    // Сохранённое место — только если оно на одном из экранов: монитор могли
+    // отключить, а в старых настройках могли остаться координаты свёрнутого окна.
+    let visible = |x: i32, y: i32| {
+        window
+            .available_monitors()
+            .map(|monitors| {
+                monitors.iter().any(|monitor| {
+                    let (at, size) = (monitor.position(), monitor.size());
+                    x >= at.x - 50
+                        && y >= at.y - 50
+                        && x < at.x + size.width as i32 - 20
+                        && y < at.y + size.height as i32 - 20
+                })
+            })
+            .unwrap_or(false)
+    };
     let position = match (widget.x, widget.y) {
-        (Some(x), Some(y)) => PhysicalPosition::new(x, y),
+        (Some(x), Some(y)) if visible(x, y) => PhysicalPosition::new(x, y),
         // Впервые — в правом верхнем углу основного экрана.
         _ => match window.primary_monitor()? {
             Some(monitor) => {
@@ -1070,8 +1086,19 @@ pub fn show_usage_widget(app: &AppHandle) -> tauri::Result<()> {
     window.show()?;
 
     let handle = app.clone();
+    let widget_window = window.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Moved(to) = event {
+            // Свёрнут («Свернуть все окна», Win+D) — виджет рабочего стола
+            // должен остаться на рабочем столе.
+            if to.x <= -30000 || to.y <= -30000 {
+                let widget = widget_window.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    let _ = widget.unminimize();
+                });
+                return;
+            }
             remember_widget_position(&handle, to.x, to.y);
         }
     });
@@ -1099,6 +1126,11 @@ static WIDGET_SAVING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 /// улеглось: событие приходит на каждый пиксель пути.
 fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
     use std::sync::atomic::Ordering;
+    // −32000 — так Windows ставит свёрнутое окно («Свернуть все окна»). Это не
+    // место, куда виджет перетащили, и запоминать его нельзя.
+    if x <= -30000 || y <= -30000 {
+        return;
+    }
     *WIDGET_MOVE.lock().unwrap_or_else(|err| err.into_inner()) = Some((x, y));
     if WIDGET_SAVING.swap(true, Ordering::SeqCst) {
         return;

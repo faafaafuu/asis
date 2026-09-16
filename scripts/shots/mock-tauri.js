@@ -182,7 +182,9 @@
     usage_summary: () => ({
       today: { requests: 46, prompt: 118400, completion: 6150, cost: 0.0214 },
       month: { requests: 1210, prompt: 3120000, completion: 162000, cost: 0.587 },
+      total: { requests: 2890, prompt: 7450000, completion: 391000, cost: 1.42 },
       balance: 9.41,
+      spent: 1.59,
       model: "deepseek/deepseek-v4-flash",
       cloud: true,
       service: "OpenRouter",

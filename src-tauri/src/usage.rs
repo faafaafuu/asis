@@ -46,7 +46,8 @@ struct Store {
 }
 
 static STORE: Mutex<Option<(PathBuf, Store)>> = Mutex::new(None);
-static BALANCE: Mutex<Option<f64>> = Mutex::new(None);
+/// Счёт OpenRouter: остаток и сколько потрачено за всё время — долларами.
+static ACCOUNT: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 
 pub fn load(dir: PathBuf) {
     let path = dir.join("usage.json");
@@ -102,8 +103,12 @@ pub fn record(value: &serde_json::Value) {
 pub struct Summary {
     pub today: Tally,
     pub month: Tally,
+    /// За всё время, что ведётся учёт.
+    pub total: Tally,
     /// Остаток на счёте OpenRouter, доллары. `None` — не OpenRouter или не узнали.
     pub balance: Option<f64>,
+    /// Сколько потрачено на счёте OpenRouter за всё время — всеми программами.
+    pub spent: Option<f64>,
     pub model: String,
     /// Облачная ли модель: у своей деньги не считаются.
     pub cloud: bool,
@@ -119,12 +124,14 @@ pub fn summary(app: &AppHandle) -> Summary {
     let now = chrono::Local::now();
     let today_key = now.format("%Y-%m-%d").to_string();
     let month_key = now.format("%Y-%m").to_string();
-    let (today, month) = {
+    let (today, month, total) = {
         let guard = STORE.lock().unwrap_or_else(|err| err.into_inner());
         let mut month = Tally::default();
         let mut today = Tally::default();
+        let mut total = Tally::default();
         if let Some((_, store)) = guard.as_ref() {
             for (day, tally) in &store.days {
+                total.add(tally);
                 if day.starts_with(&month_key) {
                     month.add(tally);
                 }
@@ -133,12 +140,15 @@ pub fn summary(app: &AppHandle) -> Summary {
                 }
             }
         }
-        (today, month)
+        (today, month, total)
     };
+    let account = *ACCOUNT.lock().unwrap_or_else(|err| err.into_inner());
     Summary {
         today,
         month,
-        balance: *BALANCE.lock().unwrap_or_else(|err| err.into_inner()),
+        total,
+        balance: account.map(|(balance, _)| balance),
+        spent: account.map(|(_, spent)| spent),
         model,
         cloud: !crate::config::is_local(&endpoint),
         service: service_name(&endpoint).into(),
@@ -159,8 +169,8 @@ fn service_name(endpoint: &str) -> &'static str {
     }
 }
 
-/// Остаток на счёте OpenRouter: купленное минус потраченное.
-async fn openrouter_balance(key: &str, proxy: &str) -> Option<f64> {
+/// Счёт OpenRouter: остаток (купленное минус потраченное) и потраченное.
+async fn openrouter_account(key: &str, proxy: &str) -> Option<(f64, f64)> {
     let mut builder = crate::net::client_builder().timeout(Duration::from_secs(15));
     if !proxy.trim().is_empty() {
         if let Ok(proxy) = reqwest::Proxy::all(proxy.trim()) {
@@ -179,7 +189,9 @@ async fn openrouter_balance(key: &str, proxy: &str) -> Option<f64> {
         .await
         .ok()?;
     let data = &body["data"];
-    Some(data["total_credits"].as_f64()? - data["total_usage"].as_f64()?)
+    let credits = data["total_credits"].as_f64()?;
+    let spent = data["total_usage"].as_f64()?;
+    Some((credits - spent, spent))
 }
 
 /// Следит за остатком на счёте, пока программа работает.
@@ -192,12 +204,12 @@ pub fn watch(app: AppHandle) {
                 let config = state.config();
                 (config.ai.endpoint.clone(), config.ai.api_key.clone(), config.ai.proxy.clone())
             };
-            let balance = if endpoint.contains("openrouter.ai") && !key.is_empty() {
-                tauri::async_runtime::block_on(openrouter_balance(&key, &proxy))
+            let account = if endpoint.contains("openrouter.ai") && !key.is_empty() {
+                tauri::async_runtime::block_on(openrouter_account(&key, &proxy))
             } else {
                 None
             };
-            *BALANCE.lock().unwrap_or_else(|err| err.into_inner()) = balance;
+            *ACCOUNT.lock().unwrap_or_else(|err| err.into_inner()) = account;
             std::thread::sleep(BALANCE_EVERY);
         });
 }
