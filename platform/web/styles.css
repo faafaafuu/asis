@@ -1437,6 +1437,26 @@ textarea:focus,
   color: #fff;
 }
 
+.iconbtn {
+  display: none;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid #2f5399;
+  background: var(--chrome-2);
+  color: #dce6fa;
+}
+
+.iconbtn:hover {
+  border-color: #7fa5e8;
+}
+
+.iconbtn svg {
+  width: 19px;
+  height: 19px;
+  display: block;
+}
+
 .searchbtn {
   width: 40px;
   height: 40px;
@@ -1595,8 +1615,21 @@ textarea:focus,
   .top > .seg,
   .cta,
   .me__name,
-  .top__auth .btn--ghost {
+  .top__auth .btn--ghost,
+  .top__auth .top__link {
     display: none;
+  }
+
+  .iconbtn {
+    display: grid;
+  }
+
+  .me {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+    gap: 0;
   }
 
   .addm {

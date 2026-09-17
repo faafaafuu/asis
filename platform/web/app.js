@@ -354,6 +354,8 @@ function renderChrome(route) {
     button.setAttribute("aria-pressed", String(button.dataset.lang === state.lang));
   }
   $("langBtn").textContent = `${state.lang.toUpperCase()} ▾`;
+  $("signInIcon").setAttribute("aria-label", tr.signIn);
+  $("signInIcon").title = tr.signIn;
 
   const count = state.stats ? String(state.stats.modules) : "";
   const moduleLink = state.lastModule ? `module/${state.lastModule}` : "library";
