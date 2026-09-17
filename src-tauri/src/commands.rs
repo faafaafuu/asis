@@ -493,6 +493,7 @@ pub fn plugins_connect(
             args: args.to_vec(),
             env: Default::default(),
         },
+        ..Default::default()
     };
     crate::plugins::install(&app, manifest)
 }
@@ -500,8 +501,16 @@ pub fn plugins_connect(
 /// Ставит модуль из библиотеки.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn plugins_install(app: AppHandle, manifest: crate::plugins::Manifest) -> Result<(), String> {
-    crate::plugins::install(&app, manifest)
+pub async fn plugins_install(app: AppHandle, manifest: crate::plugins::Manifest) -> Result<(), String> {
+    // С площадки — вместе с файлами сервера; без площадки — описание из
+    // вшитой библиотеки (там только пакеты npx).
+    match crate::platform::package(&manifest.id).await {
+        Ok((manifest, files)) => crate::plugins::install_package(&app, manifest, files),
+        Err(err) => {
+            log::info!("модуль «{}» не взят с площадки ({err}) — ставлю из вшитой библиотеки", manifest.id);
+            crate::plugins::install(&app, manifest)
+        }
+    }
 }
 
 #[cfg(desktop)]
@@ -510,11 +519,108 @@ pub fn plugins_remove(app: AppHandle, id: String) -> Result<(), String> {
     crate::plugins::uninstall(&app, &id)
 }
 
+/// Ключи модуля: названия и есть ли значение. Самих значений окно не видит.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn plugins_secrets(app: AppHandle, id: String) -> Result<Vec<crate::plugins::SecretField>, String> {
+    crate::plugins::secret_fields(&app, &id)
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn plugins_save_secrets(
+    app: AppHandle,
+    id: String,
+    values: std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    crate::plugins::save_secret_values(&app, &id, values)
+}
+
+/// Проверить модуль заново.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn plugins_recheck(app: AppHandle, id: String) -> Result<(), String> {
+    crate::plugins::recheck(&app, &id)
+}
+
 /// Библиотека модулей из репозитория.
 #[cfg(desktop)]
 #[tauri::command]
 pub async fn plugins_library() -> Result<Vec<crate::plugins::Manifest>, String> {
-    crate::plugins::library().await
+    match crate::platform::list("").await {
+        Ok(found) if !found.is_empty() => Ok(found
+            .into_iter()
+            .filter_map(|card| {
+                Some(crate::plugins::Manifest {
+                    id: card["id"].as_str()?.to_string(),
+                    title: card["title"].as_str()?.to_string(),
+                    icon: card["icon"].as_str().unwrap_or("✦").to_string(),
+                    about: card["about"].as_str().unwrap_or_default().to_string(),
+                    voice: card["voice"].as_str().unwrap_or_default().to_string(),
+                    ..Default::default()
+                })
+            })
+            .collect()),
+        _ => crate::plugins::library().await,
+    }
+}
+
+/// Площадка модулей: адрес и есть ли ключ. Сам ключ окно не видит.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformSettings {
+    pub url: String,
+    #[serde(default)]
+    pub token: String,
+    #[serde(default)]
+    pub has_token: bool,
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn platform_settings(state: State<'_, AppState>) -> PlatformSettings {
+    let config = state.config();
+    PlatformSettings {
+        url: config.platform.url.clone(),
+        token: String::new(),
+        has_token: !config.platform.token.is_empty(),
+    }
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn save_platform_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: PlatformSettings,
+) -> Result<String, String> {
+    let url = settings.url.trim().trim_end_matches('/').to_string();
+    let url = if url.is_empty() { crate::config::DEFAULT_PLATFORM_URL.to_string() } else { url };
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("Адрес площадки начинается с https://".into());
+    }
+    let token = settings.token.trim().to_string();
+    // Новый ключ сначала проверяем: сохранённый нерабочий ключ сломал бы публикацию молча.
+    let owner = if token.is_empty() {
+        None
+    } else {
+        if !token.starts_with("noah_") {
+            return Err("Ключ площадки начинается с noah_ — скопируйте его из кабинета целиком.".into());
+        }
+        Some(crate::platform::whoami(&url, &token).await?)
+    };
+    {
+        let mut config = state.config_mut();
+        config.platform.url = url;
+        if !token.is_empty() {
+            config.platform.token = crate::secret::protect(&token);
+        }
+    }
+    persist(&app, &state)?;
+    Ok(match owner {
+        Some(name) => format!("Ключ подходит: автор {name}."),
+        None => "Сохранено.".into(),
+    })
 }
 
 /// Модули и их состояние — для главного окна.
@@ -912,6 +1018,17 @@ pub fn open_key_page(provider: String) -> Result<(), String> {
         other => return Err(format!("для «{other}» страницы ключей нет")),
     };
     open_externally(url)
+}
+
+/// Открывает площадку модулей — по сохранённому адресу, не по строке из окна.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn open_platform(state: State<'_, AppState>) -> Result<(), String> {
+    let url = state.config().platform.url.clone();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("адрес площадки не задан".into());
+    }
+    open_externally(&url)
 }
 
 /// Отдаёт ссылку системе — пусть открывает тем, чем человек обычно читает.

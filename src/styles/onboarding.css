@@ -794,6 +794,27 @@ body {
   opacity: 0.8;
 }
 
+.mod__keys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.mod__keys .mod__btn {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.mod__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 .mod__actions {
   display: flex;
   align-items: center;

@@ -1,0 +1,24 @@
+[Unit]
+Description=NOAH platform (module library)
+After=network-online.target
+
+[Service]
+User=noah
+Group=noah
+WorkingDirectory=/opt/noah-platform/platform/server
+Environment=NOAH_PORT=8795
+Environment=NOAH_HOST=0.0.0.0
+Environment=NOAH_DATA=/var/lib/noah-platform
+Environment=NOAH_SEED=/opt/noah-platform/modules/index.json
+Environment=NODE_NO_WARNINGS=1
+ExecStart=/usr/bin/node /opt/noah-platform/platform/server/server.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/noah-platform
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

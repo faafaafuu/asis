@@ -1,15 +1,8 @@
 //! Свои модули: папка с `module.json`, инструменты — через MCP.
 //!
-//! ```json
-//! {
-//!   "id": "memory",
-//!   "title": "Память",
-//!   "icon": "◎",
-//!   "about": "Запоминает факты и связи между ними",
-//!   "voice": "«Ноа, запомни, что встреча с заказчиком — по четвергам»",
-//!   "mcp": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] }
-//! }
-//! ```
+//! Формат, правила и проверка — в `module_kit`. Здесь — жизнь модулей внутри
+//! работающей Ноа: запуск только проверенных версий, проверка новых и
+//! изменённых, перезапуск упавших серверов, ключи, вызовы инструментов.
 //!
 //! Модули лежат в `%APPDATA%\app.sufler.popup\modules\<id>\`. Ноа запускает
 //! MCP-сервер каждого модуля, спрашивает у него инструменты и отдаёт их
@@ -18,41 +11,23 @@
 //! в репозитории программы.
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Stdio};
-use std::sync::mpsc::{channel, Receiver};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde::Serialize;
+use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
+pub use crate::module_kit::{valid_id, Manifest, McpSpec};
+use crate::module_kit::{self as kit, Server};
+
 const LIBRARY_URL: &str = "https://raw.githubusercontent.com/faafaafuu/asis/main/modules/index.json";
-const PROTOCOL: &str = "2024-11-05";
-/// Первый запуск через npx скачивает пакет — это не секунды.
-const START_TIMEOUT: Duration = Duration::from_secs(120);
-const CALL_TIMEOUT: Duration = Duration::from_secs(60);
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct McpSpec {
-    pub command: String,
-    pub args: Vec<String>,
-    pub env: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Manifest {
-    pub id: String,
-    pub title: String,
-    pub icon: String,
-    pub about: String,
-    pub voice: String,
-    pub mcp: McpSpec,
-}
+/// Сколько падений терпим, прежде чем перестать перезапускать.
+const CRASH_LIMIT: usize = 3;
+const CRASH_WINDOW: Duration = Duration::from_secs(600);
+/// Описание, изменённое только что, ещё может дописываться.
+const SETTLE: Duration = Duration::from_secs(3);
 
 /// Инструмент модуля — для разбора реплик.
 #[derive(Debug, Clone)]
@@ -70,16 +45,26 @@ impl Tool {
     }
 }
 
-struct Server {
-    child: Child,
-    stdin: ChildStdin,
-    replies: Receiver<Value>,
-    next_id: u64,
+struct Running {
+    server: Arc<Mutex<Server>>,
+    dir: PathBuf,
+    manifest: Manifest,
+    fingerprint: String,
 }
 
-static SERVERS: Mutex<Option<HashMap<String, Arc<Mutex<Server>>>>> = Mutex::new(None);
+#[derive(Default)]
+struct Health {
+    crashes: Vec<Instant>,
+    /// Версия, которая не прошла проверку или падает, — её не трогаем, пока
+    /// не изменится или не пройдёт проверку заново (`check_module`).
+    given_up: Option<(String, Option<std::time::SystemTime>)>,
+    checking: bool,
+}
+
+static RUNNING: Mutex<Option<HashMap<String, Running>>> = Mutex::new(None);
 static TOOLS: Mutex<Vec<Tool>> = Mutex::new(Vec::new());
 static STATUS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+static HEALTH: Mutex<Option<HashMap<String, Health>>> = Mutex::new(None);
 /// Описания запущенных модулей — для правил разбора.
 static MANIFESTS: Mutex<Option<BTreeMap<String, Manifest>>> = Mutex::new(None);
 
@@ -87,15 +72,21 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|err| err.into_inner())
 }
 
-fn set_status(id: &str, text: String) {
-    lock(&STATUS).get_or_insert_with(HashMap::new).insert(id.to_string(), text);
+fn health<R>(id: &str, f: impl FnOnce(&mut Health) -> R) -> R {
+    f(lock(&HEALTH).get_or_insert_with(HashMap::new).entry(id.to_string()).or_default())
+}
+
+/// Состояние модуля: строка для плитки и файл для нейросети.
+fn set_status(dir: &Path, id: &str, state: &str, text: &str) {
+    lock(&STATUS).get_or_insert_with(HashMap::new).insert(id.to_string(), text.to_string());
+    kit::write_status(dir, state, text);
 }
 
 pub fn status(id: &str) -> String {
     lock(&STATUS)
         .as_ref()
         .and_then(|all| all.get(id).cloned())
-        .unwrap_or_else(|| "запускается…".into())
+        .unwrap_or_else(|| "проверяется…".into())
 }
 
 fn root(app: &AppHandle) -> Result<PathBuf, String> {
@@ -105,11 +96,11 @@ fn root(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|err| err.to_string())
 }
 
-/// Имя модуля — латиница, цифры и дефис: из него складывается путь к папке.
-pub fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 40
-        && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+fn module_dir(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    if !valid_id(id) {
+        return Err("нет такого модуля".into());
+    }
+    Ok(root(app)?.join(id))
 }
 
 /// Установленные модули.
@@ -118,154 +109,45 @@ pub fn installed(app: &AppHandle) -> Vec<Manifest> {
     let Ok(entries) = std::fs::read_dir(&root) else { return Vec::new() };
     let mut list: Vec<Manifest> = entries
         .flatten()
-        .filter_map(|entry| std::fs::read_to_string(entry.path().join("module.json")).ok())
-        .filter_map(|text| serde_json::from_str::<Manifest>(&text).ok())
+        .filter_map(|entry| kit::read_manifest(&entry.path()))
         .filter(|manifest| valid_id(&manifest.id))
         .collect();
     list.sort_by(|a, b| a.title.cmp(&b.title));
     list
 }
 
-/// `%USERPROFILE%` и прочие переменные в аргументах — как в командной строке.
-fn expand(text: &str) -> String {
-    let mut out = String::new();
-    let mut rest = text;
-    while let Some(start) = rest.find('%') {
-        let Some(len) = rest[start + 1..].find('%') else { break };
-        let name = &rest[start + 1..start + 1 + len];
-        out.push_str(&rest[..start]);
-        match std::env::var(name) {
-            Ok(value) if !name.is_empty() => out.push_str(&value),
-            _ => out.push_str(&rest[start..start + len + 2]),
-        }
-        rest = &rest[start + len + 2..];
-    }
-    out.push_str(rest);
-    out
-}
-
-impl Server {
-    fn send(&mut self, message: &Value) -> Result<(), String> {
-        writeln!(self.stdin, "{message}").map_err(|err| format!("сервер модуля закрыт: {err}"))?;
-        self.stdin.flush().map_err(|err| err.to_string())
-    }
-
-    fn request(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
-        self.next_id += 1;
-        let id = self.next_id;
-        self.send(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
-            let reply = self
-                .replies
-                .recv_timeout(left)
-                .map_err(|_| format!("модуль не ответил на {method}"))?;
-            // Уведомления и чужие ответы пропускаем.
-            if reply["id"].as_u64() != Some(id) {
-                continue;
-            }
-            if let Some(error) = reply.get("error") {
-                return Err(error["message"].as_str().unwrap_or("ошибка модуля").to_string());
-            }
-            return Ok(reply["result"].clone());
-        }
-    }
-}
-
-fn spawn(app: &AppHandle, manifest: &Manifest) -> Result<Server, String> {
-    let spec = &manifest.mcp;
-    if spec.command.trim().is_empty() {
-        return Err("не указана команда MCP-сервера".into());
-    }
-    let dir = root(app)?.join(&manifest.id);
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-    let log = std::fs::File::create(dir.join("server.log")).map_err(|err| err.to_string())?;
-
-    // npx, uvx и прочие на Windows — это .cmd: без cmd /C их не запустить.
-    // %MODULE_DIR% — папка модуля: там лежат файлы сервера, который написала
-    // нейросеть пользователя через `sufler.exe --mcp`.
-    let module_dir = dir.to_string_lossy().to_string();
-    let expand = |text: &str| expand(&text.replace("%MODULE_DIR%", &module_dir));
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut command = std::process::Command::new("cmd");
-        command.arg("/C").arg(expand(&spec.command));
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-        command
-    };
-    #[cfg(not(target_os = "windows"))]
-    let mut command = std::process::Command::new(expand(&spec.command));
-
-    command
-        .args(spec.args.iter().map(|arg| expand(arg)))
-        .envs(spec.env.iter().map(|(key, value)| (key, expand(value))))
-        .current_dir(&dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(log);
-    let mut child = command
-        .spawn()
-        .map_err(|err| format!("не запустился «{}»: {err}", spec.command))?;
-    crate::jobs::adopt(&child);
-
-    let stdin = child.stdin.take().ok_or("нет ввода сервера")?;
-    let stdout = child.stdout.take().ok_or("нет вывода сервера")?;
-    let (tx, replies) = channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            let Ok(line) = line else { break };
-            if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                if tx.send(value).is_err() {
-                    break;
-                }
-            }
-        }
-    });
-    Ok(Server { child, stdin, replies, next_id: 0 })
-}
-
-/// Запускает модуль и берёт у него инструменты.
-fn start(app: &AppHandle, manifest: &Manifest) -> Result<usize, String> {
+/// Запускает проверенную версию модуля и берёт у него инструменты.
+fn start(dir: &Path, manifest: &Manifest, fingerprint: &str) -> Result<usize, String> {
     stop(&manifest.id);
-    let mut server = spawn(app, manifest)?;
-    server.request(
-        "initialize",
-        json!({
-            "protocolVersion": PROTOCOL,
-            "capabilities": {},
-            "clientInfo": { "name": "noa", "version": env!("CARGO_PKG_VERSION") },
-        }),
-        START_TIMEOUT,
-    )?;
-    server.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))?;
-    let listed = server.request("tools/list", json!({}), CALL_TIMEOUT)?;
-    let tools: Vec<Tool> = listed["tools"]
-        .as_array()
-        .map(|tools| {
-            tools
-                .iter()
-                .filter_map(|tool| {
-                    Some(Tool {
-                        module: manifest.id.clone(),
-                        name: tool["name"].as_str()?.to_string(),
-                        description: tool["description"].as_str().unwrap_or_default().to_string(),
-                        schema: tool["inputSchema"].clone(),
-                    })
-                })
-                .collect()
+    let secrets = kit::load_secrets(dir);
+    let mut server = Server::spawn(dir, manifest, &secrets)?;
+    let listed = server.handshake(manifest.start_timeout())?;
+    let tools: Vec<Tool> = listed
+        .iter()
+        .filter_map(|tool| {
+            Some(Tool {
+                module: manifest.id.clone(),
+                name: tool["name"].as_str()?.to_string(),
+                description: tool["description"].as_str().unwrap_or_default().to_string(),
+                schema: tool["inputSchema"].clone(),
+            })
         })
-        .unwrap_or_default();
+        .collect();
     let count = tools.len();
     {
         let mut all = lock(&TOOLS);
         all.retain(|tool| tool.module != manifest.id);
         all.extend(tools);
     }
-    lock(&SERVERS)
-        .get_or_insert_with(HashMap::new)
-        .insert(manifest.id.clone(), Arc::new(Mutex::new(server)));
+    lock(&RUNNING).get_or_insert_with(HashMap::new).insert(
+        manifest.id.clone(),
+        Running {
+            server: Arc::new(Mutex::new(server)),
+            dir: dir.to_path_buf(),
+            manifest: manifest.clone(),
+            fingerprint: fingerprint.to_string(),
+        },
+    );
     lock(&MANIFESTS)
         .get_or_insert_with(BTreeMap::new)
         .insert(manifest.id.clone(), manifest.clone());
@@ -273,9 +155,9 @@ fn start(app: &AppHandle, manifest: &Manifest) -> Result<usize, String> {
 }
 
 fn stop(id: &str) {
-    let server = lock(&SERVERS).as_mut().and_then(|all| all.remove(id));
-    if let Some(server) = server {
-        let _ = lock(&server).child.kill();
+    let running = lock(&RUNNING).as_mut().and_then(|all| all.remove(id));
+    if let Some(running) = running {
+        lock(&running.server).kill();
     }
     lock(&TOOLS).retain(|tool| tool.module != id);
     if let Some(all) = lock(&MANIFESTS).as_mut() {
@@ -283,68 +165,147 @@ fn stop(id: &str) {
     }
 }
 
-fn start_in_background(app: &AppHandle, manifest: Manifest) {
-    set_status(&manifest.id, "запускается…".into());
-    let app = app.clone();
-    let _ = std::thread::Builder::new()
-        .name(format!("sufler-module-{}", manifest.id))
-        .spawn(move || match start(&app, &manifest) {
-            Ok(count) => {
-                log::info!("модуль «{}»: инструментов {count}", manifest.title);
-                set_status(&manifest.id, format!("инструментов: {count}"));
-            }
-            Err(err) => {
-                log::warn!("модуль «{}» не запустился: {err}", manifest.title);
-                set_status(&manifest.id, format!("не запустился: {err}"));
-            }
-        });
+fn start_logged(dir: &Path, manifest: &Manifest, fingerprint: &str) {
+    set_status(dir, &manifest.id, "starting", "запускается…");
+    match start(dir, manifest, fingerprint) {
+        Ok(count) => {
+            log::info!("модуль «{}»: инструментов {count}", manifest.title);
+            set_status(dir, &manifest.id, "running", &format!("работает · инструментов: {count}"));
+        }
+        Err(err) => {
+            log::warn!("модуль «{}» не запустился: {err}", manifest.title);
+            health(&manifest.id, |h| h.crashes.push(Instant::now()));
+            set_status(dir, &manifest.id, "crashed", &format!("не запустился: {err}"));
+        }
+    }
 }
 
-/// Когда менялось описание модуля — чтобы заметить правку со стороны.
-fn stamp(app: &AppHandle, id: &str) -> Option<std::time::SystemTime> {
-    let path = root(app).ok()?.join(id).join("module.json");
-    std::fs::metadata(path).and_then(|meta| meta.modified()).ok()
+/// Проверяет модуль и, если он прошёл, запускает.
+fn check_and_start(dir: PathBuf, manifest: Manifest) {
+    let id = manifest.id.clone();
+    health(&id, |h| h.checking = true);
+    set_status(&dir, &id, "checking", "проверяется…");
+    let _ = std::thread::Builder::new().name(format!("sufler-check-{id}")).spawn(move || {
+        let report = kit::check(&dir, &manifest, &kit::load_secrets(&dir));
+        health(&id, |h| h.checking = false);
+        if report.ok && kit::dir_fingerprint(&dir).as_deref() == Some(report.fingerprint.as_str()) {
+            let _ = kit::write_checked(&dir, &report.fingerprint, &report.tools);
+            log::info!("модуль «{}» прошёл проверку", manifest.title);
+            start_logged(&dir, &manifest, &report.fingerprint);
+        } else if !report.ok {
+            let first = report.failed.first().cloned().unwrap_or_default();
+            log::warn!("модуль «{}» не прошёл проверку: {first}", manifest.title);
+            health(&id, |h| h.given_up = Some((report.fingerprint.clone(), kit::checked_at(&dir))));
+            set_status(&dir, &id, "failed", &format!("не прошёл проверку: {first}"));
+        }
+    });
 }
 
-/// Запускает модули и дальше следит за их папкой.
+/// Один проход наблюдателя по папке модулей.
+fn tick(app: &AppHandle) {
+    let Ok(root) = root(app) else { return };
+    let mut present = Vec::new();
+    for entry in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+        let dir = entry.path();
+        if kit::is_updating(&dir) {
+            continue;
+        }
+        let Some(manifest) = kit::read_manifest(&dir) else { continue };
+        let id = manifest.id.clone();
+        if !valid_id(&id) || dir.file_name().and_then(|n| n.to_str()) != Some(id.as_str()) {
+            continue;
+        }
+        present.push(id.clone());
+        let Some(fingerprint) = kit::dir_fingerprint(&dir) else { continue };
+
+        // Запущен — жив ли и та ли версия.
+        let running = lock(&RUNNING)
+            .as_ref()
+            .and_then(|all| all.get(&id).map(|r| (r.fingerprint.clone(), r.server.clone())));
+        if let Some((running_fp, server)) = running {
+            if running_fp != fingerprint {
+                log::info!("модуль «{}» изменён — останавливаю до проверки", manifest.title);
+                stop(&id);
+            } else {
+                // Сервер занят вызовом — значит жив; проверим в следующий раз.
+                let alive = server.try_lock().map(|mut s| s.alive()).unwrap_or(true);
+                if alive {
+                    // Отметку «запускается» могла оставить повторная проверка.
+                    if kit::read_status(&dir).is_none_or(|s| s.state != "running") {
+                        let count = lock(&TOOLS).iter().filter(|tool| tool.module == id).count();
+                        set_status(&dir, &id, "running", &format!("работает · инструментов: {count}"));
+                    }
+                    continue;
+                }
+                stop(&id);
+                let crashes = health(&id, |h| {
+                    h.crashes.push(Instant::now());
+                    h.crashes.retain(|at| at.elapsed() < CRASH_WINDOW);
+                    h.crashes.len()
+                });
+                let tail = kit::log_tail(&dir, 3);
+                log::warn!("модуль «{}» упал ({crashes}-й раз): {tail}", manifest.title);
+                if crashes >= CRASH_LIMIT {
+                    health(&id, |h| h.given_up = Some((fingerprint.clone(), kit::checked_at(&dir))));
+                    set_status(&dir, &id, "crashed", &format!("падает: {}", tail.lines().last().unwrap_or("")));
+                } else {
+                    start_logged(&dir, &manifest, &fingerprint);
+                }
+                continue;
+            }
+        }
+
+        let settled = std::fs::metadata(dir.join(kit::MANIFEST_FILE))
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|at| at.elapsed().ok())
+            .is_some_and(|age| age >= SETTLE);
+        let (checking, given_up) = health(&id, |h| (h.checking, h.given_up.clone()));
+        let stuck = given_up.is_some_and(|(fp, at)| fp == fingerprint && at == kit::checked_at(&dir));
+        if !settled || checking || stuck {
+            continue;
+        }
+        let missing: Vec<String> = manifest
+            .missing_secrets(&kit::load_secrets(&dir))
+            .iter()
+            .map(|s| s.title.clone())
+            .collect();
+        if !missing.is_empty() {
+            let text = format!("нужен ключ: {}", missing.join(", "));
+            if status(&id) != text {
+                set_status(&dir, &id, "needs_secret", &text);
+            }
+            continue;
+        }
+        if kit::is_verified(&dir) {
+            start_logged(&dir, &manifest, &fingerprint);
+        } else {
+            check_and_start(dir, manifest);
+        }
+    }
+
+    let gone: Vec<String> = lock(&RUNNING)
+        .as_ref()
+        .map(|all| all.keys().filter(|id| !present.contains(id)).cloned().collect())
+        .unwrap_or_default();
+    for id in gone {
+        log::info!("модуль «{id}» удалён — останавливаю");
+        stop(&id);
+        lock(&STATUS).as_mut().map(|all| all.remove(&id));
+    }
+}
+
+/// Следит за папкой модулей всё время работы программы.
 ///
-/// Модуль может появиться не из окна: его создаёт нейросеть пользователя через
-/// `sufler.exe --mcp` — отдельный процесс, который до работающей программы не
-/// дотягивается. Поэтому папка проверяется раз в несколько секунд: новый
-/// модуль запускается, изменённый перезапускается, удалённый останавливается.
+/// Модуль может появиться не из окна: его ставит нейросеть пользователя через
+/// `sufler.exe --mcp` — отдельный процесс. Поэтому папка проверяется раз в
+/// несколько секунд: новый или изменённый модуль проверяется и запускается,
+/// удалённый — останавливается, упавший — перезапускается.
 pub fn watch(app: &AppHandle) {
     let app = app.clone();
-    let _ = std::thread::Builder::new().name("sufler-modules".into()).spawn(move || {
-        let mut known: HashMap<String, Option<std::time::SystemTime>> = HashMap::new();
-        loop {
-            let present = installed(&app);
-            for manifest in &present {
-                let changed = stamp(&app, &manifest.id);
-                match known.get(&manifest.id) {
-                    Some(seen) if *seen == changed => {}
-                    seen => {
-                        if seen.is_some() {
-                            log::info!("модуль «{}» изменён — перезапускаю", manifest.title);
-                            stop(&manifest.id);
-                        }
-                        known.insert(manifest.id.clone(), changed);
-                        start_in_background(&app, manifest.clone());
-                    }
-                }
-            }
-            let gone: Vec<String> = known
-                .keys()
-                .filter(|id| !present.iter().any(|m| &m.id == *id))
-                .cloned()
-                .collect();
-            for id in gone {
-                log::info!("модуль «{id}» удалён — останавливаю");
-                stop(&id);
-                known.remove(&id);
-                lock(&STATUS).as_mut().map(|all| all.remove(&id));
-            }
-            std::thread::sleep(std::time::Duration::from_secs(4));
-        }
+    let _ = std::thread::Builder::new().name("sufler-modules".into()).spawn(move || loop {
+        tick(&app);
+        std::thread::sleep(Duration::from_secs(3));
     });
 }
 
@@ -354,31 +315,37 @@ pub fn tools() -> Vec<Tool> {
 }
 
 /// Вызывает инструмент `модуль.инструмент`. Возвращает текст ответа.
+///
+/// Упавший сервер поднимается заново, и вызов повторяется один раз: человек не
+/// должен узнавать о падении модуля, если его можно пережить.
 pub fn call(full_name: &str, args: &Value) -> Result<String, String> {
     let (module, name) = full_name.split_once('.').ok_or("неполное имя инструмента")?;
-    let server = lock(&SERVERS)
-        .as_ref()
-        .and_then(|all| all.get(module).cloned())
-        .ok_or_else(|| format!("модуль «{module}» не запущен"))?;
-    let result = lock(&server).request(
-        "tools/call",
-        json!({ "name": name, "arguments": if args.is_object() { args.clone() } else { json!({}) } }),
-        CALL_TIMEOUT,
-    )?;
-    let text: Vec<String> = result["content"]
-        .as_array()
-        .map(|parts| {
-            parts
-                .iter()
-                .filter_map(|part| part["text"].as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    let text = text.join("\n");
-    if result["isError"].as_bool().unwrap_or(false) {
-        return Err(if text.is_empty() { "инструмент вернул ошибку".into() } else { text });
+    let running = |module: &str| {
+        lock(&RUNNING)
+            .as_ref()
+            .and_then(|all| all.get(module).map(|r| (r.server.clone(), r.dir.clone(), r.manifest.clone(), r.fingerprint.clone())))
+    };
+    let (server, dir, manifest, fingerprint) =
+        running(module).ok_or_else(|| format!("модуль «{module}» сейчас не работает: {}", status(module)))?;
+    let first = {
+        let mut server = lock(&server);
+        if server.alive() {
+            server.call(name, args, kit::CALL_TIMEOUT)
+        } else {
+            Err("сервер модуля закрылся".into())
+        }
+    };
+    match first {
+        Err(err) if err.contains("закрылся") => {
+            log::warn!("модуль «{module}» упал во время вызова — перезапускаю");
+            health(module, |h| h.crashes.push(Instant::now()));
+            start(&dir, &manifest, &fingerprint)?;
+            let (server, ..) = running(module).ok_or("модуль не поднялся")?;
+            let mut server = lock(&server);
+            server.call(name, args, kit::CALL_TIMEOUT)
+        }
+        other => other,
     }
-    Ok(text)
 }
 
 /// Разбирает командную строку на части с учётом кавычек.
@@ -411,34 +378,102 @@ pub fn split_command(line: &str) -> Vec<String> {
     parts
 }
 
-/// Ставит модуль: пишет описание и запускает.
+/// Ставит модуль: пишет описание. Проверит и запустит его наблюдатель.
 pub fn install(app: &AppHandle, manifest: Manifest) -> Result<(), String> {
-    if !valid_id(&manifest.id) {
-        return Err("имя модуля — латиница, цифры и дефис".into());
+    let problems = kit::lint(&manifest, &BTreeMap::new());
+    if let Some(problem) = problems.first() {
+        return Err(problem.clone());
     }
-    if manifest.title.trim().is_empty() || manifest.mcp.command.trim().is_empty() {
-        return Err("нужны название и команда".into());
-    }
-    let dir = root(app)?.join(&manifest.id);
+    let dir = module_dir(app, &manifest.id)?;
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
     let text = serde_json::to_string_pretty(&manifest).map_err(|err| err.to_string())?;
-    std::fs::write(dir.join("module.json"), text).map_err(|err| err.to_string())?;
+    std::fs::write(dir.join(kit::MANIFEST_FILE), text).map_err(|err| err.to_string())?;
+    health(&manifest.id, |h| *h = Health::default());
+    set_status(&dir, &manifest.id, "checking", "проверяется…");
     log::info!("модуль «{}» установлен", manifest.title);
-    // Запустит его `watch` — через несколько секунд, как и модуль, созданный
-    // нейросетью. Запуск отсюда же дал бы второй экземпляр сервера.
-    set_status(&manifest.id, "запускается…".into());
+    Ok(())
+}
+
+/// Ставит модуль с площадки: описание и файлы. Проверит его наблюдатель.
+pub fn install_package(app: &AppHandle, manifest: Manifest, files: BTreeMap<String, Vec<u8>>) -> Result<(), String> {
+    let dir = module_dir(app, &manifest.id)?;
+    let updating = kit::Updating::start(&dir)?;
+    kit::replace_files(&dir, &files)?;
+    let _ = std::fs::remove_file(dir.join(kit::CHECKED_FILE));
+    kit::write_manifest(&dir, &manifest)?;
+    drop(updating);
+    stop(&manifest.id);
+    health(&manifest.id, |h| *h = Health::default());
+    set_status(&dir, &manifest.id, "checking", "проверяется…");
+    log::info!("модуль «{}» поставлен с площадки", manifest.title);
     Ok(())
 }
 
 /// Удаляет модуль вместе с папкой.
 pub fn uninstall(app: &AppHandle, id: &str) -> Result<(), String> {
-    if !valid_id(id) {
-        return Err("нет такого модуля".into());
-    }
+    let dir = module_dir(app, id)?;
     stop(id);
-    let dir = root(app)?.join(id);
-    std::fs::remove_dir_all(&dir).map_err(|err| format!("папка модуля не удалилась: {err}"))?;
     lock(&STATUS).as_mut().map(|all| all.remove(id));
+    // Процесс сервера отпускает файлы не мгновенно.
+    for _ in 0..10 {
+        if std::fs::remove_dir_all(&dir).is_ok() || !dir.exists() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    Err("папка модуля ещё занята — попробуйте через несколько секунд".into())
+}
+
+/// Ключ модуля для окна: значение не показывается, только есть ли оно.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretField {
+    pub name: String,
+    pub title: String,
+    pub hint: String,
+    pub optional: bool,
+    pub set: bool,
+}
+
+pub fn secret_fields(app: &AppHandle, id: &str) -> Result<Vec<SecretField>, String> {
+    let dir = module_dir(app, id)?;
+    let manifest = kit::read_manifest(&dir).ok_or("нет такого модуля")?;
+    let have = kit::load_secrets(&dir);
+    Ok(manifest
+        .secrets
+        .into_iter()
+        .map(|secret| SecretField {
+            set: have.get(&secret.name).is_some_and(|v| !v.is_empty()),
+            name: secret.name,
+            title: secret.title,
+            hint: secret.hint,
+            optional: secret.optional,
+        })
+        .collect())
+}
+
+/// Сохраняет ключи и перезапускает модуль с ними.
+pub fn save_secret_values(app: &AppHandle, id: &str, values: BTreeMap<String, String>) -> Result<(), String> {
+    let dir = module_dir(app, id)?;
+    let manifest = kit::read_manifest(&dir).ok_or("нет такого модуля")?;
+    let known: Vec<&String> = manifest.secrets.iter().map(|s| &s.name).collect();
+    if let Some(unknown) = values.keys().find(|name| !known.contains(name)) {
+        return Err(format!("у модуля нет ключа {unknown}"));
+    }
+    kit::save_secrets(&dir, &values)?;
+    stop(id);
+    health(id, |h| *h = Health::default());
+    set_status(&dir, id, "checking", "проверяется…");
+    Ok(())
+}
+
+/// Проверить модуль заново — после правки руками или по кнопке.
+pub fn recheck(app: &AppHandle, id: &str) -> Result<(), String> {
+    let dir = module_dir(app, id)?;
+    stop(id);
+    let _ = std::fs::remove_file(dir.join(kit::CHECKED_FILE));
+    health(id, |h| *h = Health::default());
+    set_status(&dir, id, "checking", "проверяется…");
     Ok(())
 }
 
@@ -553,6 +588,7 @@ pub fn rules_section() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn command_line_is_split_with_quotes() {
@@ -570,13 +606,6 @@ mod tests {
         assert!(!valid_id("../evil"));
         assert!(!valid_id("Память"));
         assert!(!valid_id(""));
-    }
-
-    #[test]
-    fn environment_variables_are_expanded() {
-        std::env::set_var("SUFLER_TEST_DIR", r"C:\Users\test");
-        assert_eq!(expand(r"%SUFLER_TEST_DIR%\Documents"), r"C:\Users\test\Documents");
-        assert_eq!(expand("100% готово"), "100% готово");
     }
 
     #[test]
@@ -614,7 +643,8 @@ mod tests {
         for item in modules {
             let manifest: Manifest = serde_json::from_value(item.clone()).unwrap();
             assert!(valid_id(&manifest.id), "{}", manifest.id);
-            assert!(!manifest.mcp.command.is_empty());
+            let problems = kit::lint(&manifest, &BTreeMap::new());
+            assert!(problems.is_empty(), "{}: {problems:?}", manifest.id);
         }
     }
 

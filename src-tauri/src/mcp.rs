@@ -17,23 +17,20 @@
 //! В стандартный вывод здесь не пишется ничего, кроме ответов протокола:
 //! любая лишняя строка сломала бы клиенту разбор.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
+
+use crate::module_kit::{self as kit, Manifest};
 
 /// Версия протокола, если клиент не назвал свою.
 const PROTOCOL: &str = "2024-11-05";
 
-/// Где лежат данные Ноа: `%APPDATA%\app.sufler.popup`.
-fn data_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("APPDATA")?;
-    Some(PathBuf::from(base).join("app.sufler.popup"))
-}
-
 /// Разбирает запросы, пока клиент не закроет ввод.
 pub fn serve() {
-    if let Some(dir) = data_dir() {
+    if let Some(dir) = kit::data_dir() {
         let _ = std::fs::create_dir_all(&dir);
         crate::learning::load(dir);
     }
@@ -88,14 +85,7 @@ fn error(id: Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
-const INSTRUCTIONS: &str = "Ноа — голосовой помощник на компьютере пользователя, \
-оболочка для модулей. Главное, что здесь можно сделать, — собрать пользователю свой \
-модуль под его задачу: напиши небольшой MCP-сервер, положи его через create_module — \
-и Ноа запустит его и станет вызывать его инструменты по голосу. Перед этим вызови \
-module_format, после — list_modules, чтобы убедиться, что модуль запустился. \
-Ещё можно создавать курсы обучения (сначала course_format; большой курс — по частям: \
-create_course с первой темой, потом add_topic) и передавать Ноа распоряжения как \
-сказанные голосом (ask_noa).";
+const INSTRUCTIONS: &str = "Ноа — мультимодальная оболочка для ИИ на компьютере пользователя. Главное, что здесь делается, — модуль под задачу пользователя: ты пишешь небольшой MCP-сервер, Ноа проверяет его по своему регламенту и ставит, после чего пользователь пользуется им голосом. Порядок строгий: 1) module_format — прочитай регламент целиком; 2) environment — узнай, на чём можно писать; 3) уточни у пользователя задачу, фразы и нужные ключи; 4) create_module; 5) если отчёт с ошибками — исправь и отправь снова, пока проверка не пройдёт; не говори пользователю, что модуль готов, до успешного отчёта. Ещё можно создавать курсы обучения (course_format, create_course, add_topic) и передавать Ноа распоряжения как сказанные голосом (ask_noa).";
 
 const MODULE_FORMAT: &str = include_str!("module_format.md");
 
@@ -153,7 +143,7 @@ fn tools() -> Value {
         },
         {
             "name": "create_module",
-            "description": "Создать или заменить модуль Ноа: описание и файлы его MCP-сервера. Работающая Ноа запустит модуль сама через несколько секунд, и его инструменты станут доступны голосом.",
+            "description": "Отправить модуль Ноа: описание и файлы MCP-сервера. Ноа проверяет модуль по регламенту (правила, запуск, тесты, устойчивость) и ставит только прошедший; иначе возвращает отчёт с ошибками — исправь и отправь снова. Прошедший модуль Ноа сразу запускает.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -165,6 +155,50 @@ fn tools() -> Value {
                     }
                 },
                 "required": ["module"]
+            }
+        },
+        {
+            "name": "environment",
+            "description": "Что установлено у пользователя для модулей (Node.js, Python и др.) и запущена ли Ноа. Вызови перед тем, как писать сервер модуля.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "check_module",
+            "description": "Проверить установленный модуль заново (например, после того как пользователь ввёл ключи). Возвращает отчёт проверки; прошедший модуль Ноа запускает.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "search_modules",
+            "description": "Найти готовые модули на площадке NOAH по словам. Перед тем как писать свой модуль, проверь, нет ли готового.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "query": { "type": "string", "description": "Что ищем, например «погода»" } }
+            }
+        },
+        {
+            "name": "install_module",
+            "description": "Поставить модуль с площадки NOAH по id. Ноа проверит его так же, как созданный тобой, и запустит.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "publish_module",
+            "description": "Опубликовать проверенный модуль пользователя на площадке NOAH от его имени (нужен ключ площадки в настройках Ноа). Спроси пользователя перед публикацией.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "description": { "type": "string", "description": "Подробное описание для страницы модуля, 1–3 абзаца" },
+                    "category": { "type": "string", "enum": ["work", "home", "finance", "dev", "health", "media", "other"] }
+                },
+                "required": ["id"]
             }
         },
         {
@@ -208,6 +242,15 @@ fn call(name: &str, args: &Value) -> Value {
         "module_format" => Ok(MODULE_FORMAT.to_string()),
         "create_module" => create_module(&args["module"], &args["files"]),
         "list_modules" => Ok(list_modules()),
+        "environment" => Ok(environment()),
+        "search_modules" => search_modules(args["query"].as_str().unwrap_or_default()),
+        "install_module" => install_module(args["id"].as_str().unwrap_or_default()),
+        "publish_module" => tauri::async_runtime::block_on(crate::platform::publish(
+            args["id"].as_str().unwrap_or_default(),
+            args["description"].as_str().unwrap_or_default(),
+            args["category"].as_str().unwrap_or("other"),
+        )),
+        "check_module" => check_module(args["id"].as_str().unwrap_or_default()),
         "delete_module" => delete_module(args["id"].as_str().unwrap_or_default()),
         "ask_noa" => ask_noa(args["text"].as_str().unwrap_or_default()),
         other => Err(format!("Нет инструмента «{other}».")),
@@ -251,121 +294,223 @@ fn list_courses() -> String {
 }
 
 fn modules_dir() -> Result<PathBuf, String> {
-    data_dir()
-        .map(|dir| dir.join("modules"))
-        .ok_or_else(|| "не нашёл папку данных Ноа".to_string())
+    kit::modules_root().ok_or_else(|| "не нашёл папку данных Ноа".to_string())
 }
 
-/// Имя файла сервера — без путей, чтобы запись не вышла из папки модуля.
-fn safe_file_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 80
-        && name != "module.json"
-        && name != "server.log"
-        && !name.starts_with('.')
-        && name.chars().all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+/// Что есть у пользователя для запуска модулей.
+fn environment() -> String {
+    let mut lines = vec![format!("Ноа {}, регламент модулей v{}.", env!("CARGO_PKG_VERSION"), kit::FORMAT)];
+    for name in ["node", "npx", "python", "py", "uvx", "deno", "bun"] {
+        match kit::runtime_version(name) {
+            Some(version) => lines.push(format!("{name}: {version}")),
+            None => lines.push(format!("{name}: нет")),
+        }
+    }
+    lines.push(if crate::instance::running() {
+        "Ноа запущена: модуль заработает сразу после проверки.".into()
+    } else {
+        "Ноа сейчас не запущена: модуль заработает при её запуске.".into()
+    });
+    lines.push(
+        "Пиши сервер под то, что установлено. Если нет ни Node.js, ни Python — попроси пользователя \
+         поставить Node.js LTS с nodejs.org и вызови environment снова."
+            .into(),
+    );
+    lines.join("\n")
+}
+
+/// Ждёт, пока работающая Ноа запустит модуль, и говорит, чем кончилось.
+fn wait_started(dir: &Path) -> String {
+    if !crate::instance::running() {
+        return "Ноа сейчас не запущена — модуль заработает при её запуске.".into();
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40);
+    let mut last = String::new();
+    while std::time::Instant::now() < deadline {
+        if let Some(status) = kit::read_status(dir) {
+            match status.state.as_str() {
+                "running" => return format!("Ноа запустила модуль: {}.", status.detail.trim_end_matches('.')),
+                "failed" | "crashed" | "needs_secret" => {
+                    return format!(
+                        "Ноа не запустила модуль: {}.\nЖурнал:\n{}",
+                        status.detail,
+                        kit::log_tail(dir, 15)
+                    )
+                }
+                _ => last = status.detail,
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    format!("Ноа ещё не запустила модуль ({last}). Проверь позже через list_modules.")
 }
 
 fn create_module(module: &Value, files: &Value) -> Result<String, String> {
-    let manifest: crate::plugins::Manifest = serde_json::from_value(module.clone())
-        .map_err(|err| format!("module.json не разобрался: {err}"))?;
-    if !crate::plugins::valid_id(&manifest.id) {
-        return Err("id — латиница в нижнем регистре, цифры и дефис, до 40 знаков.".into());
+    let manifest: Manifest =
+        serde_json::from_value(module.clone()).map_err(|err| format!("module.json не разобрался: {err}"))?;
+    let files = kit::parse_files(files)?;
+    let problems = kit::lint(&manifest, &files);
+    if !problems.is_empty() {
+        let list: Vec<String> = problems.iter().map(|p| format!("  ✗ {p}")).collect();
+        return Err(format!(
+            "Модуль не принят — нарушен регламент (module_format):\n{}",
+            list.join("\n")
+        ));
     }
-    if manifest.title.trim().is_empty() || manifest.mcp.command.trim().is_empty() {
-        return Err("Нужны title и mcp.command.".into());
-    }
-    let files: Vec<(String, String)> = match files {
-        Value::Null => Vec::new(),
-        Value::Object(map) => map
-            .iter()
-            .map(|(name, text)| match text.as_str() {
-                Some(text) if safe_file_name(name) => Ok((name.clone(), text.to_string())),
-                Some(_) => Err(format!(
-                    "Имя файла «{name}» не подходит: только буквы, цифры, точка, дефис и подчёркивание."
-                )),
-                None => Err(format!("Содержимое «{name}» должно быть строкой.")),
-            })
-            .collect::<Result<_, _>>()?,
-        _ => return Err("files — объект «имя файла → содержимое».".into()),
-    };
 
-    let dir = modules_dir()?.join(&manifest.id);
-    std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-    for (name, text) in &files {
-        std::fs::write(dir.join(name), text).map_err(|err| format!("{name}: {err}"))?;
-    }
-    // Описание — последним: по нему Ноа запускает модуль, и файлы сервера к
-    // этому моменту уже должны лежать на месте.
-    let text = serde_json::to_string_pretty(&manifest).map_err(|err| err.to_string())?;
-    std::fs::write(dir.join("module.json"), text).map_err(|err| err.to_string())?;
+    let root = modules_dir()?;
+    let installed = root.join(&manifest.id);
+    let secrets = kit::load_secrets(&installed);
+    let missing = manifest.missing_secrets(&secrets);
 
-    let next = if crate::instance::running() {
-        "Ноа запустит его через несколько секунд — проверь list_modules."
-    } else {
-        "Ноа сейчас не запущена — модуль заработает при следующем запуске."
-    };
-    Ok(format!("Модуль «{}» сохранён в {}. {next}", manifest.title, dir.display()))
+    // Нет ключей — проверить модуль нельзя. Ставим его ожидающим: ключи
+    // вводит человек в окне Ноа, и после этого Ноа проверит модуль сама.
+    if !missing.is_empty() {
+        let updating = kit::Updating::start(&installed)?;
+        kit::replace_files(&installed, &files)?;
+        let _ = std::fs::remove_file(installed.join(kit::CHECKED_FILE));
+        kit::write_manifest(&installed, &manifest)?;
+        drop(updating);
+        let list: Vec<String> = missing.iter().map(|s| format!("  • {} — {}", s.title, s.hint)).collect();
+        return Ok(format!(
+            "Модуль «{}» сохранён, но ещё не проверен: нужны ключи.\n{}\n\
+             Попроси пользователя открыть Ноа → Модули → «{}» → «Ключи» и ввести их. \
+             Сами ключи у пользователя не спрашивай и в чат не записывай. \
+             Когда он скажет, что ввёл, вызови check_module(\"{}\").",
+            manifest.title,
+            list.join("\n"),
+            manifest.title,
+            manifest.id
+        ));
+    }
+
+    // Проверка — на черновике: работающая версия модуля не трогается, пока
+    // новая не прошла.
+    let draft = root.join(".drafts").join(&manifest.id);
+    let _ = std::fs::remove_dir_all(&draft);
+    kit::replace_files(&draft, &files)?;
+    kit::write_manifest(&draft, &manifest)?;
+    let report = kit::check(&draft, &manifest, &secrets);
+    let text = report.render(&manifest.title);
+    if !report.ok {
+        return Err(text);
+    }
+
+    let updating = kit::Updating::start(&installed)?;
+    kit::replace_files(&installed, &files)?;
+    kit::write_manifest(&installed, &manifest)?;
+    kit::write_checked(&installed, &report.fingerprint, &report.tools)?;
+    // Прежнее состояние относится к старой версии — ждём новое.
+    kit::write_status(&installed, "starting", "запускается…");
+    drop(updating);
+    let _ = std::fs::remove_dir_all(&draft);
+    let started = wait_started(&installed);
+    Ok(format!(
+        "{text}\n{started}\nСкажи пользователю, как позвать модуль: {}",
+        manifest.voice
+    ))
+}
+
+fn search_modules(query: &str) -> Result<String, String> {
+    let found = tauri::async_runtime::block_on(crate::platform::list(query))?;
+    if found.is_empty() {
+        return Ok("На площадке ничего не нашлось — можно собрать свой модуль.".into());
+    }
+    Ok(found
+        .iter()
+        .take(20)
+        .map(|m| {
+            format!(
+                "{} (id: {}) — {}; автор {}, установок {}",
+                m["title"].as_str().unwrap_or_default(),
+                m["id"].as_str().unwrap_or_default(),
+                m["about"].as_str().unwrap_or_default(),
+                m["author"].as_str().unwrap_or_default(),
+                m["installs"].as_u64().unwrap_or(0)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("
+"))
+}
+
+fn install_module(id: &str) -> Result<String, String> {
+    let (manifest, files) = tauri::async_runtime::block_on(crate::platform::package(id))?;
+    let files: serde_json::Map<String, Value> = files
+        .into_iter()
+        .map(|(name, bytes)| (name, Value::String(String::from_utf8_lossy(&bytes).into_owned())))
+        .collect();
+    let manifest = serde_json::to_value(&manifest).map_err(|err| err.to_string())?;
+    create_module(&manifest, &Value::Object(files))
+}
+
+fn check_module(id: &str) -> Result<String, String> {
+    if !kit::valid_id(id) {
+        return Err("Нет такого модуля.".into());
+    }
+    let dir = modules_dir()?.join(id);
+    let manifest = kit::read_manifest(&dir).ok_or_else(|| format!("Модуля «{id}» нет."))?;
+    let report = kit::check(&dir, &manifest, &kit::load_secrets(&dir));
+    let text = report.render(&manifest.title);
+    if !report.ok {
+        return Err(text);
+    }
+    // Новая отметка о проверке — Ноа запустит модуль, даже если раньше
+    // от него отказалась.
+    kit::write_checked(&dir, &report.fingerprint, &report.tools)?;
+    kit::write_status(&dir, "starting", "запускается…");
+    Ok(format!("{text}\n{}", wait_started(&dir)))
 }
 
 fn list_modules() -> String {
-    let Ok(entries) = modules_dir().and_then(|root| std::fs::read_dir(root).map_err(|err| err.to_string()))
-    else {
+    let Ok(entries) = modules_dir().and_then(|root| std::fs::read_dir(root).map_err(|err| err.to_string())) else {
         return "Модулей нет.".into();
     };
     let mut lines = Vec::new();
     for entry in entries.flatten() {
         let dir = entry.path();
-        let Ok(text) = std::fs::read_to_string(dir.join("module.json")) else { continue };
-        let Ok(manifest) = serde_json::from_str::<crate::plugins::Manifest>(&text) else { continue };
-        let log = std::fs::read_to_string(dir.join("server.log")).unwrap_or_default();
-        let mut tail: Vec<&str> = log.lines().rev().take(8).collect();
-        tail.reverse();
-        let journal = if tail.is_empty() {
-            "пусто".to_string()
-        } else {
-            format!("\n    {}", tail.join("\n    "))
-        };
+        let Some(manifest) = kit::read_manifest(&dir) else { continue };
+        if !kit::valid_id(&manifest.id) {
+            continue;
+        }
+        let state = kit::read_status(&dir)
+            .map(|s| format!("{} — {}", s.state, s.detail))
+            .unwrap_or_else(|| "ещё не запускался".into());
+        let verified = if kit::is_verified(&dir) { "проверен" } else { "не проверен" };
+        let tail = kit::log_tail(&dir, 6);
         lines.push(format!(
-            "{} (id: {}) — {}\n  запуск: {} {}\n  журнал: {journal}",
+            "{} (id: {}, {verified}) — {}\n  состояние: {state}\n  запуск: {} {}{}",
             manifest.title,
             manifest.id,
             manifest.about,
             manifest.mcp.command,
             manifest.mcp.args.join(" "),
+            if tail.is_empty() { String::new() } else { format!("\n  журнал:\n    {}", tail.replace('\n', "\n    ")) },
         ));
     }
     if lines.is_empty() {
         return "Модулей нет.".into();
     }
-    let state = if crate::instance::running() {
-        "Число инструментов запущенного модуля видно на его плитке в главном окне Ноа."
-    } else {
-        "Ноа сейчас не запущена."
-    };
-    format!("{}\n\n{state}", lines.join("\n\n"))
+    lines.join("\n\n")
 }
 
 fn delete_module(id: &str) -> Result<String, String> {
-    if !crate::plugins::valid_id(id) {
+    if !kit::valid_id(id) {
         return Err("Нет такого модуля.".into());
     }
     let dir = modules_dir()?.join(id);
-    if !dir.join("module.json").exists() {
+    if !dir.join(kit::MANIFEST_FILE).exists() {
         return Err(format!("Модуля «{id}» нет."));
     }
     // Сначала описание: Ноа остановит сервер, и его файлы освободятся.
-    std::fs::remove_file(dir.join("module.json")).map_err(|err| err.to_string())?;
+    std::fs::remove_file(dir.join(kit::MANIFEST_FILE)).map_err(|err| err.to_string())?;
     for _ in 0..20 {
         if std::fs::remove_dir_all(&dir).is_ok() {
             return Ok(format!("Модуль «{id}» удалён."));
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    Ok(format!(
-        "Модуль «{id}» отключён; папку {} удалите вручную — файлы ещё заняты.",
-        dir.display()
-    ))
+    Ok(format!("Модуль «{id}» отключён; папка {} ещё занята и удалится позже.", dir.display()))
 }
 
 /// Передаёт фразу работающей Ноа — тем же путём, что `sufler.exe --ask`.

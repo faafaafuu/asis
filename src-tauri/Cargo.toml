@@ -27,6 +27,8 @@ serde_json = "1"
 # и високосных лет: «завтра в три» и «через неделю» вручную не считаются.
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
+# sha2 — отпечаток проверенной версии модуля (module_kit).
+sha2 = "0.10"
 log = "0.4"
 async-trait = "0.1"
 tokio = { version = "1", features = ["time", "rt", "sync", "macros"] }
@@ -61,6 +63,9 @@ reqwest = { version = "0.13", default-features = false, features = [
   "system-proxy",
   "charset",
   "http2",
+  # gzip — площадка модулей сжимает ответы: так они доходят и там, где
+  # крупные ответы зарубежных серверов провайдер обрывает.
+  "gzip",
 ] }
 
 # На Android системного OpenSSL нет, и native-tls тянет за собой openssl-sys,
@@ -80,6 +85,9 @@ reqwest = { version = "0.13", default-features = false, features = [
   "system-proxy",
   "charset",
   "http2",
+  # gzip — площадка модулей сжимает ответы: так они доходят и там, где
+  # крупные ответы зарубежных серверов провайдер обрывает.
+  "gzip",
 ] }
 
 # Автозапуск вместе с системой. Официальный плагин, а не своя запись в реестре:

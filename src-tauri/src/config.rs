@@ -23,6 +23,25 @@ pub struct Config {
     pub food: FoodConfig,
     pub telegram: TelegramConfig,
     pub widget: WidgetConfig,
+    pub platform: PlatformConfig,
+}
+
+/// Адрес площадки модулей по умолчанию. Сменится на домен, когда он появится.
+pub const DEFAULT_PLATFORM_URL: &str = "http://84.247.166.53:8795";
+
+/// Площадка модулей NOAH: откуда брать модули и куда публиковать свои.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PlatformConfig {
+    pub url: String,
+    /// Ключ площадки из кабинета автора. Хранится зашифрованным (DPAPI).
+    pub token: String,
+}
+
+impl Default for PlatformConfig {
+    fn default() -> Self {
+        Self { url: DEFAULT_PLATFORM_URL.into(), token: String::new() }
+    }
 }
 
 /// Виджет расхода на рабочем столе.

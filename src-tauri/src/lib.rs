@@ -33,7 +33,9 @@ mod shots;
 mod learning;
 mod alarms;
 mod mcp;
+mod module_kit;
 mod modules;
+mod platform;
 mod plugins;
 mod review;
 mod usage;
@@ -348,7 +350,19 @@ pub fn run() {
             #[cfg(desktop)]
             commands::plugins_remove,
             #[cfg(desktop)]
+            commands::plugins_secrets,
+            #[cfg(desktop)]
+            commands::plugins_save_secrets,
+            #[cfg(desktop)]
+            commands::plugins_recheck,
+            #[cfg(desktop)]
             commands::plugins_library,
+            #[cfg(desktop)]
+            commands::platform_settings,
+            #[cfg(desktop)]
+            commands::save_platform_settings,
+            #[cfg(desktop)]
+            commands::open_platform,
             #[cfg(desktop)]
             commands::usage_summary,
             #[cfg(desktop)]

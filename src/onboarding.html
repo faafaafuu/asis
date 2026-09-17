@@ -432,6 +432,25 @@
         <input class="ob__underline" data-el="foodEndpoint" type="text" spellcheck="false" />
       </div>
 
+      <!-- Площадка модулей: откуда ставить модули и куда публиковать свои. -->
+      <div class="ob__block" data-el="platformBlock" id="platform">
+        <h2 class="ob__subtitle">Площадка модулей</h2>
+        <p class="ob__lead">
+          Библиотека готовых модулей NOAH. Чтобы публиковать свои модули, войдите на площадку,
+          создайте ключ в кабинете и вставьте его сюда.
+        </p>
+        <span class="ob__label">Адрес площадки</span>
+        <input class="ob__underline" data-el="platformUrl" type="url" spellcheck="false" />
+        <span class="ob__label">Ключ площадки</span>
+        <input class="ob__underline" data-el="platformToken" type="password" autocomplete="off"
+               spellcheck="false" placeholder="noah_…" />
+        <div class="ob__row">
+          <button class="ob__btn ob__btn--primary" data-el="platformSave" type="button">Проверить и сохранить</button>
+          <button class="ob__btn" data-el="platformOpen" type="button">Открыть площадку</button>
+          <span class="ob__status" data-el="platformStatus"></span>
+        </div>
+      </div>
+
       <!-- Уведомления в Telegram: сюда приходят оповещения о ценах из окна «Активы». -->
       <div class="ob__block" data-el="telegramBlock" id="telegram">
         <h2 class="ob__subtitle">Уведомления в Telegram</h2>

@@ -759,7 +759,25 @@ function moduleCard(module) {
     open.addEventListener("click", () => api?.invoke("open_module", { id: module.id }).catch(() => {}));
     actions.append(open);
   }
+  if (module.custom && module.secrets) {
+    const keys = document.createElement("button");
+    keys.type = "button";
+    keys.className = "ob__btn ob__btn--primary mod__btn";
+    keys.textContent = "Ключи";
+    keys.addEventListener("click", () => toggleKeys(card, module));
+    actions.append(keys);
+  }
   if (module.custom) {
+    const check = document.createElement("button");
+    check.type = "button";
+    check.className = "ob__btn ob__btn--quiet mod__btn";
+    check.textContent = "Проверить";
+    check.addEventListener("click", async () => {
+      check.disabled = true;
+      await api?.invoke("plugins_recheck", { id: module.id }).catch(() => {});
+      loadModules();
+    });
+    actions.append(check);
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "ob__btn ob__btn--quiet mod__btn";
@@ -784,16 +802,85 @@ function moduleCard(module) {
   return card;
 }
 
+/**
+ * Ключи своего модуля — прямо в плитке. Значения сюда не приходят: поле
+ * показывает только, введён ли ключ; пустое поле при сохранении ключ не трогает.
+ */
+async function toggleKeys(card, module) {
+  const open = card.querySelector(".mod__keys");
+  if (open) {
+    open.remove();
+    return;
+  }
+  let fields = [];
+  try {
+    fields = await api.invoke("plugins_secrets", { id: module.id });
+  } catch (err) {
+    return;
+  }
+  const form = document.createElement("form");
+  form.className = "mod__keys";
+  const inputs = {};
+  for (const field of fields) {
+    const label = document.createElement("span");
+    label.className = "ob__label";
+    label.textContent = field.optional ? `${field.title} (необязательно)` : field.title;
+    const input = document.createElement("input");
+    input.className = "ob__underline";
+    input.type = "password";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.placeholder = field.set ? "сохранён — оставьте пустым, чтобы не менять" : "вставьте ключ";
+    const hint = document.createElement("p");
+    hint.className = "mod__hint";
+    hint.textContent = field.hint;
+    inputs[field.name] = input;
+    form.append(label, input, hint);
+  }
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.className = "ob__btn ob__btn--primary mod__btn";
+  save.textContent = "Сохранить";
+  const note = document.createElement("p");
+  note.className = "mod__hint";
+  form.append(save, note);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const values = Object.fromEntries(Object.entries(inputs).map(([name, input]) => [name, input.value]));
+    save.disabled = true;
+    try {
+      await api.invoke("plugins_save_secrets", { id: module.id, values });
+      form.remove();
+      loadModules();
+    } catch (err) {
+      note.textContent = String(err);
+      save.disabled = false;
+    }
+  });
+  card.append(form);
+  Object.values(inputs)[0]?.focus();
+}
+
+/** Пока модуль проверяется или запускается — обновлять плитки сами. */
+let modulesTimer = 0;
+const BUSY = /проверяется|запускается/;
+
 /** Установленные модули — по последнему ответу; библиотека сверяется с ними. */
 let knownModules = [];
 
 async function loadModules() {
   if (!api) return;
   try {
+    // Открытую форму ключей не сбрасываем: человек, может быть, печатает.
+    if (ui.modules.querySelector(".mod__keys")) return;
     const modules = await api.invoke("modules_overview");
     knownModules = modules;
     // «Свой модуль» — последней плиткой той же сетки.
     ui.modules.replaceChildren(...modules.map(moduleCard), ui.moduleAdd);
+    clearTimeout(modulesTimer);
+    if (modules.some((module) => module.custom && BUSY.test(module.status)) && !ui.modules.closest("[hidden]")) {
+      modulesTimer = setTimeout(loadModules, 2000);
+    }
   } catch {
     /* окно открыто вне приложения */
   }
@@ -1759,3 +1846,40 @@ loadView().then(() => applyPlatform()).then(() => {
   loadTrigger();
   refreshCapture();
 });
+
+/* ── Площадка модулей ────────────────────────────────────────────────────── */
+
+async function loadPlatform() {
+  if (!api || !ui.platformUrl) return;
+  try {
+    const settings = await api.invoke("platform_settings");
+    ui.platformUrl.value = settings.url;
+    ui.platformToken.value = "";
+    ui.platformToken.placeholder = settings.hasToken ? "ключ сохранён — вставьте новый, чтобы заменить" : "noah_…";
+  } catch {
+    /* окно открыто вне приложения */
+  }
+}
+
+ui.platformSave?.addEventListener("click", async () => {
+  if (!api) return;
+  ui.platformSave.disabled = true;
+  ui.platformStatus.textContent = "Проверяю…";
+  try {
+    ui.platformStatus.textContent = await api.invoke("save_platform_settings", {
+      settings: { url: ui.platformUrl.value, token: ui.platformToken.value, hasToken: false },
+    });
+    await loadPlatform();
+  } catch (err) {
+    ui.platformStatus.textContent = String(err);
+  } finally {
+    ui.platformSave.disabled = false;
+  }
+});
+
+ui.platformOpen?.addEventListener("click", () => {
+  api?.invoke("open_platform").catch((err) => (ui.platformStatus.textContent = String(err)));
+});
+
+loadPlatform();
+

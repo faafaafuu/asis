@@ -24,6 +24,8 @@ pub struct ModuleCard {
     pub window: bool,
     /// Свой модуль — его можно удалить.
     pub custom: bool,
+    /// Модулю нужны ключи — у плитки кнопка «Ключи».
+    pub secrets: bool,
 }
 
 fn builtin(id: &str, title: &str, icon: &str, about: &str, status: String, voice: &str, window: bool) -> ModuleCard {
@@ -36,6 +38,7 @@ fn builtin(id: &str, title: &str, icon: &str, about: &str, status: String, voice
         voice: voice.into(),
         window,
         custom: false,
+        secrets: false,
     }
 }
 
@@ -139,6 +142,7 @@ pub fn overview(app: &AppHandle) -> Vec<ModuleCard> {
     ];
     cards.extend(crate::plugins::installed(app).into_iter().map(|manifest| ModuleCard {
         status: crate::plugins::status(&manifest.id),
+        secrets: !manifest.secrets.is_empty(),
         id: manifest.id,
         title: manifest.title,
         icon: if manifest.icon.is_empty() { "✦".into() } else { manifest.icon },
