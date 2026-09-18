@@ -1,11 +1,10 @@
 //! Обучение: курсы из тем, в теме — урок, задачи и мини-экзамен, в конце
 //! курса — большой экзамен.
 //!
-//! Материал курса написан заранее и лежит в программе (`courses/`): своя
-//! модель на 7 миллиардов параметров в предметах вроде DevOps ошибается, и
-//! учить по её пересказу нельзя. Модель здесь только проверяет открытые
-//! ответы — сверяет их с ключевыми пунктами эталона. Вопросы с вариантами
-//! проверяются без неё.
+//! Курсы собирает нейросеть человека через MCP (`course_format`,
+//! `create_course`, `add_topic`) — заранее, целиком, с эталонами ответов; своя
+//! маленькая модель здесь только проверяет открытые ответы по ключевым пунктам
+//! эталона. Вопросы с вариантами проверяются без неё.
 //!
 //! Прогресс — в `learning.json` рядом с настройками: что прочитано, лучшие
 //! баллы задач и экзаменов, вопросы, на которых ошибся, — их можно
@@ -19,23 +18,11 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 /// Встроенные курсы: описание курса и файлы тем по порядку.
-const BUILT_IN: &[(&str, &[&str])] = &[(
-    include_str!("../courses/devops/course.json"),
-    &[
-        include_str!("../courses/devops/linux.json"),
-        include_str!("../courses/devops/network.json"),
-        include_str!("../courses/devops/git.json"),
-        include_str!("../courses/devops/bash.json"),
-        include_str!("../courses/devops/docker.json"),
-        include_str!("../courses/devops/kubernetes.json"),
-        include_str!("../courses/devops/cicd.json"),
-        include_str!("../courses/devops/iac.json"),
-        include_str!("../courses/devops/cloud.json"),
-        include_str!("../courses/devops/monitoring.json"),
-        include_str!("../courses/devops/security.json"),
-        include_str!("../courses/devops/sre.json"),
-    ],
-)];
+///
+/// По умолчанию курсов нет: обучение наполняет сам человек — своя нейросеть
+/// собирает курс по его теме через MCP (`course_format`, `create_course`) и
+/// кладёт его в папку `courses` рядом с прогрессом.
+const BUILT_IN: &[(&str, &[&str])] = &[];
 
 /// Проходной балл мини-экзамена и финального экзамена, в процентах.
 pub const TOPIC_PASS: u32 = 70;
@@ -972,6 +959,10 @@ const QUIZ_FORGET: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// Курс и тема по сказанному: «докер», «девопс», «кубер».
 pub fn find(said: &str) -> (Option<Course>, Option<Topic>) {
+    find_in(&courses(), said)
+}
+
+fn find_in(all: &[Course], said: &str) -> (Option<Course>, Option<Topic>) {
     let lower = said.to_lowercase().replace('ё', "е");
     let matches = |title: &str, aliases: &[String]| {
         let title = title.to_lowercase().replace('ё', "е");
@@ -981,8 +972,7 @@ pub fn find(said: &str) -> (Option<Course>, Option<Topic>) {
                 !alias.is_empty() && lower.contains(&alias)
             })
     };
-    let all = courses();
-    for course in &all {
+    for course in all {
         if let Some(topic) = course.topics.iter().find(|t| matches(&t.title, &t.aliases)) {
             return (Some(course.clone()), Some(topic.clone()));
         }
@@ -1116,7 +1106,7 @@ pub async fn voice(app: &AppHandle, action: &str, about: &str) -> String {
         _ => (course, topic),
     };
     let Some(course) = course else {
-        return "Курсов пока нет.".into();
+        return "Курсов пока нет. Попросите свою нейросеть собрать курс для Ноа — он появится в окне «Обучение».".into();
     };
     match action.trim() {
         "quiz" => start_quiz(&course, topic.as_ref()),
@@ -1367,40 +1357,6 @@ mod tests {
     }
 
     #[test]
-    fn built_in_courses_are_whole() {
-        let courses = builtin();
-        assert!(!courses.is_empty());
-        for course in courses {
-            assert_eq!(course.topics.len(), BUILT_IN[0].1.len(), "все темы разобрались");
-            let mut ids = std::collections::HashSet::new();
-            let all = course
-                .topics
-                .iter()
-                .flat_map(|t| t.tasks.iter().chain(&t.exam))
-                .chain(&course.final_exam);
-            for q in all {
-                assert!(ids.insert(q.id.clone()), "повтор номера {}", q.id);
-                match q.kind.as_str() {
-                    "choice" => {
-                        assert!(q.options.len() >= 2, "{}: мало вариантов", q.id);
-                        let answer = q.answer.expect("у выбора есть ответ");
-                        assert!(answer < q.options.len(), "{}: ответ вне вариантов", q.id);
-                    }
-                    "open" => {
-                        assert!(!q.points.is_empty(), "{}: нет пунктов", q.id);
-                        assert!(!q.reference.is_empty(), "{}: нет эталона", q.id);
-                    }
-                    other => panic!("{}: неизвестный вид {other}", q.id),
-                }
-            }
-            for topic in &course.topics {
-                assert!(topic.lesson.len() > 500, "{}: урок пустой", topic.id);
-                assert!(!topic.exam.is_empty() && !topic.tasks.is_empty(), "{}", topic.id);
-            }
-        }
-    }
-
-    #[test]
     fn a_choice_is_heard() {
         let options: Vec<String> = ["TCP", "UDP", "ICMP"].iter().map(|s| s.to_string()).collect();
         assert_eq!(choice_of("второй", &options), Some(1));
@@ -1429,7 +1385,12 @@ mod tests {
 
     #[test]
     fn a_topic_is_found_by_name() {
-        let (course, topic) = find("погоняй меня по докеру");
+        let course: Course = serde_json::from_str(
+            r#"{"id":"ops","title":"Ops","description":"","topics":[{"id":"docker","title":"Docker",
+               "aliases":["докер"],"summary":"","lesson":"","tasks":[],"exam":[]}]}"#,
+        )
+        .expect("разбор");
+        let (course, topic) = find_in(&[course], "погоняй меня по докеру");
         assert!(course.is_some());
         assert_eq!(topic.map(|t| t.id).as_deref(), Some("docker"));
     }

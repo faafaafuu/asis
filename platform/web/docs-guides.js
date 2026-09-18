@@ -399,6 +399,30 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
     },
   },
   {
+    slug: "courses",
+    section: "howto",
+    ru: {
+      title: "Свой курс обучения",
+      lead: "Окно «Обучение» пустое, пока вы не соберёте курс. Собирает его ваша нейросеть.",
+      body: `
+1. [Подключите нейросеть](#/docs/connect-ai) к NOAH.
+2. Попросите: «Собери мне курс NOAH по английскому для путешествий: пять тем, в каждой урок, задачи и мини-экзамен».
+3. Нейросеть прочитает формат (\`course_format\`) и отправит курс (\`create_course\`). NOAH проверит его и покажет в окне «Обучение».
+
+Дальше голосом: «погоняй меня по курсу», «как мой прогресс». Тему можно добавить позже: «добавь в курс тему про аэропорт» (\`add_topic\`).
+`,
+    },
+    en: {
+      title: "Your own course",
+      lead: "The Learning window is empty until you build a course. Your AI builds it.",
+      body: `
+1. [Connect your AI](#/docs/connect-ai) to NOAH.
+2. Ask: “Build me a NOAH course on travel English: five topics, each with a lesson, tasks and a quiz”.
+3. The AI reads the format (\`course_format\`) and sends the course (\`create_course\`). NOAH checks it and shows it in the Learning window.
+`,
+    },
+  },
+  {
     slug: "telegram",
     section: "howto",
     ru: {

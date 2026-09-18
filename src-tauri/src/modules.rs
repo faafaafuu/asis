@@ -88,7 +88,7 @@ fn watchlist_status() -> String {
 fn learning_status() -> String {
     let courses = crate::learning::overview();
     match courses.as_slice() {
-        [] => "курсов нет".into(),
+        [] => "курсов нет — соберите свой через нейросеть".into(),
         [one] => format!("{} — {}%", one.title, one.percent),
         [first, ..] => format!(
             "{}, {} — {}%",
