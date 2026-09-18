@@ -22,7 +22,48 @@ pub fn settings() -> (String, String) {
     let url = config["platform"]["url"].as_str().unwrap_or_default().trim().trim_end_matches('/').to_string();
     let token = crate::secret::reveal(config["platform"]["token"].as_str().unwrap_or_default());
     let url = if url.is_empty() || url == crate::config::OLD_PLATFORM_URL { DEFAULT_PLATFORM_URL.to_string() } else { url };
-    (url, token)
+    (reachable(url), token)
+}
+
+/// Отвечает ли площадка по домену — и когда это проверяли.
+static DOMAIN_OK: std::sync::Mutex<Option<(bool, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+/// Адрес, по которому площадка сейчас доступна.
+///
+/// Часть провайдеров режет соединения с именем noahlab.ru — сервер тот же, а
+/// по голому IP он отвечает. Поэтому домен проверяется раз в десять минут, и
+/// пока он не отвечает (или ещё не проверен), Ноа ходит по IP.
+fn reachable(url: String) -> String {
+    if url != DEFAULT_PLATFORM_URL {
+        return url;
+    }
+    let known = *DOMAIN_OK.lock().unwrap_or_else(|err| err.into_inner());
+    let fresh = known.filter(|(_, at)| at.elapsed() < Duration::from_secs(600));
+    if fresh.is_none() {
+        // Проверка — в своём потоке: ответ «по какому адресу» нужен сразу.
+        *DOMAIN_OK.lock().unwrap_or_else(|err| err.into_inner()) =
+            Some((known.is_some_and(|(ok, _)| ok), std::time::Instant::now()));
+        let _ = std::thread::Builder::new().name("sufler-platform-probe".into()).spawn(|| {
+            let ok = tauri::async_runtime::block_on(async {
+                let Ok(client) = crate::net::client_builder().timeout(Duration::from_secs(6)).build() else {
+                    return false;
+                };
+                client
+                    .get(format!("{DEFAULT_PLATFORM_URL}/api/health"))
+                    .send()
+                    .await
+                    .is_ok_and(|response| response.status().is_success())
+            });
+            if !ok {
+                log::info!("площадка по домену не отвечает — хожу по IP");
+            }
+            *DOMAIN_OK.lock().unwrap_or_else(|err| err.into_inner()) = Some((ok, std::time::Instant::now()));
+        });
+    }
+    match fresh.or(known) {
+        Some((true, _)) => url,
+        _ => crate::config::OLD_PLATFORM_URL.to_string(),
+    }
 }
 
 fn client() -> Result<reqwest::Client, String> {

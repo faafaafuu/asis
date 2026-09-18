@@ -1075,6 +1075,8 @@ async function loadSpeech() {
     ui.wakeWord.checked = Boolean(voice.wakeWord);
     ui.wakeName.value = voice.wakeName ?? "";
     ui.wakeName.placeholder = (await api.invoke("default_wake_name")) ?? "Ноа";
+    // Имя в шпаргалке на вкладке «Помощь» — то, на которое помощник отзывается.
+    if (ui.helpName) ui.helpName.textContent = ui.wakeName.value || ui.wakeName.placeholder;
     updateMicHint();
   } catch {
     /* окно открыто вне приложения */
@@ -1100,6 +1102,7 @@ ui.speechDevice.addEventListener("change", saveVoice);
 ui.wakeWord.addEventListener("change", saveVoice);
 ui.wakeName.addEventListener("change", async () => {
   await saveVoice();
+  if (ui.helpName) ui.helpName.textContent = ui.wakeName.value.trim() || ui.wakeName.placeholder;
   loadChips();
 });
 

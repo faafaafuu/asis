@@ -38,6 +38,7 @@ const T = {
     brains: ["Любой мозг", "Своя модель — бесплатно и офлайн, облачная — по ключу. Меняются одной фразой: «переключись на мистраль»."],
     market: ["Библиотека и продажа", "Готовые модули ставятся одной кнопкой. Свои — публикуете и делитесь; платные модули — скоро."],
     local: ["Локально и приватно", "Голос, файлы и ключи остаются на компьютере. Ключи модулей шифруются, нейросеть их не видит."],
+    localPills: ["голос — на ПК", "ключи шифруются", "своя модель офлайн"],
     libAll: "Все модули →",
     whoKicker: "КОМУ",
     whoTitle: "Каждому, кто хочет, чтобы ИИ делал, а не только говорил",
@@ -99,6 +100,7 @@ const T = {
     brains: ["Any brain", "A local model — free and offline, a cloud one — by key. Switch with one phrase: «switch to mistral»."],
     market: ["Library and sales", "Ready modules install in one click. Publish and share your own; paid modules are coming."],
     local: ["Local and private", "Voice, files and keys stay on your computer. Module keys are encrypted; your AI never sees them."],
+    localPills: ["voice stays local", "keys encrypted", "offline model"],
     libAll: "All modules →",
     whoKicker: "FOR WHOM",
     whoTitle: "For anyone who wants AI to act, not just talk",
@@ -400,7 +402,10 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
     h("article", { class: `bento__cell ${cls}`, vars: { "--accent": accent } }, h("h3", {}, title), h("p", {}, body), ...extra);
   const pills = (list, on = 0) => h("div", { class: "pills" }, list.map((p, at) => h("span", { class: `pill${at === on ? " is-on" : ""}` }, p)));
 
-  const topModules = modules.slice(0, 4).map((m) =>
+  // Сначала — то, чем NOAH умеет сам; дальше — что есть в библиотеке.
+  const FIRST = ["fact-check", "pc-doctor", "tasks", "profile-memory", "telegram", "watchlist"];
+  const picked = [...FIRST.map((id) => modules.find((m) => m.id === id)).filter(Boolean), ...modules.filter((m) => !FIRST.includes(m.id))];
+  const topModules = picked.slice(0, 5).map((m) =>
     h("a", { class: "bento__mod", href: `#/module/${m.id}` }, h("span", { class: "bento__icon" }, m.icon || "✦"), h("span", {}, m.title), h("span", { class: "mono" }, "→")),
   );
 
@@ -416,8 +421,8 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
       cell("bento__cell--dark", "#5F8C4C", tr.check, h("pre", { class: "bento__report" }, tr.report.map((line) => `✓ ${line}`).join("\n"))),
       cell("", "#2B5BC4", tr.multi, pills(tr.multiPills)),
       cell("", "#D4564A", tr.brains, pills(["qwen 9b", "mistral", "claude", "deepseek"])),
-      cell("", "#5F8C4C", tr.local, h("div", { class: "bento__lock" }, icon("memory"))),
-      cell("bento__cell--wide", "#2B5BC4", tr.market, h("div", { class: "bento__mods" }, topModules, h("a", { class: "bento__all", href: "#/library" }, tr.libAll))),
+      cell("", "#5F8C4C", tr.local, pills(tr.localPills, -1)),
+      cell("bento__cell--full", "#2B5BC4", tr.market, h("div", { class: "bento__mods" }, topModules, h("a", { class: "bento__all", href: "#/library" }, tr.libAll))),
     ),
   );
 

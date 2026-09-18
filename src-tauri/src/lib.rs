@@ -1191,9 +1191,12 @@ fn wake_split(text: &str, name: &str) -> Option<String> {
 /// иначе однобуквенный допуск цепляет половину обычной речи.
 #[cfg(desktop)]
 fn name_tolerance(name: &str) -> usize {
+    // Трёхбуквенному имени одна ошибка — это уже обычные слова: под «чел»
+    // подходили «шёл», «дел», «чек», и помощник просыпался от разговора в
+    // комнате. Короткое имя — только точное совпадение.
     match name.chars().count() {
-        0..=2 => 0,
-        3..=5 => 1,
+        0..=3 => 0,
+        4..=5 => 1,
         _ => 2,
     }
 }
@@ -1910,9 +1913,15 @@ fn speak_with_hud(app: &tauri::AppHandle, text: String, wait: bool) {
     let handle = app.clone();
     let speaking = move || {
         let config = handle.state::<AppState>().config().voice.clone();
-        overlay::show_hud(&handle, "speaking");
+        // «Говорю» — когда звук уже пошёл. Пока голос синтезируется (у Silero
+        // это секунда-другая), индикатор остаётся на «думаю»: раньше он
+        // показывал речь, а в колонках была тишина.
+        overlay::show_hud(&handle, "thinking");
         if let Err(err) = tauri::async_runtime::block_on(voice::speak(&handle, &config, &text)) {
             log::warn!("сказать не вышло: {err}");
+        }
+        if voice::speaking() {
+            overlay::show_hud(&handle, "speaking");
         }
         // Индикатор относится к речи, а не к окну, которое человек читает
         // дальше, — убираем его, когда речь отзвучит.

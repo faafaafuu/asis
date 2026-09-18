@@ -1030,7 +1030,16 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             // Без товаров заказывать нечего, а молчаливый пустой заказ выглядел
             // бы как поломка. Просили купить — переспрашиваем, что именно;
             // иначе пусть ответит как на обычную фразу.
-            if items.is_empty() && bought(said) {
+            if items.is_empty() && declined(said) {
+                // «Ничего не надо заказывать» — это отказ, а не заказ: молчим.
+                log::info!("«{said}» — от заказа отказались");
+                Intent::Say(String::new())
+            } else if items.is_empty() && bought(said) && ambient() {
+                // Посреди разговора голое «закажи» — чаще ослышка: переспрашивать
+                // «что заказать?» в ответ на шум в комнате незачем.
+                log::info!("«{said}» — заказ без товаров посреди разговора, пропускаю");
+                Intent::Say(String::new())
+            } else if items.is_empty() && bought(said) {
                 Intent::Say("Что заказать? Назовите продукты — например: яйца, хлеб, молоко.".into())
             } else if items.is_empty() {
                 Intent::Chat
@@ -2241,6 +2250,14 @@ fn count_of(words: &[&str]) -> Option<(f64, usize)> {
 fn bought(said: &str) -> bool {
     let lower = said.to_lowercase();
     ["закаж", "купи", "купить", "заказ", "привез", "достав", "корзин"]
+        .iter()
+        .any(|stem| lower.contains(stem))
+}
+
+/// Отказ: «не надо», «ничего не заказывай», «отмена».
+fn declined(said: &str) -> bool {
+    let lower = said.to_lowercase().replace('ё', "е");
+    ["не надо", "не нужно", "ничего не", "не заказ", "не покупай", "отмена", "отмени", "передумал"]
         .iter()
         .any(|stem| lower.contains(stem))
 }

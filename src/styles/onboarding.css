@@ -844,3 +844,41 @@ body {
 .mod--add .mod__icon {
   border-style: dashed;
 }
+
+
+/* ── Шпаргалка по управлению (вкладка «Помощь») ─────────────────────────── */
+
+.cheat__grid {
+  display: grid;
+  gap: 22px;
+}
+
+.cheat__list {
+  display: grid;
+  grid-template-columns: minmax(0, 42%) minmax(0, 1fr);
+  gap: 8px 14px;
+  margin: 8px 0 0;
+  align-items: baseline;
+}
+
+.cheat__list dt {
+  font-weight: 600;
+}
+
+.cheat__list dd {
+  margin: 0;
+  opacity: 0.8;
+}
+
+.cheat kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.85em;
+  text-align: center;
+  opacity: 0.9;
+}

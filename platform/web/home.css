@@ -311,6 +311,16 @@ body.is-home .page {
 
 .bento__go {
   align-self: flex-start;
+  margin-top: auto;
+}
+
+/* В широкой карточке метки идут сразу за текстом, кнопка — внизу. */
+.bento__cell--wide .pills {
+  margin-top: 4px;
+}
+
+.bento__cell--full {
+  grid-column: 1 / -1;
 }
 
 .how__step {

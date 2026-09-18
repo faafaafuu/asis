@@ -223,7 +223,7 @@ const packCache = new Map();
  */
 function packed(req, body, key) {
   const accepts = String(req.headers["accept-encoding"] ?? "");
-  const encoding = /br/.test(accepts) ? "br" : /gzip/.test(accepts) ? "gzip" : "";
+  const encoding = /(^|[\s,])br(;|,|$)/.test(accepts) ? "br" : /gzip/.test(accepts) ? "gzip" : "";
   if (!encoding || body.length < 1024) return { body, headers: {} };
   const cacheKey = key && `${encoding}:${key}`;
   let out = cacheKey && packCache.get(cacheKey);
@@ -459,6 +459,40 @@ route("DELETE", /^\/api\/tokens\/(\d+)$/, ({ user, match }) => {
   return { ok: true };
 });
 
+/* ── Постоянная ссылка MCP ───────────────────────────────────────────────── */
+
+// Одна ссылка на аккаунт, которую видно всегда. Раньше страница «Подключить
+// ИИ» каждый раз выпускала новый ключ (прежний показать нельзя — хранится
+// хеш), и нейросеть приходилось переподключать. Ключ этой ссылки хранится
+// как есть: его видит только сам владелец, а сменить можно одной кнопкой.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS mcp_links (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    token_id INTEGER NOT NULL REFERENCES tokens(id) ON DELETE CASCADE,
+    key TEXT NOT NULL
+  );
+`);
+
+function issueMcpKey(userId) {
+  const key = `noah_${randomBytes(24).toString("base64url")}`;
+  const info = db.prepare("INSERT INTO tokens (user_id, label, hash) VALUES (?, ?, ?)").run(userId, "Ссылка MCP", sha(key));
+  db.prepare("INSERT OR REPLACE INTO mcp_links (user_id, token_id, key) VALUES (?, ?, ?)").run(userId, Number(info.lastInsertRowid), key);
+  return key;
+}
+
+route("GET", /^\/api\/my\/mcp$/, ({ user }) => {
+  if (!user) throw new Fail(401, "Войдите.");
+  const row = db.prepare("SELECT key FROM mcp_links WHERE user_id = ?").get(user.id);
+  return { key: row?.key ?? issueMcpKey(user.id) };
+});
+
+route("POST", /^\/api\/my\/mcp\/rotate$/, ({ user }) => {
+  if (!user) throw new Fail(401, "Войдите.");
+  const row = db.prepare("SELECT token_id FROM mcp_links WHERE user_id = ?").get(user.id);
+  if (row) db.prepare("DELETE FROM tokens WHERE id = ? AND user_id = ?").run(row.token_id, user.id);
+  return { key: issueMcpKey(user.id) };
+});
+
 /** Публикация из Ноа: модуль уже прошёл живую проверку у автора. */
 /** Публикует модуль от имени автора. Общий путь для Ноа и для MCP по ссылке. */
 function publishModule(user, { manifest, files, tools, description, category }) {
@@ -591,14 +625,6 @@ const server = http.createServer(async (req, res) => {
   try {
     // MCP по ссылке: нейросеть пользователя подключается сюда адресом с ключом.
     if (url.pathname === "/mcp") return await mcpHandler(req, res, url);
-    // Страницы сайта, открытые по голому адресу, — на домен с HTTPS. API, MCP и
-    // скачивание по адресу работают как раньше: им пользуется приложение.
-    const site = process.env.NOAH_PUBLIC_URL;
-    if (site && !local && /^[\d.]+(:\d+)?$/.test(String(req.headers.host ?? "")) && req.method === "GET" &&
-        !/^\/(api|mcp|auth|download)(\/|$)/.test(url.pathname)) {
-      res.writeHead(301, { Location: `${site.replace(/\/$/, "")}${url.pathname}${url.search}` });
-      return res.end();
-    }
     if (url.pathname === "/download") {
       res.writeHead(302, { Location: await latestInstaller(), "Cache-Control": "no-store" });
       return res.end();
