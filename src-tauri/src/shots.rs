@@ -173,7 +173,7 @@ fn grab(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>, String> {
 }
 
 /// BGRA в PNG — встроенным кодировщиком Windows.
-fn png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+pub fn png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapEncoder, BitmapPixelFormat};
     use windows::Storage::Streams::{DataReader, InMemoryRandomAccessStream};
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};

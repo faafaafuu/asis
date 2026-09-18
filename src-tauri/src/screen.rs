@@ -238,6 +238,18 @@ fn clipboard_image() -> Option<Image> {
     }
 }
 
+/// Картинка из буфера обмена в PNG — чтобы отправить её в Telegram.
+#[cfg(target_os = "windows")]
+pub fn clipboard_png() -> Option<Vec<u8>> {
+    let image = clipboard_image()?;
+    crate::shots::png(&image.bgra, image.width, image.height).ok()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn clipboard_png() -> Option<Vec<u8>> {
+    None
+}
+
 #[cfg(target_os = "windows")]
 fn clipboard_text() -> Option<String> {
     use windows::Win32::Foundation::HGLOBAL;

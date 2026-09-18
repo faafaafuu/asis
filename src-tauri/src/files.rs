@@ -141,6 +141,7 @@ pub fn find(query: &str, kind: Kind) -> String {
         }
         [single] => {
             let _ = select_in_explorer(single);
+            crate::planner::offer_file(single.clone());
             format!(
                 "Нашёл: {} — открыл папку с ним.",
                 single.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default()

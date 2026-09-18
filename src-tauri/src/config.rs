@@ -24,6 +24,8 @@ pub struct Config {
     pub telegram: TelegramConfig,
     pub widget: WidgetConfig,
     pub platform: PlatformConfig,
+    /// Модели, на которых Ноа уже работала, — между ними переключаются голосом.
+    pub brains: Vec<crate::brains::Brain>,
 }
 
 /// Адрес площадки модулей по умолчанию. Сменится на домен, когда он появится.
@@ -548,6 +550,10 @@ impl Config {
         config.ai.key_stored_plain =
             !config.ai.api_key.is_empty() && !crate::secret::is_protected(&config.ai.api_key);
         config.ai.api_key = crate::secret::reveal(&config.ai.api_key);
+        for brain in &mut config.brains {
+            brain.api_key = crate::secret::reveal(&brain.api_key);
+        }
+        crate::brains::remember(&mut config);
 
         config.apply_env();
         config.normalize();

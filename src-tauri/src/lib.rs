@@ -4,6 +4,7 @@
 //! где точкой входа становится `run()` через `tauri::mobile_entry_point`.
 
 mod ai_client;
+mod brains;
 mod calendar;
 mod commands;
 mod config;
@@ -2192,6 +2193,7 @@ pub(crate) fn wake_local_model(app: &tauri::AppHandle) {
                 {
                     let mut config = state.config_mut();
                     config.ai.model = chosen.to_string();
+                    crate::brains::remember(&mut config);
                 }
                 if let Err(err) = crate::commands::persist(&app, &state) {
                     log::warn!("выбранная модель не сохранилась: {err}");

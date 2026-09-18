@@ -137,6 +137,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(reply) = confirm_send(said) {
         return Some(reply);
     }
+    // «Какая модель сейчас», «переключись на мистраль» — без модели: её и меняем.
+    if let Some(reply) = crate::brains::voice(app, said).await {
+        return Some(reply);
+    }
     // «Отвечай без окна», «показывай окно» — переключатель, а не вопрос.
     if let Some(show) = window_request(said) {
         return Some(crate::set_show_window(app, show));
@@ -157,6 +161,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     }
     // «Включи музыку» без уточнений — своя станция из настроек.
     if let Some(reply) = music_request(app, said) {
+        return Some(reply);
+    }
+    // «Пришли последний скриншот» — уже сделанный, а не новый.
+    if let Some(reply) = recent_image_request(app, said) {
         return Some(reply);
     }
     // «Сделай скриншот», «скинь скрин хрома».
@@ -1788,6 +1796,94 @@ pub fn take_photo() -> Option<Vec<u8>> {
     PHOTO.lock().unwrap_or_else(|err| err.into_inner()).take()
 }
 
+/// Файл, найденный по последней просьбе. Попросили из Telegram — он уходит
+/// туда документом.
+static FILE: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+pub fn offer_file(path: std::path::PathBuf) {
+    *FILE.lock().unwrap_or_else(|err| err.into_inner()) = Some(path);
+}
+
+pub fn take_file() -> Option<std::path::PathBuf> {
+    FILE.lock().unwrap_or_else(|err| err.into_inner()).take()
+}
+
+/// «Пришли последний скриншот», «скинь снимок из буфера»: не снимать заново,
+/// а отдать уже сделанное — из буфера обмена или самый свежий снимок в папках
+/// снимков экрана.
+fn recent_image_request(app: &AppHandle, said: &str) -> Option<String> {
+    const VERBS: &[&str] = &["пришл", "скин", "отправ", "покаж", "дай", "кин", "перешл"];
+    const NOUNS: &[&str] = &["скрин", "снимк", "снимок", "изображен", "картинк", "фото"];
+    const RECENT: &[&str] = &["последн", "предыдущ", "прошл", "сделанн", "свеж", "буфер"];
+    let words = words_of(said);
+    let has = |stems: &[&str]| words.iter().any(|w| stems.iter().any(|s| w.starts_with(s)));
+    if !(has(VERBS) && has(NOUNS) && has(RECENT)) {
+        return None;
+    }
+
+    // Просили буфер — сначала он.
+    if has(&["буфер"]) {
+        if let Some(png) = crate::screen::clipboard_png() {
+            *PHOTO.lock().unwrap_or_else(|err| err.into_inner()) = Some(png);
+            return Some("Картинка из буфера обмена.".into());
+        }
+    }
+    match latest_screenshot(app) {
+        Some(path) => {
+            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    *PHOTO.lock().unwrap_or_else(|err| err.into_inner()) = Some(bytes);
+                    Some(format!("Последний снимок экрана — {name}."))
+                }
+                Err(err) => Some(format!("Нашёл {name}, но не смог прочитать: {err}")),
+            }
+        }
+        None => match crate::screen::clipboard_png() {
+            Some(png) => {
+                *PHOTO.lock().unwrap_or_else(|err| err.into_inner()) = Some(png);
+                Some("Снимков в папках нет — присылаю картинку из буфера обмена.".into())
+            }
+            None => Some("Снимков экрана не нашёл ни в папках, ни в буфере обмена.".into()),
+        },
+    }
+}
+
+/// Самый свежий снимок экрана: Windows кладёт их в «Изображения\Снимки
+/// экрана» (на диске — Screenshots, бывает и в OneDrive), Ноа — в свою папку.
+fn latest_screenshot(app: &AppHandle) -> Option<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(pictures) = app.path().picture_dir() {
+        dirs.push(pictures.join("Screenshots"));
+        dirs.push(pictures.join("Снимки экрана"));
+        dirs.push(pictures.join("Суфлёр"));
+    }
+    if let Ok(home) = std::env::var("USERPROFILE").map(std::path::PathBuf::from) {
+        let bases = [
+            home.join("Pictures"),
+            home.join("OneDrive").join("Pictures"),
+            home.join("OneDrive").join("Изображения"),
+            home.join("OneDrive").join("Картинки"),
+        ];
+        for base in bases {
+            dirs.push(base.join("Screenshots"));
+            dirs.push(base.join("Снимки экрана"));
+        }
+    }
+    if let Ok(own) = app.path().app_local_data_dir() {
+        dirs.push(own.join("снимки"));
+    }
+    dirs.iter()
+        .flat_map(|dir| std::fs::read_dir(dir).into_iter().flatten().flatten())
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            name.ends_with(".png") || name.ends_with(".jpg") || name.ends_with(".jpeg")
+        })
+        .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
+        .max_by_key(|(at, _)| *at)
+        .map(|(_, path)| path)
+}
+
 /// Что снимать: `Some(None)` — весь экран, `Some(Some(программа))` — окно
 /// программы, `None` — это не просьба о снимке.
 fn shot_target(said: &str) -> Option<Option<String>> {
@@ -2209,7 +2305,10 @@ fn asked_for(intent: &str, said: &str) -> bool {
             "ошибк", "не работает", "сломал", "проблем", "случилось", "глючит", "висит", "вылет",
             "зависа", "почему", "что это",
         ],
-        "find" => &["найди", "найти", "поищи", "где лежит", "где файл", "где мой", "где мо"],
+        "find" => &[
+            "найди", "найти", "поищи", "где лежит", "где файл", "где мой", "где мо", "пришли",
+            "скинь", "отправь", "перешли", "дай",
+        ],
         "type" => &["напиши", "напечатай", "впиши", "введи", "набери", "напечат"],
         "message" => &["напиши", "отправь", "сообщени", "скажи", "передай"],
         "send" => &["отправ", "жми", "энтер", "enter"],

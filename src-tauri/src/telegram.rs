@@ -255,13 +255,20 @@ async fn reply_to(
         return;
     }
     log::info!("Telegram: «{said}»");
-    // Снимок, оставшийся от просьбы голосом за компьютером, сюда не относится.
+    // Снимок и файл, оставшиеся от просьбы голосом за компьютером, сюда не относятся.
     let _ = crate::planner::take_photo();
+    let _ = crate::planner::take_file();
     let reply = answer(app, &said, history).await;
     log::info!("Telegram, ответ: «{reply}»");
     let sent = if let Some(photo) = crate::planner::take_photo() {
-        let file = File::new("sendPhoto", "photo", photo, "screen.png", "image/png");
+        let file = File::new("sendPhoto", "photo", photo, "screen.png".into(), "image/png");
         send_file(token, chat, file, &reply).await
+    } else if let Some(path) = crate::planner::take_file() {
+        match document(&path) {
+            Ok(file) => send_file(token, chat, file, &reply).await,
+            Err(err) => send(token, chat, &format!("{reply}
+Прислать не вышло: {err}")).await,
+        }
     } else if by_voice {
         // Спросили голосом — отвечаем голосом. Текст — подписью: голосовое
         // не всегда удобно слушать. Длинный текст в подпись не влезает и
@@ -269,7 +276,7 @@ async fn reply_to(
         match spoken(app, &reply) {
             Ok(voice) => {
                 let fits = reply.chars().count() <= 1000;
-                let file = File::new("sendVoice", "voice", voice, "voice.ogg", "audio/ogg");
+                let file = File::new("sendVoice", "voice", voice, "voice.ogg".into(), "audio/ogg");
                 let sent = send_file(token, chat, file, if fits { &reply } else { "" }).await;
                 match sent {
                     Ok(()) if !fits => send(token, chat, &reply).await,
@@ -302,7 +309,7 @@ struct File {
     method: &'static str,
     field: &'static str,
     bytes: Vec<u8>,
-    name: &'static str,
+    name: String,
     mime: &'static str,
 }
 
@@ -311,7 +318,7 @@ impl File {
         method: &'static str,
         field: &'static str,
         bytes: Vec<u8>,
-        name: &'static str,
+        name: String,
         mime: &'static str,
     ) -> Self {
         Self {
@@ -322,6 +329,22 @@ impl File {
             mime,
         }
     }
+}
+
+/// Найденный на компьютере файл — документом. Telegram у ботов принимает
+/// файлы до 50 МБ.
+fn document(path: &std::path::Path) -> Result<File, String> {
+    const LIMIT: u64 = 50 * 1024 * 1024;
+    let size = std::fs::metadata(path).map_err(|err| err.to_string())?.len();
+    if size > LIMIT {
+        return Err(format!("файл больше 50 МБ ({} МБ)", size / 1024 / 1024));
+    }
+    let bytes = std::fs::read(path).map_err(|err| err.to_string())?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".into());
+    Ok(File::new("sendDocument", "document", bytes, name, "application/octet-stream"))
 }
 
 /// Шлёт файл — фотографию или голосовое — с подписью.

@@ -24,6 +24,9 @@ pub fn persist(app: &AppHandle, state: &AppState) -> Result<(), String> {
     // от имени пользователя, а на общей машине и соседняя учётная запись.
     let mut config = state.config().clone();
     config.ai.api_key = crate::secret::protect(&config.ai.api_key);
+    for brain in &mut config.brains {
+        brain.api_key = crate::secret::protect(&brain.api_key);
+    }
 
     let json = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
     std::fs::write(path.join("config.json"), json).map_err(|err| err.to_string())
@@ -213,6 +216,7 @@ pub fn save_ai_settings(
         if !settings.api_key.is_empty() && !settings.api_key.starts_with('•') {
             config.ai.api_key = settings.api_key;
         }
+        crate::brains::remember(&mut config);
     }
 
     persist(&app, &state)?;
