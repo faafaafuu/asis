@@ -1,6 +1,6 @@
 // Тексты интерфейса площадки: английский и русский.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=36";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=37";
 
 export const T = {
   en: {
@@ -16,7 +16,7 @@ export const T = {
     statModules: "MODULES", statAuthors: "AUTHORS", statBrains: "BRAINS SUPPORTED", statInstalls: "INSTALLS",
     cat: { all: "All", free: "Free", work: "Work", home: "Home", finance: "Finance", dev: "Dev tools", health: "Health", local: "Local-only", media: "Media", other: "Other" },
     free: "free", install: "Install", installsWord: "installs", noModules: "Nothing found. Try another word or category — or build the module yourself in the Studio.",
-    backLib: "BACK TO LIBRARY", core: "noah-core", builtIn: "built into NOAH", builtInLong: "Built into NOAH — comes with the app, nothing to install separately.", builtInBtn: "DOWNLOAD NOAH", builtInTransport: "part of the core", open: "Open",
+    backLib: "BACK TO LIBRARY", core: "noah-core", builtIn: "built into NOAH", builtInLong: "Built into NOAH — comes with the app, nothing to install separately.", builtInBtn: "DOWNLOAD NOAH", builtInTransport: "part of the shell", open: "Open",
     installBtn: "INSTALL", copyAsk: "COPY REQUEST",
     toolsExposed: "TOOLS EXPOSED", noTools: "Tools are listed after the module is published from NOAH.",
     metaBrain: "BRAIN", brainAny: "any", metaTransport: "TRANSPORT", metaInstalls: "INSTALLS", metaUpdated: "UPDATED",
@@ -115,7 +115,7 @@ export const T = {
     statModules: "МОДУЛЕЙ", statAuthors: "АВТОРОВ", statBrains: "МОЗГОВ", statInstalls: "УСТАНОВОК",
     cat: { all: "Все", free: "Бесплатные", work: "Работа", home: "Дом", finance: "Финансы", dev: "Разработка", health: "Здоровье", local: "Только локально", media: "Медиа", other: "Другое" },
     free: "бесплатно", install: "Поставить", installsWord: "установок", noModules: "Ничего не нашлось. Попробуйте другое слово или раздел — или соберите модуль сами в Студии.",
-    backLib: "НАЗАД В БИБЛИОТЕКУ", core: "noah-core", builtIn: "встроен в NOAH", builtInLong: "Встроен в NOAH — ставится вместе с приложением, отдельно ставить не нужно.", builtInBtn: "СКАЧАТЬ NOAH", builtInTransport: "часть ядра", open: "Подробнее",
+    backLib: "НАЗАД В БИБЛИОТЕКУ", core: "noah-core", builtIn: "встроен в NOAH", builtInLong: "Встроен в NOAH — ставится вместе с приложением, отдельно ставить не нужно.", builtInBtn: "СКАЧАТЬ NOAH", builtInTransport: "часть оболочки", open: "Подробнее",
     installBtn: "ПОСТАВИТЬ", copyAsk: "СКОПИРОВАТЬ ЗАПРОС",
     toolsExposed: "ДОСТУПНЫЕ ИНСТРУМЕНТЫ", noTools: "Инструменты появятся, когда модуль опубликуют из NOAH.",
     metaBrain: "МОЗГ", brainAny: "любой", metaTransport: "ТРАНСПОРТ", metaInstalls: "УСТАНОВОК", metaUpdated: "ОБНОВЛЁН",

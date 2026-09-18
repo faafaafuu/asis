@@ -189,10 +189,10 @@ export const REFERENCE = [
     slug: "core",
     section: "concepts",
     ru: {
-      title: "Ядро, мозг и модули",
+      title: "Оболочка, мозг и модули",
       lead: "Как устроен NOAH и почему модули может делать каждый.",
       body: `
-**Ядро** — NOAH на вашем компьютере: слышит, говорит, видит экран, управляет программами, помнит разговор и факты о вас.
+**Оболочка** — NOAH на вашем компьютере: слышит, говорит, видит экран, управляет программами, помнит разговор и факты о вас.
 
 **Мозг** — любая нейросеть. Она понимает сказанное и решает, что сделать. Мозг можно поменять, не трогая остального.
 
@@ -202,10 +202,10 @@ export const REFERENCE = [
 `,
     },
     en: {
-      title: "Core, brain and modules",
+      title: "Shell, brain and modules",
       lead: "How NOAH is built and why anyone can make modules.",
       body: `
-**Core** — NOAH on your computer: hears, speaks, sees the screen, drives apps, remembers.
+**Shell** — NOAH on your computer: hears, speaks, sees the screen, drives apps, remembers.
 
 **Brain** — any AI model. Swap it without touching anything else.
 
