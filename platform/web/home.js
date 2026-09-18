@@ -1,13 +1,13 @@
 // Главная страница NOAH: что это, кому, как работает. Живая демонстрация —
 // тот же индикатор, что в приложении, и реплики, которые печатаются сами.
 
-const RELEASES = "https://github.com/faafaafuu/asis/releases/latest";
+const RELEASES = "/download";
 
 const T = {
   ru: {
     kicker: "ЯДРО · МУЛЬТИМОДАЛЬНАЯ ОБОЛОЧКА ДЛЯ ИИ",
-    title: ["Ядро для ИИ.", "Модули — словами.", "Без кода."],
-    lead: "NOAH — оболочка на вашем компьютере. Подключаете любую нейросеть — это мозг. Руки собираете сами: опишите задачу словами, ваша нейросеть напишет модуль, NOAH проверит его и запустит. Получилось полезное — выложите в библиотеку для всех или продавайте.",
+    title: ["Ядро для ИИ.", "Модули без кода."],
+    lead: "Подключите любую нейросеть и собирайте модули словами. Удачные — в библиотеку или на продажу.",
     primary: "Подключить свой ИИ",
     download: "Скачать NOAH",
     meta: "бесплатно · Windows 10 / 11 · любая нейросеть",
@@ -67,8 +67,8 @@ const T = {
   },
   en: {
     kicker: "CORE · MULTIMODAL SHELL FOR AI",
-    title: ["A core for AI.", "Modules in words.", "No code."],
-    lead: "NOAH is a shell on your computer. Plug in any AI — that's the brain. You build the hands yourself: describe a task in plain words, your AI writes a module, NOAH checks it and runs it. Made something useful? Share it in the library or sell it.",
+    title: ["A core for AI.", "Modules, no code."],
+    lead: "Plug in any AI and build modules in plain words. Share the good ones in the library or sell them.",
     primary: "Connect your AI",
     download: "Download NOAH",
     meta: "free · Windows 10 / 11 · any AI",
@@ -355,13 +355,13 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
       "div",
       { class: "hero__text" },
       h("span", { class: "kicker" }, tr.kicker),
-      h("h1", { class: "hero__title" }, tr.title.map((line, at) => h("span", { class: at === 2 ? "is-gold" : "" }, line))),
+      h("h1", { class: "hero__title" }, tr.title.map((line, at) => h("span", { class: at === tr.title.length - 1 ? "is-gold" : "" }, line))),
       h("p", { class: "hero__lead" }, tr.lead),
       h(
         "div",
         { class: "hero__cta" },
         h("a", { class: "btn btn--gold btn--big", href: "#/connect" }, tr.primary),
-        h("a", { class: "btn btn--ghost btn--big", href: RELEASES, target: "_blank", rel: "noopener" }, tr.download),
+        h("a", { class: "btn btn--ghost btn--big", href: RELEASES }, tr.download),
       ),
       h("p", { class: "hero__meta mono" }, tr.meta),
     ),
@@ -505,7 +505,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
       "div",
       { class: "hero__cta" },
       h("a", { class: "btn btn--dark btn--big", href: "#/connect" }, tr.primary),
-      h("a", { class: "btn btn--big", href: RELEASES, target: "_blank", rel: "noopener" }, tr.download),
+      h("a", { class: "btn btn--big", href: RELEASES }, tr.download),
     ),
   );
 

@@ -6,11 +6,17 @@
     <title>NOAH — модули для ИИ-помощника</title>
     <meta name="description" content="NOAH — мультимодальная оболочка для ИИ. Подключите любую нейросеть и соберите модуль под свою задачу за пару минут, без программирования." />
     <link rel="icon" href="assets/noah-mark.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/icon-180.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <meta name="theme-color" content="#1a1d26" />
+    <meta name="apple-mobile-web-app-title" content="NOAH" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800;900&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css?v=16" />
-    <link rel="stylesheet" href="home.css?v=16" />
+    <link rel="stylesheet" href="styles.css?v=21" />
+    <link rel="stylesheet" href="home.css?v=21" />
   </head>
   <body>
     <svg class="sprite" aria-hidden="true">
@@ -36,7 +42,7 @@
         </a>
         <nav class="side__nav" data-el="nav"></nav>
         <div class="side__foot">
-          <a class="side__app" data-el="download" target="_blank" rel="noopener">
+          <a class="side__app" data-el="download">
             <span class="side__dot"></span>
             <span class="mono" data-t="brainLabel"></span>
             <strong data-t="brainValue"></strong>
@@ -121,6 +127,6 @@
     </div>
 
     <div class="toast" data-el="toast" role="status" hidden></div>
-    <script type="module" src="app.js?v=16"></script>
+    <script type="module" src="app.js?v=21"></script>
   </body>
 </html>

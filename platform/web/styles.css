@@ -1678,10 +1678,9 @@ textarea:focus,
     width: 100%;
   }
 
+  /* Пункты делят ширину поровну и не вылезают за экран. */
   .nav__group {
-    flex: none;
-    flex-direction: row;
-    gap: 0;
+    display: contents;
   }
 
   .nav__item {
@@ -1689,11 +1688,18 @@ textarea:focus,
     align-items: center;
     justify-content: center;
     gap: 4px;
-    flex: none;
-    min-width: 64px;
-    padding: 8px 4px;
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 8px 2px;
     font-size: 9.5px;
     text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .nav__item[href="#/standard"] {
+    display: none;
   }
 
   .navicon {
@@ -1868,4 +1874,29 @@ textarea:focus,
 
 .idlist__state.is-on {
   color: #2e8b57;
+}
+
+/* ── Поля и колонка контента ────────────────────────────────────────────── */
+
+/* Контент — в колонке до 1200 px по центру, с воздухом по краям. Раньше всё
+   тянулось на всю ширину с полями в 26 px и прилипало к краям экрана. */
+:root {
+  --gutter: clamp(16px, 4vw, 56px);
+  --column: 1200px;
+}
+
+.page {
+  padding-inline: var(--gutter);
+}
+
+.page > * {
+  width: 100%;
+  max-width: var(--column);
+  margin-inline: auto;
+}
+
+/* На главной шапка и подвал выровнены по той же колонке. */
+body.is-home .top,
+body.is-home .foot {
+  padding-inline: max(var(--gutter), calc((100% - var(--column)) / 2));
 }

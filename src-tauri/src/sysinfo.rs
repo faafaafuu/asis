@@ -729,35 +729,80 @@ fn describe_gpu(gpu: &Gpu, full: bool) -> String {
     line
 }
 
-/* ── Что за ошибка ──────────────────────────────────────────────────────── */
+/* ── Что не так с компьютером ───────────────────────────────────────────── */
 
-/// Недавние ошибки из журнала Windows: последние полчаса, самые свежие.
+/// Скан системы для «что не так»: устройства с ошибками, драйверы основных
+/// устройств с датами, падения программ и ошибки Windows за сутки, службы
+/// автозапуска, которые стоят, ожидание перезагрузки, диски, сеть и звук.
 ///
-/// Только «ошибка» и «критическая» — предупреждений в журнале сотни, и среди
-/// них настоящая причина утонула бы.
-const EVENTS_SCRIPT: &str = r#"
+/// Раньше смотрели только ошибки журнала за полчаса, и на «проверь драйверы»
+/// Ноа отвечала загрузкой процессора: про драйверы ей было просто нечего
+/// сказать.
+const SCAN_SCRIPT: &str = r#"
 $ErrorActionPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-Get-WinEvent -FilterHashtable @{ LogName = 'Application','System'; Level = 1,2; StartTime = (Get-Date).AddMinutes(-30) } -MaxEvents 8 |
+
+'## Устройства с ошибками'
+$bad = Get-PnpDevice -PresentOnly | Where-Object { $_.Status -ne 'OK' -and $_.Status -ne 'Unknown' }
+if ($bad) { $bad | Select-Object -First 8 | ForEach-Object { '{0} [{1}]: состояние {2}, код {3}' -f $_.FriendlyName, $_.Class, $_.Status, $_.Problem } } else { 'нет' }
+
+'## Драйверы основных устройств'
+Get-CimInstance Win32_PnPSignedDriver |
+  Where-Object { $_.DeviceClass -in 'DISPLAY','NET','MEDIA','BLUETOOTH','USB','HDC','SCSIADAPTER' -and $_.DriverProviderName -ne 'Microsoft' -and $_.DeviceName } |
+  Sort-Object DeviceClass, DeviceName -Unique | Select-Object -First 14 |
   ForEach-Object {
-    $text = ($_.Message -replace '\s+', ' ')
-    if ($text.Length -gt 300) { $text = $text.Substring(0, 300) }
-    '{0:HH:mm} {1} (код {2}): {3}' -f $_.TimeCreated, $_.ProviderName, $_.Id, $text
+    $date = if ($_.DriverDate) { $_.DriverDate.ToString('yyyy-MM-dd') } else { '?' }
+    '{0} [{1}]: версия {2}, от {3}, {4}' -f $_.DeviceName, $_.DeviceClass, $_.DriverVersion, $date, $_.DriverProviderName
   }
+
+'## Падения программ за сутки'
+$crashes = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1002; StartTime = (Get-Date).AddDays(-1) } -MaxEvents 30
+if ($crashes) {
+  $crashes | ForEach-Object { ($_.Properties[0].Value) } | Group-Object | Sort-Object Count -Descending | Select-Object -First 6 |
+    ForEach-Object { '{0}: {1} раз' -f $_.Name, $_.Count }
+} else { 'нет' }
+
+'## Ошибки Windows за сутки'
+$errors = Get-WinEvent -FilterHashtable @{ LogName = 'System', 'Application'; Level = 1, 2; StartTime = (Get-Date).AddDays(-1) } -MaxEvents 200
+if ($errors) {
+  $errors | Group-Object ProviderName, Id | Sort-Object Count -Descending | Select-Object -First 8 |
+    ForEach-Object {
+      $first = $_.Group[0]
+      $text = ($first.Message -replace '\s+', ' ')
+      if ($text.Length -gt 180) { $text = $text.Substring(0, 180) }
+      '{0} раз, последний {1:dd.MM HH:mm} — {2} (код {3}): {4}' -f $_.Count, $first.TimeCreated, $first.ProviderName, $first.Id, $text
+    }
+} else { 'нет' }
+
+'## Службы автозапуска, которые стоят'
+$stopped = Get-CimInstance Win32_Service | Where-Object { $_.StartMode -eq 'Auto' -and $_.State -ne 'Running' -and $_.ExitCode -ne 0 }
+if ($stopped) { $stopped | Select-Object -First 6 | ForEach-Object { '{0} ({1}): код выхода {2}' -f $_.DisplayName, $_.Name, $_.ExitCode } } else { 'нет' }
+
+'## Прочее'
+$pending = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or
+  (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')
+if ($pending) { 'Windows ждёт перезагрузки после обновлений.' }
+$os = Get-CimInstance Win32_OperatingSystem
+'Windows: {0} {1}, без перезагрузки {2:N0} ч' -f $os.Caption, $os.BuildNumber, ((Get-Date) - $os.LastBootUpTime).TotalHours
+Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object {
+  '{0} свободно {1:N0} из {2:N0} ГБ' -f $_.DeviceID, ($_.FreeSpace / 1GB), ($_.Size / 1GB)
+}
+Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object -First 3 | ForEach-Object { 'Сеть: {0} — {1}' -f $_.Name, $_.LinkSpeed }
+$audio = Get-CimInstance Win32_SoundDevice | ForEach-Object { '{0} ({1})' -f $_.Name, $_.Status }
+'Звук: ' + ($audio -join '; ')
 "#;
 
-/// Объясняет, что случилось, и отдаёт ответ.
+/// Разбирается, что не так, и отдаёт ответ.
 ///
-/// Смотрит туда же, куда смотрит человек: текст окна, которое было впереди, —
-/// чаще всего это и есть окно с ошибкой, — плюс недавние ошибки из журнала
-/// Windows и загрузка системы. Модель по этим данным объясняет причину и
-/// говорит, что сделать. Выдумывать ей запрещено: если по данным причина не
-/// видна, она так и говорит и называет, что проверить.
+/// Смотрит туда же, куда смотрел бы мастер: окно, которое было впереди, —
+/// чаще всего это и есть окно с ошибкой, — скан системы и загрузку. Модель
+/// называет причину и предлагает, что сделать. Выдумывать ей запрещено.
 pub async fn diagnose(app: &AppHandle, question: &str) -> String {
     let window = tauri::async_runtime::spawn_blocking(crate::pc::last_window_text)
         .await
         .unwrap_or_default();
-    let events = tauri::async_runtime::spawn_blocking(|| powershell(EVENTS_SCRIPT))
+    let scan = tauri::async_runtime::spawn_blocking(|| powershell(SCAN_SCRIPT))
         .await
         .ok()
         .and_then(Result::ok)
@@ -768,28 +813,29 @@ pub async fn diagnose(app: &AppHandle, question: &str) -> String {
 
     let name = app.state::<AppState>().wake_name();
     let rules = format!(
-        "Ты — {name}, голосовой помощник на компьютере с Windows. Человек спрашивает о \
-         проблеме. Ниже — текст окна, которое у него сейчас впереди, недавние ошибки \
-         из журнала Windows и состояние системы. Объясни по-русски, коротко и \
-         простыми словами: что случилось — одним-двумя предложениями, — и что \
-         сделать — двумя-четырьмя шагами. Опирайся только на данные ниже; если \
-         причина по ним не видна, так и скажи и назови, что проверить. Не выдумывай \
-         названия программ и ошибок, которых нет в данных. Обычный текст, без \
-         разметки.\n\n\
+        "Ты — {name}, помощник на компьютере человека с Windows, и у тебя есть данные \
+         с этого компьютера — ниже. Человек спрашивает о проблеме или просит проверить \
+         систему. Ответь по-русски, как мастер другу: сначала главное — что не так, \
+         одним-двумя предложениями, с конкретным названием устройства, программы или \
+         драйвера из данных; потом, что с этим сделать, одним-двумя предложениями. \
+         Если есть что поправить — закончи коротким предложением сделать это: \
+         «Открыть очистку диска?», «Открыть центр обновления?». Отвечай ровно на \
+         вопрос: спросили про драйверы — говори про драйверы, а не про процессор. \
+         Старым драйвер считай, если ему больше двух лет. Если по данным всё в \
+         порядке — так и скажи одной фразой. Не выдумывай того, чего в данных нет. \
+         Без списков, без разметки, без извинений.\n\n\
          Окно впереди:\n{}\n\n\
-         Ошибки в журнале за полчаса:\n{}\n\n\
-         Состояние: {}",
+         Скан системы:\n{}\n\n\
+         Загрузка: {}",
         if window.trim().is_empty() { "(текста не видно)".to_string() } else { window },
-        if events.trim().is_empty() { "(ошибок нет)".to_string() } else { events },
+        if scan.trim().is_empty() { "(скан не удался)".to_string() } else { scan },
         load
     );
 
     let provider = app.state::<AppState>().provider();
-    match provider.interpret(&rules, question).await {
+    match provider.advise(&rules, question).await {
         Ok(answer) if !answer.trim().is_empty() => answer.trim().to_string(),
-        _ => "Не смог разобраться: модель не ответила. Посмотрите текст ошибки в окне — \
-              и спросите ещё раз."
-            .into(),
+        _ => "Не смогла разобраться: модель не ответила. Спросите ещё раз.".into(),
     }
 }
 
@@ -969,7 +1015,7 @@ mod live {
             println!("{label} ({} мс): {said}", started.elapsed().as_millis());
             assert!(!said.is_empty());
         }
-        let events = super::powershell(super::EVENTS_SCRIPT);
-        println!("журнал: {:?}", events.map(|text| text.lines().count()));
+        let scan = super::powershell(super::SCAN_SCRIPT);
+        println!("скан: {:?}", scan.map(|text| text.lines().count()));
     }
 }

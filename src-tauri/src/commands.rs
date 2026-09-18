@@ -158,7 +158,11 @@ pub async fn ai_ask(
     let what = format!("вопрос про «{term}»");
     let answer = guarded(
         &what,
-        async move { provider.ask(&term, &context, &thread, &question).await },
+        async move {
+            // Окно шлёт всю переписку; модели — последние шесть обменов.
+            let recent = &thread[thread.len().saturating_sub(6)..];
+            provider.ask(&term, &context, recent, &question).await
+        },
         fallback,
         limit,
     )

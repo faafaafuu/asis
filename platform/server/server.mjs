@@ -25,6 +25,7 @@ const PORT = Number(process.env.NOAH_PORT ?? 8795);
 const HOST = process.env.NOAH_HOST ?? "0.0.0.0";
 const DATA = process.env.NOAH_DATA ?? join(HERE, "..", "data");
 const SEED = process.env.NOAH_SEED ?? join(HERE, "..", "..", "modules", "index.json");
+const BUILTIN = process.env.NOAH_BUILTIN ?? join(HERE, "..", "..", "modules", "builtin.json");
 const SECURE = process.env.NOAH_SECURE === "1";
 const SESSION_DAYS = 30;
 const MAX_BODY = 8 * 1024 * 1024;
@@ -96,6 +97,25 @@ function seed() {
   }
 }
 seed();
+
+/** Модули, встроенные в само приложение: в библиотеке для обзора, ставятся вместе с NOAH. */
+function seedBuiltin() {
+  if (!existsSync(BUILTIN)) return;
+  const body = JSON.parse(readFileSync(BUILTIN, "utf8"));
+  const upsert = db.prepare(`
+    INSERT INTO modules (id, owner_id, author, title, icon, about, voice, category, description, manifest, tools)
+    VALUES (?, NULL, 'noah', ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET title = excluded.title, icon = excluded.icon, about = excluded.about,
+      voice = excluded.voice, category = excluded.category, description = excluded.description,
+      manifest = excluded.manifest, tools = excluded.tools, updated = datetime('now')
+    WHERE modules.owner_id IS NULL`);
+  for (const m of body.modules ?? []) {
+    if (!validId(m.id)) continue;
+    const manifest = { id: m.id, title: m.title, icon: m.icon, about: m.about, voice: m.voice, builtin: true, local: true };
+    upsert.run(m.id, m.title, m.icon, m.about, m.voice, m.category ?? "other", m.description ?? "", JSON.stringify(manifest), JSON.stringify(m.tools ?? []));
+  }
+}
+seedBuiltin();
 
 /* ── Пароли, сессии, токены ──────────────────────────────────────────────── */
 
@@ -252,6 +272,7 @@ function card(row) {
     installs: row.installs,
     updated: row.updated,
     core: row.owner_id === null,
+    builtin: row.author === "noah" && row.owner_id === null,
   };
 }
 
@@ -367,7 +388,7 @@ route("GET", /^\/api\/modules\/([a-z0-9-]+)$/, ({ match }) => {
     ...card(row),
     description: row.description,
     tools: JSON.parse(row.tools),
-    runtime: manifest.mcp?.command ?? "",
+    runtime: manifest.builtin ? "builtin" : (manifest.mcp?.command ?? ""),
     brain: typeof manifest.brain === "string" ? manifest.brain.slice(0, 40) : "",
     secrets: (manifest.secrets ?? []).map((s) => ({ title: s.title, hint: s.hint, optional: Boolean(s.optional) })),
     files: Object.keys(JSON.parse(row.files)),
@@ -378,6 +399,7 @@ route("GET", /^\/api\/modules\/([a-z0-9-]+)$/, ({ match }) => {
 route("GET", /^\/api\/modules\/([a-z0-9-]+)\/package$/, ({ match }) => {
   const row = db.prepare("SELECT * FROM modules WHERE id = ? AND hidden = 0").get(match[1]);
   if (!row) throw new Fail(404, "Модуль не найден.");
+  if (JSON.parse(row.manifest).builtin) throw new Fail(409, `«${row.title}» уже встроен в NOAH и ставится вместе с приложением.`);
   db.prepare("UPDATE modules SET installs = installs + 1 WHERE id = ?").run(row.id);
   return { format: FORMAT, manifest: JSON.parse(row.manifest), files: JSON.parse(row.files) };
 });
@@ -477,6 +499,7 @@ const TYPES = {
   ".webp": "image/webp",
   ".ico": "image/x-icon",
   ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
 async function serveStatic(req, res, pathname, versioned) {
@@ -511,6 +534,28 @@ async function serveStatic(req, res, pathname, versioned) {
   }
 }
 
+/* ── Скачать NOAH: сразу установщик последнего релиза ───────────────────── */
+
+const RELEASES = "https://github.com/faafaafuu/asis/releases/latest";
+let installer = { url: "", at: 0 };
+
+/** Прямая ссылка на установщик из последнего релиза; держится 10 минут. */
+async function latestInstaller() {
+  if (installer.url && Date.now() - installer.at < 10 * 60_000) return installer.url;
+  try {
+    const response = await fetch("https://api.github.com/repos/faafaafuu/asis/releases/latest", {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "noah-platform" },
+      signal: AbortSignal.timeout(8000),
+    });
+    const release = await response.json();
+    const asset = (release.assets ?? []).find((a) => /setup\.exe$/i.test(a.name)) ?? (release.assets ?? []).find((a) => /\.(exe|msi)$/i.test(a.name));
+    if (asset) installer = { url: asset.browser_download_url, at: Date.now() };
+  } catch (err) {
+    console.error("последний релиз не получен:", err.message);
+  }
+  return installer.url || RELEASES;
+}
+
 const oauthHandler = mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies });
 const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY });
 
@@ -518,7 +563,8 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://local");
   // Заголовку прокси верим, только если запрос пришёл от него самого.
   const peer = String(req.socket.remoteAddress ?? "");
-  const local = peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
+  // Свои: сам хост и сеть Docker, где стоит nginx с HTTPS для домена.
+  const local = peer === "127.0.0.1" || peer === "::1" || /^(::ffff:)?(127\.|172\.(1[6-9]|2\d|3[01])\.)/.test(peer);
   const ip = local && req.headers["x-real-ip"] ? String(req.headers["x-real-ip"]) : peer;
   // По пути к серверу из некоторых сетей соединение замирает, когда через него
   // прошло около 30 КБ. Каждый ответ — в своём соединении, и замирать нечему.
@@ -526,6 +572,10 @@ const server = http.createServer(async (req, res) => {
   try {
     // MCP по ссылке: нейросеть пользователя подключается сюда адресом с ключом.
     if (url.pathname === "/mcp") return await mcpHandler(req, res, url);
+    if (url.pathname === "/download") {
+      res.writeHead(302, { Location: await latestInstaller(), "Cache-Control": "no-store" });
+      return res.end();
+    }
     if (url.pathname.startsWith("/auth/") && (await oauthHandler(req, res, url))) return;
     if (url.pathname.startsWith("/api/")) {
       if (req.method !== "GET" && !sameOrigin(req)) throw new Fail(403, "Чужой источник запроса.");

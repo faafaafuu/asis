@@ -1,8 +1,8 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=16";
+import { renderHome, stopHome } from "./home.js?v=21";
 
-const RELEASES = "https://github.com/faafaafuu/asis/releases/latest";
+const RELEASES = "/download";
 const REPO = "https://github.com/faafaafuu/asis";
 const STANDARD_DOC = "https://github.com/faafaafuu/asis/blob/main/src-tauri/src/module_format.md";
 
@@ -20,7 +20,7 @@ const T = {
     statModules: "MODULES", statAuthors: "AUTHORS", statBrains: "BRAINS SUPPORTED", statInstalls: "INSTALLS",
     cat: { all: "All", free: "Free", work: "Work", home: "Home", finance: "Finance", dev: "Dev tools", health: "Health", local: "Local-only", media: "Media", other: "Other" },
     free: "free", install: "Install", installsWord: "installs", noModules: "Nothing found. Try another word or category — or build the module yourself in the Studio.",
-    backLib: "BACK TO LIBRARY", core: "noah-core",
+    backLib: "BACK TO LIBRARY", core: "noah-core", builtIn: "built into NOAH", builtInLong: "Built into NOAH — comes with the app, nothing to install separately.", builtInBtn: "DOWNLOAD NOAH", builtInTransport: "part of the core", open: "Open",
     installBtn: "INSTALL", copyAsk: "COPY REQUEST",
     toolsExposed: "TOOLS EXPOSED", noTools: "Tools are listed after the module is published from NOAH.",
     metaBrain: "BRAIN", brainAny: "any", metaTransport: "TRANSPORT", metaInstalls: "INSTALLS", metaUpdated: "UPDATED",
@@ -119,7 +119,7 @@ const T = {
     statModules: "МОДУЛЕЙ", statAuthors: "АВТОРОВ", statBrains: "МОЗГОВ", statInstalls: "УСТАНОВОК",
     cat: { all: "Все", free: "Бесплатные", work: "Работа", home: "Дом", finance: "Финансы", dev: "Разработка", health: "Здоровье", local: "Только локально", media: "Медиа", other: "Другое" },
     free: "бесплатно", install: "Поставить", installsWord: "установок", noModules: "Ничего не нашлось. Попробуйте другое слово или раздел — или соберите модуль сами в Студии.",
-    backLib: "НАЗАД В БИБЛИОТЕКУ", core: "noah-core",
+    backLib: "НАЗАД В БИБЛИОТЕКУ", core: "noah-core", builtIn: "встроен в NOAH", builtInLong: "Встроен в NOAH — ставится вместе с приложением, отдельно ставить не нужно.", builtInBtn: "СКАЧАТЬ NOAH", builtInTransport: "часть ядра", open: "Подробнее",
     installBtn: "ПОСТАВИТЬ", copyAsk: "СКОПИРОВАТЬ ЗАПРОС",
     toolsExposed: "ДОСТУПНЫЕ ИНСТРУМЕНТЫ", noTools: "Инструменты появятся, когда модуль опубликуют из NOAH.",
     metaBrain: "МОЗГ", brainAny: "любой", metaTransport: "ТРАНСПОРТ", metaInstalls: "УСТАНОВОК", metaUpdated: "ОБНОВЛЁН",
@@ -479,11 +479,16 @@ function moduleCard(module) {
       "div",
       { class: "card__head" },
       tile(module),
-      h("span", { class: "card__name" }, h("span", { class: "card__title" }, module.title), h("span", { class: "card__author" }, module.core ? tr.core : module.author)),
+      h("span", { class: "card__name" }, h("span", { class: "card__title" }, module.title), h("span", { class: "card__author" }, module.builtin ? tr.builtIn : module.core ? tr.core : module.author)),
       h("span", { class: "price" }, tr.free),
     ),
     h("span", { class: "card__about" }, module.about),
-    h("div", { class: "card__foot" }, h("span", {}, `${number(module.installs)} ${tr.installsWord}`), h("strong", {}, `${tr.install} →`)),
+    h(
+      "div",
+      { class: "card__foot" },
+      h("span", {}, module.builtin ? tr.builtIn : `${number(module.installs)} ${tr.installsWord}`),
+      h("strong", {}, `${module.builtin ? tr.open : tr.install} →`),
+    ),
   );
 }
 
@@ -545,7 +550,7 @@ function renderModule(page, module) {
     tr.installSteps(module.id, module.title).map(([title, body], at) =>
       h("div", { class: "step__row" }, h("span", { class: "num", vars: { "--accent": "#F2C14E" } }, at + 1), h("div", {}, title, h("p", {}, body))),
     ),
-    h("div", { class: "step__body" }, h("a", { class: "btn btn--gold", href: RELEASES, target: "_blank", rel: "noopener" }, tr.appTitle)),
+    h("div", { class: "step__body" }, h("a", { class: "btn btn--gold", href: RELEASES }, tr.appTitle)),
   );
 
   const perms = [];
@@ -566,14 +571,16 @@ function renderModule(page, module) {
           "div",
           { class: "plate__name" },
           h("h1", {}, module.title),
-          h("div", { class: "plate__meta" }, `${module.core ? tr.core : module.author} · v${module.version} · MCP`),
+          h("div", { class: "plate__meta" }, module.builtin ? tr.builtIn : `${module.core ? tr.core : module.author} · v${module.version} · MCP`),
         ),
         h(
           "div",
           { class: "plate__buy" },
           h("span", { class: "big-price" }, tr.free),
-          h("button", { type: "button", class: "btn btn--gold", onclick: () => (howTo.hidden = !howTo.hidden) }, tr.installBtn),
-          askButton,
+          module.builtin
+            ? h("a", { class: "btn btn--gold", href: RELEASES }, tr.builtInBtn)
+            : h("button", { type: "button", class: "btn btn--gold", onclick: () => (howTo.hidden = !howTo.hidden) }, tr.installBtn),
+          module.builtin ? h("p", { class: "hint" }, tr.builtInLong) : askButton,
         ),
       ),
       h(
@@ -597,7 +604,7 @@ function renderModule(page, module) {
           { class: "col col--flush" },
           [
             [tr.metaBrain, module.brain || tr.brainAny],
-            [tr.metaTransport, "MCP / stdio"],
+            [tr.metaTransport, module.builtin ? tr.builtInTransport : "MCP / stdio"],
             [tr.metaInstalls, number(module.installs)],
             [tr.metaUpdated, when(module.updated)],
           ].map(([k, v]) => h("div", { class: "kv" }, h("span", {}, k), h("span", {}, v))),

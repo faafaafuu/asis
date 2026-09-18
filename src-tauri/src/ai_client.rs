@@ -143,6 +143,12 @@ pub trait AiProvider: Send + Sync {
     async fn interpret(&self, _rules: &str, _said: &str) -> Result<String, AiError> {
         Err(AiError::Parse)
     }
+
+    /// Отвечает человеку по заданным указаниям обычным текстом — как
+    /// `interpret`, но без требования JSON: диагностике нужен связный ответ.
+    async fn advise(&self, rules: &str, said: &str) -> Result<String, AiError> {
+        self.interpret(rules, said).await
+    }
 }
 
 /// Навешивает прокси на клиент, если он задан.
@@ -1119,6 +1125,20 @@ fn strip_foreign(text: &str) -> String {
 
 #[async_trait]
 impl AiProvider for HttpProvider {
+    async fn advise(&self, rules: &str, said: &str) -> Result<String, AiError> {
+        self.answer_as(vec![
+            Message {
+                role: "system",
+                content: rules.to_string(),
+            },
+            Message {
+                role: "user",
+                content: said.to_string(),
+            },
+        ], false)
+        .await
+    }
+
     async fn interpret(&self, rules: &str, said: &str) -> Result<String, AiError> {
         self.answer_as(vec![
             Message {
@@ -1221,7 +1241,8 @@ impl AiProvider for HttpProvider {
                              выполняет сама программа по командам, до тебя доходят только \
                              разговорные вопросы. Никогда не говори, что у тебя нет доступа к \
                              компьютеру или что ты на сервере: ты — часть программы на его \
-                             компьютере и управляешь им через неё; спросят про доступ — отвечай, что да,                              и что умеешь. Если просьба похожа на действие, скажи коротко, что \
+                             компьютере и управляешь им через неё; спросят про доступ — отвечай, что да, \
+                             и что умеешь. Если просьба похожа на действие, скажи коротко, что \
                              не разобрал её как команду, и предложи сказать проще, например \
                              «пришли последний скриншот» или «найди файл договор». \
                              Отвечай по делу и коротко — обычно одной-двумя фразами, \
@@ -1239,7 +1260,7 @@ impl AiProvider for HttpProvider {
                              Отвечай по-русски, даже если сам термин на другом языке."
                         ),
                         };
-                        format!("{persona} {}", today_line(&self.language))
+                        format!("{persona} {} {}", today_line(&self.language), crate::profile::prompt_line())
                     },
                 },
             ];
@@ -1259,9 +1280,9 @@ impl AiProvider for HttpProvider {
                     },
                 });
             }
-            // Последние три обмена, не больше: на длинной переписке маленькая
-            // модель начинает пересказывать прежние ответы вместо нового.
-            for item in &thread[thread.len().saturating_sub(3)..] {
+            // Сколько обменов брать, решает вызывающий: своей маленькой модели
+            // — три, облачной — больше (см. `thread_depth`).
+            for item in thread {
                 messages.push(Message {
                     role: "user",
                     content: item.q.clone(),

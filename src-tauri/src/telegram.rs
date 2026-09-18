@@ -391,7 +391,7 @@ async fn answer(
         let limit = state.config().ai.call_limit();
         (state.provider(), limit)
     };
-    let recent = history[history.len().saturating_sub(3)..].to_vec();
+    let recent = history[history.len().saturating_sub(8)..].to_vec();
     match tokio::time::timeout(limit, provider.ask("", "", &recent, said)).await {
         Ok(Ok(reply)) if !reply.trim().is_empty() => {
             let reply = reply.trim().to_string();

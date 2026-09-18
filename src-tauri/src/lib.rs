@@ -27,6 +27,7 @@ mod files;
 mod screen;
 mod browser;
 mod prices;
+mod profile;
 mod watchlist;
 mod telegram;
 mod timers;
@@ -1419,7 +1420,10 @@ const FILLER: &[&str] = &[
 #[cfg(desktop)]
 fn is_farewell(text: &str, name: &str) -> bool {
     let lower = text.to_lowercase();
-    if FAREWELL_ANYWHERE.iter().any(|word| lower.contains(word)) {
+    // «Спасибо» в длинной фразе — вежливость посреди разговора, а не прощание:
+    // «спасибо, классно, слушай, а когда новый фильм» обрывало беседу.
+    let word_count = lower.split(|c: char| !c.is_alphabetic()).filter(|w| !w.is_empty()).count();
+    if word_count <= 5 && FAREWELL_ANYWHERE.iter().any(|word| lower.contains(word)) {
         return true;
     }
 
@@ -1579,12 +1583,9 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
             overlay::show_hud(&app, "listening");
             let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
 
-            // Сколько ходов подряд ушло впустую: обрывки, тишина, «открой»
-            // того, чего нет. Музыка и чужая речь в комнате держат разговор
-            // живым — распознавание слышит в них слова, и Ноа отвечала
-            // невпопад и открывала что попало. Два пустых хода подряд значат,
-            // что говорят не с ней.
-            let mut junk = 0;
+            // Беседу заканчивают только прощание, Esc и минута тишины. Обрывки
+            // и чужая речь пропускаются молча: раньше два таких хода подряд
+            // обрывали разговор посреди дела.
             for heard in phrases {
                 if !CONVERSATION.load(Ordering::SeqCst) {
                     break;
@@ -1602,12 +1603,11 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                 // распознавание слышит в нём «стрелки» и «отрезать», и Ноа
                 // начинал отвечать сам себе. Человек печатает — значит, занят
                 // другим, и разговор окончен.
+                // Разговор при этом не кончается: человек мог печатать и
+                // говорить одновременно, а обрывать беседу за это — грубо.
                 if typed_during(&wav) {
-                    log::info!("во время фразы печатали — это клавиатура; разговор окончен");
-                    // Без сигнала и не закрывая окно: человек занят своим, а
-                    // ответ в окне ему, может быть, ещё нужен.
-                    end_conversation(&app, false, false);
-                    break;
+                    log::info!("во время фразы печатали — это клавиатура; фразу пропускаю");
+                    continue;
                 }
 
                 // Пока думаем и отвечаем — не слушаем: иначе в следующую фразу
@@ -1632,30 +1632,18 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                     // «напомни завтра позвонить» — не вопрос, отвечать на него
                     // объяснением было бы нелепо.
                     Some(text) if ambient_task(&app, &text) => {
-                        if planner::take_junk() {
-                            junk += 1;
-                        } else {
-                            junk = 0;
-                        }
+                        planner::take_junk();
                     }
                     // Обрывок в одно-два слова без вопроса — скорее ослышка,
                     // чем вопрос: отвечать на него полминуты незачем.
                     Some(text) if fragment(&text) => {
                         log::info!("«{text}» — обрывок, не отвечаю");
-                        junk += 1;
                     }
-                    Some(text) => {
-                        junk = 0;
-                        answer_aloud(&app, &text);
-                    }
-                    None => junk += 1,
+                    Some(text) => answer_aloud(&app, &text),
+                    None => {}
                 }
                 end_turn();
 
-                if junk >= 2 {
-                    log::info!("два хода подряд не к Ноа — похоже, это музыка или чужая речь; разговор окончен");
-                    break;
-                }
                 if !CONVERSATION.load(Ordering::SeqCst) {
                     break;
                 }
@@ -1978,6 +1966,9 @@ fn handled_as_task(app: &tauri::AppHandle, text: &str) -> bool {
     if reply.is_empty() {
         return true;
     }
+    // В историю — как обычный обмен: «а как это исправить?» после диагностики
+    // должно быть понятно, о чём речь.
+    remember_exchange(text, &reply);
     respond(app, reply);
     // Разговор передан Claude: Ноа замолкает и уходит. Ход считается
     // оконченным — разговор после него не начинается, — а окно закрывается.
@@ -2348,17 +2339,17 @@ static VOICE_THREAD: std::sync::Mutex<(Vec<ai_client::ThreadItem>, Option<std::t
     std::sync::Mutex::new((Vec::new(), None));
 
 #[cfg(desktop)]
-const THREAD_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+const THREAD_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 /// Сколько обменов помнить. Своей маленькой модели — три: на большем она
-/// начинает пересказывать прежнее вместо ответа на новое. Облачной — шесть.
+/// начинает пересказывать прежнее вместо ответа на новое. Облачной — двенадцать.
 #[cfg(desktop)]
 fn thread_depth(app: &tauri::AppHandle) -> usize {
     let local = crate::config::is_local(&app.state::<AppState>().config().ai.endpoint);
     if local {
         3
     } else {
-        6
+        12
     }
 }
 
@@ -2402,18 +2393,29 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
         overlay::hide_hud(app);
         return;
     }
-    {
-        let mut thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
-        thread.0.push(ai_client::ThreadItem {
-            q: question.to_string(),
-            a: answer.clone(),
-        });
-        let excess = thread.0.len().saturating_sub(6);
-        thread.0.drain(..excess);
-        thread.1 = Some(std::time::Instant::now());
-    }
+    remember_exchange(question, &answer);
     speak_with_hud(app, answer, true);
 }
+
+/// Кладёт вопрос и ответ в историю разговора (см. `VOICE_THREAD`).
+#[cfg(desktop)]
+fn remember_exchange(question: &str, answer: &str) {
+    let mut thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
+    if thread.1.is_some_and(|at| at.elapsed() > THREAD_TTL) {
+        thread.0.clear();
+    }
+    thread.0.push(ai_client::ThreadItem {
+        q: question.to_string(),
+        a: answer.to_string(),
+    });
+    let excess = thread.0.len().saturating_sub(THREAD_KEEP);
+    thread.0.drain(..excess);
+    thread.1 = Some(std::time::Instant::now());
+}
+
+/// Сколько обменов хранится; модели отдаётся не больше `thread_depth`.
+#[cfg(desktop)]
+const THREAD_KEEP: usize = 12;
 
 /// Печатали ли, пока звучала фраза: с её начала и ещё секунду после.
 #[cfg(desktop)]

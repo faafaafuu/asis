@@ -48,8 +48,8 @@ body.is-home .page {
   font-family: var(--display);
   font-weight: 900;
   text-transform: uppercase;
-  font-size: clamp(40px, 6vw, 88px);
-  line-height: 0.92;
+  font-size: clamp(30px, 4.4vw, 62px);
+  line-height: 0.95;
   letter-spacing: -0.03em;
   color: #fff;
 }
@@ -544,9 +544,12 @@ body.is-home .page {
 .code--tabs .code__head {
   gap: 0;
   padding: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .code__tab {
+  flex: none;
   padding: 11px 16px;
   border: none;
   border-right: 1px solid #22304d;

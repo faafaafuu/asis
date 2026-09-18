@@ -138,6 +138,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         return Some(reply);
     }
     // «Какая модель сейчас», «переключись на мистраль» — без модели: её и меняем.
+    // «Запомни, что…», «что ты обо мне знаешь», «забудь про…» — без модели.
+    if let Some(reply) = crate::profile::voice(said) {
+        return Some(reply);
+    }
     if let Some(reply) = crate::brains::voice(app, said).await {
         return Some(reply);
     }
@@ -183,6 +187,19 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     // разбор такие просьбы путал с удалением одного дела и сносил не то.
     if let Some(reply) = done_tasks_request(app, said) {
         return Some(reply);
+    }
+
+    // «Проверь драйверы», «что не так с компьютером», «почему не запускается
+    // игра» — сразу проверка системы. Разбор моделью путал это с загрузкой
+    // процессора и отвечал про неё.
+    if wants_diagnosis(said) {
+        return Some(crate::sysinfo::diagnose(app, said).await);
+    }
+
+    // Обычный вопрос без единого слова-распоряжения не гоняем через разбор:
+    // это секунды ожидания перед каждым ответом ради того, чтобы узнать «chat».
+    if !may_be_command(said) {
+        return None;
     }
 
     let open = open_tasks();
@@ -231,6 +248,9 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
             }
         }),
         Intent::Close { program, force } => {
+            if let Some(reply) = close_own_window(app, &program, said) {
+                return Some(reply);
+            }
             Some(blocking(move || crate::pc::close(&program, force)).await)
         }
         Intent::Power { action } => Some(crate::pc::power(action)),
@@ -2303,7 +2323,10 @@ fn asked_for(intent: &str, said: &str) -> bool {
         ],
         "diagnose" => &[
             "ошибк", "не работает", "сломал", "проблем", "случилось", "глючит", "висит", "вылет",
-            "зависа", "почему", "что это",
+            "зависа", "почему", "что это", "драйвер", "не запуска", "не открыва", "не включа",
+            "не так", "не видит", "не грузит", "не загружа", "просканир", "проверь систем",
+            "проверь комп", "пробегись", "пробежись", "пробежат", "обновлени", "синий экран",
+            "нет звука", "нет интернет", "не ловит",
         ],
         "find" => &[
             "найди", "найти", "поищи", "где лежит", "где файл", "где мой", "где мо", "пришли",
@@ -2409,10 +2432,11 @@ fn rules_with_context(open: &[Task], name: &str, context: &str) -> String {
          vpn — просит включить или выключить VPN;\n\
          nav — просит полистать страницу, вернуться назад или вперёд, закрыть \
          вкладку, обновить страницу или свернуть все окна;\n\
-         system — спрашивает о состоянии компьютера: что грузит процессор, память \
+         system — спрашивает только о загрузке: что грузит процессор, память \
          или диск, сколько места, почему тормозит;\n\
-         diagnose — спрашивает про ошибку или проблему на компьютере: «что это за \
-         ошибка», «почему не работает», «что случилось»;\n\
+         diagnose — спрашивает про ошибку или проблему на компьютере или просит \
+         проверить систему: «что это за ошибка», «почему не запускается игра», \
+         «что не так с компьютером», «проверь драйверы», «нет звука»;\n\
          find — просит найти файл на компьютере;\n\
          type — просит напечатать или вписать текст в окно;\n\
          message — просит написать кому-то сообщение в мессенджере;\n\
@@ -3494,5 +3518,100 @@ mod tests {
         assert!(refuses_time("да не надо срока"));
         assert!(refuses_time("потом решу"));
         assert!(!refuses_time("завтра в три"));
+    }
+}
+
+
+/* ── Быстрые решения без модели ─────────────────────────────────────────── */
+
+/// Разборы, у которых в `asked_for` есть свои слова.
+const COMMAND_INTENTS: &[&str] = &[
+    "launch", "close", "list", "web", "nav", "vpn", "system", "diagnose", "find", "type",
+    "message", "send", "paste", "price", "claude", "learn", "watch", "remove", "screen", "power",
+];
+
+/// Слова дел, заказов и справок, у которых в `asked_for` нет своего списка.
+const OTHER_COMMAND_STEMS: &[&str] = &[
+    "напомн", "запиш", "добав", "заведи", "запланир", "встреч", "календар", "задач", "дело",
+    "сделал", "готово", "выполнил", "закончил", "перенес", "перенос", "отлож", "с чего начать",
+    "разбей", "по шагам", "закаж", "заказ", "купи", "доставк", "погод", "курс", "новост",
+    "расписан", "адрес", "телефон", "часы работы", "во сколько", "сколько стоит", "где ",
+    "когда ", "таймер", "будильник", "разбуди", "музык", "скрин", "пришли", "скинь",
+];
+
+/// Может ли фраза быть распоряжением — есть ли в ней хоть одно слово дела.
+/// Если нет, это разговор, и разбирать её моделью незачем.
+fn may_be_command(said: &str) -> bool {
+    let lower = format!("{} ", said.to_lowercase());
+    COMMAND_INTENTS.iter().any(|intent| asked_for(intent, said))
+        || OTHER_COMMAND_STEMS.iter().any(|stem| lower.contains(stem))
+}
+
+/// Просьба проверить компьютер — по словам, без модели.
+fn wants_diagnosis(said: &str) -> bool {
+    let lower = said.to_lowercase().replace('ё', "е");
+    [
+        "драйвер", "что не так с комп", "что не так с систем", "что не так с ноут",
+        "что с компьютером", "что с системой", "не запускается", "не открывается",
+        "не включается", "вылетает", "синий экран", "нет звука", "пропал звук",
+        "нет интернета", "пропал интернет", "проверь систему", "проверь компьютер",
+        "просканируй", "продиагност", "диагностик",
+    ]
+    .iter()
+    .any(|stem| lower.contains(stem))
+}
+
+/// Закрывает окно самой Ноа, если просят его: «закрой задачи», «убери
+/// обучение». Иначе общий поиск по окнам Windows находил что-то похожее
+/// по звучанию у чужой программы и закрывал его.
+fn close_own_window(app: &AppHandle, program: &str, said: &str) -> Option<String> {
+    use tauri::Manager;
+    let text = format!("{} {}", program.to_lowercase(), said.to_lowercase());
+    let own: &[(&[&str], &str, &str)] = &[
+        (&["задач", "дел", "план"], crate::overlay::TASKS_LABEL, "задачи"),
+        (&["заказ", "корзин"], crate::overlay::ORDER_LABEL, "заказ"),
+        (&["обучен", "курс", "урок"], crate::overlay::LEARN_LABEL, "обучение"),
+        (&["вотч", "актив", "портфел", "котиров"], crate::overlay::WATCH_LABEL, "активы"),
+        (&["расход", "трат", "лимит"], crate::overlay::USAGE_LABEL, "расход"),
+        (&["настройк", "ноа", "модул"], crate::overlay::ONBOARDING_LABEL, "настройки"),
+        (&["ответ"], crate::overlay::POPUP_LABEL, "окно ответа"),
+    ];
+    for (stems, label, name) in own {
+        if !stems.iter().any(|stem| text.contains(stem)) {
+            continue;
+        }
+        let Some(window) = app.get_webview_window(label) else { continue };
+        if !window.is_visible().unwrap_or(false) {
+            continue;
+        }
+        let _ = window.hide();
+        log::info!("закрываю своё окно: {name}");
+        return Some(format!("Закрыла {name}."));
+    }
+    None
+}
+
+#[cfg(test)]
+mod quick_tests {
+    use super::*;
+
+    #[test]
+    fn plain_questions_skip_the_parser() {
+        assert!(!may_be_command("а ты на какое имя теперь отзываешься"));
+        assert!(!may_be_command("что такое альбедо"));
+        assert!(!may_be_command("как к тебе обращаться"));
+        assert!(may_be_command("закрой модуль задачи"));
+        assert!(may_be_command("проверь все ли драйвера последние"));
+        assert!(may_be_command("напомни завтра позвонить маме"));
+        assert!(may_be_command("открой телеграм"));
+    }
+
+    #[test]
+    fn computer_trouble_goes_straight_to_diagnosis() {
+        assert!(wants_diagnosis("проверь, все ли драйвера в порядке"));
+        assert!(wants_diagnosis("почему не запускается игра"));
+        assert!(wants_diagnosis("что не так с компьютером"));
+        assert!(!wants_diagnosis("что грузит процессор"));
+        assert!(!wants_diagnosis("открой телеграм"));
     }
 }
