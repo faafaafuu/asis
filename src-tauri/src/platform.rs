@@ -21,7 +21,8 @@ pub fn settings() -> (String, String) {
         .unwrap_or_default();
     let url = config["platform"]["url"].as_str().unwrap_or_default().trim().trim_end_matches('/').to_string();
     let token = crate::secret::reveal(config["platform"]["token"].as_str().unwrap_or_default());
-    (if url.is_empty() { DEFAULT_PLATFORM_URL.to_string() } else { url }, token)
+    let url = if url.is_empty() || url == crate::config::OLD_PLATFORM_URL { DEFAULT_PLATFORM_URL.to_string() } else { url };
+    (url, token)
 }
 
 fn client() -> Result<reqwest::Client, String> {

@@ -200,6 +200,13 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         return Some(crate::sysinfo::diagnose(app, said).await);
     }
 
+    // «Поищи в интернете», «погугли», «узнай» — сразу поиск. Если сказано «про
+    // это», запрос собирается из того, о чём только что говорили.
+    if let Some(query) = search_request(said) {
+        log::info!("поиск по просьбе: «{query}»");
+        return Some(crate::web::lookup(app, &query).await);
+    }
+
     // Обычный вопрос без единого слова-распоряжения не гоняем через разбор:
     // это секунды ожидания перед каждым ответом ради того, чтобы узнать «chat».
     if !may_be_command(said) {
@@ -3536,6 +3543,7 @@ const COMMAND_INTENTS: &[&str] = &[
 
 /// Слова дел, заказов и справок, у которых в `asked_for` нет своего списка.
 const OTHER_COMMAND_STEMS: &[&str] = &[
+    "поиск", "поищ", "гугл", "интернет", "инете", "узнай", "глянь", "посмотри", "найди",
     "напомн", "запиш", "добав", "заведи", "запланир", "встреч", "календар", "задач", "дело",
     "сделал", "готово", "выполнил", "закончил", "перенес", "перенос", "отлож", "с чего начать",
     "разбей", "по шагам", "закаж", "заказ", "купи", "доставк", "погод", "курс", "новост",
@@ -3586,6 +3594,56 @@ async fn answer_offer(said: &str) -> Option<String> {
     take();
     log::info!("предложение принято: открываю «{pending}»");
     Some(blocking(move || crate::pc::launch(pending, false, "")).await)
+}
+
+/// Просьба поискать в интернете и что искать. `None` — это не она.
+fn search_request(said: &str) -> Option<String> {
+    let lower = said.to_lowercase().replace('ё', "е");
+    const ASK: &[&str] = &[
+        "поищи", "поискать", "поиск", "погугли", "загугли", "гугл", "в интернете", "в инете",
+        "в интернет", "в сети", "онлайн", "узнай", "пробей",
+    ];
+    if !ASK.iter().any(|word| lower.contains(word)) {
+        return None;
+    }
+    // Сайты и магазины ищет разбор («найди салфетки на вайлдберриз»), файлы — поиск файлов.
+    if ["вайлдберриз", "wildberries", "озон", "ozon", "маркет", "авито", "файл", "документ", "папк"]
+        .iter()
+        .any(|word| lower.contains(word))
+    {
+        return None;
+    }
+    // Убираем саму просьбу — остаётся то, что искать. Сначала фразы, потом
+    // отдельные слова целиком: подстрока «а» съела бы окончание в «курса».
+    let mut text = format!(" {} ", lower.split(|c: char| !c.is_alphanumeric() && c != '-').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "));
+    for phrase in [
+        "в интернете", "в инете", "в интернет", "в сети", "в гугле", "есть или нет такое",
+        "правда ли", "по этому поводу", "про это", "об этом", "на эту тему",
+    ] {
+        text = text.replace(&format!(" {phrase} "), " ");
+    }
+    const FILLER: &[&str] = &[
+        "можешь", "можете", "пожалуйста", "слушай", "давай", "а", "ну", "мне", "информацию",
+        "инфу", "информация", "поищи", "поискать", "погугли", "загугли", "гугл", "онлайн",
+        "узнай", "пробей", "поиск", "найди", "посмотри", "глянь", "такое", "это", "ли",
+    ];
+    let query = text
+        .split_whitespace()
+        .filter(|w| !FILLER.contains(w))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let about_that = ["по этому поводу", "про это", "об этом", "на эту тему"]
+        .iter()
+        .any(|phrase| lower.contains(phrase))
+        || text.split_whitespace().any(|w| w == "это" || w == "такое");
+    // Своих слов почти нет или сказано «про это» — ищем тему разговора.
+    if query.chars().count() < 6 || about_that {
+        #[cfg(desktop)]
+        if let Some((question, _)) = crate::last_exchange() {
+            return Some(format!("{question} {query}").trim().to_string());
+        }
+    }
+    (!query.is_empty()).then_some(query)
 }
 
 /// Просьба проверить компьютер — по словам, без модели.
@@ -3654,5 +3712,13 @@ mod quick_tests {
         assert!(wants_diagnosis("что не так с компьютером"));
         assert!(!wants_diagnosis("что грузит процессор"));
         assert!(!wants_diagnosis("открой телеграм"));
+    }
+
+    #[test]
+    fn search_requests_keep_what_to_find() {
+        assert_eq!(search_request("поищи в интернете курс биткоина").as_deref(), Some("курс биткоина"));
+        assert_eq!(search_request("погугли когда выйдет gta 6").as_deref(), Some("когда выйдет gta 6"));
+        assert!(search_request("найди салфетки на wildberries").is_none());
+        assert!(search_request("что такое альбедо").is_none());
     }
 }

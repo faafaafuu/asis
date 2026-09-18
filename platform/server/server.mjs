@@ -572,6 +572,14 @@ const server = http.createServer(async (req, res) => {
   try {
     // MCP по ссылке: нейросеть пользователя подключается сюда адресом с ключом.
     if (url.pathname === "/mcp") return await mcpHandler(req, res, url);
+    // Страницы сайта, открытые по голому адресу, — на домен с HTTPS. API, MCP и
+    // скачивание по адресу работают как раньше: им пользуется приложение.
+    const site = process.env.NOAH_PUBLIC_URL;
+    if (site && !local && /^[\d.]+(:\d+)?$/.test(String(req.headers.host ?? "")) && req.method === "GET" &&
+        !/^\/(api|mcp|auth|download)(\/|$)/.test(url.pathname)) {
+      res.writeHead(301, { Location: `${site.replace(/\/$/, "")}${url.pathname}${url.search}` });
+      return res.end();
+    }
     if (url.pathname === "/download") {
       res.writeHead(302, { Location: await latestInstaller(), "Cache-Control": "no-store" });
       return res.end();

@@ -1,9 +1,11 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=25";
-import { renderDocs } from "./docs.js?v=25";
+import { renderHome, stopHome } from "./home.js?v=26";
+import { renderDocs } from "./docs.js?v=26";
 
 const RELEASES = "/download";
+// Адрес сайта для ссылок, которые уходят наружу: открыли по IP — всё равно домен.
+const SITE = /^[\d.]+$/.test(location.hostname) ? "https://noahlab.ru" : location.origin;
 const REPO = "https://github.com/faafaafuu/asis";
 const STANDARD_DOC = "#/docs/module-standard";
 
@@ -1066,7 +1068,7 @@ async function renderAccount(page) {
 
 async function renderConnect(page) {
   const tr = t();
-  const link = (key) => `${location.origin}/mcp?key=${key}`;
+  const link = (key) => `${SITE}/mcp?key=${key}`;
   const clients = h(
     "div",
     { class: "plate" },

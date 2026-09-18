@@ -2397,6 +2397,16 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
     speak_with_hud(app, answer, true);
 }
 
+/// Последний обмен разговора, если тема ещё жива: о чём «это» в «поищи про это».
+#[cfg(desktop)]
+pub(crate) fn last_exchange() -> Option<(String, String)> {
+    let thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
+    if thread.1.is_some_and(|at| at.elapsed() > THREAD_TTL) {
+        return None;
+    }
+    thread.0.last().map(|item| (item.q.clone(), item.a.clone()))
+}
+
 /// Кладёт вопрос и ответ в историю разговора (см. `VOICE_THREAD`).
 #[cfg(desktop)]
 fn remember_exchange(question: &str, answer: &str) {
