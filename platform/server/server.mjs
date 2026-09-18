@@ -16,6 +16,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { CATEGORIES, FORMAT, lint, validId } from "./standard.mjs";
 import { mountRemote } from "./remote.mjs";
+import { mountOAuth } from "./oauth.mjs";
 
 const scrypt = promisify(scryptCb);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -261,7 +262,11 @@ const route = (method, pattern, handler) => routes.push({ method, pattern, handl
 
 route("GET", /^\/api\/health$/, () => ({ status: "ok" }));
 
-route("GET", /^\/api\/me$/, ({ user }) => ({ user }));
+route("GET", /^\/api\/me$/, ({ user }) => {
+  if (!user) return { user: null };
+  const row = db.prepare("SELECT pass FROM users WHERE id = ?").get(user.id);
+  return { user: { ...user, hasPassword: String(row?.pass).startsWith("scrypt$") } };
+});
 
 route("POST", /^\/api\/auth\/register$/, async ({ req, res, ip }) => {
   if (throttled(ip)) throw new Fail(429, "Слишком много попыток. Подождите несколько минут.");
@@ -300,7 +305,8 @@ route("POST", /^\/api\/account\/password$/, async ({ req, user, ip }) => {
   if (throttled(ip)) throw new Fail(429, "Слишком много попыток. Подождите несколько минут.");
   const { current, next } = await readJson(req);
   const row = db.prepare("SELECT pass FROM users WHERE id = ?").get(user.id);
-  if (!(await checkPassword(String(current ?? ""), row.pass))) throw new Fail(403, "Текущий пароль не подходит.");
+  const hasPassword = String(row.pass).startsWith("scrypt$");
+  if (hasPassword && !(await checkPassword(String(current ?? ""), row.pass))) throw new Fail(403, "Текущий пароль не подходит.");
   if (String(next ?? "").length < 10) throw new Fail(400, "Пароль — от 10 знаков.");
   db.prepare("UPDATE users SET pass = ? WHERE id = ?").run(await hashPassword(next), user.id);
   return { ok: true };
@@ -318,7 +324,8 @@ route("DELETE", /^\/api\/account$/, async ({ req, res, user, ip }) => {
   if (throttled(ip)) throw new Fail(429, "Слишком много попыток. Подождите несколько минут.");
   const { password } = await readJson(req);
   const row = db.prepare("SELECT pass FROM users WHERE id = ?").get(user.id);
-  if (!(await checkPassword(String(password ?? ""), row.pass))) throw new Fail(403, "Пароль не подходит.");
+  const hasPassword = String(row.pass).startsWith("scrypt$");
+  if (hasPassword && !(await checkPassword(String(password ?? ""), row.pass))) throw new Fail(403, "Пароль не подходит.");
   db.prepare("DELETE FROM modules WHERE owner_id = ?").run(user.id);
   db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
   res.setHeader("Set-Cookie", sessionCookie("", 0));
@@ -472,7 +479,7 @@ const TYPES = {
   ".json": "application/json; charset=utf-8",
 };
 
-async function serveStatic(req, res, pathname) {
+async function serveStatic(req, res, pathname, versioned) {
   let file = normalize(join(WEB, decodeURIComponent(pathname)));
   if (!file.startsWith(WEB)) return false;
   try {
@@ -488,8 +495,13 @@ async function serveStatic(req, res, pathname) {
       ...SECURITY_HEADERS,
       "Content-Type": type,
       "Content-Length": out.body.length,
-      // Сайт маленький, а правки должны быть видны сразу: браузер каждый раз сверяется.
-      "Cache-Control": [".svg", ".png", ".webp", ".ico"].includes(extname(file)) ? "public, max-age=86400" : "no-cache",
+      // Файлы с версией в адресе (?v=) не меняются — их браузер берёт из кэша.
+      // Остальное сверяется каждый раз, чтобы правки были видны сразу.
+      "Cache-Control": versioned
+        ? "public, max-age=31536000, immutable"
+        : [".svg", ".png", ".webp", ".ico"].includes(extname(file))
+          ? "public, max-age=86400"
+          : "no-cache",
       ...out.headers,
     });
     res.end(req.method === "HEAD" ? undefined : out.body);
@@ -499,6 +511,7 @@ async function serveStatic(req, res, pathname) {
   }
 }
 
+const oauthHandler = mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies });
 const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY });
 
 const server = http.createServer(async (req, res) => {
@@ -507,9 +520,13 @@ const server = http.createServer(async (req, res) => {
   const peer = String(req.socket.remoteAddress ?? "");
   const local = peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
   const ip = local && req.headers["x-real-ip"] ? String(req.headers["x-real-ip"]) : peer;
+  // По пути к серверу из некоторых сетей соединение замирает, когда через него
+  // прошло около 30 КБ. Каждый ответ — в своём соединении, и замирать нечему.
+  if (!local) res.shouldKeepAlive = false;
   try {
     // MCP по ссылке: нейросеть пользователя подключается сюда адресом с ключом.
     if (url.pathname === "/mcp") return await mcpHandler(req, res, url);
+    if (url.pathname.startsWith("/auth/") && (await oauthHandler(req, res, url))) return;
     if (url.pathname.startsWith("/api/")) {
       if (req.method !== "GET" && !sameOrigin(req)) throw new Fail(403, "Чужой источник запроса.");
       for (const r of routes) {
@@ -521,7 +538,7 @@ const server = http.createServer(async (req, res) => {
       throw new Fail(404, "Нет такого адреса.");
     }
     if (req.method !== "GET" && req.method !== "HEAD") throw new Fail(405, "Метод не поддерживается.");
-    if (!(await serveStatic(req, res, url.pathname))) throw new Fail(404, "Не найдено.");
+    if (!(await serveStatic(req, res, url.pathname, url.searchParams.has("v")))) throw new Fail(404, "Не найдено.");
   } catch (err) {
     const status = err instanceof Fail ? err.status : 500;
     if (status === 500) console.error(err);

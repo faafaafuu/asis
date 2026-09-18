@@ -1,6 +1,6 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=13";
+import { renderHome, stopHome } from "./home.js?v=16";
 
 const RELEASES = "https://github.com/faafaafuu/asis/releases/latest";
 const REPO = "https://github.com/faafaafuu/asis";
@@ -79,6 +79,7 @@ const T = {
       ["NOAH", [["About", "#/"], ["Download", RELEASES], ["Source code", REPO], ["Contact", REPO + "/issues"]]],
       ["LEGAL", [["Privacy policy", "#/privacy"], ["Terms of service", "#/terms"]]],
     ],
+    orWith: "or", with: (name) => `Continue with ${name}`, tgWait: "Press «Start» in Telegram — you are signed in here automatically.", tgOpen: "Open Telegram",
     connKicker: "CONNECT AI", connTitle: "Your AI + NOAH",
     connLead: "One link gives your AI hands on your computer. Paste it into Claude, Cursor or any MCP client and describe the module you want — your AI writes it, NOAH checks it and runs it.",
     connNeedLogin: "Sign in to get your personal MCP link.",
@@ -99,6 +100,7 @@ const T = {
     navConnect: "Connect AI",
     justNow: "just now", error: "Something went wrong.",
     accKicker: "ACCOUNT", accTitle: "Account settings",
+    idTitle: "SIGN-IN METHODS", idLead: "Sign in to the same account with any of these.", idPassword: "Email and password", idOn: "connected", idOff: "not connected", idLink: "Connect", idUnlink: "Disconnect", idNone: "Sign-in via other services isn’t enabled on this site yet.",
     passTitle: "CHANGE PASSWORD", passCurrent: "Current password", passNew: "New password", passSave: "Change password", passDone: "Password changed.",
     sessTitle: "SESSIONS", sessLead: "Signed in on another computer and want to end it? Sign out everywhere — this browser stays signed in.", sessBtn: "Sign out everywhere else", sessDone: "Other sessions ended.",
     delTitle: "DELETE ACCOUNT", delLead: "Your modules are removed from the library, keys stop working. This can't be undone.", delBtn: "Delete account", delConfirm: "Delete the account for good?",
@@ -176,6 +178,7 @@ const T = {
       ["NOAH", [["О проекте", "#/"], ["Скачать", RELEASES], ["Исходный код", REPO], ["Связаться", REPO + "/issues"]]],
       ["ПРАВОВОЕ", [["Политика конфиденциальности", "#/privacy"], ["Пользовательское соглашение", "#/terms"]]],
     ],
+    orWith: "или", with: (name) => `Войти через ${name}`, tgWait: "Нажмите «Старт» в Telegram — здесь вход выполнится сам.", tgOpen: "Открыть Telegram",
     connKicker: "ПОДКЛЮЧИТЬ ИИ", connTitle: "Ваша нейросеть + NOAH",
     connLead: "Одна ссылка даёт вашей нейросети руки на вашем компьютере. Вставьте её в Claude, Cursor или другой клиент с MCP и опишите, какой модуль нужен, — нейросеть напишет его, NOAH проверит и запустит.",
     connNeedLogin: "Войдите, чтобы получить свою ссылку MCP.",
@@ -196,6 +199,7 @@ const T = {
     navConnect: "Подключить ИИ",
     justNow: "только что", error: "Что-то пошло не так.",
     accKicker: "АККАУНТ", accTitle: "Настройки аккаунта",
+    idTitle: "СПОСОБЫ ВХОДА", idLead: "Входите в этот же аккаунт любым из них.", idPassword: "Почта и пароль", idOn: "привязан", idOff: "не привязан", idLink: "Привязать", idUnlink: "Отвязать", idNone: "Вход через другие сервисы на сайте пока не включён.",
     passTitle: "СМЕНА ПАРОЛЯ", passCurrent: "Текущий пароль", passNew: "Новый пароль", passSave: "Сменить пароль", passDone: "Пароль изменён.",
     sessTitle: "СЕАНСЫ", sessLead: "Входили на другом компьютере и хотите закончить? Выйдите везде — этот браузер останется в аккаунте.", sessBtn: "Выйти на других устройствах", sessDone: "Остальные сеансы закрыты.",
     delTitle: "УДАЛИТЬ АККАУНТ", delLead: "Ваши модули уйдут из библиотеки, ключи перестанут работать. Отменить нельзя.", delBtn: "Удалить аккаунт", delConfirm: "Удалить аккаунт насовсем?",
@@ -903,8 +907,24 @@ function renderAuth(page, mode) {
       h("a", { href: signup ? "#/login" : "#/signup" }, signup ? tr.signIn : tr.signUp),
     ),
   );
+  const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
+  if (params.get("error")) {
+    error.textContent = params.get("error");
+    error.hidden = false;
+  }
+  const providers = (state.providers ?? []).map((provider) => {
+    if (provider.id === "telegram") {
+      return h("button", { type: "button", class: `btn btn--wide oauth oauth--${provider.id}`, onclick: () => telegramLogin(error) }, h("span", { class: "oauth__mark" }, "✈"), tr.with(provider.title));
+    }
+    return h("a", { class: `btn btn--wide oauth oauth--${provider.id}`, href: `/auth/${provider.id}` }, h("span", { class: "oauth__mark" }, provider.title.slice(0, 1)), tr.with(provider.title));
+  });
+  const social = providers.length ? h("div", { class: "form oauth__list" }, providers, h("p", { class: "oauth__or mono" }, tr.orWith)) : null;
   page.replaceChildren(
-    h("div", { class: "auth" }, h("div", { class: "plate plate--accent", vars: { "--accent": "#F2C14E" } }, h("div", { class: "step__head" }, signup ? tr.signupTitle : tr.loginTitle), form)),
+    h(
+      "div",
+      { class: "auth" },
+      h("div", { class: "plate plate--accent", vars: { "--accent": "#F2C14E" } }, h("div", { class: "step__head" }, signup ? tr.signupTitle : tr.loginTitle), social, form),
+    ),
   );
   email.focus();
 }
@@ -918,7 +938,7 @@ async function renderAccount(page) {
   const field = (label, input) => h("label", { class: "field" }, h("span", { class: "label" }, label), input);
   const note = () => h("p", { class: "hint", role: "status" });
 
-  const current = h("input", { type: "password", autocomplete: "current-password", required: true });
+  const current = h("input", { type: "password", autocomplete: "current-password", required: state.user.hasPassword !== false });
   const next = h("input", { type: "password", autocomplete: "new-password", required: true, minlength: "10" });
   const passNote = note();
   const pass = h(
@@ -931,13 +951,54 @@ async function renderAccount(page) {
           await api("/api/account/password", { method: "POST", body: { current: current.value, next: next.value } });
           current.value = next.value = "";
           passNote.textContent = tr.passDone;
+          if (state.user.hasPassword === false) {
+            state.user.hasPassword = true;
+            route();
+          }
         } catch (err) {
           passNote.textContent = err.message;
         }
       },
     },
     h("div", { class: "step__head" }, tr.passTitle),
-    h("div", { class: "step__body" }, field(tr.passCurrent, current), field(tr.passNew, next), h("p", { class: "hint" }, tr.passHint), h("button", { type: "submit", class: "btn btn--gold" }, tr.passSave), passNote),
+    h("div", { class: "step__body" }, state.user.hasPassword === false ? null : field(tr.passCurrent, current), field(tr.passNew, next), h("p", { class: "hint" }, tr.passHint), h("button", { type: "submit", class: "btn btn--gold" }, tr.passSave), passNote),
+  );
+
+  const idNote = note();
+  const idList = h("div", { class: "idlist" });
+  const drawIdentities = (info) => {
+    const linked = new Set(info.linked.map((row) => row.provider));
+    const row = (title, on, action) =>
+      h("div", { class: "idlist__row" }, h("strong", {}, title), h("span", { class: `mono idlist__state${on ? " is-on" : ""}` }, on ? tr.idOn : tr.idOff), action ?? h("span"));
+    const rows = [row(tr.idPassword, info.hasPassword)];
+    for (const provider of state.providers ?? []) {
+      const on = linked.has(provider.id);
+      const action = on
+        ? h("button", {
+            type: "button",
+            class: "btn",
+            onclick: async () => {
+              try {
+                drawIdentities(await api(`/api/my/identities/${provider.id}`, { method: "DELETE" }));
+                idNote.textContent = "";
+              } catch (err) {
+                idNote.textContent = err.message;
+              }
+            },
+          }, tr.idUnlink)
+        : provider.id === "telegram"
+          ? h("button", { type: "button", class: "btn", onclick: () => telegramLogin(idNote, "#/account") }, tr.idLink)
+          : h("a", { class: "btn", href: `/auth/${provider.id}` }, tr.idLink);
+      rows.push(row(provider.title, on, action));
+    }
+    idList.replaceChildren(...rows);
+  };
+  api("/api/my/identities").then(drawIdentities).catch((err) => (idNote.textContent = err.message));
+  const identities = h(
+    "div",
+    { class: "plate" },
+    h("div", { class: "step__head" }, tr.idTitle),
+    h("div", { class: "step__body" }, h("p", { class: "hint" }, (state.providers ?? []).length ? tr.idLead : tr.idNone), idList, idNote),
   );
 
   const sessNote = note();
@@ -965,7 +1026,7 @@ async function renderAccount(page) {
     ),
   );
 
-  const delPass = h("input", { type: "password", autocomplete: "current-password", required: true });
+  const delPass = h("input", { type: "password", autocomplete: "current-password", required: state.user.hasPassword !== false });
   const delNote = note();
   const remove = h(
     "form",
@@ -985,13 +1046,13 @@ async function renderAccount(page) {
       },
     },
     h("div", { class: "step__head" }, tr.delTitle),
-    h("div", { class: "step__body" }, h("p", { class: "hint" }, tr.delLead), field(tr.password, delPass), h("button", { type: "submit", class: "btn btn--danger" }, tr.delBtn), delNote),
+    h("div", { class: "step__body" }, h("p", { class: "hint" }, tr.delLead), state.user.hasPassword === false ? null : field(tr.password, delPass), h("button", { type: "submit", class: "btn btn--danger" }, tr.delBtn), delNote),
   );
 
   page.replaceChildren(
     pageHead(tr.accKicker, tr.accTitle),
     h("div", { class: "plate step__body" }, h("strong", {}, state.user.name), h("span", { class: "mono hint" }, state.user.email)),
-    h("div", { class: "steps" }, pass, sessions, remove),
+    h("div", { class: "steps" }, identities, pass, sessions, remove),
   );
 }
 
@@ -1088,6 +1149,32 @@ async function renderConnect(page) {
   page.replaceChildren(pageHead(tr.connKicker, tr.connTitle), h("p", { class: "lead" }, tr.connLead), top, h("div", { class: "steps" }, clients, prompts), local);
 }
 
+/** Вход через бота площадки: открыть бота и ждать подтверждения. */
+async function telegramLogin(error, back = "#/connect") {
+  const tr = t();
+  const tab = window.open("about:blank", "_blank");
+  try {
+    const { link } = await api("/api/auth/telegram/start", { method: "POST" });
+    if (tab) tab.location.href = link;
+    else location.href = link;
+    toast(tr.tgWait);
+    for (let i = 0; i < 100; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const status = await api("/api/auth/telegram/status");
+      if (status.done) {
+        state.user = (await api("/api/me")).user;
+        if (location.hash === back) route();
+        else location.hash = back;
+        return;
+      }
+    }
+  } catch (err) {
+    tab?.close();
+    error.textContent = err.message;
+    error.hidden = false;
+  }
+}
+
 function renderDoc(page, name) {
   const [title, sections] = DOCS[name][state.lang];
   page.replaceChildren(
@@ -1101,7 +1188,7 @@ function renderDoc(page, name) {
 let routeId = 0;
 async function route() {
   const id = ++routeId;
-  const [view, arg] = location.hash.replace(/^#\/?/, "").split("/");
+  const [view, arg] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/");
   const name = view || "home";
   document.body.classList.toggle("is-home", name === "home");
   if (name !== "home") stopHome();
@@ -1172,6 +1259,7 @@ $("search").addEventListener("input", (event) => {
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
+    $("searchBox").classList.add("is-open");
     $("search").focus();
   }
 });
@@ -1195,6 +1283,7 @@ $("meBtn").addEventListener("click", (event) => {
 });
 document.addEventListener("click", (event) => {
   if (!$("menu").contains(event.target)) $("menu").hidden = true;
+  if (!$("searchBox").contains(event.target) && !$("searchBtn").contains(event.target) && !$("search").value) $("searchBox").classList.remove("is-open");
   if (!$("langPick").contains(event.target)) {
     $("langList").hidden = true;
     $("langBtn").setAttribute("aria-expanded", "false");
@@ -1210,10 +1299,9 @@ $("signOut").addEventListener("click", async () => {
 window.addEventListener("hashchange", route);
 
 (async () => {
-  try {
-    state.user = (await api("/api/me")).user;
-  } catch {
-    state.user = null;
-  }
+  [state.user, state.providers] = await Promise.all([
+    api("/api/me").then((r) => r.user).catch(() => null),
+    api("/api/auth/providers").then((r) => r.providers).catch(() => []),
+  ]);
   route();
 })();

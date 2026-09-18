@@ -105,6 +105,8 @@ expect("неверный пароль", r.status === 401, r);
 r = await call("/api/auth/login", { method: "POST", body: { email, password: "correct-horse-battery" } });
 expect("вход", r.status === 200, r);
 
+r = await call("/api/account", { method: "DELETE", body: { password: "correct-horse-battery" } });
+expect("аккаунт удалён", r.status === 200, r);
+
 console.log(failed ? `\nОшибок: ${failed}` : "\nВсё прошло.");
-console.log(`CLEANUP ${email}`);
 process.exit(failed ? 1 : 0);

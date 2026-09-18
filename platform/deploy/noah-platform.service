@@ -11,6 +11,8 @@ Environment=NOAH_HOST=0.0.0.0
 Environment=NOAH_DATA=/var/lib/noah-platform
 Environment=NOAH_SEED=/opt/noah-platform/modules/index.json
 Environment=NODE_NO_WARNINGS=1
+# Ключи входа через соцсети и адрес сайта (см. platform/README.md).
+EnvironmentFile=-/etc/noah-platform.env
 ExecStart=/usr/bin/node /opt/noah-platform/platform/server/server.mjs
 Restart=always
 RestartSec=3

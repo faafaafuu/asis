@@ -1751,3 +1751,121 @@ textarea:focus,
     flex: 1;
   }
 }
+
+/* ── Компактная шапка: язык списком, поиск и вход иконками ─────────────── */
+
+.top {
+  justify-content: flex-end;
+}
+
+.top .mhead {
+  margin-right: auto;
+}
+
+.top > .seg,
+.top__auth .top__link,
+.top__auth .btn--ghost {
+  display: none;
+}
+
+.langpick {
+  display: block;
+}
+
+.searchbtn,
+.iconbtn {
+  display: grid;
+}
+
+.search {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: clamp(16px, 2.4vw, 26px);
+  width: min(420px, calc(100vw - 32px));
+  margin-top: 6px;
+  z-index: 35;
+  box-shadow: 6px 6px 0 var(--chrome);
+}
+
+.search.is-open {
+  display: flex;
+}
+
+@media (max-width: 900px) {
+  .search {
+    position: static;
+    width: auto;
+    margin-top: 0;
+    box-shadow: none;
+  }
+}
+
+/* ── Вход через соцсети ─────────────────────────────────────────────────── */
+
+.oauth__list {
+  padding-bottom: 0;
+  gap: 10px;
+}
+
+.oauth {
+  justify-content: flex-start;
+  gap: 12px;
+  text-transform: none;
+}
+
+.oauth__mark {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: #fff;
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: 12px;
+}
+
+.oauth--google .oauth__mark { background: #2b5bc4; }
+.oauth--telegram .oauth__mark { background: #2aa3de; }
+.oauth--yandex .oauth__mark { background: #d4564a; }
+.oauth--vk .oauth__mark { background: #2b5bc4; }
+.oauth--github .oauth__mark,
+.oauth--x .oauth__mark { background: var(--ink); }
+
+.oauth__or {
+  margin: 4px 0 0;
+  text-align: center;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ── Способы входа в кабинете ───────────────────────────────────────────── */
+
+.idlist {
+  display: grid;
+  border-top: 1px solid var(--hair);
+}
+
+.idlist__row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hair);
+}
+
+.idlist__state {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.idlist__state.is-on {
+  color: #2e8b57;
+}

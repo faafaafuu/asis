@@ -220,28 +220,65 @@ body.is-home .page {
   display: flex;
   align-items: center;
   gap: 20px;
-  flex-wrap: wrap;
-  padding: 16px 20px;
+  padding: 16px 0 16px 20px;
   background: #fff;
   border: 1px solid var(--hair);
+  overflow: hidden;
 }
 
 .band .label {
+  flex: none;
   color: var(--ink-3);
 }
 
-.band__row {
+.band__viewport {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+
+.band__track {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px 22px;
+  width: max-content;
+  gap: 34px;
+  padding-right: 34px;
+  animation: band-run 55s linear infinite;
+}
+
+.band:hover .band__track {
+  animation-play-state: paused;
 }
 
 .band__item {
   font-family: var(--display);
   font-weight: 800;
-  font-size: 15px;
+  font-size: 16px;
   text-transform: uppercase;
   letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.band__item::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 12px;
+  vertical-align: middle;
+  background: var(--gold);
+}
+
+@keyframes band-run {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .band__track {
+    animation: none;
+  }
 }
 
 .sect {

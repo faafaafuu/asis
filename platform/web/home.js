@@ -128,7 +128,13 @@ const T = {
   },
 };
 
-const BRAINS = ["Claude", "Qwen", "Gemma", "Mistral", "DeepSeek", "Gemini", "Llama", "Ollama", "OpenRouter", "Groq", "OpenAI API"];
+// Модели — от самых популярных. Любая работает через Ollama, OpenRouter,
+// Groq или любой OpenAI-совместимый сервис.
+const BRAINS = [
+  "GPT", "Claude", "Gemini", "DeepSeek", "Llama", "Qwen", "Grok", "Mistral", "Gemma", "Kimi",
+  "GLM", "Phi", "Mixtral", "Command R", "MiniMax", "Nemotron", "Codestral", "Hermes", "Yi",
+  "Granite", "OLMo", "Aya", "Falcon", "StarCoder",
+];
 
 const MANIFEST = `{
   "id": "euro-rate",
@@ -366,7 +372,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
     "section",
     { class: "band" },
     h("span", { class: "label" }, tr.brainsLabel),
-    h("div", { class: "band__row" }, BRAINS.map((b) => h("span", { class: "band__item" }, b))),
+    h("div", { class: "band__viewport" }, h("div", { class: "band__track" }, [...BRAINS, ...BRAINS].map((b) => h("span", { class: "band__item" }, b)))),
   );
 
   const tiles = ["#2B5BC4", "#F2C14E", "#D4564A", "#5F8C4C"];
