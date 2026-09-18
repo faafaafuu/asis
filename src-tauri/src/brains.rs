@@ -189,11 +189,50 @@ async fn candidates(app: &AppHandle) -> Vec<Brain> {
     list
 }
 
+/// Названия моделей и уровни рассуждения, которые понимает мост к Claude Code.
+const BRIDGE_WORDS: &[&str] = &[
+    "опус", "соннет", "сонет", "хайку", "хаику", "фейбл", "фэйбл", "opus", "sonnet", "haiku", "fable",
+    "уровень", "уровня", "effort", "эффорт", "рассужд",
+];
+
+/// Уровни рассуждения. Сами по себе слова частые, поэтому считаются только в
+/// короткой фразе: «включи medium», «поставь очень высокий».
+const EFFORT_WORDS: &[&str] = &[
+    "low", "medium", "high", "xhigh", "max", "лоу", "медиум", "хай", "экстра", "extra", "низк", "средн",
+    "высок", "максимал", "макс",
+];
+
+fn bridge_control(said: &str) -> bool {
+    let words = words(said);
+    words.iter().any(|w| BRIDGE_WORDS.iter().any(|b| w.starts_with(b)))
+        || (words.len() <= 6
+            && words.iter().any(|w| EFFORT_WORDS.iter().any(|e| w == e || (e.chars().count() > 3 && w.starts_with(e)))))
+}
+
+/// Спрашивает мост напрямую: он сам меняет свою модель и уровень и отвечает,
+/// не тратя на это модель.
+async fn ask_bridge(app: &AppHandle, said: &str) -> String {
+    let provider = app.state::<AppState>().provider();
+    match provider.ask("", "", &[], said).await {
+        Ok(reply) if !reply.trim().is_empty() => reply.trim().to_string(),
+        Ok(_) => "Мост ничего не ответил.".into(),
+        Err(err) => format!("Мост не ответил: {err}"),
+    }
+}
+
 /// Ответ на просьбу про модели, если это она.
 pub async fn voice(app: &AppHandle, said: &str) -> Option<String> {
-    let ask = parse(said)?;
     let current = Brain::of(&app.state::<AppState>().config().ai);
+    // Через мост модель и уровень меняет сам мост: «переключи на хайку»,
+    // «какой уровень», «поставь medium».
+    if kind(&current) == "мост" && bridge_control(said) {
+        return Some(ask_bridge(app, said).await);
+    }
+    let ask = parse(said)?;
     match ask {
+        Ask::Which if kind(&current) == "мост" => {
+            Some(format!("Работаю через мост. {}", ask_bridge(app, "какая модель сейчас").await))
+        }
         Ask::Which => Some(format!(
             "Сейчас отвечает {} — {}.",
             spoken_name(&current.model),
@@ -311,6 +350,16 @@ mod tests {
         config.ai.model = "a".into();
         remember(&mut config);
         assert_eq!(config.brains.iter().map(|b| b.model.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    }
+
+    #[test]
+    fn bridge_phrases_are_detected() {
+        assert!(bridge_control("переключи на хайку"));
+        assert!(bridge_control("какой уровень сейчас"));
+        assert!(bridge_control("включи medium"));
+        assert!(bridge_control("поставь очень высокий"));
+        assert!(!bridge_control("поставь будильник на семь утра"));
+        assert!(!bridge_control("какая погода в Казани"));
     }
 
     #[test]
