@@ -289,6 +289,36 @@ route("POST", /^\/api\/auth\/logout$/, ({ req, res }) => {
   return { ok: true };
 });
 
+route("POST", /^\/api\/account\/password$/, async ({ req, user, ip }) => {
+  if (!user) throw new Fail(401, "Войдите.");
+  if (throttled(ip)) throw new Fail(429, "Слишком много попыток. Подождите несколько минут.");
+  const { current, next } = await readJson(req);
+  const row = db.prepare("SELECT pass FROM users WHERE id = ?").get(user.id);
+  if (!(await checkPassword(String(current ?? ""), row.pass))) throw new Fail(403, "Текущий пароль не подходит.");
+  if (String(next ?? "").length < 10) throw new Fail(400, "Пароль — от 10 знаков.");
+  db.prepare("UPDATE users SET pass = ? WHERE id = ?").run(await hashPassword(next), user.id);
+  return { ok: true };
+});
+
+route("POST", /^\/api\/account\/logout-others$/, ({ req, user }) => {
+  if (!user) throw new Fail(401, "Войдите.");
+  const token = cookies(req).noah_session;
+  db.prepare("DELETE FROM sessions WHERE user_id = ? AND hash != ?").run(user.id, sha(token ?? ""));
+  return { ok: true };
+});
+
+route("DELETE", /^\/api\/account$/, async ({ req, res, user, ip }) => {
+  if (!user) throw new Fail(401, "Войдите.");
+  if (throttled(ip)) throw new Fail(429, "Слишком много попыток. Подождите несколько минут.");
+  const { password } = await readJson(req);
+  const row = db.prepare("SELECT pass FROM users WHERE id = ?").get(user.id);
+  if (!(await checkPassword(String(password ?? ""), row.pass))) throw new Fail(403, "Пароль не подходит.");
+  db.prepare("DELETE FROM modules WHERE owner_id = ?").run(user.id);
+  db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
+  res.setHeader("Set-Cookie", sessionCookie("", 0));
+  return { ok: true };
+});
+
 route("GET", /^\/api\/stats$/, () => {
   const row = db
     .prepare("SELECT COUNT(*) AS modules, COUNT(DISTINCT author) AS authors, COALESCE(SUM(installs), 0) AS installs FROM modules WHERE hidden = 0")

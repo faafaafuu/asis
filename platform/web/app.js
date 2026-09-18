@@ -1,5 +1,7 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
+import { renderHome, stopHome } from "./home.js?v=12";
+
 const RELEASES = "https://github.com/faafaafuu/asis/releases/latest";
 const REPO = "https://github.com/faafaafuu/asis";
 const STANDARD_DOC = "https://github.com/faafaafuu/asis/blob/main/src-tauri/src/module_format.md";
@@ -11,8 +13,8 @@ const T = {
     signIn: "Sign in", signUp: "Create account", signOut: "Sign out", myModules: "My modules", apiKeys: "Platform keys",
     privacy: "Privacy", terms: "Terms",
     navDiscover: "DISCOVER", navBuild: "BUILD", navAccount: "EARN",
-    navLibrary: "Library", navModule: "Module", langLabel: "LANGUAGE", navStudio: "Studio", navStandard: "Standard", navSeller: "Seller",
-    menu: ["My modules", "Installed", "Payouts", "Settings"],
+    navHome: "Home", navLibrary: "Library", navModule: "Module", langLabel: "LANGUAGE", navStudio: "Studio", navStandard: "Standard", navSeller: "Seller",
+    menu: ["My modules", "Platform keys", "Account settings"],
     libKicker: "MARKETPLACE", libTitle: "Module library",
     sortPopular: "Popular", sortNew: "New", sortFree: "Free",
     statModules: "MODULES", statAuthors: "AUTHORS", statBrains: "BRAINS SUPPORTED", statInstalls: "INSTALLS",
@@ -72,12 +74,17 @@ const T = {
     passHint: "At least 10 characters.",
     noAccount: "No account yet?", haveAccount: "Already have one?",
     footer: [
-      ["PLATFORM", [["Library", "#/library"], ["Studio", "#/studio"], ["Standard", "#/standard"], ["Seller dashboard", "#/seller"]]],
-      ["BUILD", [["Docs", STANDARD_DOC], ["MCP guide", REPO + "/blob/main/modules/README.md"], ["Publish a module", "#/seller"], ["Changelog", REPO + "/blob/main/CHANGELOG.md"]]],
-      ["COMPANY", [["About", REPO], ["Blog", REPO], ["Careers", REPO], ["Press kit", REPO + "/tree/main/docs"]]],
-      ["LEGAL", [["Privacy policy", "#/privacy"], ["Terms of service", "#/terms"], ["Seller agreement", "#/terms"], ["Refunds", "#/terms"]]],
+      ["PLATFORM", [["Home", "#/"], ["Library", "#/library"], ["Studio", "#/studio"], ["Seller dashboard", "#/seller"]]],
+      ["BUILD", [["Module standard", "#/standard"], ["Full spec", STANDARD_DOC], ["MCP guide", REPO + "/blob/main/modules/README.md"], ["Publish a module", "#/seller"]]],
+      ["NOAH", [["About", "#/"], ["Download", RELEASES], ["Source code", REPO], ["Contact", REPO + "/issues"]]],
+      ["LEGAL", [["Privacy policy", "#/privacy"], ["Terms of service", "#/terms"]]],
     ],
     justNow: "just now", error: "Something went wrong.",
+    accKicker: "ACCOUNT", accTitle: "Account settings",
+    passTitle: "CHANGE PASSWORD", passCurrent: "Current password", passNew: "New password", passSave: "Change password", passDone: "Password changed.",
+    sessTitle: "SESSIONS", sessLead: "Signed in on another computer and want to end it? Sign out everywhere — this browser stays signed in.", sessBtn: "Sign out everywhere else", sessDone: "Other sessions ended.",
+    delTitle: "DELETE ACCOUNT", delLead: "Your modules are removed from the library, keys stop working. This can't be undone.", delBtn: "Delete account", delConfirm: "Delete the account for good?",
+    payoutSoon: "Paid modules and payouts are coming later.",
   },
   ru: {
     brainLabel: "МОЗГ", brainValue: "любая LLM", brainLocal: "локально · офлайн", sellerRole: "продавец", contact: "Связаться",
@@ -85,8 +92,8 @@ const T = {
     signIn: "Войти", signUp: "Создать аккаунт", signOut: "Выйти", myModules: "Мои модули", apiKeys: "Ключи площадки",
     privacy: "Конфиденциальность", terms: "Соглашение",
     navDiscover: "НАЙТИ", navBuild: "СОБРАТЬ", navAccount: "ЗАРАБОТОК",
-    navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navSeller: "Кабинет",
-    menu: ["Мои модули", "Установленные", "Выплаты", "Настройки"],
+    navHome: "Главная", navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navSeller: "Кабинет",
+    menu: ["Мои модули", "Ключи площадки", "Настройки аккаунта"],
     libKicker: "МАРКЕТПЛЕЙС", libTitle: "Библиотека модулей",
     sortPopular: "Популярные", sortNew: "Новые", sortFree: "Бесплатные",
     statModules: "МОДУЛЕЙ", statAuthors: "АВТОРОВ", statBrains: "МОЗГОВ", statInstalls: "УСТАНОВОК",
@@ -146,12 +153,17 @@ const T = {
     passHint: "Не короче 10 знаков.",
     noAccount: "Нет аккаунта?", haveAccount: "Уже есть аккаунт?",
     footer: [
-      ["ПЛАТФОРМА", [["Библиотека", "#/library"], ["Студия", "#/studio"], ["Стандарт", "#/standard"], ["Кабинет продавца", "#/seller"]]],
-      ["РАЗРАБОТКА", [["Документация", STANDARD_DOC], ["Гид по MCP", REPO + "/blob/main/modules/README.md"], ["Опубликовать модуль", "#/seller"], ["История версий", REPO + "/blob/main/CHANGELOG.md"]]],
-      ["КОМПАНИЯ", [["О проекте", REPO], ["Блог", REPO], ["Вакансии", REPO], ["Пресс-кит", REPO + "/tree/main/docs"]]],
-      ["ПРАВОВОЕ", [["Политика конфиденциальности", "#/privacy"], ["Пользовательское соглашение", "#/terms"], ["Договор продавца", "#/terms"], ["Возвраты", "#/terms"]]],
+      ["ПЛАТФОРМА", [["Главная", "#/"], ["Библиотека", "#/library"], ["Студия", "#/studio"], ["Кабинет продавца", "#/seller"]]],
+      ["РАЗРАБОТКА", [["Стандарт модуля", "#/standard"], ["Полный регламент", STANDARD_DOC], ["Гид по MCP", REPO + "/blob/main/modules/README.md"], ["Опубликовать модуль", "#/seller"]]],
+      ["NOAH", [["О проекте", "#/"], ["Скачать", RELEASES], ["Исходный код", REPO], ["Связаться", REPO + "/issues"]]],
+      ["ПРАВОВОЕ", [["Политика конфиденциальности", "#/privacy"], ["Пользовательское соглашение", "#/terms"]]],
     ],
     justNow: "только что", error: "Что-то пошло не так.",
+    accKicker: "АККАУНТ", accTitle: "Настройки аккаунта",
+    passTitle: "СМЕНА ПАРОЛЯ", passCurrent: "Текущий пароль", passNew: "Новый пароль", passSave: "Сменить пароль", passDone: "Пароль изменён.",
+    sessTitle: "СЕАНСЫ", sessLead: "Входили на другом компьютере и хотите закончить? Выйдите везде — этот браузер останется в аккаунте.", sessBtn: "Выйти на других устройствах", sessDone: "Остальные сеансы закрыты.",
+    delTitle: "УДАЛИТЬ АККАУНТ", delLead: "Ваши модули уйдут из библиотеки, ключи перестанут работать. Отменить нельзя.", delBtn: "Удалить аккаунт", delConfirm: "Удалить аккаунт насовсем?",
+    payoutSoon: "Платные модули и выплаты появятся позже.",
   },
 };
 
@@ -193,7 +205,7 @@ const ACCENTS = [
   { accent: "#5F8C4C", fg: "#FFFFFF" },
 ];
 const ICONS = { memory: "memory", files: "files", fetch: "browser", browser: "browser", docs: "notes", thinking: "code" };
-const NAV_ICON = { library: "notes", module: "browser", studio: "code", standard: "legal", seller: "chart" };
+const NAV_ICON = { home: "home", library: "notes", module: "browser", studio: "code", standard: "legal", seller: "chart" };
 const CATEGORY_ICON = { work: "notes", home: "home", finance: "chart", dev: "code", health: "memory", media: "browser", other: "files" };
 
 /* ── Состояние ───────────────────────────────────────────────────────────── */
@@ -360,7 +372,7 @@ function renderChrome(route) {
   const count = state.stats ? String(state.stats.modules) : "";
   const moduleLink = state.lastModule ? `module/${state.lastModule}` : "library";
   const groups = [
-    [tr.navDiscover, [["library", tr.navLibrary, count, "#2B5BC4"], ["module", tr.navModule, "", "#D4564A", moduleLink]]],
+    [tr.navDiscover, [["home", tr.navHome, "", "#F2C14E", ""], ["library", tr.navLibrary, count, "#2B5BC4"], ["module", tr.navModule, "", "#D4564A", moduleLink]]],
     [tr.navBuild, [["studio", tr.navStudio, "", "#F2C14E"], ["standard", tr.navStandard, "5", "#7FB069"]]],
     [tr.navAccount, [["seller", tr.navSeller, "$0", "#D4564A"]]],
   ];
@@ -373,7 +385,7 @@ function renderChrome(route) {
         items.map(([id, text, badge, dot, target]) =>
           h(
             "a",
-            { class: "nav__item", href: `#/${target ?? id}`, "aria-current": route === id ? "page" : null, vars: { "--dot": dot } },
+            { class: "nav__item", "data-id": id, href: `#/${target ?? id}`, "aria-current": route === id ? "page" : null, vars: { "--dot": dot } },
             h("span", { class: "nav__dot" }),
             h("span", { class: "navicon" }, icon(NAV_ICON[id])),
             text,
@@ -394,8 +406,8 @@ function renderChrome(route) {
     for (const el of ["meAvatar", "sideAvatar"]) $(el).textContent = user.name.slice(0, 1);
     for (const el of ["meName", "sideName", "menuName"]) $(el).textContent = user.name;
     $("menuEmail").textContent = user.email;
-    const hints = [String(state.myCount ?? ""), "", "$0", ""];
-    const targets = ["#/seller", "#/library", "#/seller", "#/seller"];
+    const hints = [String(state.myCount ?? ""), "", ""];
+    const targets = ["#/seller", "#/seller/keys", "#/account"];
     $("menuItems").replaceChildren(
       ...tr.menu.map((label, at) => h("a", { class: "menu__item", href: targets[at] }, label, h("span", { class: "mono" }, hints[at]))),
     );
@@ -656,7 +668,7 @@ function renderStudio(page) {
 
 /* ── Кабинет автора ──────────────────────────────────────────────────────── */
 
-async function renderSeller(page) {
+async function renderSeller(page, focusKeys = false) {
   const tr = t();
   if (!state.user) {
     page.replaceChildren(
@@ -713,7 +725,7 @@ async function renderSeller(page) {
   const fresh = h("div", { class: "secret-once", hidden: true });
   const keys = h(
     "div",
-    { class: "plate" },
+    { class: "plate", id: "keys" },
     h("div", { class: "step__head" }, tr.keysTitle),
     h(
       "div",
@@ -772,9 +784,16 @@ async function renderSeller(page) {
     tr.publishSteps.map(([title, body], at) => h("div", { class: "step__row" }, h("span", { class: "num", vars: { "--accent": "#7FB069" } }, at + 1), h("div", {}, title, h("p", {}, body)))),
   );
 
-  const payout = h("button", { type: "button", class: "btn", disabled: true }, `${tr.payout} $0`);
-  page.replaceChildren(pageHead(tr.sellerKicker, tr.sellerTitle, payout), stats, table, h("div", { class: "steps" }, keys, how));
+  const payout = h("button", { type: "button", class: "btn", disabled: true, title: tr.payoutSoon }, `${tr.payout} $0`);
+  page.replaceChildren(
+    pageHead(tr.sellerKicker, tr.sellerTitle, payout),
+    h("p", { class: "lead" }, tr.payoutSoon),
+    stats,
+    table,
+    h("div", { class: "steps" }, keys, how),
+  );
   renderChrome("seller");
+  if (focusKeys) keys.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 /* ── Стандарт ────────────────────────────────────────────────────────────── */
@@ -854,6 +873,92 @@ function renderAuth(page, mode) {
   email.focus();
 }
 
+async function renderAccount(page) {
+  const tr = t();
+  if (!state.user) {
+    location.hash = "#/login";
+    return;
+  }
+  const field = (label, input) => h("label", { class: "field" }, h("span", { class: "label" }, label), input);
+  const note = () => h("p", { class: "hint", role: "status" });
+
+  const current = h("input", { type: "password", autocomplete: "current-password", required: true });
+  const next = h("input", { type: "password", autocomplete: "new-password", required: true, minlength: "10" });
+  const passNote = note();
+  const pass = h(
+    "form",
+    {
+      class: "plate",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        try {
+          await api("/api/account/password", { method: "POST", body: { current: current.value, next: next.value } });
+          current.value = next.value = "";
+          passNote.textContent = tr.passDone;
+        } catch (err) {
+          passNote.textContent = err.message;
+        }
+      },
+    },
+    h("div", { class: "step__head" }, tr.passTitle),
+    h("div", { class: "step__body" }, field(tr.passCurrent, current), field(tr.passNew, next), h("p", { class: "hint" }, tr.passHint), h("button", { type: "submit", class: "btn btn--gold" }, tr.passSave), passNote),
+  );
+
+  const sessNote = note();
+  const sessions = h(
+    "div",
+    { class: "plate" },
+    h("div", { class: "step__head" }, tr.sessTitle),
+    h(
+      "div",
+      { class: "step__body" },
+      h("p", { class: "hint" }, tr.sessLead),
+      h("button", {
+        type: "button",
+        class: "btn",
+        onclick: async () => {
+          try {
+            await api("/api/account/logout-others", { method: "POST" });
+            sessNote.textContent = tr.sessDone;
+          } catch (err) {
+            sessNote.textContent = err.message;
+          }
+        },
+      }, tr.sessBtn),
+      sessNote,
+    ),
+  );
+
+  const delPass = h("input", { type: "password", autocomplete: "current-password", required: true });
+  const delNote = note();
+  const remove = h(
+    "form",
+    {
+      class: "plate plate--accent",
+      vars: { "--accent": "#D4564A" },
+      onsubmit: async (event) => {
+        event.preventDefault();
+        if (!confirm(tr.delConfirm)) return;
+        try {
+          await api("/api/account", { method: "DELETE", body: { password: delPass.value } });
+          state.user = null;
+          location.hash = "#/";
+        } catch (err) {
+          delNote.textContent = err.message;
+        }
+      },
+    },
+    h("div", { class: "step__head" }, tr.delTitle),
+    h("div", { class: "step__body" }, h("p", { class: "hint" }, tr.delLead), field(tr.password, delPass), h("button", { type: "submit", class: "btn btn--danger" }, tr.delBtn), delNote),
+  );
+
+  page.replaceChildren(
+    pageHead(tr.accKicker, tr.accTitle),
+    h("div", { class: "plate step__body" }, h("strong", {}, state.user.name), h("span", { class: "mono hint" }, state.user.email)),
+    h("div", { class: "steps" }, pass, sessions, remove),
+  );
+}
+
 function renderDoc(page, name) {
   const [title, sections] = DOCS[name][state.lang];
   page.replaceChildren(
@@ -868,11 +973,19 @@ let routeId = 0;
 async function route() {
   const id = ++routeId;
   const [view, arg] = location.hash.replace(/^#\/?/, "").split("/");
-  const name = view || "library";
+  const name = view || "home";
+  document.body.classList.toggle("is-home", name === "home");
+  if (name !== "home") stopHome();
   renderChrome(name);
   const page = $("page");
   try {
-    if (name === "library" || name === "") {
+    if (name === "home") {
+      await loadLibrary();
+      if (id === routeId) {
+        renderChrome("home");
+        renderHome(page, { h, icon, lang: state.lang, stats: state.stats, modules: state.modules, number });
+      }
+    } else if (name === "library") {
       await loadLibrary();
       if (id === routeId) {
         renderChrome("library");
@@ -886,13 +999,14 @@ async function route() {
         renderModule(page, module);
       }
     } else if (name === "studio") renderStudio(page);
-    else if (name === "seller") await renderSeller(page);
+    else if (name === "seller") await renderSeller(page, arg === "keys");
+    else if (name === "account") await renderAccount(page);
     else if (name === "standard") renderStandard(page);
     else if (name === "login" || name === "signup") {
       if (state.user) location.hash = "#/seller";
       else renderAuth(page, name);
     } else if (name === "privacy" || name === "terms") renderDoc(page, name);
-    else location.hash = "#/library";
+    else location.hash = "#/";
   } catch (err) {
     if (id === routeId) page.replaceChildren(h("p", { class: "empty" }, err.message));
   }
@@ -920,7 +1034,7 @@ $("search").addEventListener("input", (event) => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     state.query = event.target.value.trim();
-    if (!location.hash.startsWith("#/library") && location.hash !== "" && location.hash !== "#/") location.hash = "#/library";
+    if (!location.hash.startsWith("#/library")) location.hash = "#/library";
     else route();
   }, 220);
 });
