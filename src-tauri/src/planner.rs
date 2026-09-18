@@ -138,6 +138,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         return Some(reply);
     }
     // «Какая модель сейчас», «переключись на мистраль» — без модели: её и меняем.
+    // Ноа предложила действие («Открыть центр обновления?») — «да» его выполняет.
+    if let Some(reply) = answer_offer(said).await {
+        return Some(reply);
+    }
     // «Запомни, что…», «что ты обо мне знаешь», «забудь про…» — без модели.
     if let Some(reply) = crate::profile::voice(said) {
         return Some(reply);
@@ -3545,6 +3549,43 @@ fn may_be_command(said: &str) -> bool {
     let lower = format!("{} ", said.to_lowercase());
     COMMAND_INTENTS.iter().any(|intent| asked_for(intent, said))
         || OTHER_COMMAND_STEMS.iter().any(|stem| lower.contains(stem))
+}
+
+/// Предложенное действие и когда его предложили.
+static OFFER: std::sync::Mutex<Option<(&'static str, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+/// Сколько предложение ждёт ответа.
+const OFFER_TTL: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Запоминает, что Ноа предложила открыть: имя для `pc::launch`.
+pub fn offer(target: &'static str) {
+    *OFFER.lock().unwrap_or_else(|err| err.into_inner()) = Some((target, std::time::Instant::now()));
+}
+
+/// Ответ на предложение: «да» — открыть, «нет» — забыть. `None` — это не ответ.
+async fn answer_offer(said: &str) -> Option<String> {
+    let pending = {
+        let offer = OFFER.lock().unwrap_or_else(|err| err.into_inner());
+        (*offer).filter(|(_, at)| at.elapsed() < OFFER_TTL).map(|(target, _)| target)
+    }?;
+    let lower = said.to_lowercase().replace('ё', "е");
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphabetic()).filter(|w| !w.is_empty()).collect();
+    if words.is_empty() || words.len() > 4 {
+        return None;
+    }
+    const YES: &[&str] = &["да", "давай", "ага", "угу", "открой", "открывай", "конечно", "сделай", "ок", "окей", "хорошо", "можно", "го"];
+    const NO: &[&str] = &["нет", "не", "неа", "потом", "позже", "отмена"];
+    let take = || *OFFER.lock().unwrap_or_else(|err| err.into_inner()) = None;
+    if words.iter().any(|w| NO.contains(w)) {
+        take();
+        return Some("Хорошо.".into());
+    }
+    if !words.iter().any(|w| YES.contains(w)) {
+        return None;
+    }
+    take();
+    log::info!("предложение принято: открываю «{pending}»");
+    Some(blocking(move || crate::pc::launch(pending, false, "")).await)
 }
 
 /// Просьба проверить компьютер — по словам, без модели.

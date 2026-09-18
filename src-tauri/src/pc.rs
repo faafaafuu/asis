@@ -708,6 +708,7 @@ const SYSTEM: &[(&str, &str)] = &[
     ("диспетчер устройств", "devmgmt.msc"),
     ("диспетчер задач", "taskmgr.exe"),
     ("управление дисками", "diskmgmt.msc"),
+    ("очистка диска", "cleanmgr.exe"),
     ("управление компьютером", "compmgmt.msc"),
     ("службы", "services.msc"),
     ("просмотр событий", "eventvwr.msc"),
