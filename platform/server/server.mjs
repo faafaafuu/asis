@@ -11,7 +11,7 @@ import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { gzipSync } from "node:zlib";
+import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
 
 import { CATEGORIES, FORMAT, lint, validId } from "./standard.mjs";
@@ -212,11 +212,29 @@ class Fail extends Error {
   }
 }
 
-/** Сжатие текста: ответы меньше и быстрее доходят через медленные сети. */
-function packed(req, body) {
-  const wants = /gzip/.test(String(req.headers["accept-encoding"] ?? ""));
-  if (!wants || body.length < 1024) return { body, headers: {} };
-  return { body: gzipSync(body), headers: { "Content-Encoding": "gzip", Vary: "Accept-Encoding" } };
+/** Сжатые файлы сайта: жмутся один раз, пока файл не изменился. */
+const packCache = new Map();
+
+/**
+ * Сжатие текста: ответы меньше и быстрее доходят через медленные сети. Brotli
+ * — где браузер его понимает: на треть меньше gzip, а из части сетей
+ * соединение с сервером замирает после ~16 КБ, и каждый килобайт на счету.
+ * `key` — файл и время его изменения, чтобы не жать одно и то же заново.
+ */
+function packed(req, body, key) {
+  const accepts = String(req.headers["accept-encoding"] ?? "");
+  const encoding = /br/.test(accepts) ? "br" : /gzip/.test(accepts) ? "gzip" : "";
+  if (!encoding || body.length < 1024) return { body, headers: {} };
+  const cacheKey = key && `${encoding}:${key}`;
+  let out = cacheKey && packCache.get(cacheKey);
+  if (!out) {
+    out =
+      encoding === "br"
+        ? brotliCompressSync(body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: key ? 11 : 5 } })
+        : gzipSync(body, { level: 9 });
+    if (cacheKey) packCache.set(cacheKey, out);
+  }
+  return { body: out, headers: { "Content-Encoding": encoding, Vary: "Accept-Encoding" } };
 }
 
 function send(res, status, body, headers = {}) {
@@ -513,7 +531,8 @@ async function serveStatic(req, res, pathname, versioned) {
   try {
     const type = TYPES[extname(file)] ?? "application/octet-stream";
     const raw = await readFile(file);
-    const out = /^(text|application\/json|image\/svg)/.test(type) ? packed(req, raw) : { body: raw, headers: {} };
+    const key = `${file}:${(await stat(file)).mtimeMs}`;
+    const out = /^(text|application\/(json|manifest)|image\/svg)/.test(type) ? packed(req, raw, key) : { body: raw, headers: {} };
     res.writeHead(200, {
       ...SECURITY_HEADERS,
       "Content-Type": type,

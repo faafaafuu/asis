@@ -2224,3 +2224,24 @@ body.is-home .foot {
     grid-template-columns: 1fr;
   }
 }
+
+/* Ссылка на документацию в шапке — на всех страницах, включая главную. */
+.top__docs {
+  padding: 8px 12px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13.5px;
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.top__docs:hover {
+  border-color: var(--chrome-3);
+}
+
+/* На телефоне документация — в нижнем меню («Справка»), в шапке ей нет места. */
+@media (max-width: 900px) {
+  .top__docs {
+    display: none;
+  }
+}

@@ -1,245 +1,21 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=26";
-import { renderDocs } from "./docs.js?v=26";
+import { renderHome, stopHome } from "./home.js?v=27";
 
-const RELEASES = "/download";
-// Адрес сайта для ссылок, которые уходят наружу: открыли по IP — всё равно домен.
-const SITE = /^[\d.]+$/.test(location.hostname) ? "https://noahlab.ru" : location.origin;
-const REPO = "https://github.com/faafaafuu/asis";
-const STANDARD_DOC = "#/docs/module-standard";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=27";
+import { T, DOCS } from "./i18n.js?v=27";
 
-const T = {
-  en: {
-    brainLabel: "BRAIN", brainValue: "any LLM", brainLocal: "local · offline", sellerRole: "seller", contact: "Contact",
-    appTitle: "Get NOAH", searchPh: "Search modules, tools, authors…", newModule: "+ NEW MODULE",
-    signIn: "Sign in", signUp: "Create account", signOut: "Sign out", myModules: "My modules", apiKeys: "Platform keys",
-    privacy: "Privacy", terms: "Terms",
-    navDiscover: "DISCOVER", navBuild: "BUILD", navAccount: "EARN",
-    navHome: "Home", navLibrary: "Library", navModule: "Module", langLabel: "LANGUAGE", navStudio: "Studio", navStandard: "Standard", navDocs: "Docs", navSeller: "Seller",
-    menu: ["My modules", "Platform keys", "Account settings"],
-    libKicker: "MARKETPLACE", libTitle: "Module library",
-    sortPopular: "Popular", sortNew: "New", sortFree: "Free",
-    statModules: "MODULES", statAuthors: "AUTHORS", statBrains: "BRAINS SUPPORTED", statInstalls: "INSTALLS",
-    cat: { all: "All", free: "Free", work: "Work", home: "Home", finance: "Finance", dev: "Dev tools", health: "Health", local: "Local-only", media: "Media", other: "Other" },
-    free: "free", install: "Install", installsWord: "installs", noModules: "Nothing found. Try another word or category — or build the module yourself in the Studio.",
-    backLib: "BACK TO LIBRARY", core: "noah-core", builtIn: "built into NOAH", builtInLong: "Built into NOAH — comes with the app, nothing to install separately.", builtInBtn: "DOWNLOAD NOAH", builtInTransport: "part of the core", open: "Open",
-    installBtn: "INSTALL", copyAsk: "COPY REQUEST",
-    toolsExposed: "TOOLS EXPOSED", noTools: "Tools are listed after the module is published from NOAH.",
-    metaBrain: "BRAIN", brainAny: "any", metaTransport: "TRANSPORT", metaInstalls: "INSTALLS", metaUpdated: "UPDATED",
-    permsLabel: "PERMISSIONS ASKED", permKeys: (list) => `Your keys: ${list}. You enter them in NOAH; the module never shows them to anyone.`,
-    permNone: "No keys or accounts needed.", permLocal: "Runs on your computer; NOAH checks it before the first start.",
-    installHow: "How to install",
-    installSteps: (id, title) => [
-      ["Get NOAH", "Download the app and start it — it lives in the tray."],
-      ["Open the library", `NOAH → Modules → Your module → Library → «${title}».`],
-      ["Or ask your AI", `With NOAH connected over MCP, say: «Install the NOAH module ${id}». NOAH checks it and starts it.`],
-    ],
-    studioKicker: "NO CODE", studioTitle: "Module studio",
-    stepDescribe: "DESCRIBE IT", stepAssemble: "NOAH ASSEMBLES", stepManifest: "MANIFEST",
-    studioPh: "I want it to check my three bank accounts every morning and tell me what changed…",
-    ideas: ["watch my bank", "sort receipts", "daily standup"],
-    assembleBtn: "ASSEMBLE MODULE",
-    build: ["Task described", "Request for your AI is ready", "Your AI writes the module", "NOAH checks and starts it"],
-    states: { done: "DONE", running: "RUNNING", waiting: "WAITING" },
-    connectHint: "Connect NOAH to your AI once, then paste the copied request into it:",
-    copied: "Copied",
-    promptIntro: "Build me a NOAH module through the noa MCP tools. Follow the order from the NOAH instructions: module_format, environment, clarify with me, create_module, fix until the check passes. The task:",
-    promptEmpty: "Describe the task first.",
-    sellerKicker: "SELLER", sellerTitle: "Your modules", payout: "WITHDRAW",
-    sellerStats: ["AVAILABLE", "ALL TIME", "SALES", "PUBLISHED"],
-    colModule: "MODULE", colPrice: "PRICE", colSales: "SALES", colRevenue: "REVENUE",
-    noMine: "You haven't published anything yet. Build a module in NOAH, then ask your AI: «Publish module <id> to NOAH».",
-    remove: "Delete", removeConfirm: "Delete the module from the library? Installed copies keep working.",
-    keysTitle: "PLATFORM KEYS", keysLead: "A key links NOAH on your computer to this account: with it NOAH publishes your modules. Paste it into NOAH → Settings → Platform.",
-    keyLabelPh: "Key name, e.g. home PC", createKey: "Create key",
-    keyOnce: "Copy it now — it is shown only once:", noKeys: "No keys yet.", used: "used", never: "never used",
-    publishHow: "HOW TO PUBLISH",
-    publishSteps: [
-      ["Create a key", "Right here, then paste it into NOAH → Settings → Platform."],
-      ["Check the module", "The module must pass NOAH's check on your computer."],
-      ["Publish", "Ask your AI: «Publish module <id> to NOAH». It shows up in the library right away."],
-    ],
-    needLogin: "Sign in to see your modules and keys.",
-    stdKicker: "SPEC", stdTitle: "The module standard",
-    stdBody: "Every module in the library is an MCP server plus one manifest file. Five rules, nothing else. Pass them and your module installs in one click on any NOAH — on a laptop with a free local model or on a workstation driving a frontier model.",
-    rules: [
-      ["One manifest", "module.json at the root: name, version, tools, permissions, price. Nothing hidden outside it."],
-      ["Speak MCP", "Tools are exposed over MCP (stdio or http). No custom protocol, no NOAH-specific SDK."],
-      ["Declare the brain", "State the smallest model the module works with. If it needs reasoning, say so — the shell warns before install."],
-      ["Ask, don't take", "Every permission is listed up front and granted by the user. Anything destructive asks again at runtime."],
-      ["Publish like npm", "One command publishes. No review queue — complaints are handled after the fact, and a bad module is pulled."],
-    ],
-    stdFull: "Full standard",
-    loginTitle: "Sign in", signupTitle: "Create account",
-    email: "Email", password: "Password", authorName: "Author name",
-    authorHint: "3–24 characters: latin letters, digits, dot, dash. Shown on your modules.",
-    passHint: "At least 10 characters.",
-    noAccount: "No account yet?", haveAccount: "Already have one?",
-    footer: [
-      ["PLATFORM", [["Home", "#/"], ["Library", "#/library"], ["Studio", "#/studio"], ["Seller dashboard", "#/seller"]]],
-      ["BUILD", [["Documentation", "#/docs"], ["Module standard", "#/standard"], ["Full spec", STANDARD_DOC], ["Connect your AI", "#/docs/connect-ai"], ["Publish a module", "#/docs/publish"]]],
-      ["NOAH", [["About", "#/"], ["Download", RELEASES], ["Source code", REPO], ["Contact", REPO + "/issues"]]],
-      ["LEGAL", [["Privacy policy", "#/privacy"], ["Terms of service", "#/terms"]]],
-    ],
-    orWith: "or", with: (name) => `Continue with ${name}`, tgWait: "Press «Start» in Telegram — you are signed in here automatically.", tgOpen: "Open Telegram",
-    connKicker: "CONNECT AI", connTitle: "Your AI + NOAH",
-    connLead: "One link gives your AI hands on your computer. Paste it into Claude, Cursor or any MCP client and describe the module you want — your AI writes it, NOAH checks it and runs it.",
-    connNeedLogin: "Sign in to get your personal MCP link.",
-    connLinkTitle: "YOUR MCP LINK", connMake: "Create my link",
-    connOnce: "Copy it now — it is shown only once. The same key goes into NOAH → Settings → Platform, so NOAH picks up your modules.",
-    connKey: "Key for NOAH", connHave: "You already have keys. A new link doesn't break the old ones; delete unused keys in the author space.",
-    connStatus: "NOAH ON YOUR COMPUTER", connOnline: "Online — modules are picked up in seconds.", connOffline: "Offline. Start NOAH and paste the key into Settings → Platform.", connNever: "Hasn't connected yet. Paste the key into NOAH → Settings → Platform.",
-    connWhere: "WHERE TO PASTE THE LINK",
-    connClients: [
-      ["Claude (web and desktop)", "Settings → Connectors → Add custom connector → paste the link."],
-      ["Cursor", "Settings → MCP → Add new MCP server → type «streamable http» → paste the link."],
-      ["ChatGPT", "Settings → Connectors → Advanced → developer mode → Create → paste the link."],
-      ["Any other client", "Any client that connects MCP servers by URL (Streamable HTTP)."],
-    ],
-    connTry: "THEN JUST ASK",
-    connPrompts: ["Build me a NOAH module that tells the weather in my city", "Build a module that reads my unread mail aloud", "Publish my module to the NOAH library"],
-    connLocal: "WITHOUT THE WEBSITE", connLocalLead: "Claude Code or Claude Desktop on the same computer can talk to NOAH directly:",
-    navConnect: "Connect AI",
-    justNow: "just now", error: "Something went wrong.",
-    accKicker: "ACCOUNT", accTitle: "Account settings",
-    idTitle: "SIGN-IN METHODS", idLead: "Sign in to the same account with any of these.", idPassword: "Email and password", idOn: "connected", idOff: "not connected", idLink: "Connect", idUnlink: "Disconnect", idNone: "Sign-in via other services isn’t enabled on this site yet.",
-    passTitle: "CHANGE PASSWORD", passCurrent: "Current password", passNew: "New password", passSave: "Change password", passDone: "Password changed.",
-    sessTitle: "SESSIONS", sessLead: "Signed in on another computer and want to end it? Sign out everywhere — this browser stays signed in.", sessBtn: "Sign out everywhere else", sessDone: "Other sessions ended.",
-    delTitle: "DELETE ACCOUNT", delLead: "Your modules are removed from the library, keys stop working. This can't be undone.", delBtn: "Delete account", delConfirm: "Delete the account for good?",
-    payoutSoon: "Paid modules and payouts are coming later.",
-  },
-  ru: {
-    brainLabel: "МОЗГ", brainValue: "любая LLM", brainLocal: "локально · офлайн", sellerRole: "продавец", contact: "Связаться",
-    appTitle: "Скачать NOAH", searchPh: "Поиск модулей, инструментов, авторов…", newModule: "+ НОВЫЙ МОДУЛЬ",
-    signIn: "Войти", signUp: "Создать аккаунт", signOut: "Выйти", myModules: "Мои модули", apiKeys: "Ключи площадки",
-    privacy: "Конфиденциальность", terms: "Соглашение",
-    navDiscover: "НАЙТИ", navBuild: "СОБРАТЬ", navAccount: "ЗАРАБОТОК",
-    navHome: "Главная", navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navDocs: "Справка", navSeller: "Кабинет",
-    menu: ["Мои модули", "Ключи площадки", "Настройки аккаунта"],
-    libKicker: "МАРКЕТПЛЕЙС", libTitle: "Библиотека модулей",
-    sortPopular: "Популярные", sortNew: "Новые", sortFree: "Бесплатные",
-    statModules: "МОДУЛЕЙ", statAuthors: "АВТОРОВ", statBrains: "МОЗГОВ", statInstalls: "УСТАНОВОК",
-    cat: { all: "Все", free: "Бесплатные", work: "Работа", home: "Дом", finance: "Финансы", dev: "Разработка", health: "Здоровье", local: "Только локально", media: "Медиа", other: "Другое" },
-    free: "бесплатно", install: "Поставить", installsWord: "установок", noModules: "Ничего не нашлось. Попробуйте другое слово или раздел — или соберите модуль сами в Студии.",
-    backLib: "НАЗАД В БИБЛИОТЕКУ", core: "noah-core", builtIn: "встроен в NOAH", builtInLong: "Встроен в NOAH — ставится вместе с приложением, отдельно ставить не нужно.", builtInBtn: "СКАЧАТЬ NOAH", builtInTransport: "часть ядра", open: "Подробнее",
-    installBtn: "ПОСТАВИТЬ", copyAsk: "СКОПИРОВАТЬ ЗАПРОС",
-    toolsExposed: "ДОСТУПНЫЕ ИНСТРУМЕНТЫ", noTools: "Инструменты появятся, когда модуль опубликуют из NOAH.",
-    metaBrain: "МОЗГ", brainAny: "любой", metaTransport: "ТРАНСПОРТ", metaInstalls: "УСТАНОВОК", metaUpdated: "ОБНОВЛЁН",
-    permsLabel: "ЗАПРАШИВАЕТ ДОСТУП", permKeys: (list) => `Ваши ключи: ${list}. Вводятся в NOAH, модуль никому их не показывает.`,
-    permNone: "Ключи и аккаунты не нужны.", permLocal: "Работает на вашем компьютере; NOAH проверяет его перед первым запуском.",
-    installHow: "Как поставить",
-    installSteps: (id, title) => [
-      ["Скачайте NOAH", "Установите приложение — оно живёт в трее."],
-      ["Откройте библиотеку", `NOAH → Модули → Свой модуль → Библиотека → «${title}».`],
-      ["Или попросите нейросеть", `Если NOAH подключена к ней по MCP, скажите: «Поставь модуль NOAH ${id}». NOAH проверит и запустит его.`],
-    ],
-    studioKicker: "БЕЗ КОДА", studioTitle: "Студия модулей",
-    stepDescribe: "ОПИШИТЕ", stepAssemble: "NOAH СОБИРАЕТ", stepManifest: "МАНИФЕСТ",
-    studioPh: "Хочу, чтобы каждое утро проверял три моих счёта и говорил, что изменилось…",
-    ideas: ["следить за счётом", "разобрать чеки", "утренний стендап"],
-    assembleBtn: "СОБРАТЬ МОДУЛЬ",
-    build: ["Задача описана", "Запрос для нейросети готов", "Нейросеть пишет модуль", "NOAH проверяет и запускает"],
-    states: { done: "ГОТОВО", running: "ИДЁТ", waiting: "ЖДЁТ" },
-    connectHint: "Один раз подключите NOAH к своей нейросети, затем вставьте в неё скопированный запрос:",
-    copied: "Скопировано",
-    promptIntro: "Собери мне модуль NOAH через инструменты MCP noa. Соблюдай порядок из инструкций NOAH: module_format, environment, уточни у меня детали, create_module, исправляй, пока проверка не пройдёт. Задача:",
-    promptEmpty: "Сначала опишите задачу.",
-    sellerKicker: "ПРОДАВЕЦ", sellerTitle: "Ваши модули", payout: "ВЫВЕСТИ",
-    sellerStats: ["К ВЫВОДУ", "ВСЕГО", "ПРОДАЖ", "ОПУБЛИКОВАНО"],
-    colModule: "МОДУЛЬ", colPrice: "ЦЕНА", colSales: "ПРОДАЖ", colRevenue: "ВЫРУЧКА",
-    noMine: "Вы ещё ничего не опубликовали. Соберите модуль в NOAH и попросите нейросеть: «Опубликуй модуль <id> в NOAH».",
-    remove: "Удалить", removeConfirm: "Убрать модуль из библиотеки? Уже поставленные копии продолжат работать.",
-    keysTitle: "КЛЮЧИ ПЛОЩАДКИ", keysLead: "Ключ связывает NOAH на вашем компьютере с этим аккаунтом: по нему NOAH публикует ваши модули. Вставьте его в NOAH → Настройки → Площадка.",
-    keyLabelPh: "Название ключа, например «домашний ПК»", createKey: "Создать ключ",
-    keyOnce: "Скопируйте сейчас — ключ показывается один раз:", noKeys: "Ключей пока нет.", used: "использован", never: "не использовался",
-    publishHow: "КАК ОПУБЛИКОВАТЬ",
-    publishSteps: [
-      ["Создайте ключ", "Здесь же, и вставьте его в NOAH → Настройки → Площадка."],
-      ["Проверьте модуль", "Модуль должен пройти проверку NOAH на вашем компьютере."],
-      ["Опубликуйте", "Попросите нейросеть: «Опубликуй модуль <id> в NOAH». Он сразу появится в библиотеке."],
-    ],
-    needLogin: "Войдите, чтобы увидеть свои модули и ключи.",
-    stdKicker: "СТАНДАРТ", stdTitle: "Стандарт модуля",
-    stdBody: "Каждый модуль в библиотеке — это MCP-сервер плюс один файл-манифест. Пять правил, больше ничего. Соблюдены — модуль ставится одной кнопкой в любой NOAH: на ноутбуке с бесплатной локальной моделью или на рабочей станции с топовой облачной.",
-    rules: [
-      ["Один манифест", "module.json в корне: имя, версия, инструменты, доступы, цена. Ничего спрятанного за его пределами."],
-      ["Говорить на MCP", "Инструменты отдаются по MCP (stdio или http). Никакого своего протокола и SDK под NOAH."],
-      ["Объявить мозг", "Укажите минимальную модель, на которой модуль работает. Нужны рассуждения — так и скажите, оболочка предупредит."],
-      ["Просить, а не брать", "Все доступы перечислены заранее и даются пользователем. Всё необратимое спрашивает повторно при запуске."],
-      ["Публикация как в npm", "Одна команда — и модуль в библиотеке. Без очереди на ревью: жалобы разбираются постфактум, плохой модуль снимают."],
-    ],
-    stdFull: "Полный стандарт",
-    loginTitle: "Вход", signupTitle: "Новый аккаунт",
-    email: "Почта", password: "Пароль", authorName: "Имя автора",
-    authorHint: "3–24 знака: латиница, цифры, точка, дефис. Показывается на ваших модулях.",
-    passHint: "Не короче 10 знаков.",
-    noAccount: "Нет аккаунта?", haveAccount: "Уже есть аккаунт?",
-    footer: [
-      ["ПЛАТФОРМА", [["Главная", "#/"], ["Библиотека", "#/library"], ["Студия", "#/studio"], ["Кабинет продавца", "#/seller"]]],
-      ["РАЗРАБОТКА", [["Документация", "#/docs"], ["Стандарт модуля", "#/standard"], ["Полный регламент", STANDARD_DOC], ["Подключить свой ИИ", "#/docs/connect-ai"], ["Опубликовать модуль", "#/docs/publish"]]],
-      ["NOAH", [["О проекте", "#/"], ["Скачать", RELEASES], ["Исходный код", REPO], ["Связаться", REPO + "/issues"]]],
-      ["ПРАВОВОЕ", [["Политика конфиденциальности", "#/privacy"], ["Пользовательское соглашение", "#/terms"]]],
-    ],
-    orWith: "или", with: (name) => `Войти через ${name}`, tgWait: "Нажмите «Старт» в Telegram — здесь вход выполнится сам.", tgOpen: "Открыть Telegram",
-    connKicker: "ПОДКЛЮЧИТЬ ИИ", connTitle: "Ваша нейросеть + NOAH",
-    connLead: "Одна ссылка даёт вашей нейросети руки на вашем компьютере. Вставьте её в Claude, Cursor или другой клиент с MCP и опишите, какой модуль нужен, — нейросеть напишет его, NOAH проверит и запустит.",
-    connNeedLogin: "Войдите, чтобы получить свою ссылку MCP.",
-    connLinkTitle: "ВАША ССЫЛКА MCP", connMake: "Создать мою ссылку",
-    connOnce: "Скопируйте сейчас — она показывается один раз. Этот же ключ вставьте в NOAH → Настройки → Площадка: так NOAH будет забирать ваши модули.",
-    connKey: "Ключ для NOAH", connHave: "Ключи у вас уже есть. Новая ссылка старые не ломает; ненужные ключи удаляются в кабинете автора.",
-    connStatus: "NOAH НА ВАШЕМ КОМПЬЮТЕРЕ", connOnline: "На связи — модули забираются за секунды.", connOffline: "Не на связи. Запустите NOAH и вставьте ключ в Настройки → Площадка.", connNever: "Ещё не подключался. Вставьте ключ в NOAH → Настройки → Площадка.",
-    connWhere: "КУДА ВСТАВИТЬ ССЫЛКУ",
-    connClients: [
-      ["Claude (сайт и приложение)", "Настройки → Коннекторы → Добавить свой коннектор → вставьте ссылку."],
-      ["Cursor", "Settings → MCP → Add new MCP server → тип «streamable http» → вставьте ссылку."],
-      ["ChatGPT", "Настройки → Коннекторы → Дополнительно → режим разработчика → Создать → вставьте ссылку."],
-      ["Любой другой клиент", "Любой клиент, который подключает MCP-серверы по адресу (Streamable HTTP)."],
-    ],
-    connTry: "ДАЛЬШЕ ПРОСТО ПОПРОСИТЕ",
-    connPrompts: ["Собери мне модуль NOAH, который рассказывает погоду в моём городе", "Сделай модуль, который читает вслух мою непрочитанную почту", "Опубликуй мой модуль в библиотеке NOAH"],
-    connLocal: "БЕЗ САЙТА", connLocalLead: "Claude Code или Claude Desktop на том же компьютере подключаются к NOAH напрямую:",
-    navConnect: "Подключить ИИ",
-    justNow: "только что", error: "Что-то пошло не так.",
-    accKicker: "АККАУНТ", accTitle: "Настройки аккаунта",
-    idTitle: "СПОСОБЫ ВХОДА", idLead: "Входите в этот же аккаунт любым из них.", idPassword: "Почта и пароль", idOn: "привязан", idOff: "не привязан", idLink: "Привязать", idUnlink: "Отвязать", idNone: "Вход через другие сервисы на сайте пока не включён.",
-    passTitle: "СМЕНА ПАРОЛЯ", passCurrent: "Текущий пароль", passNew: "Новый пароль", passSave: "Сменить пароль", passDone: "Пароль изменён.",
-    sessTitle: "СЕАНСЫ", sessLead: "Входили на другом компьютере и хотите закончить? Выйдите везде — этот браузер останется в аккаунте.", sessBtn: "Выйти на других устройствах", sessDone: "Остальные сеансы закрыты.",
-    delTitle: "УДАЛИТЬ АККАУНТ", delLead: "Ваши модули уйдут из библиотеки, ключи перестанут работать. Отменить нельзя.", delBtn: "Удалить аккаунт", delConfirm: "Удалить аккаунт насовсем?",
-    payoutSoon: "Платные модули и выплаты появятся позже.",
-  },
-};
+// Шрифты — после первой отрисовки, чтобы не держать страницу (см. index.html).
+{
+  const fonts = document.querySelector('link[rel="preload"][as="style"]');
+  if (fonts) {
+    const sheet = document.createElement("link");
+    sheet.rel = "stylesheet";
+    sheet.href = fonts.href;
+    document.head.append(sheet);
+  }
+}
 
-const DOCS = {
-  privacy: {
-    ru: ["Политика конфиденциальности", [
-      ["Что мы храним", "Почту, имя автора и хеш пароля — чтобы вы могли входить. Опубликованные вами модули и число их установок. Хеши ключей площадки и дату их последнего использования."],
-      ["Чего мы не храним", "Пароли в открытом виде, ключи модулей и всё, что вы говорите NOAH: голос, вопросы и ответы остаются на вашем компьютере и у выбранной вами нейросети."],
-      ["Куки", "Одна служебная кука сессии, чтобы вы оставались в аккаунте. Без рекламы и сторонней аналитики."],
-      ["Удаление", "Модули удаляются в кабинете автора. Чтобы удалить аккаунт целиком, напишите нам через страницу проекта на GitHub."],
-    ]],
-    en: ["Privacy policy", [
-      ["What we store", "Your email, author name and a password hash so you can sign in. The modules you publish and their install counts. Hashes of your platform keys and when they were last used."],
-      ["What we don't", "Plain passwords, module keys, and anything you say to NOAH: voice, questions and answers stay on your computer and with the AI you chose."],
-      ["Cookies", "One session cookie to keep you signed in. No ads, no third-party analytics."],
-      ["Deletion", "Delete modules in the author space. To delete the whole account, contact us through the project page on GitHub."],
-    ]],
-  },
-  terms: {
-    ru: ["Пользовательское соглашение", [
-      ["Площадка", "NOAH — библиотека модулей для приложения NOAH. Модули публикуют их авторы; площадка их не пишет и не запускает."],
-      ["Авторам", "Публикуйте только то, на что у вас есть права. Модуль не должен собирать данные без ведома пользователя, обходить проверку NOAH или вредить компьютеру. Такие модули снимаются."],
-      ["Пользователям", "NOAH проверяет модуль перед запуском, но не может гарантировать его поведение во всём. Ставьте модули авторов, которым доверяете, и читайте, какие ключи они просят."],
-      ["Ответственность", "Площадка предоставляется «как есть». Мы исправляем ошибки и снимаем вредные модули, как только о них узнаём."],
-    ]],
-    en: ["Terms of service", [
-      ["The platform", "NOAH is a library of modules for the NOAH app. Modules are published by their authors; the platform does not write or run them."],
-      ["Authors", "Publish only what you have rights to. A module must not collect data behind the user's back, bypass NOAH's check or harm the computer. Such modules are removed."],
-      ["Users", "NOAH checks a module before it runs but cannot guarantee everything it does. Install modules from authors you trust and read which keys they ask for."],
-      ["Liability", "The platform is provided as is. We fix bugs and remove harmful modules as soon as we learn about them."],
-    ]],
-  },
-};
 
 const ACCENTS = [
   { accent: "#2B5BC4", fg: "#FFFFFF" },
@@ -1206,10 +982,15 @@ async function route() {
   const page = $("page");
   try {
     if (name === "home") {
+      // Главная рисуется сразу; числа и модули библиотеки подставляются, когда
+      // придут. Первый заход не должен ждать ни одного запроса.
+      const draw = () => renderHome(page, { h, icon, lang: state.lang, stats: state.stats, modules: state.modules ?? [], number });
+      const had = Boolean(state.modules);
+      if (!had) draw();
       await loadLibrary();
       if (id === routeId) {
         renderChrome("home");
-        renderHome(page, { h, icon, lang: state.lang, stats: state.stats, modules: state.modules, number });
+        draw();
       }
     } else if (name === "library") {
       await loadLibrary();
@@ -1229,7 +1010,11 @@ async function route() {
     else if (name === "account") await renderAccount(page);
     else if (name === "connect") await renderConnect(page);
     else if (name === "standard") renderStandard(page);
-    else if (name === "docs") await renderDocs(page, arg, { h, lang: state.lang });
+    // Документация грузится, только когда её открыли: главной она не нужна.
+    else if (name === "docs") {
+      const { renderDocs } = await import("./docs.js?v=27");
+      await renderDocs(page, arg, { h, lang: state.lang });
+    }
     else if (name === "login" || name === "signup") {
       if (state.user) location.hash = "#/seller";
       else renderAuth(page, name);
@@ -1310,9 +1095,14 @@ $("signOut").addEventListener("click", async () => {
 window.addEventListener("hashchange", route);
 
 (async () => {
-  [state.user, state.providers] = await Promise.all([
+  const ready = Promise.all([
     api("/api/me").then((r) => r.user).catch(() => null),
     api("/api/auth/providers").then((r) => r.providers).catch(() => []),
   ]);
-  route();
+  // Главной и документации аккаунт не нужен — они рисуются, не дожидаясь его.
+  const view = location.hash.replace(/^#\/?/, "").split(/[/?]/)[0] || "home";
+  if (view === "home" || view === "docs") route();
+  [state.user, state.providers] = await ready;
+  if (view === "home" || view === "docs") renderChrome(view);
+  else route();
 })();
