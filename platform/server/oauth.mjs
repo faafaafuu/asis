@@ -287,15 +287,19 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
           const match = /^\/start\s+([A-Za-z0-9]{8,32})$/.exec(message?.text ?? "");
           const entry = match && tgCodes.get(match[1]);
           let reply = "Это бот входа на площадку NOAH. Нажмите «Войти через Telegram» на сайте.";
+          // Кнопкой назад — не текстом «вернитесь на сайт»: с телефона так
+          // возвращаются на вкладку с площадкой одним касанием.
+          let markup;
           if (entry && Date.now() - entry.at < TG_TTL) {
             const from = message.from;
             entry.user = { subject: String(from.id), email: "", name: from.username || [from.first_name, from.last_name].filter(Boolean).join(" ") };
-            reply = "Готово — вернитесь на сайт NOAH, вход уже выполнен.";
+            reply = "Готово — вход выполнен.";
+            markup = { inline_keyboard: [[{ text: "🌐 NOAH", url: PUBLIC_URL }]] };
           }
           await fetch(`https://api.telegram.org/bot${tgBot.token}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id: message?.chat?.id, text: reply }),
+            body: JSON.stringify({ chat_id: message?.chat?.id, text: reply, reply_markup: markup }),
           }).catch(() => {});
         }
       } catch {

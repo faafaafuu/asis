@@ -186,6 +186,10 @@ button {
   white-space: nowrap;
 }
 
+.nav__text--short {
+  display: none;
+}
+
 .nav__item:hover {
   color: #fff;
 }
@@ -1695,6 +1699,16 @@ textarea:focus,
     line-height: 1.15;
     text-align: center;
     white-space: normal;
+  }
+
+  /* В нижнем меню — короткое имя пункта, полному там не хватает места. */
+  .nav__text {
+    display: none;
+  }
+
+  .nav__text--short {
+    display: inline;
+    overflow-wrap: anywhere;
   }
 
   .nav__item[href="#/standard"] {

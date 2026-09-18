@@ -1,9 +1,9 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=27";
+import { renderHome, stopHome } from "./home.js?v=29";
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=27";
-import { T, DOCS } from "./i18n.js?v=27";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=29";
+import { T, DOCS } from "./i18n.js?v=29";
 
 // Шрифты — после первой отрисовки, чтобы не держать страницу (см. index.html).
 {
@@ -192,7 +192,7 @@ function renderChrome(route) {
   const moduleLink = state.lastModule ? `module/${state.lastModule}` : "library";
   const groups = [
     [tr.navDiscover, [["home", tr.navHome, "", "#F2C14E", ""], ["library", tr.navLibrary, count, "#2B5BC4"], ["module", tr.navModule, "", "#D4564A", moduleLink]]],
-    [tr.navBuild, [["connect", tr.navConnect, "MCP", "#F2C14E"], ["studio", tr.navStudio, "", "#D4564A"], ["standard", tr.navStandard, "5", "#7FB069"], ["docs", tr.navDocs, "", "#2B5BC4"]]],
+    [tr.navBuild, [["connect", tr.navConnect, "MCP", "#F2C14E"], ["studio", tr.navStudio, "", "#D4564A"], ["standard", tr.navStandard, "5", "#7FB069"], ["docs", tr.navDocsFull, "", "#2B5BC4", undefined, tr.navDocs]]],
     [tr.navAccount, [["seller", tr.navSeller, "$0", "#D4564A"]]],
   ];
   $("nav").replaceChildren(
@@ -201,13 +201,16 @@ function renderChrome(route) {
         "div",
         { class: "nav__group" },
         h("span", { class: "nav__label" }, label),
-        items.map(([id, text, badge, dot, target]) =>
+        items.map(([id, text, badge, dot, target, short]) =>
           h(
             "a",
             { class: "nav__item", "data-id": id, href: `#/${target ?? id}`, "aria-current": route === id ? "page" : null, vars: { "--dot": dot } },
             h("span", { class: "nav__dot" }),
             h("span", { class: "navicon" }, icon(NAV_ICON[id])),
-            text,
+            // Полное имя в сайдбаре; в нижнем меню телефона под тем же пунктом —
+            // короткое, там для длинных слов нет места.
+            h("span", { class: "nav__text" }, text),
+            h("span", { class: "nav__text nav__text--short" }, short ?? text),
             h("span", { class: "nav__count" }, badge),
           ),
         ),
@@ -1012,7 +1015,7 @@ async function route() {
     else if (name === "standard") renderStandard(page);
     // Документация грузится, только когда её открыли: главной она не нужна.
     else if (name === "docs") {
-      const { renderDocs } = await import("./docs.js?v=27");
+      const { renderDocs } = await import("./docs.js?v=29");
       await renderDocs(page, arg, { h, lang: state.lang });
     }
     else if (name === "login" || name === "signup") {

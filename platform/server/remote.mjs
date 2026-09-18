@@ -304,16 +304,32 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
   }
 
   return async function mcp(req, res, url) {
-    const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, authorization, mcp-session-id, mcp-protocol-version", "Access-Control-Allow-Methods": "POST, OPTIONS" };
+    const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, authorization, mcp-session-id, mcp-protocol-version", "Access-Control-Allow-Methods": "POST, GET, OPTIONS" };
     if (req.method === "OPTIONS") {
       res.writeHead(204, headers);
       return res.end();
     }
-    if (req.method !== "POST") {
-      res.writeHead(405, { ...headers, Allow: "POST", "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ error: "MCP принимает только POST." }));
+    const bearer0 = /^Bearer\s+(\S+)$/.exec(String(req.headers.authorization ?? ""))?.[1];
+    // GET — необязательный по протоколу поток для сообщений от сервера. Мы их
+    // не шлём — ответы и так уходят прямо на POST, — но часть клиентов (Qwen
+    // и другие) открывает этот поток первым делом и обрывается на отказе.
+    // Держим его молча открытым, чтобы не мешать таким клиентам.
+    if (req.method === "GET") {
+      if (!userForKey(url.searchParams.get("key") ?? bearer0)) {
+        res.writeHead(401, { ...headers, "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ error: "Нужен ключ площадки в ссылке: …/mcp?key=noah_…" }));
+      }
+      res.writeHead(200, { ...headers, "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+      res.write(": открыт\n\n");
+      const ping = setInterval(() => res.write(": ping\n\n"), 20_000);
+      req.on("close", () => clearInterval(ping));
+      return;
     }
-    const bearer = /^Bearer\s+(\S+)$/.exec(String(req.headers.authorization ?? ""))?.[1];
+    if (req.method !== "POST") {
+      res.writeHead(405, { ...headers, Allow: "POST, GET", "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "MCP принимает POST и GET." }));
+    }
+    const bearer = bearer0;
     const user = userForKey(url.searchParams.get("key") ?? bearer);
     let body;
     try {

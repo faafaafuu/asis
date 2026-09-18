@@ -1,6 +1,6 @@
 // Тексты интерфейса площадки: английский и русский.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=27";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=29";
 
 export const T = {
   en: {
@@ -108,7 +108,7 @@ export const T = {
     signIn: "Войти", signUp: "Создать аккаунт", signOut: "Выйти", myModules: "Мои модули", apiKeys: "Ключи площадки",
     privacy: "Конфиденциальность", terms: "Соглашение",
     navDiscover: "НАЙТИ", navBuild: "СОБРАТЬ", navAccount: "ЗАРАБОТОК",
-    navHome: "Главная", navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navDocs: "Справка", navDocsFull: "Документация", navSeller: "Кабинет",
+    navHome: "Главная", navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navDocs: "Документация", navDocsFull: "Документация", navSeller: "Кабинет",
     menu: ["Мои модули", "Ключи площадки", "Настройки аккаунта"],
     libKicker: "МАРКЕТПЛЕЙС", libTitle: "Библиотека модулей",
     sortPopular: "Популярные", sortNew: "Новые", sortFree: "Бесплатные",
