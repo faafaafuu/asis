@@ -1,10 +1,11 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=21";
+import { renderHome, stopHome } from "./home.js?v=25";
+import { renderDocs } from "./docs.js?v=25";
 
 const RELEASES = "/download";
 const REPO = "https://github.com/faafaafuu/asis";
-const STANDARD_DOC = "https://github.com/faafaafuu/asis/blob/main/src-tauri/src/module_format.md";
+const STANDARD_DOC = "#/docs/module-standard";
 
 const T = {
   en: {
@@ -13,7 +14,7 @@ const T = {
     signIn: "Sign in", signUp: "Create account", signOut: "Sign out", myModules: "My modules", apiKeys: "Platform keys",
     privacy: "Privacy", terms: "Terms",
     navDiscover: "DISCOVER", navBuild: "BUILD", navAccount: "EARN",
-    navHome: "Home", navLibrary: "Library", navModule: "Module", langLabel: "LANGUAGE", navStudio: "Studio", navStandard: "Standard", navSeller: "Seller",
+    navHome: "Home", navLibrary: "Library", navModule: "Module", langLabel: "LANGUAGE", navStudio: "Studio", navStandard: "Standard", navDocs: "Docs", navSeller: "Seller",
     menu: ["My modules", "Platform keys", "Account settings"],
     libKicker: "MARKETPLACE", libTitle: "Module library",
     sortPopular: "Popular", sortNew: "New", sortFree: "Free",
@@ -75,7 +76,7 @@ const T = {
     noAccount: "No account yet?", haveAccount: "Already have one?",
     footer: [
       ["PLATFORM", [["Home", "#/"], ["Library", "#/library"], ["Studio", "#/studio"], ["Seller dashboard", "#/seller"]]],
-      ["BUILD", [["Module standard", "#/standard"], ["Full spec", STANDARD_DOC], ["MCP guide", REPO + "/blob/main/modules/README.md"], ["Publish a module", "#/seller"]]],
+      ["BUILD", [["Documentation", "#/docs"], ["Module standard", "#/standard"], ["Full spec", STANDARD_DOC], ["Connect your AI", "#/docs/connect-ai"], ["Publish a module", "#/docs/publish"]]],
       ["NOAH", [["About", "#/"], ["Download", RELEASES], ["Source code", REPO], ["Contact", REPO + "/issues"]]],
       ["LEGAL", [["Privacy policy", "#/privacy"], ["Terms of service", "#/terms"]]],
     ],
@@ -112,7 +113,7 @@ const T = {
     signIn: "Войти", signUp: "Создать аккаунт", signOut: "Выйти", myModules: "Мои модули", apiKeys: "Ключи площадки",
     privacy: "Конфиденциальность", terms: "Соглашение",
     navDiscover: "НАЙТИ", navBuild: "СОБРАТЬ", navAccount: "ЗАРАБОТОК",
-    navHome: "Главная", navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navSeller: "Кабинет",
+    navHome: "Главная", navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navDocs: "Справка", navSeller: "Кабинет",
     menu: ["Мои модули", "Ключи площадки", "Настройки аккаунта"],
     libKicker: "МАРКЕТПЛЕЙС", libTitle: "Библиотека модулей",
     sortPopular: "Популярные", sortNew: "Новые", sortFree: "Бесплатные",
@@ -174,7 +175,7 @@ const T = {
     noAccount: "Нет аккаунта?", haveAccount: "Уже есть аккаунт?",
     footer: [
       ["ПЛАТФОРМА", [["Главная", "#/"], ["Библиотека", "#/library"], ["Студия", "#/studio"], ["Кабинет продавца", "#/seller"]]],
-      ["РАЗРАБОТКА", [["Стандарт модуля", "#/standard"], ["Полный регламент", STANDARD_DOC], ["Гид по MCP", REPO + "/blob/main/modules/README.md"], ["Опубликовать модуль", "#/seller"]]],
+      ["РАЗРАБОТКА", [["Документация", "#/docs"], ["Стандарт модуля", "#/standard"], ["Полный регламент", STANDARD_DOC], ["Подключить свой ИИ", "#/docs/connect-ai"], ["Опубликовать модуль", "#/docs/publish"]]],
       ["NOAH", [["О проекте", "#/"], ["Скачать", RELEASES], ["Исходный код", REPO], ["Связаться", REPO + "/issues"]]],
       ["ПРАВОВОЕ", [["Политика конфиденциальности", "#/privacy"], ["Пользовательское соглашение", "#/terms"]]],
     ],
@@ -245,7 +246,7 @@ const ACCENTS = [
   { accent: "#5F8C4C", fg: "#FFFFFF" },
 ];
 const ICONS = { memory: "memory", files: "files", fetch: "browser", browser: "browser", docs: "notes", thinking: "code" };
-const NAV_ICON = { connect: "memory", home: "home", library: "notes", module: "browser", studio: "code", standard: "legal", seller: "chart" };
+const NAV_ICON = { connect: "memory", home: "home", library: "notes", module: "browser", studio: "code", standard: "legal", seller: "chart", docs: "files" };
 const CATEGORY_ICON = { work: "notes", home: "home", finance: "chart", dev: "code", health: "memory", media: "browser", other: "files" };
 
 /* ── Состояние ───────────────────────────────────────────────────────────── */
@@ -413,7 +414,7 @@ function renderChrome(route) {
   const moduleLink = state.lastModule ? `module/${state.lastModule}` : "library";
   const groups = [
     [tr.navDiscover, [["home", tr.navHome, "", "#F2C14E", ""], ["library", tr.navLibrary, count, "#2B5BC4"], ["module", tr.navModule, "", "#D4564A", moduleLink]]],
-    [tr.navBuild, [["connect", tr.navConnect, "MCP", "#F2C14E"], ["studio", tr.navStudio, "", "#D4564A"], ["standard", tr.navStandard, "5", "#7FB069"]]],
+    [tr.navBuild, [["connect", tr.navConnect, "MCP", "#F2C14E"], ["studio", tr.navStudio, "", "#D4564A"], ["standard", tr.navStandard, "5", "#7FB069"], ["docs", tr.navDocs, "", "#2B5BC4"]]],
     [tr.navAccount, [["seller", tr.navSeller, "$0", "#D4564A"]]],
   ];
   $("nav").replaceChildren(
@@ -864,7 +865,7 @@ function renderStandard(page) {
       ),
     ),
     h("div", { class: "doc" }, codeBlock("module.json", EXAMPLE_MANIFEST, { highlightJson: true })),
-    h("a", { class: "back", href: STANDARD_DOC, target: "_blank", rel: "noopener" }, `${tr.stdFull} →`),
+    h("a", { class: "back", href: STANDARD_DOC }, `${tr.stdFull} →`),
   );
 }
 
@@ -1226,6 +1227,7 @@ async function route() {
     else if (name === "account") await renderAccount(page);
     else if (name === "connect") await renderConnect(page);
     else if (name === "standard") renderStandard(page);
+    else if (name === "docs") await renderDocs(page, arg, { h, lang: state.lang });
     else if (name === "login" || name === "signup") {
       if (state.user) location.hash = "#/seller";
       else renderAuth(page, name);

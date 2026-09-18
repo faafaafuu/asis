@@ -93,6 +93,9 @@ const TOOLS = [
 ];
 
 export function mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody }) {
+  // Регламент для раздела документации на сайте — тот же текст, что читает нейросеть.
+  route("GET", /^\/api\/docs\/standard$/, () => ({ text: standardText() }));
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS drafts (
       id TEXT PRIMARY KEY,
