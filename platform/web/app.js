@@ -1,6 +1,6 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=12";
+import { renderHome, stopHome } from "./home.js?v=13";
 
 const RELEASES = "https://github.com/faafaafuu/asis/releases/latest";
 const REPO = "https://github.com/faafaafuu/asis";
@@ -79,6 +79,24 @@ const T = {
       ["NOAH", [["About", "#/"], ["Download", RELEASES], ["Source code", REPO], ["Contact", REPO + "/issues"]]],
       ["LEGAL", [["Privacy policy", "#/privacy"], ["Terms of service", "#/terms"]]],
     ],
+    connKicker: "CONNECT AI", connTitle: "Your AI + NOAH",
+    connLead: "One link gives your AI hands on your computer. Paste it into Claude, Cursor or any MCP client and describe the module you want — your AI writes it, NOAH checks it and runs it.",
+    connNeedLogin: "Sign in to get your personal MCP link.",
+    connLinkTitle: "YOUR MCP LINK", connMake: "Create my link",
+    connOnce: "Copy it now — it is shown only once. The same key goes into NOAH → Settings → Platform, so NOAH picks up your modules.",
+    connKey: "Key for NOAH", connHave: "You already have keys. A new link doesn't break the old ones; delete unused keys in the author space.",
+    connStatus: "NOAH ON YOUR COMPUTER", connOnline: "Online — modules are picked up in seconds.", connOffline: "Offline. Start NOAH and paste the key into Settings → Platform.", connNever: "Hasn't connected yet. Paste the key into NOAH → Settings → Platform.",
+    connWhere: "WHERE TO PASTE THE LINK",
+    connClients: [
+      ["Claude (web and desktop)", "Settings → Connectors → Add custom connector → paste the link."],
+      ["Cursor", "Settings → MCP → Add new MCP server → type «streamable http» → paste the link."],
+      ["ChatGPT", "Settings → Connectors → Advanced → developer mode → Create → paste the link."],
+      ["Any other client", "Any client that connects MCP servers by URL (Streamable HTTP)."],
+    ],
+    connTry: "THEN JUST ASK",
+    connPrompts: ["Build me a NOAH module that tells the weather in my city", "Build a module that reads my unread mail aloud", "Publish my module to the NOAH library"],
+    connLocal: "WITHOUT THE WEBSITE", connLocalLead: "Claude Code or Claude Desktop on the same computer can talk to NOAH directly:",
+    navConnect: "Connect AI",
     justNow: "just now", error: "Something went wrong.",
     accKicker: "ACCOUNT", accTitle: "Account settings",
     passTitle: "CHANGE PASSWORD", passCurrent: "Current password", passNew: "New password", passSave: "Change password", passDone: "Password changed.",
@@ -158,6 +176,24 @@ const T = {
       ["NOAH", [["О проекте", "#/"], ["Скачать", RELEASES], ["Исходный код", REPO], ["Связаться", REPO + "/issues"]]],
       ["ПРАВОВОЕ", [["Политика конфиденциальности", "#/privacy"], ["Пользовательское соглашение", "#/terms"]]],
     ],
+    connKicker: "ПОДКЛЮЧИТЬ ИИ", connTitle: "Ваша нейросеть + NOAH",
+    connLead: "Одна ссылка даёт вашей нейросети руки на вашем компьютере. Вставьте её в Claude, Cursor или другой клиент с MCP и опишите, какой модуль нужен, — нейросеть напишет его, NOAH проверит и запустит.",
+    connNeedLogin: "Войдите, чтобы получить свою ссылку MCP.",
+    connLinkTitle: "ВАША ССЫЛКА MCP", connMake: "Создать мою ссылку",
+    connOnce: "Скопируйте сейчас — она показывается один раз. Этот же ключ вставьте в NOAH → Настройки → Площадка: так NOAH будет забирать ваши модули.",
+    connKey: "Ключ для NOAH", connHave: "Ключи у вас уже есть. Новая ссылка старые не ломает; ненужные ключи удаляются в кабинете автора.",
+    connStatus: "NOAH НА ВАШЕМ КОМПЬЮТЕРЕ", connOnline: "На связи — модули забираются за секунды.", connOffline: "Не на связи. Запустите NOAH и вставьте ключ в Настройки → Площадка.", connNever: "Ещё не подключался. Вставьте ключ в NOAH → Настройки → Площадка.",
+    connWhere: "КУДА ВСТАВИТЬ ССЫЛКУ",
+    connClients: [
+      ["Claude (сайт и приложение)", "Настройки → Коннекторы → Добавить свой коннектор → вставьте ссылку."],
+      ["Cursor", "Settings → MCP → Add new MCP server → тип «streamable http» → вставьте ссылку."],
+      ["ChatGPT", "Настройки → Коннекторы → Дополнительно → режим разработчика → Создать → вставьте ссылку."],
+      ["Любой другой клиент", "Любой клиент, который подключает MCP-серверы по адресу (Streamable HTTP)."],
+    ],
+    connTry: "ДАЛЬШЕ ПРОСТО ПОПРОСИТЕ",
+    connPrompts: ["Собери мне модуль NOAH, который рассказывает погоду в моём городе", "Сделай модуль, который читает вслух мою непрочитанную почту", "Опубликуй мой модуль в библиотеке NOAH"],
+    connLocal: "БЕЗ САЙТА", connLocalLead: "Claude Code или Claude Desktop на том же компьютере подключаются к NOAH напрямую:",
+    navConnect: "Подключить ИИ",
     justNow: "только что", error: "Что-то пошло не так.",
     accKicker: "АККАУНТ", accTitle: "Настройки аккаунта",
     passTitle: "СМЕНА ПАРОЛЯ", passCurrent: "Текущий пароль", passNew: "Новый пароль", passSave: "Сменить пароль", passDone: "Пароль изменён.",
@@ -205,7 +241,7 @@ const ACCENTS = [
   { accent: "#5F8C4C", fg: "#FFFFFF" },
 ];
 const ICONS = { memory: "memory", files: "files", fetch: "browser", browser: "browser", docs: "notes", thinking: "code" };
-const NAV_ICON = { home: "home", library: "notes", module: "browser", studio: "code", standard: "legal", seller: "chart" };
+const NAV_ICON = { connect: "memory", home: "home", library: "notes", module: "browser", studio: "code", standard: "legal", seller: "chart" };
 const CATEGORY_ICON = { work: "notes", home: "home", finance: "chart", dev: "code", health: "memory", media: "browser", other: "files" };
 
 /* ── Состояние ───────────────────────────────────────────────────────────── */
@@ -373,7 +409,7 @@ function renderChrome(route) {
   const moduleLink = state.lastModule ? `module/${state.lastModule}` : "library";
   const groups = [
     [tr.navDiscover, [["home", tr.navHome, "", "#F2C14E", ""], ["library", tr.navLibrary, count, "#2B5BC4"], ["module", tr.navModule, "", "#D4564A", moduleLink]]],
-    [tr.navBuild, [["studio", tr.navStudio, "", "#F2C14E"], ["standard", tr.navStandard, "5", "#7FB069"]]],
+    [tr.navBuild, [["connect", tr.navConnect, "MCP", "#F2C14E"], ["studio", tr.navStudio, "", "#D4564A"], ["standard", tr.navStandard, "5", "#7FB069"]]],
     [tr.navAccount, [["seller", tr.navSeller, "$0", "#D4564A"]]],
   ];
   $("nav").replaceChildren(
@@ -959,6 +995,99 @@ async function renderAccount(page) {
   );
 }
 
+async function renderConnect(page) {
+  const tr = t();
+  const link = (key) => `${location.origin}/mcp?key=${key}`;
+  const clients = h(
+    "div",
+    { class: "plate" },
+    h("div", { class: "step__head" }, tr.connWhere),
+    tr.connClients.map(([name, how], at) =>
+      h("div", { class: "step__row" }, h("span", { class: "num", vars: { "--accent": ["#F2C14E", "#2B5BC4", "#5F8C4C", "#E7E4DD"][at] } }, at + 1), h("div", {}, name, h("p", {}, how))),
+    ),
+  );
+  const prompts = h(
+    "div",
+    { class: "plate" },
+    h("div", { class: "step__head" }, tr.connTry),
+    h(
+      "div",
+      { class: "step__body" },
+      tr.connPrompts.map((text) => {
+        const button = h("button", { type: "button", class: "chip chip--quiet chip--wide", onclick: () => copy(text, button, text) }, `«${text}»`);
+        return button;
+      }),
+    ),
+  );
+  const local = h(
+    "div",
+    { class: "plate" },
+    h("div", { class: "step__head" }, tr.connLocal),
+    h("div", { class: "step__body" }, h("p", { class: "hint" }, tr.connLocalLead), codeBlock("terminal", 'claude mcp add noa -- "C:\\path\\to\\sufler.exe" --mcp')),
+  );
+
+  let top;
+  if (!state.user) {
+    top = h(
+      "div",
+      { class: "plate plate--accent", vars: { "--accent": "#F2C14E" } },
+      h("div", { class: "step__head" }, tr.connLinkTitle),
+      h(
+        "div",
+        { class: "step__body" },
+        h("p", { class: "hint" }, tr.connNeedLogin),
+        h("div", { class: "hero__cta" }, h("a", { class: "btn btn--gold", href: "#/signup" }, tr.signUp), h("a", { class: "btn", href: "#/login" }, tr.signIn)),
+      ),
+    );
+  } else {
+    const [{ tokens }, device] = await Promise.all([api("/api/tokens"), api("/api/my/device")]);
+    const result = h("div", { class: "step__body", hidden: true });
+    const make = h("button", {
+      type: "button",
+      class: "btn btn--gold",
+      onclick: async () => {
+        make.disabled = true;
+        try {
+          const { token } = await api("/api/tokens", { method: "POST", body: { label: "MCP" } });
+          const url = link(token);
+          const copyLink = h("button", { type: "button", class: "btn btn--small", onclick: () => copy(url, copyLink, "COPY") }, "COPY");
+          const copyKey = h("button", { type: "button", class: "btn btn--small", onclick: () => copy(token, copyKey, "COPY") }, "COPY");
+          result.replaceChildren(
+            h("div", { class: "secret-once" }, h("code", {}, url), copyLink),
+            h("span", { class: "label" }, tr.connKey),
+            h("div", { class: "secret-once" }, h("code", {}, token), copyKey),
+            h("p", { class: "hint" }, tr.connOnce),
+          );
+          result.hidden = false;
+        } catch (err) {
+          toast(err.message);
+          make.disabled = false;
+        }
+      },
+    }, tr.connMake);
+    const status = device.online ? tr.connOnline : device.seen ? tr.connOffline : tr.connNever;
+    top = h(
+      "div",
+      { class: "steps" },
+      h(
+        "div",
+        { class: "plate plate--accent", vars: { "--accent": "#F2C14E" } },
+        h("div", { class: "step__head" }, tr.connLinkTitle),
+        h("div", { class: "step__body" }, tokens.length ? h("p", { class: "hint" }, tr.connHave) : null, make),
+        result,
+      ),
+      h(
+        "div",
+        { class: "plate plate--accent", vars: { "--accent": device.online ? "#5F8C4C" : "#D4564A" } },
+        h("div", { class: "step__head" }, tr.connStatus),
+        h("div", { class: "step__body" }, h("p", { class: "hint" }, status)),
+      ),
+    );
+  }
+
+  page.replaceChildren(pageHead(tr.connKicker, tr.connTitle), h("p", { class: "lead" }, tr.connLead), top, h("div", { class: "steps" }, clients, prompts), local);
+}
+
 function renderDoc(page, name) {
   const [title, sections] = DOCS[name][state.lang];
   page.replaceChildren(
@@ -1001,6 +1130,7 @@ async function route() {
     } else if (name === "studio") renderStudio(page);
     else if (name === "seller") await renderSeller(page, arg === "keys");
     else if (name === "account") await renderAccount(page);
+    else if (name === "connect") await renderConnect(page);
     else if (name === "standard") renderStandard(page);
     else if (name === "login" || name === "signup") {
       if (state.user) location.hash = "#/seller";

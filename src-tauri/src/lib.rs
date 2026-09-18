@@ -219,6 +219,7 @@ pub fn run() {
                 alarms::watch(app.handle().clone());
                 usage::watch(app.handle().clone());
                 plugins::watch(app.handle());
+                platform::sync(app.handle());
                 if app.state::<AppState>().config().widget.enabled {
                     if let Err(err) = overlay::show_usage_widget(app.handle()) {
                         log::warn!("виджет расхода не открылся: {err}");

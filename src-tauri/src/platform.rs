@@ -166,6 +166,71 @@ pub async fn publish(id: &str, description: &str, category: &str) -> Result<Stri
     ))
 }
 
+/// Связь с площадкой: Ноа забирает черновики модулей, которые нейросеть
+/// пользователя собрала через MCP по ссылке, проверяет их по регламенту,
+/// ставит прошедшие и отправляет отчёт обратно. Без ключа площадки — молчит.
+pub fn sync(app: &tauri::AppHandle) {
+    let _ = app;
+    let _ = std::thread::Builder::new().name("sufler-platform".into()).spawn(|| {
+        let mut last_hello = std::time::Instant::now() - Duration::from_secs(3600);
+        loop {
+            let (url, token) = settings();
+            if !token.is_empty() {
+                if last_hello.elapsed() > Duration::from_secs(240) {
+                    let env = crate::mcp::environment();
+                    let hello = tauri::async_runtime::block_on(post(&url, "/api/app/hello", &token, &json!({ "env": env })));
+                    match hello {
+                        Ok(_) => last_hello = std::time::Instant::now(),
+                        Err(err) => log::debug!("площадка: не поздоровались ({err})"),
+                    }
+                }
+                if let Err(err) = take_drafts(&url, &token) {
+                    log::debug!("площадка: черновики не взяты ({err})");
+                }
+            }
+            std::thread::sleep(Duration::from_secs(5));
+        }
+    });
+}
+
+fn take_drafts(url: &str, token: &str) -> Result<(), String> {
+    let body = tauri::async_runtime::block_on(async {
+        let response = client()?
+            .get(format!("{url}/api/app/drafts"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|err| err.to_string())?;
+        read(response).await
+    })?;
+    for draft in body["drafts"].as_array().cloned().unwrap_or_default() {
+        let id = draft["id"].as_str().unwrap_or_default().to_string();
+        let module_id = draft["manifest"]["id"].as_str().unwrap_or_default().to_string();
+        log::info!("площадка: черновик модуля «{module_id}» — проверяю");
+        let outcome = crate::mcp::create_module(&draft["manifest"], &draft["files"]);
+        let (ok, report) = match outcome {
+            Ok(text) => (true, text),
+            Err(text) => (false, text),
+        };
+        let tools: Vec<Value> = crate::plugins::tools()
+            .into_iter()
+            .filter(|tool| tool.module == module_id)
+            .map(|tool| json!({ "name": tool.name, "about": tool.description }))
+            .collect();
+        log::info!("площадка: «{module_id}» {}", if ok { "прошёл проверку" } else { "не прошёл проверку" });
+        let sent = tauri::async_runtime::block_on(post(
+            url,
+            &format!("/api/app/drafts/{id}/report"),
+            token,
+            &json!({ "ok": ok, "report": report, "tools": tools }),
+        ));
+        if let Err(err) = sent {
+            log::warn!("площадка: отчёт по «{module_id}» не ушёл: {err}");
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

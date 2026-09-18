@@ -15,6 +15,7 @@ import { gzipSync } from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
 
 import { CATEGORIES, FORMAT, lint, validId } from "./standard.mjs";
+import { mountRemote } from "./remote.mjs";
 
 const scrypt = promisify(scryptCb);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -150,10 +151,15 @@ function sessionUser(req) {
 
 function tokenUser(req) {
   const match = /^Bearer\s+(noah_[A-Za-z0-9_-]{20,})$/.exec(String(req.headers.authorization ?? ""));
-  if (!match) return null;
+  return match ? userForKey(match[1]) : null;
+}
+
+/** Владелец ключа площадки: `noah_…`. */
+function userForKey(key) {
+  if (!/^noah_[A-Za-z0-9_-]{20,}$/.test(String(key ?? ""))) return null;
   const row = db
     .prepare("SELECT users.id, users.email, users.name, tokens.id AS token_id FROM tokens JOIN users ON users.id = tokens.user_id WHERE tokens.hash = ?")
-    .get(sha(match[1]));
+    .get(sha(key));
   if (row) db.prepare("UPDATE tokens SET used = datetime('now') WHERE id = ?").run(row.token_id);
   return row ?? null;
 }
@@ -407,9 +413,8 @@ route("DELETE", /^\/api\/tokens\/(\d+)$/, ({ user, match }) => {
 });
 
 /** Публикация из Ноа: модуль уже прошёл живую проверку у автора. */
-route("POST", /^\/api\/publish$/, async ({ req, tokenUser: user }) => {
-  if (!user) throw new Fail(401, "Нужен ключ площадки: создайте его в кабинете и впишите в Ноа.");
-  const { manifest, files, tools, description, category } = await readJson(req);
+/** Публикует модуль от имени автора. Общий путь для Ноа и для MCP по ссылке. */
+function publishModule(user, { manifest, files, tools, description, category }) {
   const problems = lint(manifest, files);
   if (problems.length) throw new Fail(422, `Модуль не соответствует стандарту:\n${problems.map((p) => `  ✗ ${p}`).join("\n")}`);
   if (!Array.isArray(tools) || !tools.length || tools.some((t) => typeof t?.name !== "string")) {
@@ -418,7 +423,7 @@ route("POST", /^\/api\/publish$/, async ({ req, tokenUser: user }) => {
   const existing = db.prepare("SELECT owner_id FROM modules WHERE id = ?").get(manifest.id);
   if (existing && existing.owner_id !== user.id) throw new Fail(409, `Имя «${manifest.id}» занято другим автором — выберите другой id.`);
   const cat = CATEGORIES.includes(category) ? category : "other";
-  const cleanTools = tools.slice(0, 25).map((t) => ({ name: t.name.slice(0, 48), about: String(t.about ?? "").slice(0, 200) }));
+  const cleanTools = tools.slice(0, 25).map((t) => ({ name: String(t.name).slice(0, 48), about: String(t.about ?? "").slice(0, 200) }));
   db.prepare(
     `INSERT INTO modules (id, owner_id, author, title, icon, about, voice, category, version, description, manifest, files, tools)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -442,6 +447,11 @@ route("POST", /^\/api\/publish$/, async ({ req, tokenUser: user }) => {
     JSON.stringify(cleanTools),
   );
   return { ok: true, id: manifest.id, url: `/#/module/${manifest.id}` };
+}
+
+route("POST", /^\/api\/publish$/, async ({ req, tokenUser: user }) => {
+  if (!user) throw new Fail(401, "Нужен ключ площадки: создайте его в кабинете и впишите в Ноа.");
+  return publishModule(user, await readJson(req));
 });
 
 route("GET", /^\/api\/whoami$/, ({ tokenUser: user }) => {
@@ -489,6 +499,8 @@ async function serveStatic(req, res, pathname) {
   }
 }
 
+const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY });
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://local");
   // Заголовку прокси верим, только если запрос пришёл от него самого.
@@ -496,6 +508,8 @@ const server = http.createServer(async (req, res) => {
   const local = peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
   const ip = local && req.headers["x-real-ip"] ? String(req.headers["x-real-ip"]) : peer;
   try {
+    // MCP по ссылке: нейросеть пользователя подключается сюда адресом с ключом.
+    if (url.pathname === "/mcp") return await mcpHandler(req, res, url);
     if (url.pathname.startsWith("/api/")) {
       if (req.method !== "GET" && !sameOrigin(req)) throw new Fail(403, "Чужой источник запроса.");
       for (const r of routes) {

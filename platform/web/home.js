@@ -5,126 +5,130 @@ const RELEASES = "https://github.com/faafaafuu/asis/releases/latest";
 
 const T = {
   ru: {
-    kicker: "МУЛЬТИМОДАЛЬНАЯ ОБОЛОЧКА ДЛЯ ИИ",
-    title: ["Любая нейросеть.", "Любые руки.", "Один голос."],
-    lead: "NOAH живёт на вашем компьютере и делает то, что вы говорите: открывает программы, находит файлы, присылает скриншоты в Telegram, ставит напоминания. А чего не умеет — тому его учит ваша нейросеть: описываете задачу словами, и через пару минут у помощника новый модуль.",
-    download: "Скачать для Windows",
-    library: "Открыть библиотеку",
-    meta: "бесплатно · Windows 10 / 11 · работает без интернета",
-    states: ["ЖДЁТ ИМЕНИ", "СЛУШАЕТ", "ДУМАЕТ", "ОТВЕЧАЕТ"],
+    kicker: "ЯДРО · МУЛЬТИМОДАЛЬНАЯ ОБОЛОЧКА ДЛЯ ИИ",
+    title: ["Ядро для ИИ.", "Модули — словами.", "Без кода."],
+    lead: "NOAH — оболочка на вашем компьютере. Подключаете любую нейросеть — это мозг. Руки собираете сами: опишите задачу словами, ваша нейросеть напишет модуль, NOAH проверит его и запустит. Получилось полезное — выложите в библиотеку для всех или продавайте.",
+    primary: "Подключить свой ИИ",
+    download: "Скачать NOAH",
+    meta: "бесплатно · Windows 10 / 11 · любая нейросеть",
+    states: ["ЖДЁТ", "СЛУШАЕТ", "СОБИРАЕТ", "ГОТОВО"],
     demo: [
-      { said: "Ноа, какая погода в Казани?", tool: "weather.weather({ city: \"Казань\" })", answer: "В Казани +13°, ветер 10 км/ч." },
-      { said: "Пришли последний скриншот", tool: "telegram.send_photo(\"Снимок экрана.png\")", answer: "Отправил в Telegram." },
-      { said: "Сделай модуль, который следит за курсом евро", tool: "create_module → проверка ✓ 4 из 4", answer: "Модуль «Курс евро» готов и уже работает." },
-      { said: "Переключись на свою модель", tool: "brains.switch(\"qwen3.5:9b\")", answer: "Переключился на qwen 9b — работаю офлайн." },
+      { said: "Сделай модуль, который каждое утро говорит курс евро", tool: "module_format → create_module", answer: "Проверка ✓ 4 из 4. Модуль «Курс евро» работает." },
+      { said: "Ноа, какой курс евро?", tool: "euro-rate.rate()", answer: "Евро — 94,12 ₽." },
+      { said: "Выложи этот модуль в библиотеку", tool: "publish_module(\"euro-rate\")", answer: "Модуль в библиотеке NOAH — им могут пользоваться все." },
+      { said: "Собери модуль, который разбирает мои чеки", tool: "create_module → проверка ✗ 1 → исправлено ✓", answer: "Модуль «Чеки» готов: скажите «Ноа, сколько я потратил»." },
     ],
-    brainsLabel: "МОЗГ — НА ВЫБОР",
+    brainsLabel: "МОЗГ — ЛЮБОЙ",
     howKicker: "КАК ЭТО РАБОТАЕТ",
-    howTitle: "Три шага до своего помощника",
+    howTitle: "От идеи до модуля — за пару минут",
     how: [
-      ["Поставьте NOAH", "Скачайте приложение — оно живёт в трее, слушает имя и сразу умеет десятки вещей: задачи, будильники, файлы, программы, Telegram."],
-      ["Подключите мозг", "Своя модель через Ollama — бесплатно и без интернета. Или облачная по ключу: OpenRouter, Google, Groq, Claude. Переключаются голосом."],
-      ["Опишите модуль словами", "Подключите NOAH к своей нейросети по MCP и скажите, что нужно. Она напишет модуль, NOAH проверит его и запустит."],
+      ["Поставьте ядро", "Скачайте NOAH. Он живёт в трее, слышит голос и уже умеет десятки вещей из коробки."],
+      ["Подключите свой ИИ", "Одна ссылка MCP — и ваш Claude, Cursor или другая нейросеть получают руки на вашем компьютере."],
+      ["Опишите модуль словами", "«Хочу, чтобы…» — нейросеть пишет модуль, NOAH проверяет его по регламенту и запускает."],
+      ["Делитесь или продавайте", "Выложите модуль в библиотеку: его поставят другие одной кнопкой. Платные модули — скоро."],
     ],
-    featKicker: "ЧТО УМЕЕТ",
-    featTitle: "Оболочка, которая растёт вместе с вами",
-    voice: ["Голос", "Позовите по имени и говорите как с человеком. Имя — любое, распознавание и голос — на вашем компьютере."],
+    featKicker: "ЧТО ЭТО ДАЁТ",
+    featTitle: "Одно ядро — бесконечно много рук",
+    build: ["Любые модули без кода", "Счета, чеки, заказы, отчёты, умный дом, работа — всё, что можно описать словами, становится модулем."],
+    buildPills: ["курс валют", "разбор чеков", "утренний отчёт", "умный дом", "мои задачи", "поиск по документам"],
     check: ["Проверка перед запуском", "Модуль ставится, только если прошёл регламент: правила, живой запуск, тесты, устойчивость к ошибкам."],
-    report: ["Описание и файлы по регламенту", "Сервер ответил за 63 мс", "погода в Казани: «Казань: 13°»", "Пережил неверные вызовы"],
-    tg: ["Telegram", "Пишите или говорите боту — NOAH ответит тем же и пришлёт файл, снимок экрана или голосовое."],
-    tgChat: [["me", "Пришли договор аренды"], ["noa", "Нашёл: договор аренды.pdf"], ["me", "🎙 Поставь напоминание на 9 утра"], ["noa", "Готово: завтра в 9:00."]],
-    brains: ["Мозги меняются голосом", "«Какие модели есть?», «переключись на облачную», «давай мистраль» — без настроек."],
+    report: ["Описание и файлы по регламенту", "Сервер ответил за 58 мс", "курс: «Евро — 94,12 ₽»", "Пережил неверные вызовы"],
+    multi: ["Мультимодальность", "Говорите голосом, пишите текстом, в Telegram, выделяйте текст на экране — ядро понимает всё и зовёт нужный модуль."],
+    multiPills: ["голос", "текст", "Telegram", "выделение", "MCP"],
+    brains: ["Любой мозг", "Своя модель — бесплатно и офлайн, облачная — по ключу. Меняются одной фразой: «переключись на мистраль»."],
+    market: ["Библиотека и продажа", "Готовые модули ставятся одной кнопкой. Свои — публикуете и делитесь; платные модули — скоро."],
     local: ["Локально и приватно", "Голос, файлы и ключи остаются на компьютере. Ключи модулей шифруются, нейросеть их не видит."],
-    lib: ["Библиотека модулей", "Готовые модули ставятся одной кнопкой, свои — публикуются из NOAH."],
     libAll: "Все модули →",
     whoKicker: "КОМУ",
-    whoTitle: "Для тех, кто хочет, чтобы ИИ делал, а не только говорил",
+    whoTitle: "Каждому, кто хочет, чтобы ИИ делал, а не только говорил",
     who: [
-      ["Для себя", "Дела, напоминания, файлы, заказ продуктов, курсы — голосом, без приложений на каждое."],
-      ["Без навыков программирования", "Нужен свой инструмент — опишите его словами. Нейросеть напишет, NOAH проверит."],
+      ["Без навыков программирования", "Нужен свой инструмент — опишите его словами. Нейросеть напишет, NOAH проверит и запустит."],
+      ["Для авторов модулей", "Соберите полезный модуль, выложите в библиотеку — им будут пользоваться другие. Скоро — продажа."],
       ["Для разработчиков", "Любой MCP-сервер становится голосовым модулем. Стандарт открыт, проверка автоматическая."],
-      ["Для авторов модулей", "Публикуйте модули в библиотеке и делитесь ими с другими пользователями NOAH."],
+      ["Для себя", "Дела, напоминания, файлы, заказы, курсы — голосом, без отдельного приложения на каждое."],
     ],
     codeKicker: "ПОД КАПОТОМ",
     codeTitle: "Модуль — это MCP-сервер и один файл",
-    codeLead: "Никакого своего протокола и SDK. Нейросеть получает от NOAH регламент с примером, пишет сервер и отправляет его на проверку, пока та не пройдёт.",
+    codeLead: "Никакого своего протокола и SDK. Ваша нейросеть получает от NOAH регламент с примером, пишет сервер и отправляет его на проверку, пока та не пройдёт.",
+    standard: "Стандарт модуля",
     tabs: ["module.json", "server.mjs", "проверка"],
     statsLabel: ["МОДУЛЕЙ", "АВТОРОВ", "МОЗГОВ", "УСТАНОВОК"],
     faqKicker: "ВОПРОСЫ",
     faqTitle: "Частые вопросы",
     faq: [
-      ["Это бесплатно?", "Да. Приложение бесплатное, своя модель через Ollama работает без ключей и интернета. Платите только облачному сервису, если выберете его."],
-      ["Нужен ли мощный компьютер?", "Для своей модели желательна видеокарта от 6 ГБ. Без неё берите облачную модель — тогда хватит любого компьютера с Windows 10 или 11."],
-      ["Как NOAH научится новому?", "Подключите его к своей нейросети по MCP (Claude, Cursor и другие) и опишите задачу словами. Нейросеть напишет модуль, NOAH проверит его и запустит."],
+      ["Нужно ли уметь программировать?", "Нет. Вы описываете задачу словами, модуль пишет ваша нейросеть, а NOAH проверяет его и возвращает на доработку, пока всё не заработает."],
+      ["Как подключить свою нейросеть?", "Войдите на сайт, откройте «Подключить ИИ» и скопируйте свою ссылку MCP. Вставьте её в Claude, Cursor или другой клиент с MCP — и в NOAH тот же ключ, чтобы он забирал модули."],
+      ["Можно ли продавать модули?", "Публиковать и делиться можно уже сейчас. Платные модули и выплаты авторам появятся позже — кабинет автора для них уже есть."],
       ["Не опасно ли ставить чужие модули?", "NOAH запускает модуль, только если он прошёл проверку, и только ту версию, что её прошла. Ключи модулей хранятся зашифрованными на вашем компьютере."],
-      ["Можно ли управлять из Telegram?", "Да. Заведите своего бота у @BotFather, вставьте токен в NOAH — и пишите или говорите ему, пока компьютер включён."],
+      ["Это бесплатно?", "Да. Ядро бесплатное, своя модель через Ollama работает без ключей и интернета. Платите только облачному сервису, если выберете его."],
     ],
-    ctaTitle: "Соберите своего помощника сегодня",
-    ctaLead: "Скачайте NOAH, подключите любую нейросеть и скажите, что нужно.",
-    ctaStudio: "Открыть студию",
+    ctaTitle: "Соберите свой первый модуль сегодня",
+    ctaLead: "Скачайте NOAH, подключите свою нейросеть и скажите, что нужно.",
   },
   en: {
-    kicker: "MULTIMODAL SHELL FOR AI",
-    title: ["Any AI.", "Any hands.", "One voice."],
-    lead: "NOAH lives on your computer and does what you say: opens apps, finds files, sends screenshots to Telegram, sets reminders. What it can't do yet, your own AI teaches it: describe the task in plain words, and a couple of minutes later the assistant has a new module.",
-    download: "Download for Windows",
-    library: "Open the library",
-    meta: "free · Windows 10 / 11 · works offline",
-    states: ["WAITING", "LISTENING", "THINKING", "ANSWERING"],
+    kicker: "CORE · MULTIMODAL SHELL FOR AI",
+    title: ["A core for AI.", "Modules in words.", "No code."],
+    lead: "NOAH is a shell on your computer. Plug in any AI — that's the brain. You build the hands yourself: describe a task in plain words, your AI writes a module, NOAH checks it and runs it. Made something useful? Share it in the library or sell it.",
+    primary: "Connect your AI",
+    download: "Download NOAH",
+    meta: "free · Windows 10 / 11 · any AI",
+    states: ["WAITING", "LISTENING", "BUILDING", "DONE"],
     demo: [
-      { said: "Noah, what's the weather in Berlin?", tool: "weather.weather({ city: \"Berlin\" })", answer: "Berlin: 13°, wind 10 km/h." },
-      { said: "Send me the last screenshot", tool: "telegram.send_photo(\"Screenshot.png\")", answer: "Sent it to Telegram." },
-      { said: "Build a module that tracks the euro rate", tool: "create_module → check ✓ 4 of 4", answer: "The «Euro rate» module is ready and running." },
-      { said: "Switch to the local model", tool: "brains.switch(\"qwen3.5:9b\")", answer: "Switched to qwen 9b — working offline." },
+      { said: "Build a module that tells me the euro rate every morning", tool: "module_format → create_module", answer: "Check ✓ 4 of 4. The «Euro rate» module is running." },
+      { said: "Noah, what's the euro rate?", tool: "euro-rate.rate()", answer: "One euro is 1.08 dollars." },
+      { said: "Publish this module to the library", tool: "publish_module(\"euro-rate\")", answer: "It's in the NOAH library — anyone can install it." },
+      { said: "Build a module that sorts my receipts", tool: "create_module → check ✗ 1 → fixed ✓", answer: "«Receipts» is ready: say «Noah, how much did I spend»." },
     ],
-    brainsLabel: "PICK A BRAIN",
+    brainsLabel: "ANY BRAIN",
     howKicker: "HOW IT WORKS",
-    howTitle: "Three steps to your own assistant",
+    howTitle: "From idea to module in minutes",
     how: [
-      ["Install NOAH", "Download the app — it lives in the tray, listens for its name and already does dozens of things: tasks, alarms, files, apps, Telegram."],
-      ["Plug in a brain", "A local model through Ollama — free and offline. Or a cloud one by key: OpenRouter, Google, Groq, Claude. Switch them by voice."],
-      ["Describe a module", "Connect NOAH to your AI over MCP and say what you need. It writes the module, NOAH checks it and starts it."],
+      ["Install the core", "Download NOAH. It lives in the tray, hears your voice and already does dozens of things."],
+      ["Connect your AI", "One MCP link — and your Claude, Cursor or other AI gets hands on your computer."],
+      ["Describe a module", "«I want it to…» — your AI writes the module, NOAH checks it against the standard and runs it."],
+      ["Share or sell", "Publish the module to the library; others install it in one click. Paid modules are coming."],
     ],
-    featKicker: "WHAT IT DOES",
-    featTitle: "A shell that grows with you",
-    voice: ["Voice", "Call it by name and talk like to a person. Any name; speech recognition and the voice run on your computer."],
+    featKicker: "WHAT YOU GET",
+    featTitle: "One core — endless hands",
+    build: ["Any module, no code", "Bills, receipts, orders, reports, smart home, work — anything you can describe becomes a module."],
+    buildPills: ["exchange rates", "receipts", "morning brief", "smart home", "my tasks", "doc search"],
     check: ["Checked before it runs", "A module installs only after it passes the standard: rules, a live start, tests, and resilience to bad calls."],
-    report: ["Manifest and files follow the standard", "Server answered in 63 ms", "weather in Berlin: «Berlin: 13°»", "Survived bad calls"],
-    tg: ["Telegram", "Text or talk to your bot — NOAH answers the same way and sends files, screenshots or voice notes."],
-    tgChat: [["me", "Send me the lease"], ["noa", "Found it: lease.pdf"], ["me", "🎙 Remind me at 9 am"], ["noa", "Done: tomorrow at 9:00."]],
-    brains: ["Brains switch by voice", "«Which models do we have?», «switch to the cloud one», «use mistral» — no settings."],
+    report: ["Manifest and files follow the standard", "Server answered in 58 ms", "rate: «1 EUR = 1.08 USD»", "Survived bad calls"],
+    multi: ["Multimodal", "Speak, type, message it in Telegram, select text on screen — the core understands and calls the right module."],
+    multiPills: ["voice", "text", "Telegram", "selection", "MCP"],
+    brains: ["Any brain", "A local model — free and offline, a cloud one — by key. Switch with one phrase: «switch to mistral»."],
+    market: ["Library and sales", "Ready modules install in one click. Publish and share your own; paid modules are coming."],
     local: ["Local and private", "Voice, files and keys stay on your computer. Module keys are encrypted; your AI never sees them."],
-    lib: ["Module library", "Ready modules install in one click, your own publish straight from NOAH."],
     libAll: "All modules →",
     whoKicker: "FOR WHOM",
-    whoTitle: "For people who want AI to act, not just talk",
+    whoTitle: "For anyone who wants AI to act, not just talk",
     who: [
-      ["For yourself", "Tasks, reminders, files, groceries, courses — by voice, without an app for each."],
-      ["No coding skills", "Need your own tool? Describe it. Your AI writes it, NOAH checks it."],
-      ["For developers", "Any MCP server becomes a voice module. Open standard, automatic checks."],
-      ["For module authors", "Publish modules in the library and share them with other NOAH users."],
+      ["No coding skills", "Need your own tool? Describe it. Your AI writes it, NOAH checks and runs it."],
+      ["Module authors", "Build something useful, publish it to the library for others. Selling is coming."],
+      ["Developers", "Any MCP server becomes a voice module. Open standard, automatic checks."],
+      ["For yourself", "Tasks, reminders, files, orders, courses — by voice, without an app for each."],
     ],
     codeKicker: "UNDER THE HOOD",
     codeTitle: "A module is an MCP server and one file",
     codeLead: "No custom protocol, no SDK. Your AI gets the standard from NOAH with an example, writes the server and submits it until the check passes.",
+    standard: "Module standard",
     tabs: ["module.json", "server.mjs", "check"],
     statsLabel: ["MODULES", "AUTHORS", "BRAINS", "INSTALLS"],
     faqKicker: "QUESTIONS",
     faqTitle: "FAQ",
     faq: [
-      ["Is it free?", "Yes. The app is free, and a local model through Ollama works without keys or internet. You pay only a cloud service if you choose one."],
-      ["Do I need a powerful computer?", "A local model wants a GPU with 6 GB or more. Without one, pick a cloud model — then any Windows 10 or 11 computer will do."],
-      ["How does NOAH learn new things?", "Connect it to your AI over MCP (Claude, Cursor and others) and describe the task. Your AI writes a module, NOAH checks it and starts it."],
+      ["Do I need to code?", "No. You describe the task, your AI writes the module, and NOAH checks it and sends it back until everything works."],
+      ["How do I connect my AI?", "Sign in, open «Connect AI» and copy your MCP link. Paste it into Claude, Cursor or another MCP client — and the same key into NOAH so it picks the modules up."],
+      ["Can I sell modules?", "Publishing and sharing work today. Paid modules and author payouts are coming — the author space is already there."],
       ["Is it safe to install other people's modules?", "NOAH runs a module only if it passed the check, and only the exact version that passed. Module keys are stored encrypted on your computer."],
-      ["Can I use it from Telegram?", "Yes. Create your own bot with @BotFather, paste the token into NOAH, and text or talk to it while the computer is on."],
+      ["Is it free?", "Yes. The core is free, and a local model through Ollama works without keys or internet. You pay only a cloud service if you choose one."],
     ],
-    ctaTitle: "Build your assistant today",
-    ctaLead: "Download NOAH, plug in any AI and say what you need.",
-    ctaStudio: "Open the studio",
+    ctaTitle: "Build your first module today",
+    ctaLead: "Download NOAH, connect your AI and say what you need.",
   },
 };
 
-const BRAINS = ["Ollama", "Qwen", "Gemma", "Mistral", "DeepSeek", "Claude", "Gemini", "Llama", "Groq", "OpenRouter", "OpenAI API"];
+const BRAINS = ["Claude", "Qwen", "Gemma", "Mistral", "DeepSeek", "Gemini", "Llama", "Ollama", "OpenRouter", "Groq", "OpenAI API"];
 
 const MANIFEST = `{
   "id": "euro-rate",
@@ -326,12 +330,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
   const console_ = h(
     "div",
     { class: "demo" },
-    h(
-      "div",
-      { class: "demo__bar" },
-      h("span", { class: "demo__dots" }, h("i"), h("i"), h("i")),
-      h("span", { class: "mono" }, "NOAH"),
-    ),
+    h("div", { class: "demo__bar" }, h("span", { class: "demo__dots" }, h("i"), h("i"), h("i")), h("span", { class: "mono" }, "NOAH")),
     h("canvas", { class: "demo__hud", "aria-hidden": "true" }),
     h("div", { class: "demo__states" }, tr.states.map((s) => h("span", { class: "demo__state" }, s))),
     h(
@@ -355,8 +354,8 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
       h(
         "div",
         { class: "hero__cta" },
-        h("a", { class: "btn btn--gold btn--big", href: RELEASES, target: "_blank", rel: "noopener" }, tr.download),
-        h("a", { class: "btn btn--ghost btn--big", href: "#/library" }, tr.library),
+        h("a", { class: "btn btn--gold btn--big", href: "#/connect" }, tr.primary),
+        h("a", { class: "btn btn--ghost btn--big", href: RELEASES, target: "_blank", rel: "noopener" }, tr.download),
       ),
       h("p", { class: "hero__meta mono" }, tr.meta),
     ),
@@ -370,7 +369,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
     h("div", { class: "band__row" }, BRAINS.map((b) => h("span", { class: "band__item" }, b))),
   );
 
-  const tiles = ["#2B5BC4", "#F2C14E", "#D4564A"];
+  const tiles = ["#2B5BC4", "#F2C14E", "#D4564A", "#5F8C4C"];
   const how = h(
     "section",
     { class: "sect" },
@@ -378,7 +377,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
     h("h2", { class: "sect__title" }, tr.howTitle),
     h(
       "div",
-      { class: "how" },
+      { class: "how how--four" },
       tr.how.map(([title, body], at) =>
         h(
           "article",
@@ -391,10 +390,11 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
     ),
   );
 
-  const cell = (cls, accent, title, body, ...extra) =>
+  const cell = (cls, accent, [title, body], ...extra) =>
     h("article", { class: `bento__cell ${cls}`, vars: { "--accent": accent } }, h("h3", {}, title), h("p", {}, body), ...extra);
+  const pills = (list, on = 0) => h("div", { class: "pills" }, list.map((p, at) => h("span", { class: `pill${at === on ? " is-on" : ""}` }, p)));
 
-  const topModules = modules.slice(0, 3).map((m) =>
+  const topModules = modules.slice(0, 4).map((m) =>
     h("a", { class: "bento__mod", href: `#/module/${m.id}` }, h("span", { class: "bento__icon" }, m.icon || "✦"), h("span", {}, m.title), h("span", { class: "mono" }, "→")),
   );
 
@@ -406,32 +406,17 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
     h(
       "div",
       { class: "bento" },
-      cell(
-        "bento__cell--wide",
-        "#2B5BC4",
-        ...tr.voice,
-        h("div", { class: "pills" }, tr.states.map((s, at) => h("span", { class: `pill${at === 1 ? " is-on" : ""}` }, s))),
-      ),
-      cell(
-        "bento__cell--dark",
-        "#5F8C4C",
-        ...tr.check,
-        h("pre", { class: "bento__report" }, tr.report.map((line) => `✓ ${line}`).join("\n")),
-      ),
-      cell(
-        "",
-        "#F2C14E",
-        ...tr.tg,
-        h("div", { class: "chat" }, tr.tgChat.map(([who, text]) => h("span", { class: `chat__msg chat__msg--${who}` }, text))),
-      ),
-      cell("", "#D4564A", ...tr.brains, h("div", { class: "pills" }, ["qwen 9b", "mistral", "claude", "deepseek"].map((b, at) => h("span", { class: `pill${at === 0 ? " is-on" : ""}` }, b)))),
-      cell("", "#2B5BC4", ...tr.local, h("div", { class: "bento__lock" }, icon("memory"))),
-      cell("bento__cell--wide", "#F2C14E", ...tr.lib, h("div", { class: "bento__mods" }, topModules, h("a", { class: "bento__all", href: "#/library" }, tr.libAll))),
+      cell("bento__cell--wide", "#F2C14E", tr.build, pills(tr.buildPills), h("a", { class: "btn btn--gold bento__go", href: "#/connect" }, tr.primary)),
+      cell("bento__cell--dark", "#5F8C4C", tr.check, h("pre", { class: "bento__report" }, tr.report.map((line) => `✓ ${line}`).join("\n"))),
+      cell("", "#2B5BC4", tr.multi, pills(tr.multiPills)),
+      cell("", "#D4564A", tr.brains, pills(["qwen 9b", "mistral", "claude", "deepseek"])),
+      cell("", "#5F8C4C", tr.local, h("div", { class: "bento__lock" }, icon("memory"))),
+      cell("bento__cell--wide", "#2B5BC4", tr.market, h("div", { class: "bento__mods" }, topModules, h("a", { class: "bento__all", href: "#/library" }, tr.libAll))),
     ),
   );
 
-  const whoTiles = ["#2B5BC4", "#F2C14E", "#D4564A", "#5F8C4C"];
-  const whoIcons = ["home", "notes", "code", "chart"];
+  const whoTiles = ["#F2C14E", "#D4564A", "#2B5BC4", "#5F8C4C"];
+  const whoIcons = ["notes", "chart", "code", "home"];
   const who = h(
     "section",
     { class: "sect" },
@@ -444,7 +429,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
         h(
           "article",
           { class: "who__card", vars: { "--accent": whoTiles[at] } },
-          h("span", { class: "tile", vars: { "--accent": whoTiles[at], "--accent-fg": at === 1 ? "#171B26" : "#FFFFFF" } }, icon(whoIcons[at])),
+          h("span", { class: "tile", vars: { "--accent": whoTiles[at], "--accent-fg": at === 0 ? "#171B26" : "#FFFFFF" } }, icon(whoIcons[at])),
           h("h3", {}, title),
           h("p", {}, body),
         ),
@@ -478,7 +463,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
       h("span", { class: "kicker" }, tr.codeKicker),
       h("h2", { class: "sect__title" }, tr.codeTitle),
       h("p", { class: "lead" }, tr.codeLead),
-      h("a", { class: "btn btn--gold", href: "#/standard" }, lang === "ru" ? "Стандарт модуля" : "Module standard"),
+      h("a", { class: "btn btn--gold", href: "#/standard" }, tr.standard),
     ),
     h("div", { class: "code code--tabs" }, h("div", { class: "code__head" }, tabButtons), pre),
   );
@@ -502,14 +487,10 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
     { class: "sect" },
     h("span", { class: "kicker" }, tr.faqKicker),
     h("h2", { class: "sect__title" }, tr.faqTitle),
-    h(
-      "div",
-      { class: "plate faq" },
-      tr.faq.map(([q, a], at) => h("details", { class: "faq__item", open: at === 0 }, h("summary", {}, q), h("p", {}, a))),
-    ),
+    h("div", { class: "plate faq" }, tr.faq.map(([q, a], at) => h("details", { class: "faq__item", open: at === 0 }, h("summary", {}, q), h("p", {}, a)))),
   );
 
-  const cta = h(
+  const finale = h(
     "section",
     { class: "finale" },
     h("h2", {}, tr.ctaTitle),
@@ -517,12 +498,12 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
     h(
       "div",
       { class: "hero__cta" },
-      h("a", { class: "btn btn--dark btn--big", href: RELEASES, target: "_blank", rel: "noopener" }, tr.download),
-      h("a", { class: "btn btn--big", href: "#/studio" }, tr.ctaStudio),
+      h("a", { class: "btn btn--dark btn--big", href: "#/connect" }, tr.primary),
+      h("a", { class: "btn btn--big", href: RELEASES, target: "_blank", rel: "noopener" }, tr.download),
     ),
   );
 
-  page.replaceChildren(hero, brains, how, bento, who, code, strip, faq, cta);
+  page.replaceChildren(hero, brains, how, bento, who, code, strip, faq, finale);
   running = startDemo(console_, tr, h);
   startHud(console_.querySelector(".demo__hud"), running.mode);
 }

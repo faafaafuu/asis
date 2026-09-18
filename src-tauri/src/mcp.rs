@@ -17,7 +17,6 @@
 //! В стандартный вывод здесь не пишется ничего, кроме ответов протокола:
 //! любая лишняя строка сломала бы клиенту разбор.
 
-use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -298,7 +297,7 @@ fn modules_dir() -> Result<PathBuf, String> {
 }
 
 /// Что есть у пользователя для запуска модулей.
-fn environment() -> String {
+pub(crate) fn environment() -> String {
     let mut lines = vec![format!("Ноа {}, регламент модулей v{}.", env!("CARGO_PKG_VERSION"), kit::FORMAT)];
     for name in ["node", "npx", "python", "py", "uvx", "deno", "bun"] {
         match kit::runtime_version(name) {
@@ -345,7 +344,7 @@ fn wait_started(dir: &Path) -> String {
     format!("Ноа ещё не запустила модуль ({last}). Проверь позже через list_modules.")
 }
 
-fn create_module(module: &Value, files: &Value) -> Result<String, String> {
+pub(crate) fn create_module(module: &Value, files: &Value) -> Result<String, String> {
     let manifest: Manifest =
         serde_json::from_value(module.clone()).map_err(|err| format!("module.json не разобрался: {err}"))?;
     let files = kit::parse_files(files)?;
