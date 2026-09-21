@@ -160,6 +160,81 @@ fn find_site(said: &str) -> Option<usize> {
     best.map(|(index, _)| index)
 }
 
+/// Название сайта, произнесённое после предлога: «найди микрофон на алике».
+///
+/// Списка всех сайтов мира быть не может, поэтому кандидат берётся из самой
+/// фразы, а подтверждается поиском: у настоящего сайта адрес похож на его
+/// название («алиэкспресс» — `aliexpress.ru`), а у «чехла на телефон» — нет,
+/// и тогда это обычный поиск, а не сайт.
+pub async fn named_site(said: &str) -> Option<(String, String)> {
+    let lower = said.to_lowercase().replace('ё', "е");
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric() && c != '-').filter(|w| !w.is_empty()).collect();
+    let mut seen = Vec::new();
+    for pair in words.windows(2) {
+        if matches!(pair[0], "на" | "в" | "во" | "с" | "по" | "через") && pair[1].chars().count() >= 3 {
+            seen.push(pair[1]);
+        }
+    }
+    for candidate in seen.into_iter().rev() {
+        if let Some(domain) = domain_of(candidate).await {
+            if looks_like(candidate, &domain) {
+                return Some((candidate.to_string(), domain));
+            }
+            log::info!("«{candidate}» — это не сайт: нашлось {domain}");
+        }
+    }
+    None
+}
+
+/// Похож ли адрес на произнесённое название: `aliexpress.ru` на «алиэкспресс».
+fn looks_like(name: &str, domain: &str) -> bool {
+    let root = domain.split('.').next().unwrap_or(domain).replace('-', "");
+    let latin = translit(name);
+    crate::pc::score(&root, &latin) >= 0.6 || root.starts_with(&latin[..latin.len().min(5)])
+}
+
+/// Кириллица латиницей — чтобы сравнить название с адресом сайта.
+fn translit(name: &str) -> String {
+    name.chars()
+        .map(|ch| match ch {
+            'а' => "a", 'б' => "b", 'в' => "v", 'г' => "g", 'д' => "d", 'е' => "e", 'ж' => "zh",
+            'з' => "z", 'и' => "i", 'й' => "y", 'к' => "k", 'л' => "l", 'м' => "m", 'н' => "n",
+            'о' => "o", 'п' => "p", 'р' => "r", 'с' => "s", 'т' => "t", 'у' => "u", 'ф' => "f",
+            'х' => "h", 'ц' => "c", 'ч' => "ch", 'ш' => "sh", 'щ' => "sch", 'ъ' => "", 'ы' => "y",
+            'ь' => "", 'э' => "e", 'ю' => "yu", 'я' => "ya",
+            other => return other.to_string(),
+        }.to_string())
+        .collect()
+}
+
+/// Адрес сайта по его названию: «алиэкспресс» — `aliexpress.ru`.
+///
+/// Берём первый результат поиска: у названий магазинов и сервисов он и есть
+/// их сайт. Рекламы и лишних страниц в выдаче для программ нет.
+async fn domain_of(name: &str) -> Option<String> {
+    let known = DOMAINS.lock().unwrap_or_else(|err| err.into_inner()).get(name).cloned();
+    if let Some(domain) = known {
+        return (!domain.is_empty()).then_some(domain);
+    }
+    let found = domain_search(name).await;
+    DOMAINS
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .insert(name.to_string(), found.clone().unwrap_or_default());
+    found
+}
+
+/// Найденные адреса сайтов: поиск по одному названию нужен один раз.
+static DOMAINS: Mutex<std::collections::BTreeMap<String, String>> = Mutex::new(std::collections::BTreeMap::new());
+
+async fn domain_search(name: &str) -> Option<String> {
+    let hits = search(&format!("{name} официальный сайт")).await.ok()?;
+    let site = hits.iter().map(|hit| hit.site.trim()).find(|site| site.contains('.'))?;
+    let domain = site.trim_start_matches("www.").trim_end_matches('/').to_string();
+    log::info!("сайт «{name}» — это {domain}");
+    Some(domain)
+}
+
 /// Знакомый сайт, названный прямо во фразе: «на озоне», «в вайлдберриз».
 ///
 /// Разбор моделью косвенные падежи теряет — «на озоне» возвращалось пустым
@@ -190,7 +265,7 @@ pub fn site_in(said: &str) -> Option<&'static str> {
 /// Сайт не назван — ищем на последнем открытом. Сайт незнакомый — открываем
 /// первый результат поиска по его названию: «открой сайт театра на Таганке»
 /// должно вести на сайт театра, а не на страницу поисковика.
-pub fn open_site(site: &str, query: &str) -> String {
+pub async fn open_site(site: &str, query: &str) -> String {
     let (site, query) = (site.trim(), query.trim());
     let known = if site.is_empty() {
         last_site()
@@ -217,21 +292,26 @@ pub fn open_site(site: &str, query: &str) -> String {
                 .trim_start_matches("http://");
             (format!("https://{bare}"), format!("Открываю {bare}."))
         }
-        None if !site.is_empty() => {
-            let wanted = if query.is_empty() {
-                site.to_string()
-            } else {
-                format!("{site} {query}")
-            };
-            // Обратная косая черта в начале запроса — «мне повезёт» у
-            // DuckDuckGo: сразу первый результат, без страницы выдачи.
-            (
-                format!("https://duckduckgo.com/?q=%5C{}", encode(&wanted)),
-                format!("Открываю {site}."),
-            )
-        }
+        // Сайт, которого нет в списке, — обычное дело: «найди на алике»,
+        // «посмотри на ламоде». Его адрес находится поиском, и дальше ищем
+        // прямо по нему. Списка на все сайты мира быть не может.
+        None if !site.is_empty() => match domain_of(site).await {
+            Some(domain) if !query.is_empty() => (
+                format!("https://www.google.com/search?q={}", encode(&format!("site:{domain} {query}"))),
+                format!("Ищу «{query}» на {domain}."),
+            ),
+            Some(domain) => (format!("https://{domain}"), format!("Открываю {domain}.")),
+            // Адрес не нашёлся — открываем поиск по названию сайта и запросу.
+            None => {
+                let wanted = if query.is_empty() { site.to_string() } else { format!("{site} {query}") };
+                (
+                    format!("https://www.google.com/search?q={}", encode(&wanted)),
+                    format!("Ищу «{wanted}»."),
+                )
+            }
+        },
         None if !query.is_empty() => (
-            format!("https://ya.ru/search/?text={}", encode(query)),
+            format!("https://www.google.com/search?q={}", encode(query)),
             format!("Ищу «{query}»."),
         ),
         None => return "Не понял, какой сайт открыть.".into(),
@@ -248,9 +328,9 @@ pub fn open_site(site: &str, query: &str) -> String {
 /// Нужна заказу: «закажи чехол на вайлдберриз» разбор иногда принимает за
 /// заказ продуктов в магазине «wildberries». Заказать там Ноа не может, но
 /// открыть поиск на самом сайте — может, и это ровно то, чего человек ждёт.
-pub fn open_known(site: &str, query: &str) -> Option<String> {
+pub async fn open_known(site: &str, query: &str) -> Option<String> {
     find_site(site)?;
-    Some(open_site(site, query))
+    Some(open_site(site, query).await)
 }
 
 /// Проценты вместо небезопасных байтов; пробел — `%20`.

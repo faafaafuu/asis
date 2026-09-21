@@ -266,7 +266,7 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         }
         Intent::Power { action } => Some(crate::pc::power(action)),
         Intent::Web { site, query } => {
-            Some(blocking(move || crate::web::open_site(&site, &query)).await)
+            Some(crate::web::open_site(&site, &query).await)
         }
         Intent::Lookup { query } => Some(crate::web::lookup(app, &query).await),
         Intent::Vpn { on } => Some(blocking(move || crate::pc::vpn(on)).await),
@@ -599,7 +599,7 @@ async fn order(app: &AppHandle, items: &[crate::food::Wanted], wanted_store: &st
             .map(|item| item.name.as_str())
             .collect::<Vec<_>>()
             .join(" ");
-        if let Some(spoken) = crate::web::open_known(wanted_store, &wanted_goods) {
+        if let Some(spoken) = crate::web::open_known(wanted_store, &wanted_goods).await {
             return spoken;
         }
         return format!(
@@ -1072,10 +1072,13 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
         },
         "web" => {
             let (mut site, query) = (text("site"), clean_query(said, &text("query")));
-            // Магазин, названный в самой фразе: «на озоне», «в вайлдберриз».
+            // Сайт, названный в самой фразе: «на озоне», «в вайлдберриз».
+            // Знакомый — сразу, незнакомый — по поиску его адреса.
             if site.is_empty() {
                 if let Some(found) = crate::web::site_in(said) {
                     site = found.to_string();
+                } else if let Some((spoken, _)) = crate::web::named_site(said).await {
+                    site = spoken;
                 }
             }
             if site.is_empty() && query.is_empty() {
@@ -2507,7 +2510,9 @@ fn rules_with_context(open: &[Task], name: &str, context: &str) -> String {
          close_tab, reload или desktop;\n\
          store — для order магазин, если человек его назвал (вкусвилл, магнит, \
          метро), иначе пустая строка;\n\
-         site — для web сайт, как его назвали, иначе пустая строка;\n\
+         site — для web сайт или магазин, названный человеком, в именительном \
+         падеже и без предлога: «на алике» → «алиэкспресс», «в днс» → «днс». \
+         Название сайта в query не повторяй. Сайт не назван — пустая строка;\n\
          query — для web что искать на сайте, для lookup короткий запрос для \
          поисковика, для find что за файл («паспорт»), иначе пустая строка;\n\
          topic — для system одно из: cpu, memory, gpu, disk, overview; gpu — \
