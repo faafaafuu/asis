@@ -52,6 +52,7 @@ pub fn current(app: &AppHandle) -> String {
 
 /// Спрашивает, вышло ли новое. Отдаёт `None`, если стоит последнее.
 pub async fn look(app: &AppHandle) -> Result<Option<Found>, String> {
+    log::info!("смотрю, не вышло ли новое");
     let updater = app.updater().map_err(|err| format!("обновление недоступно: {err}"))?;
     let answer = updater.check().await.map_err(|err| format!("не удалось проверить: {err}"))?;
 

@@ -1875,6 +1875,18 @@ ui.platformSave?.addEventListener("click", async () => {
       settings: { url: ui.platformUrl.value, token: ui.platformToken.value, hasToken: false },
     });
     await loadPlatform();
+  } catch (err) {
+    ui.platformStatus.textContent = String(err);
+  } finally {
+    ui.platformSave.disabled = false;
+  }
+});
+
+ui.platformOpen?.addEventListener("click", () => {
+  api?.invoke("open_platform").catch((err) => (ui.platformStatus.textContent = String(err)));
+});
+
+loadPlatform();
 
 /* ── Обновление ──────────────────────────────────────────────────────────── */
 
@@ -1929,17 +1941,3 @@ ui.updateInstall?.addEventListener("click", async () => {
     ui.updateCheck.disabled = false;
   }
 });
-
-  } catch (err) {
-    ui.platformStatus.textContent = String(err);
-  } finally {
-    ui.platformSave.disabled = false;
-  }
-});
-
-ui.platformOpen?.addEventListener("click", () => {
-  api?.invoke("open_platform").catch((err) => (ui.platformStatus.textContent = String(err)));
-});
-
-loadPlatform();
-
