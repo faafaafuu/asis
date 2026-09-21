@@ -450,5 +450,53 @@ Then write to it as you'd speak: “send the last screenshot”, “find the con
 `,
     },
   },
+  {
+    slug: "update",
+    section: "howto",
+    ru: {
+      title: "Обновить NOAH",
+      lead: "Новая версия ставится поверх текущей из окна настроек — удалять и ставить заново не нужно.",
+      body: `
+NOAH сам раз в несколько часов смотрит, не вышла ли новая версия, и говорит об этом один раз — навязываться не будет.
+
+## Как обновиться
+
+1. Откройте окно NOAH (двойной щелчок по значку в трее) → вкладка **Настройки**.
+2. Раздел **Обновление** внизу: там написано, какая версия стоит и какая вышла.
+3. Нажмите **Обновить и перезапустить**.
+
+NOAH скачает новую версию, поставит её поверх текущей и перезапустится сам. Настройки, модули, курсы и память о вас остаются на месте: обновляется программа, а не ваши данные.
+
+Кнопки **Обновить** нет, когда обновляться не на что — значит, у вас последняя версия. Посмотреть самому, что вышло, можно кнопкой **Проверить**.
+
+## Почему обновление безопасно
+
+Файл обновления подписан ключом выпуска, и NOAH ставит только то, что этой подписью подтверждено. Подменить обновление по дороге нельзя: подпись не сойдётся, и программа откажется его ставить.
+
+Версии до 1.7.0 обновляться сами не умеют — с них нужно один раз поставить свежую вручную, [скачав установщик](/download). Дальше обновления приходят внутрь программы.
+`,
+    },
+    en: {
+      title: "Update NOAH",
+      lead: "A new version installs over the current one from the settings window — no uninstalling.",
+      body: `
+NOAH checks for a new version every few hours and mentions it once.
+
+## How to update
+
+1. Open the NOAH window (double-click the tray icon) → **Settings**.
+2. The update section at the bottom shows the installed and the available version.
+3. Click the update button — NOAH installs the new version over the current one and restarts itself.
+
+Settings, modules, courses and what it remembers about you stay where they are.
+
+## Why it is safe
+
+The update file is signed with the release key, and NOAH installs only what that signature confirms.
+
+Versions before 1.7.0 cannot update themselves — install a fresh one manually once, [from the installer](/download).
+`,
+    },
+  },
 
 ];

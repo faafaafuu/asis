@@ -3,8 +3,8 @@
 // концепции (понять, как устроено). Страницы — Markdown в этом файле;
 // регламент модуля приходит с сервера — тот же текст, что читает нейросеть.
 
-import { GUIDES } from "./docs-guides.js?v=38";
-import { REFERENCE } from "./docs-reference.js?v=38";
+import { GUIDES } from "./docs-guides.js?v=39";
+import { REFERENCE } from "./docs-reference.js?v=39";
 
 const SECTIONS = [
   { id: "tutorials", ru: "Обучение", en: "Tutorials" },
