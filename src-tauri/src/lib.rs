@@ -575,7 +575,7 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             // микрофон раньше, мы записывали бы конец собственной
                             // фразы и отвечали сами себе.
                             std::thread::sleep(std::time::Duration::from_millis(700));
-                            start_conversation(&app);
+                            start_conversation_by_hand(&app);
                             continue;
                         }
 
@@ -696,13 +696,13 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                             // остановили клавишей Esc: человек сказал «хватит».
                             Some(text) if handled_as_task(&app, &text) => {
                                 if !turn_cancelled() {
-                                    start_conversation(&app);
+                                    start_conversation_by_hand(&app);
                                 }
                             }
                             Some(text) => {
                                 answer_aloud(&app, &text);
                                 if !turn_cancelled() {
-                                    start_conversation(&app);
+                                    start_conversation_by_hand(&app);
                                 }
                             }
                             None => {
@@ -1536,6 +1536,19 @@ fn headset_mic(app: &tauri::AppHandle) -> bool {
     ["головной телефон", "headset", "hands-free", "handsfree", "airpods", "buds"]
         .iter()
         .any(|word| device.contains(word))
+}
+
+/// Разговор, начатый клавишей.
+///
+/// Такой разговор просили голосом и руками: пробелом оборвали чтение, задали
+/// вопрос через Alt с пробелом. Запрет на микрофон Bluetooth-наушников сюда не
+/// относится — он бережёт человека от часов фонового слушания, а не отменяет
+/// то, о чём его попросили. Без этого Ноа умолкала сразу после ответа: разговор
+/// не начинался, и со стороны это выглядело как «сказала и выключилась».
+#[cfg(desktop)]
+fn start_conversation_by_hand(app: &tauri::AppHandle) {
+    EXPLICIT_TALK.store(true, std::sync::atomic::Ordering::SeqCst);
+    start_conversation(app);
 }
 
 /// Говорит и сразу начинает разговор без рук — для устного зачёта и

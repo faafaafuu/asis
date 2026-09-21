@@ -43,6 +43,19 @@ pub const DEFAULT_VOICE: &str = "xenia";
 
 /// Номер последней фразы: ответ, пришедший после остановки, не звучит.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Фраза, которая прямо сейчас синтезируется на голосовом сервере.
+///
+/// Синтез занимает секунды, и всё это время из колонок ещё тихо. Без отметки
+/// программа считалась молчащей: пробел, нажатый в эти секунды, значил не
+/// «замолчи и слушай», а «прочитай заново», — и чтение начиналось поверх.
+static SYNTHESIZING: AtomicU64 = AtomicU64::new(0);
+
+/// Идёт ли синтез: фраза заказана и ещё не поставлена в очередь звука.
+pub fn busy() -> bool {
+    let active = SYNTHESIZING.load(Ordering::SeqCst);
+    active != 0 && active == GENERATION.load(Ordering::SeqCst)
+}
 static SERVER: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static SPAWNING: Mutex<()> = Mutex::new(());
 
@@ -286,19 +299,30 @@ async fn request(voice: &str, rate: f32, text: &str) -> Result<Vec<u8>, String> 
 /// Говорит текст голосом Silero. Возвращается, когда звук поставлен в очередь.
 pub async fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), String> {
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    SYNTHESIZING.store(generation, Ordering::SeqCst);
     let voice = if voice.trim().is_empty() { DEFAULT_VOICE } else { voice.trim() };
 
+    // Отметку снимаем в любом случае — и когда сервер отказал, и когда фразу
+    // сменила следующая: забытая отметка навсегда оставила бы нас «говорящими».
+    let done = |generation: u64| {
+        let _ = SYNTHESIZING.compare_exchange(generation, 0, Ordering::SeqCst, Ordering::SeqCst);
+    };
+
     let starter = app.clone();
-    tauri::async_runtime::spawn_blocking(move || ensure_server(&starter))
-        .await
-        .map_err(|err| err.to_string())??;
-    let wav = request(voice, rate, text).await?;
-    if GENERATION.load(Ordering::SeqCst) != generation {
-        return Ok(());
+    let started = tauri::async_runtime::spawn_blocking(move || ensure_server(&starter)).await;
+    let outcome = async {
+        started.map_err(|err| err.to_string())??;
+        let wav = request(voice, rate, text).await?;
+        if GENERATION.load(Ordering::SeqCst) != generation {
+            return Ok(());
+        }
+        let (samples, hz) = super::azure::decode_wav(&wav)?;
+        super::audio::play(samples, hz);
+        Ok(())
     }
-    let (samples, hz) = super::azure::decode_wav(&wav)?;
-    super::audio::play(samples, hz);
-    Ok(())
+    .await;
+    done(generation);
+    outcome
 }
 
 /// Отменяет фразу, которая ещё синтезируется.
