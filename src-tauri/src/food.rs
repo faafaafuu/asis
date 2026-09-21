@@ -165,7 +165,7 @@ pub async fn search(app: &AppHandle, query: &str) -> Result<Vec<Shelf>, String> 
     let response = request
         .send()
         .await
-        .map_err(|err| format!("FoodPilot не ответил: {err}"))?;
+        .map_err(|err| unreachable_service(&config.endpoint, &err))?;
 
     if !response.status().is_success() {
         return Err(format!("поиск отказал: {}", response.status()));
@@ -711,6 +711,22 @@ fn food_config(app: &AppHandle) -> Result<FoodConfig, String> {
 
 fn client() -> reqwest::Client {
     reqwest::Client::new()
+}
+
+/// Почему до службы заказов не достучались.
+///
+/// «Не ответил» одинаково звучит и когда служба не запущена, и когда она
+/// подавилась запросом, — а делать человеку надо разное. Не запущена — это не
+/// поломка программы, и сказать об этом стоит прямо, иначе он будет чинить то,
+/// что не ломалось.
+fn unreachable_service(endpoint: &str, err: &reqwest::Error) -> String {
+    if err.is_connect() {
+        format!("служба заказов не запущена ({endpoint})")
+    } else if err.is_timeout() {
+        format!("служба заказов не ответила вовремя ({endpoint})")
+    } else {
+        format!("FoodPilot не ответил: {err}")
+    }
 }
 
 /// Проценты вместо небезопасных байтов. Названия товаров по-русски, и без
