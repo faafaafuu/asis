@@ -204,7 +204,10 @@ pub fn run() {
                 // Раньше микрофона и раньше окон: устройства должны достаться
                 // потоку, который живёт до конца работы.
                 voice::claim_devices();
-                wake_local_model(app.handle());
+                // Модель — после распознавания, а не вместе с ним: две загрузки
+                // в видеопамять разом мешают друг другу, и сервер расшифровки
+                // однажды поднимался две минуты вместо четырёх секунд.
+                warm_model_after_speech(app.handle());
                 listen_for_voice_keys(app.handle());
                 // Список программ собирается заранее, в фоне: иначе первое
                 // «открой блокнот» ждало бы, пока прочитается меню «Пуск».
@@ -855,10 +858,10 @@ fn hear_quietly(app: &tauri::AppHandle, wav: Vec<u8>) -> Option<String> {
 /// расшифровке.
 #[cfg(desktop)]
 fn wake_hint(name: &str) -> String {
-    format!(
-        "{name} — имя голосового помощника. {name}, слышишь? {name}, открой телеграм. \
-         {name}, закажи семечки."
-    )
+    // Только имя, без примеров команд. С примерами («{name}, открой телеграм»)
+    // распознавание выдавало их отголоски на шум — «чел, открою», «чел,
+    // закажи», — и помощник просыпался сам по себе.
+    format!("{name} — имя голосового помощника. Обращение: «{name}, …».")
 }
 
 /// То же, но с подсказкой о том, что мы ждём услышать.
@@ -1742,6 +1745,14 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
                     continue;
                 };
 
+                // Имя и одно слово, не вопрос — ослышка: в комнате говорят, а
+                // распознавание дописывает за ними что-то короткое. Просьбу из
+                // одного слова («открой», «закажи») всё равно не выполнить.
+                if !question.trim().is_empty() && fragment(&question) {
+                    log::info!("«{text}» — похоже на ослышку, слушаю дальше");
+                    continue;
+                }
+
                 log::info!("позвали: «{text}»");
                 stop_wake();
 
@@ -2125,6 +2136,27 @@ pub(crate) fn apply_autostart(_app: &tauri::AppHandle) {}
 static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(desktop)]
+/// Будит свою модель, когда распознавание уже в видеопамяти.
+///
+/// Ждём его готовности, но не дольше минуты: распознавание могли не скачать
+/// или выключить, и тогда модель всё равно нужна.
+#[cfg(desktop)]
+fn warm_model_after_speech(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::Builder::new()
+        .name("sufler-warm".into())
+        .spawn(move || {
+            for _ in 0..120 {
+                if voice::whisper::ready_now() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            wake_local_model(&app);
+        })
+        .ok();
+}
+
 pub(crate) fn wake_local_model(app: &tauri::AppHandle) {
     let (endpoint, model) = {
         let state = app.state::<AppState>();
