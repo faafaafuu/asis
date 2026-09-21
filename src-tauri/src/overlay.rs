@@ -1023,6 +1023,41 @@ pub fn show_watchlist(app: &AppHandle) -> tauri::Result<()> {
 }
 
 pub const USAGE_LABEL: &str = "usage";
+
+/// Окно модуля: у каждого модуля своё, метка — `module-<id>`.
+///
+/// Модуль описывает окно разметкой, а рамку, заголовок и оформление даёт Ноа:
+/// окно модуля — это окно Ноа, а не страница в браузере.
+pub fn show_module(app: &AppHandle, manifest: &crate::module_kit::Manifest) -> tauri::Result<()> {
+    let label = format!("module-{}", manifest.id.replace(|c: char| !c.is_alphanumeric(), "-"));
+    if let Some(window) = app.get_webview_window(&label) {
+        bring_forward(&window);
+        return Ok(());
+    }
+
+    let spec = &manifest.window;
+    let title = if spec.title.trim().is_empty() { manifest.title.clone() } else { spec.title.clone() };
+    let width = if spec.width == 0 { 460 } else { spec.width } as f64;
+    let height = if spec.height == 0 { 520 } else { spec.height } as f64;
+
+    let window = WebviewWindowBuilder::new(
+        app,
+        &label,
+        WebviewUrl::App(format!("module.html?id={}", manifest.id).into()),
+    )
+    .initialization_script(&theme_script(app))
+    .title(format!("Суфлёр — {title}"))
+    .inner_size(width, height)
+    .min_inner_size(320.0, 240.0)
+    .resizable(true)
+    .decorations(false)
+    .skip_taskbar(false)
+    .build()?;
+
+    let (x, y) = tasks_corner(&window);
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    Ok(())
+}
 const USAGE_WIDTH: f64 = 200.0;
 const USAGE_HEIGHT: f64 = 30.0;
 

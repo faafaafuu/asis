@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Суфлёр — модуль</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/module.css" />
+  </head>
+  <body>
+    <!-- Рамка и заголовок — общие для всех модулей: окно модуля выглядит как
+         окно Ноа, а не как страница в браузере. Внутри — разметка самого
+         модуля, без его скриптов: кнопки связывает с инструментами module.js. -->
+    <header class="head">
+      <span class="head__icon" data-el="icon"></span>
+      <h1 class="head__title" data-el="title">Модуль</h1>
+      <button class="head__button" data-el="minimize" type="button" title="Свернуть" aria-label="Свернуть окно">—</button>
+      <button class="head__button head__close" data-el="close" type="button" title="Закрыть (Esc)" aria-label="Закрыть окно">×</button>
+    </header>
+
+    <main class="mod" data-el="body">
+      <p class="mod__wait">Открываю…</p>
+    </main>
+
+    <script type="module" src="./js/module.js"></script>
+  </body>
+</html>

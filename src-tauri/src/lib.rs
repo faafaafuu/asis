@@ -356,6 +356,8 @@ pub fn run() {
             #[cfg(desktop)]
             commands::plugins_remove,
             #[cfg(desktop)]
+            commands::module_window,
+            commands::module_call,
             commands::plugins_secrets,
             #[cfg(desktop)]
             commands::plugins_save_secrets,

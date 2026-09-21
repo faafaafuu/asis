@@ -584,6 +584,40 @@ pub struct PlatformSettings {
     pub has_token: bool,
 }
 
+/// Что нарисовать в окне модуля: заголовок, значок и его разметка.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn module_window(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, String> {
+    let manifest = crate::plugins::installed(&app)
+        .into_iter()
+        .find(|known| known.id == id)
+        .ok_or("Такого модуля нет.")?;
+    let file = manifest.window.file.trim();
+    if file.is_empty() {
+        return Err("У модуля нет окна.".into());
+    }
+    let dir = crate::module_kit::modules_root()
+        .map(|root| root.join(&manifest.id))
+        .ok_or("Папка модулей не найдена.")?;
+    let html = std::fs::read_to_string(dir.join(file))
+        .map_err(|err| format!("разметка окна не прочиталась: {err}"))?;
+    Ok(serde_json::json!({
+        "title": if manifest.window.title.trim().is_empty() { manifest.title.clone() } else { manifest.window.title.clone() },
+        "icon": manifest.icon,
+        "html": html,
+    }))
+}
+
+/// Вызов инструмента модуля из его окна.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn module_call(id: String, tool: String, args: serde_json::Value) -> Result<String, String> {
+    let full = format!("{id}.{tool}");
+    tauri::async_runtime::spawn_blocking(move || crate::plugins::call(&full, &args))
+        .await
+        .map_err(|err| format!("вызов не выполнился: {err}"))?
+}
+
 #[cfg(desktop)]
 #[tauri::command]
 pub fn platform_settings(state: State<'_, AppState>) -> PlatformSettings {

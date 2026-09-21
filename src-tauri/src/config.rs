@@ -337,7 +337,9 @@ impl UiConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            theme: "system".into(),
+            // Неон — тема NOAH по умолчанию: тёмный терминальный вид, в
+            // котором и окна помощника, и окна модулей смотрятся одинаково.
+            theme: "neon".into(),
             language: "ru".into(),
             error_text: String::new(),
         }

@@ -241,6 +241,17 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
             program,
             sandbox,
             sandbox_box,
+        } if module_window(app, &program).is_some() => {
+            let id = module_window(app, &program).unwrap_or_default();
+            Some(match crate::modules::open(app, &id) {
+                Ok(()) => format!("Открываю {program}."),
+                Err(err) => format!("Окно не открылось: {err}."),
+            })
+        }
+        Intent::Launch {
+            program,
+            sandbox,
+            sandbox_box,
         } => Some(match own_window(&program) {
             Some(window) => open_own(app, window),
             None => {
@@ -321,6 +332,23 @@ enum OwnWindow {
 ///
 /// «Настройки заказов» и «окно заказа» — не программы на диске: искать их в
 /// меню «Пуск» бесполезно, а похожее по звучанию там найдётся всегда.
+/// Модуль с собственным окном, названный человеком: «открой часы».
+///
+/// Окно модуля рисует сама Ноа, поэтому и открывать его должна она, а не
+/// поиск программы по компьютеру: иначе «открой часы» запускало бы одноимённое
+/// приложение Windows.
+fn module_window(app: &AppHandle, program: &str) -> Option<String> {
+    let lower = program.to_lowercase();
+    crate::plugins::installed(app)
+        .into_iter()
+        .filter(|manifest| !manifest.window.file.trim().is_empty())
+        .find(|manifest| {
+            let title = manifest.title.to_lowercase();
+            lower.contains(&title) || title.contains(&lower) || lower.contains(&manifest.id)
+        })
+        .map(|manifest| manifest.id)
+}
+
 fn own_window(program: &str) -> Option<OwnWindow> {
     let lower = program.to_lowercase();
     let about_orders = lower.contains("заказ") || lower.contains("продукт");

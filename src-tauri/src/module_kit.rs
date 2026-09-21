@@ -77,6 +77,23 @@ pub struct McpSpec {
     pub env: BTreeMap<String, String>,
 }
 
+/// Окно модуля: разметка без кода, которую Ноа рисует своим окном.
+///
+/// Модуль не поднимает свой сервер и не открывает браузер: он описывает окно
+/// страницей, а Ноа показывает её в своей рамке, своей темой и своими
+/// шрифтами. Кнопки связываются с инструментами модуля атрибутами —
+/// см. регламент (`module_format.md`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WindowSpec {
+    /// Файл разметки в папке модуля.
+    pub file: String,
+    /// Заголовок окна; пусто — название модуля.
+    pub title: String,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// Ключ, который модулю нужен от пользователя. Значение вводит человек в окне
 /// Ноа; нейросети оно не показывается, модулю приходит переменной окружения.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -109,6 +126,8 @@ pub struct Manifest {
     pub voice: String,
     pub version: String,
     pub mcp: McpSpec,
+    /// Окно модуля, если оно у него есть.
+    pub window: WindowSpec,
     pub secrets: Vec<SecretSpec>,
     pub tests: Vec<TestCase>,
     /// Инструменты, которые нельзя вызывать в проверке (отправляют, платят,
@@ -207,6 +226,42 @@ pub fn lint(manifest: &Manifest, files: &BTreeMap<String, Vec<u8>>) -> Vec<Strin
         chars(&manifest.voice) >= 5,
         "voice — пример фразы пользователя, например «Ноа, какая погода в Казани».",
     );
+
+    let window = &manifest.window;
+    if !window.file.trim().is_empty() {
+        let file = window.file.trim();
+        need(file.ends_with(".html"), "window.file — файл разметки окна, с расширением .html.");
+        match files.get(file) {
+            None => need(false, &format!("window.file «{file}» не приложен к модулю.")),
+            Some(bytes) => {
+                let markup = String::from_utf8_lossy(bytes).to_lowercase();
+                // Чужой код и чужие адреса в окне Ноа не исполняются и не
+                // грузятся: окно рисует сама Ноа, своей темой.
+                for (mark, text) in [
+                    ("<script", "в окне модуля нельзя <script>: кнопки связываются с инструментами через data-call."),
+                    ("<iframe", "в окне модуля нельзя <iframe>."),
+                    ("http://", "в окне модуля нельзя внешние адреса: ни http, ни localhost."),
+                    ("https://", "в окне модуля нельзя внешние адреса: данные берутся у инструментов модуля."),
+                    ("<style", "своих стилей у окна нет: оформление даёт тема Ноа."),
+                    (" style=", "свойство style запрещено: оформление даёт тема Ноа."),
+                ] {
+                    need(!markup.contains(mark), text);
+                }
+                need(
+                    !markup.contains("data-call") || markup.contains("data-out"),
+                    "у кнопки с data-call должно быть место для ответа: элемент с data-out.",
+                );
+            }
+        }
+        need(
+            window.width == 0 || (320..=1400).contains(&window.width),
+            "window.width — ширина окна, 320–1400 точек.",
+        );
+        need(
+            window.height == 0 || (240..=1200).contains(&window.height),
+            "window.height — высота окна, 240–1200 точек.",
+        );
+    }
 
     let spec = &manifest.mcp;
     let command = spec.command.trim();
@@ -1006,6 +1061,34 @@ mod tests {
     #[test]
     fn a_good_manifest_passes_lint() {
         assert!(lint(&weather(), &files()).is_empty(), "{:?}", lint(&weather(), &files()));
+    }
+
+    #[test]
+    fn a_module_window_is_markup_without_code() {
+        let mut module = weather();
+        module.window = WindowSpec { file: "panel.html".into(), ..Default::default() };
+        let good = b"<h2>Sample</h2><button data-call=\"weather\">Go</button><p data-out=\"result\"></p>".to_vec();
+        let server = ("server.mjs".to_string(), b"// server".to_vec());
+        let files = BTreeMap::from([server.clone(), ("panel.html".to_string(), good)]);
+        assert!(lint(&module, &files).is_empty(), "{:?}", lint(&module, &files));
+
+        let bad = BTreeMap::from([
+            server.clone(),
+            (
+                "panel.html".to_string(),
+                b"<script src=\"https://cdn\"></script><div style=\"color:red\"></div>".to_vec(),
+            ),
+        ]);
+        let problems = lint(&module, &bad).join("
+");
+        assert!(problems.contains("<script>"), "{problems}");
+        assert!(problems.contains("внешние адреса"), "{problems}");
+        assert!(problems.contains("style"), "{problems}");
+
+        module.window.file = "panel.html".into();
+        let missing = lint(&module, &BTreeMap::from([server])).join("
+");
+        assert!(missing.contains("не приложен"), "{missing}");
     }
 
     #[test]

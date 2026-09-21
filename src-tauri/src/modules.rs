@@ -143,12 +143,13 @@ pub fn overview(app: &AppHandle) -> Vec<ModuleCard> {
     cards.extend(crate::plugins::installed(app).into_iter().map(|manifest| ModuleCard {
         status: crate::plugins::status(&manifest.id),
         secrets: !manifest.secrets.is_empty(),
+        // Окно есть, если модуль его описал: Ноа рисует его сама.
+        window: !manifest.window.file.trim().is_empty(),
         id: manifest.id,
         title: manifest.title,
         icon: if manifest.icon.is_empty() { "✦".into() } else { manifest.icon },
         about: manifest.about,
         voice: manifest.voice.replace("Ноа", &name),
-        window: false,
         custom: true,
     }));
     cards
@@ -161,7 +162,13 @@ pub fn open(app: &AppHandle, id: &str) -> Result<(), String> {
         "watchlist" => crate::overlay::show_watchlist(app),
         "learning" => crate::overlay::show_learning(app),
         "order" => crate::overlay::show_order(app),
-        _ => return Err(format!("у модуля «{id}» нет своего окна")),
+        // Свой модуль с окном: разметку даёт он, рамку и тему — Ноа.
+        _ => match crate::plugins::installed(app).into_iter().find(|m| m.id == id) {
+            Some(manifest) if !manifest.window.file.trim().is_empty() => {
+                crate::overlay::show_module(app, &manifest)
+            }
+            _ => return Err(format!("у модуля «{id}» нет своего окна")),
+        },
     };
     shown.map_err(|err| err.to_string())
 }
