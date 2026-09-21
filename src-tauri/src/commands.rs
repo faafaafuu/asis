@@ -584,6 +584,31 @@ pub struct PlatformSettings {
     pub has_token: bool,
 }
 
+/* ── Обновление ─────────────────────────────────────────────────────────── */
+
+/// Какая версия установлена. Нужна окну настроек, чтобы человеку было с чем
+/// сравнивать найденное.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn app_version(app: tauri::AppHandle) -> String {
+    crate::update::current(&app)
+}
+
+/// Смотрит, вышло ли новое. `null` — стоит последнее.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn update_check(app: tauri::AppHandle) -> Result<Option<crate::update::Found>, String> {
+    crate::update::look(&app).await
+}
+
+/// Ставит новую версию поверх текущей и перезапускает программу. Ответа отсюда
+/// окно не дождётся: к этому времени программа уже перезапускается.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
+    crate::update::install(app).await
+}
+
 /// Что нарисовать в окне модуля: заголовок, значок и его разметка.
 #[cfg(desktop)]
 #[tauri::command]

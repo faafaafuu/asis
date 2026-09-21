@@ -312,6 +312,19 @@
         </label>
       </section>
 
+      <!-- Обновление. Стоит рядом с автозапуском не случайно: и то и другое про
+           то, как программа живёт сама, без участия человека. Кнопка появляется
+           только когда есть что ставить, — предлагать «обновиться» тому, у кого
+           и так последняя версия, значит просить о бессмысленном действии. -->
+      <section class="ob__block" data-el="updateBlock">
+        <h2 class="ob__subtitle">Обновление</h2>
+        <p class="ob__hint" data-keep data-el="updateStatus">Версия …</p>
+        <div class="ob__actions">
+          <button class="ob__btn ob__btn--quiet" type="button" data-el="updateCheck">Проверить</button>
+          <button class="ob__btn ob__btn--primary" type="button" data-el="updateInstall" hidden>Обновить и перезапустить</button>
+        </div>
+      </section>
+
       <div class="ob__actions">
         <button class="ob__btn ob__btn--primary" type="button" data-el="save" data-i18n="action.save">Сохранить</button>
         <button class="ob__btn ob__btn--quiet" type="button" data-el="test" data-i18n="action.test">Проверить</button>

@@ -57,10 +57,14 @@ jobs:
       - name: Тесты Rust
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      # Ключ подписи нужен и здесь: с `createUpdaterArtifacts` сборка без него
+      # просто не доходит до установщика.
       - name: Сборка установщика
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         # Ни tagName, ни releaseName: без них tauri-action ничего не публикует,
         # а просто оставляет собранные файлы в target.
 
@@ -123,6 +127,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target aarch64-apple-darwin
 

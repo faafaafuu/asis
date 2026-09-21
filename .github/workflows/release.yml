@@ -94,11 +94,21 @@ jobs:
             echo 'SUFLER_NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
+      # Ключ подписи обновления. Программа ставит поверх себя только тот файл,
+      # который подписан этим ключом: обновление приходит по сети, и без подписи
+      # подменить его мог бы любой, кто вмешался в соединение. Закрытая половина
+      # ключа живёт в секретах репозитория и у того, кто выпускает версии;
+      # открытая лежит в tauri.conf.json.
       - name: Сборка установщика
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          # latest.json — то, куда смотрит установленная программа: в нём версия,
+          # адрес файла и подпись. Без него обновление не находится.
+          includeUpdaterJson: true
           tagName: ${{ github.ref_name }}
           releaseName: Суфлёр ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}

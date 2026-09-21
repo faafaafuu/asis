@@ -43,6 +43,8 @@ mod review;
 mod usage;
 mod secret;
 mod tasks;
+#[cfg(desktop)]
+mod update;
 mod selection;
 mod state;
 #[cfg(desktop)]
@@ -136,6 +138,13 @@ pub fn run() {
         Some(vec!["--background"]),
     ));
 
+    // Обновление поверх установленной программы: проверка, загрузка, перезапуск.
+    // `process` нужен рядом — им программа перезапускается после установки.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
     builder
         // move — ради одного `background`: замыкание переживает функцию, а флаг
         // лежит на её стеке.
@@ -170,6 +179,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 setup_tray(app.handle())?;
+                update::watch(app.handle());
 
                 // Окно открывается при КАЖДОМ запуске, а не только при первом.
                 //
@@ -356,6 +366,9 @@ pub fn run() {
             #[cfg(desktop)]
             commands::plugins_remove,
             #[cfg(desktop)]
+            commands::update_check,
+            commands::update_install,
+            commands::app_version,
             commands::module_window,
             commands::module_call,
             commands::plugins_secrets,

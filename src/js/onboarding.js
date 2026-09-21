@@ -1848,6 +1848,8 @@ loadView().then(() => applyPlatform()).then(() => {
   loadSettings();
   loadTrigger();
   refreshCapture();
+  // После applyPlatform: раздел обновления знает, что на телефоне его не место.
+  loadUpdate();
 });
 
 /* ── Площадка модулей ────────────────────────────────────────────────────── */
@@ -1873,6 +1875,61 @@ ui.platformSave?.addEventListener("click", async () => {
       settings: { url: ui.platformUrl.value, token: ui.platformToken.value, hasToken: false },
     });
     await loadPlatform();
+
+/* ── Обновление ──────────────────────────────────────────────────────────── */
+
+/**
+ * Что написано в разделе: какая версия стоит и есть ли что поставить.
+ *
+ * Кнопка «Обновить» показывается только когда обновление найдено: предлагать
+ * её всем остальным — обещать действие, которое ничего не изменит.
+ */
+function showUpdate(found, version) {
+  if (!ui.updateStatus) return;
+  ui.updateStatus.textContent = found
+    ? `Стоит ${version}, вышла ${found.version}. Программа поставит её поверх и перезапустится — настройки и модули останутся на месте.`
+    : `Стоит ${version} — это последняя версия.`;
+  if (ui.updateInstall) ui.updateInstall.hidden = !found;
+}
+
+async function loadUpdate() {
+  if (!api || !ui.updateBlock) return;
+  // На телефоне обновляет магазин приложений, а не программа сама.
+  if (isMobile) {
+    ui.updateBlock.hidden = true;
+    return;
+  }
+  try {
+    const version = await api.invoke("app_version");
+    ui.updateStatus.textContent = `Стоит ${version}.`;
+    showUpdate(await api.invoke("update_check"), version);
+  } catch (err) {
+    ui.updateStatus.textContent = `Не удалось проверить обновление: ${err}`;
+  }
+}
+
+ui.updateCheck?.addEventListener("click", async () => {
+  ui.updateCheck.disabled = true;
+  ui.updateStatus.textContent = "Смотрю, что вышло…";
+  await loadUpdate();
+  ui.updateCheck.disabled = false;
+});
+
+ui.updateInstall?.addEventListener("click", async () => {
+  ui.updateInstall.disabled = true;
+  ui.updateCheck.disabled = true;
+  // Загрузка идёт минуту-другую, и всё это время окно должно объяснять, чего
+  // ждать: молчащая кнопка выглядит сломанной.
+  ui.updateStatus.textContent = "Загружаю и ставлю — программа перезапустится сама.";
+  try {
+    await api.invoke("update_install");
+  } catch (err) {
+    ui.updateStatus.textContent = `Не удалось обновить: ${err}`;
+    ui.updateInstall.disabled = false;
+    ui.updateCheck.disabled = false;
+  }
+});
+
   } catch (err) {
     ui.platformStatus.textContent = String(err);
   } finally {
