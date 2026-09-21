@@ -45,6 +45,23 @@ const FIRST_LOOK: std::time::Duration = std::time::Duration::from_secs(120);
 /// шести часов проверять незачем.
 const EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 
+/// Сколько ждём ответа на вопрос «что вышло».
+///
+/// Без срока запрос висит сколько угодно, и кнопка «Проверить» выглядит
+/// сломанной. Минута — с запасом: на плохом канале ответ приходил и через две,
+/// но тогда честное «не удалось проверить» лучше тишины.
+const ASK_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Спрашивающий. Срок ставится только на вопрос о версии: загрузка самого
+/// файла идёт минутами, и обрывать её по тому же будильнику нельзя.
+fn updater(app: &AppHandle, wait: Option<std::time::Duration>) -> Result<tauri_plugin_updater::Updater, String> {
+    let mut builder = app.updater_builder();
+    if let Some(wait) = wait {
+        builder = builder.timeout(wait);
+    }
+    builder.build().map_err(|err| format!("обновление недоступно: {err}"))
+}
+
 /// Какая версия установлена сейчас.
 pub fn current(app: &AppHandle) -> String {
     app.package_info().version.to_string()
@@ -53,8 +70,7 @@ pub fn current(app: &AppHandle) -> String {
 /// Спрашивает, вышло ли новое. Отдаёт `None`, если стоит последнее.
 pub async fn look(app: &AppHandle) -> Result<Option<Found>, String> {
     log::info!("смотрю, не вышло ли новое");
-    let updater = app.updater().map_err(|err| format!("обновление недоступно: {err}"))?;
-    let answer = updater.check().await.map_err(|err| format!("не удалось проверить: {err}"))?;
+    let answer = updater(app, Some(ASK_WAIT))?.check().await.map_err(|err| format!("не удалось проверить: {err}"))?;
 
     let found = answer.map(|update| Found {
         version: update.version.clone(),
@@ -74,8 +90,7 @@ pub fn found() -> Option<Found> {
 /// Установщик работает молча и сохраняет папку, в которую программа была
 /// поставлена: для человека это одна кнопка, а не мастер установки заново.
 pub async fn install(app: AppHandle) -> Result<(), String> {
-    let updater = app.updater().map_err(|err| format!("обновление недоступно: {err}"))?;
-    let update = updater
+    let update = updater(&app, None)?
         .check()
         .await
         .map_err(|err| format!("не удалось проверить: {err}"))?
