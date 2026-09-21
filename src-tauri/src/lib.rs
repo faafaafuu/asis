@@ -1532,7 +1532,7 @@ static EXPLICIT_TALK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 /// переключает наушники с музыки на разговор, и громкость скачет.
 #[cfg(desktop)]
 fn headset_mic(app: &tauri::AppHandle) -> bool {
-    let device = input_device(app).to_lowercase();
+    let device = voice::stt::resolved_input(&input_device(app)).to_lowercase();
     ["головной телефон", "headset", "hands-free", "handsfree", "airpods", "buds"]
         .iter()
         .any(|word| device.contains(word))

@@ -283,6 +283,28 @@ pub fn devices() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Как называется микрофон, который на самом деле откроется.
+///
+/// В настройках может стоять устройство, которого сейчас нет: наушники убрали
+/// в футляр, и писать будем с основного микрофона. Решения, зависящие от того,
+/// что это за микрофон, должны смотреть на него, а не на запись в настройках,
+/// иначе отключённые наушники продолжают запрещать то, что с обычным
+/// микрофоном разрешено.
+pub fn resolved_input(preferred: &str) -> String {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    let host = cpal::default_host();
+    let device = if preferred.trim().is_empty() {
+        host.default_input_device()
+    } else {
+        host.input_devices()
+            .ok()
+            .and_then(|mut all| all.find(|d| d.name().map(|name| name == preferred).unwrap_or(false)))
+            .or_else(|| host.default_input_device())
+    };
+    device.and_then(|d| d.name().ok()).unwrap_or_default()
+}
+
 /// Открывает устройство ввода и начинает складывать отсчёты в общий буфер.
 fn open_input(preferred: &str) -> Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32)> {
     let host = cpal::default_host();
