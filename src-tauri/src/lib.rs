@@ -1589,9 +1589,11 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
             overlay::show_hud(&app, "listening");
             let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
 
-            // Беседу заканчивают только прощание, Esc и минута тишины. Обрывки
-            // и чужая речь пропускаются молча: раньше два таких хода подряд
-            // обрывали разговор посреди дела.
+            // Беседу заканчивают только прощание, Esc и минута тишины. На
+            // непонятое один раз переспрашиваем: молчание в ответ на сказанное
+            // человек принимает за «зависла». Дальше — молча, чтобы музыка и
+            // чужая речь не превратились в «не расслышала» без конца.
+            let mut asked_again = false;
             for heard in phrases {
                 if !CONVERSATION.load(Ordering::SeqCst) {
                     break;
@@ -1644,9 +1646,21 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                     // чем вопрос: отвечать на него полминуты незачем.
                     Some(text) if fragment(&text) => {
                         log::info!("«{text}» — обрывок, не отвечаю");
+                        if !asked_again {
+                            asked_again = true;
+                            respond(&app, "Не расслышала — повторите?".into());
+                        }
                     }
-                    Some(text) => answer_aloud(&app, &text),
-                    None => {}
+                    Some(text) => {
+                        asked_again = false;
+                        answer_aloud(&app, &text);
+                    }
+                    None => {
+                        if !asked_again {
+                            asked_again = true;
+                            respond(&app, "Не расслышала — повторите?".into());
+                        }
+                    }
                 }
                 end_turn();
 

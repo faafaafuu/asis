@@ -1071,7 +1071,13 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
             None => Intent::Chat,
         },
         "web" => {
-            let (site, query) = (text("site"), text("query"));
+            let (mut site, query) = (text("site"), clean_query(said, &text("query")));
+            // Магазин, названный в самой фразе: «на озоне», «в вайлдберриз».
+            if site.is_empty() {
+                if let Some(found) = crate::web::site_in(said) {
+                    site = found.to_string();
+                }
+            }
             if site.is_empty() && query.is_empty() {
                 Intent::Chat
             } else {
@@ -3613,6 +3619,30 @@ async fn answer_offer(said: &str) -> Option<String> {
     Some(blocking(move || crate::pc::launch(pending, false, "")).await)
 }
 
+/// Запрос к сайту из слов, которые человек правда сказал.
+///
+/// Модель дописывает своё: на «найди наушники на озоне» возвращала «наушники
+/// озеро». Оставляем только те слова запроса, которые есть в самой фразе, и
+/// убираем название магазина — оно уже в `site`.
+fn clean_query(said: &str, query: &str) -> String {
+    let heard = said.to_lowercase().replace('ё', "е");
+    let site_words: Vec<String> = crate::web::site_in(said)
+        .map(|name| name.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_default();
+    let starts = |haystack: &str, word: &str| {
+        let cut: String = word.chars().take(4).collect();
+        cut.chars().count() >= 3 && haystack.contains(&cut)
+    };
+    let kept: Vec<&str> = query
+        .split_whitespace()
+        .filter(|word| {
+            let lower = word.to_lowercase().replace('ё', "е");
+            starts(&heard, &lower) && !site_words.iter().any(|name| starts(&lower, name))
+        })
+        .collect();
+    if kept.is_empty() { query.trim().to_string() } else { kept.join(" ") }
+}
+
 /// Просьба поискать в интернете и что искать. `None` — это не она.
 fn search_request(said: &str) -> Option<String> {
     let lower = said.to_lowercase().replace('ё', "е");
@@ -3729,6 +3759,13 @@ mod quick_tests {
         assert!(wants_diagnosis("что не так с компьютером"));
         assert!(!wants_diagnosis("что грузит процессор"));
         assert!(!wants_diagnosis("открой телеграм"));
+    }
+
+    #[test]
+    fn a_site_query_keeps_only_spoken_words() {
+        assert_eq!(clean_query("найди наушники на озоне", "наушники озеро"), "наушники");
+        assert_eq!(clean_query("поищи чехол на вайлдберриз", "чехол вайлдберриз"), "чехол");
+        assert_eq!(clean_query("найди кофеварку", "кофеварка"), "кофеварка");
     }
 
     #[test]

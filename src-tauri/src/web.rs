@@ -151,6 +151,31 @@ fn find_site(said: &str) -> Option<usize> {
     best.map(|(index, _)| index)
 }
 
+/// Знакомый сайт, названный прямо во фразе: «на озоне», «в вайлдберриз».
+///
+/// Разбор моделью косвенные падежи теряет — «на озоне» возвращалось пустым
+/// названием, и товар искался вообще без магазина. Здесь имя ищется по самой
+/// фразе, по началу слова.
+pub fn site_in(said: &str) -> Option<&'static str> {
+    let lower = said.to_lowercase().replace('ё', "е");
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let mut best: Option<(&'static str, usize)> = None;
+    for site in SITES {
+        for name in site.names {
+            // Имя из нескольких слов ищем целиком, из одного — по началу слова.
+            let hit = if name.contains(' ') {
+                lower.contains(name)
+            } else {
+                words.iter().any(|word| word.starts_with(name) && word.len() <= name.len() + 4)
+            };
+            if hit && best.map_or(true, |(_, len)| name.len() > len) {
+                best = Some((site.names[0], name.len()));
+            }
+        }
+    }
+    best.map(|(name, _)| name)
+}
+
 /// Открывает сайт или его поиск в браузере человека и отдаёт ответ вслух.
 ///
 /// Сайт не назван — ищем на последнем открытом. Сайт незнакомый — открываем
@@ -278,9 +303,9 @@ pub async fn lookup(app: &AppHandle, question: &str) -> String {
     // Часы работы, адрес, как доехать — это карты: там они точные и в городе
     // человека.
     if about_place(question) {
-        let url = format!("https://yandex.ru/maps/?text={}", encode(question));
+        let url = format!("https://www.google.com/maps/search/?api=1&query={}", encode(question));
         return match crate::pc::open(&url) {
-            Ok(()) => "Открыл в Яндекс Картах — часы работы и адрес там.".into(),
+            Ok(()) => "Открыл в Google Картах — часы работы и адрес там.".into(),
             Err(err) => format!("Карты не открылись: {err}."),
         };
     }
@@ -293,7 +318,7 @@ pub async fn lookup(app: &AppHandle, question: &str) -> String {
             Ok(hits) => hits,
             Err(err) => {
                 log::warn!("поиск «{question}» не удался: {err}");
-                let _ = crate::pc::open(&format!("https://ya.ru/search/?text={}", encode(question)));
+                let _ = crate::pc::open(&format!("https://www.google.com/search?q={}", encode(question)));
                 return "Ответа не нашёл — открыл поиск в браузере.".into();
             }
         },
@@ -975,6 +1000,14 @@ mod tests {
         assert_eq!(title("яндекс маркет"), Some("Яндекс Маркет"));
         assert_eq!(title("ютуб"), Some("YouTube"));
         assert_eq!(title("сайт кинотеатра октябрь"), None);
+    }
+
+    #[test]
+    fn a_shop_is_found_in_the_phrase() {
+        assert_eq!(site_in("найди наушники на озоне"), Some("озон"));
+        assert_eq!(site_in("поищи салфетки в вайлдберриз"), Some("вайлдберриз"));
+        assert_eq!(site_in("посмотри на авито велосипед"), Some("авито"));
+        assert_eq!(site_in("какая погода завтра"), None);
     }
 
     #[test]
