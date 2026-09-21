@@ -124,15 +124,24 @@ const SITES: &[Site] = &[
     },
 ];
 
-/// Сайт, открытый последним.
+/// Сайт, открытый последним, и когда это было.
 ///
 /// «Открой вайлдберриз», а следом «давай посмотрим чехлы» — второй просьбе
-/// сайт не нужен: он тот же. Держим его здесь и подсказываем разбору реплики.
-static LAST: Mutex<Option<usize>> = Mutex::new(None);
+/// сайт не нужен: он тот же. Но помнить его вечно нельзя: иначе «найди на
+/// алике» через час искало бы на прежнем сайте. Через `LAST_TTL` забываем.
+static LAST: Mutex<Option<(usize, std::time::Instant)>> = Mutex::new(None);
+
+const LAST_TTL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Сайт, открытый только что.
+fn last_site() -> Option<usize> {
+    let last = *LAST.lock().unwrap_or_else(|err| err.into_inner());
+    last.filter(|(_, at)| at.elapsed() < LAST_TTL).map(|(index, _)| index)
+}
 
 /// Строка для разбора реплики: какой сайт открыт. Пусто — никакой.
 pub fn site_line() -> String {
-    match *LAST.lock().unwrap_or_else(|err| err.into_inner()) {
+    match last_site() {
         Some(index) => format!("Последний открытый сайт: {}.", SITES[index].title),
         None => String::new(),
     }
@@ -184,7 +193,7 @@ pub fn site_in(said: &str) -> Option<&'static str> {
 pub fn open_site(site: &str, query: &str) -> String {
     let (site, query) = (site.trim(), query.trim());
     let known = if site.is_empty() {
-        *LAST.lock().unwrap_or_else(|err| err.into_inner())
+        last_site()
     } else {
         find_site(site)
     };
@@ -192,7 +201,7 @@ pub fn open_site(site: &str, query: &str) -> String {
     let (url, spoken) = match known {
         Some(index) => {
             let chosen = &SITES[index];
-            *LAST.lock().unwrap_or_else(|err| err.into_inner()) = Some(index);
+            *LAST.lock().unwrap_or_else(|err| err.into_inner()) = Some((index, std::time::Instant::now()));
             if query.is_empty() {
                 (chosen.home.to_string(), format!("Открываю {}.", chosen.title))
             } else {

@@ -1607,17 +1607,6 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                     voice::stt::Heard::Phrase(wav) => wav,
                 };
 
-                // Фраза пришлась на печать — это стук клавиш, а не вопрос:
-                // распознавание слышит в нём «стрелки» и «отрезать», и Ноа
-                // начинал отвечать сам себе. Человек печатает — значит, занят
-                // другим, и разговор окончен.
-                // Разговор при этом не кончается: человек мог печатать и
-                // говорить одновременно, а обрывать беседу за это — грубо.
-                if typed_during(&wav) {
-                    log::info!("во время фразы печатали — это клавиатура; фразу пропускаю");
-                    continue;
-                }
-
                 // Пока думаем и отвечаем — не слушаем: иначе в следующую фразу
                 // попадёт собственный ответ.
                 voice::stt::pause_conversation(true);
@@ -1746,11 +1735,6 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
                 let voice::stt::Heard::Phrase(wav) = heard else {
                     continue;
                 };
-                // Стук клавиш — не обращение, и расшифровывать его незачем.
-                if typed_during(&wav) {
-                    continue;
-                }
-
                 let Some(text) = hear_hinted(&app, wav, &hint) else {
                     continue;
                 };
@@ -2482,24 +2466,6 @@ fn remember_exchange(question: &str, answer: &str) {
 #[cfg(desktop)]
 const THREAD_KEEP: usize = 12;
 
-/// Печатали ли, пока звучала фраза: с её начала и ещё секунду после.
-#[cfg(desktop)]
-fn typed_during(wav: &[u8]) -> bool {
-    voice::hotkey::typed_within(phrase_length(wav) + std::time::Duration::from_secs(1))
-}
-
-/// Длина записи WAV по её заголовку.
-fn phrase_length(wav: &[u8]) -> std::time::Duration {
-    let byte_rate = wav
-        .get(28..32)
-        .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-        .unwrap_or(0);
-    if byte_rate == 0 || wav.len() <= 44 {
-        return std::time::Duration::ZERO;
-    }
-    std::time::Duration::from_secs_f64((wav.len() - 44) as f64 / byte_rate as f64)
-}
-
 /// Обрывок в одно-два слова без вопроса — скорее ослышка, чем вопрос.
 #[cfg(desktop)]
 fn fragment(text: &str) -> bool {
@@ -2782,13 +2748,4 @@ mod farewell_tests {
         assert!(!fragment("что такое альбедо"));
     }
 
-    #[test]
-    fn a_phrase_is_as_long_as_its_sound() {
-        use super::phrase_length;
-        let mut wav = vec![0u8; 44];
-        wav[28..32].copy_from_slice(&32_000u32.to_le_bytes());
-        wav.extend(std::iter::repeat(0).take(32_000));
-        assert_eq!(phrase_length(&wav), std::time::Duration::from_secs(1));
-        assert_eq!(phrase_length(&[]), std::time::Duration::ZERO);
-    }
 }

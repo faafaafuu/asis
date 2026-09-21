@@ -73,11 +73,6 @@ fn now_ms() -> u64 {
     STARTED.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
 }
 
-/// Печатал ли человек за последние `window`.
-pub fn typed_within(window: std::time::Duration) -> bool {
-    let last = LAST_TYPED.load(Ordering::Relaxed);
-    last != 0 && now_ms().saturating_sub(last - 1) <= window.as_millis() as u64
-}
 
 /// Сообщает хуку, занят ли голос. Зовётся индикатором при показе и скрытии.
 pub fn voice_active(on: bool) {
