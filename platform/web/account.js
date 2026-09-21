@@ -1,9 +1,9 @@
 // Страницы кабинета: вход, аккаунт, кабинет автора, подключение ИИ, студия.
 // Грузятся, только когда их открыли, — главной они не нужны.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=37";
-import { DOCS } from "./i18n.js?v=37";
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=37";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=38";
+import { DOCS } from "./i18n.js?v=38";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=38";
 
 export function renderStudio(page) {
   const tr = t();
@@ -461,6 +461,9 @@ export async function renderConnect(page) {
     const draw = (current) => {
       const url = link(current);
       const copyLink = h("button", { type: "button", class: "btn btn--small", onclick: () => copy(url, copyLink, tr.connCopy) }, tr.connCopy);
+      // Тот же ключ, что в ссылке, Ноа на компьютере просит в настройках.
+      // Раньше он показывался один раз при выпуске и терялся — теперь виден всегда.
+      const copyKey = h("button", { type: "button", class: "btn btn--small", onclick: () => copy(current, copyKey, tr.connCopy) }, tr.connCopy);
       const rotate = h("button", {
         type: "button",
         class: "btn btn--small",
@@ -479,6 +482,9 @@ export async function renderConnect(page) {
       result.replaceChildren(
         h("div", { class: "secret-once" }, h("code", {}, url), copyLink),
         h("p", { class: "hint" }, tr.connLinkHint),
+        h("div", { class: "step__head" }, tr.connKey),
+        h("div", { class: "secret-once" }, h("code", {}, current), copyKey),
+        h("p", { class: "hint" }, tr.connKeyHint),
         h("div", { class: "hero__cta" }, rotate),
       );
     };

@@ -1,6 +1,6 @@
 // Тексты интерфейса площадки: английский и русский.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=37";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=38";
 
 export const T = {
   en: {
@@ -81,7 +81,7 @@ export const T = {
     connNeedLogin: "Sign in to get your personal MCP link.",
     connLinkTitle: "YOUR MCP LINK", connMake: "Create my link",
     connOnce: "Copy it now — it is shown only once. The same key goes into NOAH → Settings → Platform, so NOAH picks up your modules.",
-    connKey: "Key for NOAH", connHave: "You already have keys. A new link doesn't break the old ones; delete unused keys in the author space.",
+    connKey: "Key for NOAH", connKeyHint: "The same key without the link: NOAH on your computer asks for it in Settings → Platform. It is always here, so there is nothing to lose.", connHave: "You already have keys. A new link doesn't break the old ones; delete unused keys in the author space.",
     connStatus: "NOAH ON YOUR COMPUTER", connOnline: "Online — modules are picked up in seconds.", connOffline: "Offline. Start NOAH and paste the key into Settings → Platform.", connNever: "Hasn't connected yet. Paste the key into NOAH → Settings → Platform.",
     connWhere: "WHERE TO PASTE THE LINK",
     connClients: [
@@ -180,7 +180,7 @@ export const T = {
     connNeedLogin: "Войдите, чтобы получить свою ссылку MCP.",
     connLinkTitle: "ВАША ССЫЛКА MCP", connMake: "Создать мою ссылку",
     connOnce: "Скопируйте сейчас — она показывается один раз. Этот же ключ вставьте в NOAH → Настройки → Площадка: так NOAH будет забирать ваши модули.",
-    connKey: "Ключ для NOAH", connHave: "Ключи у вас уже есть. Новая ссылка старые не ломает; ненужные ключи удаляются в кабинете автора.",
+    connKey: "Ключ для NOAH", connKeyHint: "Тот же ключ без ссылки: его просит Ноа на компьютере в настройках платформы. Он всегда здесь, потерять нечего.", connHave: "Ключи у вас уже есть. Новая ссылка старые не ломает; ненужные ключи удаляются в кабинете автора.",
     connStatus: "NOAH НА ВАШЕМ КОМПЬЮТЕРЕ", connOnline: "На связи — модули забираются за секунды.", connOffline: "Не на связи. Запустите NOAH и вставьте ключ в Настройки → Площадка.", connNever: "Ещё не подключался. Вставьте ключ в NOAH → Настройки → Площадка.",
     connWhere: "КУДА ВСТАВИТЬ ССЫЛКУ",
     connClients: [
