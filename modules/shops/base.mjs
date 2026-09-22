@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FILE = join(HERE, "shops.json");
-const EMPTY = { cart: [], store: "", updated: "" };
+const EMPTY = { cart: [], store: "", off: [], updated: "" };
 
 function read() {
   try {
@@ -23,6 +23,7 @@ function read() {
     return {
       cart: Array.isArray(saved.cart) ? saved.cart : [],
       store: typeof saved.store === "string" ? saved.store : "",
+      off: Array.isArray(saved.off) ? saved.off.map(String) : [],
       updated: typeof saved.updated === "string" ? saved.updated : "",
     };
   } catch {
@@ -84,7 +85,31 @@ export function drop(number) {
 }
 
 export function clear() {
-  write({ ...EMPTY, store: read().store });
+  // Чистится список покупок, а не настройки: выключенные магазины и выбранный
+  // магазин человек задавал отдельно и стирать их не просил.
+  const state = read();
+  write({ ...state, cart: [] });
+}
+
+/**
+ * Магазины, которые человек выключил.
+ *
+ * Настройки модуля живут в самом модуле, а не в окне программы: выключить
+ * Метро — это про магазины, а не про Ноа, и искать такую галочку в общих
+ * настройках человек будет дольше, чем скажет «не ищи в Метро».
+ */
+export function disabled() {
+  return read().off;
+}
+
+export function enable(store, on) {
+  const state = read();
+  const name = String(store).toLowerCase();
+  const off = new Set(state.off);
+  if (on) off.delete(name);
+  else off.add(name);
+  write({ ...state, off: [...off] });
+  return [...off];
 }
 
 /** Сколько стоит список. Строки без цены считаются нулём и названы отдельно. */

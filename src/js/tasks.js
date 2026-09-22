@@ -569,3 +569,80 @@ api?.invoke("runtime_config").then((config) => applyTheme(config?.theme));
 api?.listen("tasks:changed", refresh);
 
 refresh();
+
+/* ── Настройки: вечерний разбор и календарь ───────────────────────────────
+   Раньше они жили в общем окне программы, среди микрофона и модели. Но это
+   настройки задач, и человек ищет их там, где задачи. */
+
+function showCalendarStatus(connected) {
+  ui.calendarStatus.textContent = connected ? "Подключено" : "Не подключено";
+  ui.calendarForget.hidden = !connected;
+}
+
+async function loadTune() {
+  if (!api || !ui.tune) return;
+  try {
+    const review = await api.invoke("review_settings");
+    if (review) {
+      ui.reviewEnabled.checked = Boolean(review.enabled);
+      ui.reviewAt.value = `${String(review.hour).padStart(2, "0")}:${String(review.minute).padStart(2, "0")}`;
+    }
+    const calendar = await api.invoke("calendar_settings");
+    if (calendar) {
+      ui.calendarEnabled.checked = Boolean(calendar.enabled);
+      ui.calendarClientId.value = calendar.clientId ?? "";
+      ui.calendarSecret.value = calendar.clientSecret ?? "";
+      showCalendarStatus(calendar.connected);
+    }
+  } catch (err) {
+    ui.calendarStatus.textContent = String(err);
+  }
+}
+
+async function saveReview() {
+  const [hour, minute] = (ui.reviewAt.value || "20:30").split(":").map(Number);
+  await api?.invoke("save_review_settings", {
+    settings: {
+      enabled: ui.reviewEnabled.checked,
+      hour: Number.isFinite(hour) ? hour : 20,
+      minute: Number.isFinite(minute) ? minute : 30,
+    },
+  });
+}
+
+async function saveCalendar() {
+  await api?.invoke("save_calendar_settings", {
+    settings: {
+      clientId: ui.calendarClientId.value,
+      clientSecret: ui.calendarSecret.value,
+      calendarId: "primary",
+      enabled: ui.calendarEnabled.checked,
+      connected: false,
+    },
+  });
+}
+
+ui.reviewEnabled?.addEventListener("change", saveReview);
+ui.reviewAt?.addEventListener("change", saveReview);
+ui.calendarEnabled?.addEventListener("change", saveCalendar);
+ui.calendarClientId?.addEventListener("change", saveCalendar);
+ui.calendarSecret?.addEventListener("change", saveCalendar);
+
+ui.calendarConnect?.addEventListener("click", async () => {
+  // Ключ и секрет могли только что вписать и не увести фокус с поля.
+  await saveCalendar();
+  ui.calendarStatus.textContent = "Открываю браузер…";
+  try {
+    await api?.invoke("calendar_connect");
+    showCalendarStatus(true);
+  } catch (err) {
+    ui.calendarStatus.textContent = String(err);
+  }
+});
+
+ui.calendarForget?.addEventListener("click", async () => {
+  await api?.invoke("calendar_forget");
+  showCalendarStatus(false);
+});
+
+loadTune();

@@ -364,10 +364,23 @@ fn own_window(program: &str) -> Option<OwnWindow> {
 fn open_own(app: &AppHandle, window: OwnWindow) -> String {
     let (opened, spoken) = match window {
         OwnWindow::Settings => (crate::overlay::show_onboarding(app), "Открываю настройки."),
-        OwnWindow::FoodSettings => (
-            crate::overlay::show_settings_section(app, "food"),
-            "Открываю настройки заказов.",
-        ),
+        // Настройки магазинов живут в самом модуле «Магазины»: где искать, чем
+        // открывать закрытые магазины, что в списке. Отдельного раздела в окне
+        // программы для них больше нет — незачем держать настройку там, где
+        // ищут не её.
+        OwnWindow::FoodSettings => match crate::plugins::installed(app)
+            .into_iter()
+            .find(|module| module.id == "shops")
+        {
+            Some(module) => (
+                crate::overlay::show_module(app, &module),
+                "Открываю магазины.",
+            ),
+            None => (
+                crate::overlay::show_onboarding(app),
+                "Модуля «Магазины» нет — поставьте его во вкладке «Модули».",
+            ),
+        },
         OwnWindow::Order => (crate::overlay::show_order(app), "Открываю заказ."),
     };
     match opened {
@@ -597,6 +610,58 @@ fn order_status(app: &AppHandle) -> String {
     }
 }
 
+/// Собирает список покупок модулем «Магазины», если он стоит.
+///
+/// `None` — модуля нет, и заказ идёт прежним путём, через службу с оплатой.
+/// Модуль до оплаты не доходит: он показывает, что и почём нашлось, а «купить»
+/// человек нажимает сам — поэтому и говорит о себе как о списке, а не о заказе.
+async fn order_by_module(
+    app: &AppHandle,
+    items: &[crate::food::Wanted],
+    wanted_store: &str,
+) -> Option<String> {
+    if !crate::plugins::installed(app).iter().any(|module| module.id == "shops") {
+        return None;
+    }
+
+    let mut added = Vec::new();
+    let mut missed = Vec::new();
+    for item in items {
+        let args = serde_json::json!({
+            "query": item.name,
+            "amount": item.quantity.max(1),
+            "store": wanted_store,
+        });
+        match tauri::async_runtime::spawn_blocking(move || crate::plugins::call("shops.cart_add", &args)).await {
+            Ok(Ok(answer)) if answer.starts_with("В список") => added.push(item.name.clone()),
+            Ok(Ok(answer)) => {
+                log::info!("модуль «Магазины» не взял «{}»: {answer}", item.name);
+                missed.push(item.name.clone());
+            }
+            Ok(Err(err)) => {
+                log::warn!("модуль «Магазины» отказал: {err}");
+                return Some(format!("Модуль «Магазины» не ответил: {err}"));
+            }
+            Err(err) => return Some(format!("Модуль «Магазины» не ответил: {err}")),
+        }
+    }
+
+    let list = tauri::async_runtime::spawn_blocking(|| {
+        crate::plugins::call("shops.cart_show", &serde_json::json!({}))
+    })
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or_default();
+
+    let head = match (added.len(), missed.is_empty()) {
+        (0, _) => format!("Ничего не нашлось: {}.", missed.join(", ")),
+        (_, true) => "Собрал список.".to_string(),
+        (_, false) => format!("Собрал список; не нашлось: {}.", missed.join(", ")),
+    };
+    Some(format!("{head} {list} Оплату нажмите сами — модуль до неё не доходит."))
+}
+
 /// Заказывает еду и отдаёт то, что сказать вслух.
 ///
 /// Единственная преграда между оговоркой и деньгами — потолок суммы: у
@@ -605,6 +670,13 @@ fn order_status(app: &AppHandle) -> String {
 async fn order(app: &AppHandle, items: &[crate::food::Wanted], wanted_store: &str) -> String {
     if items.is_empty() {
         return "Не понял, что заказать.".into();
+    }
+
+    // Модуль «Магазины» делает то же, что служба заказов, кроме оплаты, и он
+    // работает здесь и сейчас, а служба почти всегда не запущена. Стоит
+    // модуль — идём в него, а не в пустоту.
+    if let Some(answer) = order_by_module(app, items, wanted_store).await {
+        return answer;
     }
 
     // Названный магазин, которого Ноа не знает, — не повод молча собрать в

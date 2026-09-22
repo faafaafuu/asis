@@ -541,3 +541,93 @@ button.task__due:hover {
 .group__clear.is-armed {
   color: var(--error);
 }
+
+/* ── Настройки задач ─────────────────────────────────────────────────────
+   Вечерний разбор и календарь. Лежат под спойлером внизу окна: заходят сюда
+   раз в жизни, а список задач нужен каждый день — он и должен быть первым. */
+.tune {
+  border-top: 1px solid var(--input-border);
+  padding: 12px 20px 16px;
+}
+
+.tune__head {
+  font-size: var(--size-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.tune__head:hover {
+  color: var(--text);
+}
+
+.tune__check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.tune__hint {
+  margin: 4px 0 0 22px;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}
+
+.tune__field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}
+
+.tune__field input {
+  box-sizing: border-box;
+  flex: 0 1 260px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--input-color);
+  font-family: inherit;
+  font-size: var(--size-ui);
+  outline: none;
+  color-scheme: dark light;
+}
+.tune__field input:focus {
+  border-color: var(--btn-hover-border);
+}
+
+.tune__row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.tune__btn {
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  background: var(--btn-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--size-secondary);
+  cursor: pointer;
+}
+.tune__btn:hover {
+  border-color: var(--btn-hover-border);
+}
+.tune__btn--quiet {
+  color: var(--text-muted);
+}
+
+.tune__status {
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}

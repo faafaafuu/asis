@@ -85,10 +85,74 @@ async function open() {
     // а проверка модуля их и не пропускает.
     ui.body.innerHTML = module.html;
     wire(ui.body);
+    await keys();
   } catch (err) {
     ui.body.innerHTML = '<p class="mod__error"></p>';
     ui.body.firstChild.textContent = String(err);
   }
+}
+
+/**
+ * Ключи модуля — внизу его собственного окна.
+ *
+ * Раньше их вводили на плитке модуля в общих настройках: человек открывал
+ * окно модуля, не находил в нём ничего про ключи и шёл искать их там, где
+ * стоят галочки про микрофон. Настройки модуля принадлежат модулю, и место им
+ * рядом с тем, что они настраивают.
+ *
+ * Значения сюда не приходят никогда: поле показывает лишь, введён ли ключ, —
+ * Ноа хранит их зашифрованными и не отдаёт обратно даже своим окнам.
+ */
+async function keys() {
+  const fields = await api.invoke("plugins_secrets", { id }).catch(() => []);
+  if (!fields.length) return;
+
+  const box = document.createElement("section");
+  box.className = "mod__keys";
+  const head = document.createElement("h3");
+  head.textContent = "Ключи";
+  box.append(head);
+
+  const inputs = {};
+  for (const field of fields) {
+    const label = document.createElement("label");
+    const name = document.createElement("span");
+    name.textContent = field.optional ? `${field.title} (необязательно)` : field.title;
+    const input = document.createElement("input");
+    input.type = "password";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.placeholder = field.set ? "сохранён — оставьте пустым, чтобы не менять" : "вставьте ключ";
+    inputs[field.name] = input;
+    label.append(name, input);
+    const hint = document.createElement("p");
+    hint.className = "mod__hint";
+    hint.textContent = field.hint;
+    box.append(label, hint);
+  }
+
+  const save = document.createElement("button");
+  save.type = "button";
+  save.textContent = "Сохранить ключи";
+  const note = document.createElement("p");
+  note.className = "mod__hint";
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    note.textContent = "Сохраняю…";
+    const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value]));
+    try {
+      await api.invoke("plugins_save_secrets", { id, values });
+      // Модуль перезапускается с новыми ключами — проверка идёт отдельно, из
+      // плитки; здесь достаточно сказать, что ключи приняты.
+      note.textContent = "Ключи сохранены.";
+      for (const input of Object.values(inputs)) input.value = "";
+    } catch (err) {
+      note.textContent = String(err);
+    }
+    save.disabled = false;
+  });
+  box.append(save, note);
+  ui.body.append(box);
 }
 
 open();

@@ -1,0 +1,40 @@
+<h2>Магазины</h2>
+<p>Поиск продуктов, список покупок и настройки — здесь же. Рамку, цвета и шрифты рисует Ноа.</p>
+
+<h3>Найти</h3>
+<div class="row">
+  <label>Что ищем <input data-field="query" value="молоко" /></label>
+  <button data-call="search" data-out="found">Искать</button>
+</div>
+<p data-out="found"></p>
+
+<h3>Список покупок</h3>
+<div class="row">
+  <label>Добавить <input data-field="query" value="" /></label>
+  <button data-call="cart_add" data-out="cart">Добавить</button>
+  <button data-call="cart_show" data-out="cart">Показать</button>
+  <button data-call="cart_clear" data-out="cart">Очистить</button>
+</div>
+<p data-out="cart"></p>
+
+<h3>Где искать</h3>
+<p>Магазин, который не нужен, можно выключить — и сказать словами: «не ищи в Магните».</p>
+<div class="row">
+  <label>Магазин
+    <select data-field="store">
+      <option value="vkusvill">ВкусВилл</option>
+      <option value="magnit">Магнит</option>
+      <option value="metro">Метро</option>
+      <option value="pyaterochka">Пятёрочка</option>
+      <option value="lenta">Лента</option>
+    </select>
+  </label>
+  <button data-call="store_on" data-out="stores">Включить</button>
+  <button data-call="store_off" data-out="stores">Выключить</button>
+  <button data-call="stores" data-out="stores">Показать</button>
+</div>
+<p data-out="stores"></p>
+
+<h3>Ключи</h3>
+<p>Пятёрочка и Лента закрыты от программ: их страницы отвечают отказом любому, кто не человек с браузером. Они спрашиваются через parse.bot по вашему ключу — Ноа хранит его зашифрованным и спросит при установке модуля. Без ключа ищем в остальных магазинах.</p>
+<p>Оплаты здесь нет: модуль доводит до списка с ценами, «купить» вы нажимаете сами.</p>

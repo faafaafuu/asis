@@ -8,7 +8,7 @@
 
 import readline from "node:readline";
 import * as base from "./base.mjs";
-import { STORE_NAMES, searchEverywhere } from "./stores.mjs";
+import { CLOSED_STORES, STORE_NAMES, searchEverywhere } from "./stores.mjs";
 
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const reply = (id, result) => send({ jsonrpc: "2.0", id, result });
@@ -17,6 +17,18 @@ const bad = (id, text) => reply(id, { content: [{ type: "text", text: cut(text) 
 
 /** Ноа читает ответ вслух, поэтому он короткий. */
 const cut = (text) => (text.length > 3900 ? `${text.slice(0, 3900)}…` : text);
+
+/**
+ * Настройки поиска: чем открывать закрытые магазины и куда не ходить.
+ *
+ * Ключи приходят от Ноа переменными окружения — она хранит их зашифрованными и
+ * не показывает никому, — а выключенные магазины лежат в базе модуля.
+ */
+const how = () => ({
+  key: process.env.PARSE_BOT_KEY ?? "",
+  lentaScraper: process.env.PARSE_BOT_LENTA ?? "",
+  skip: base.disabled(),
+});
 
 const money = (rubles) => (rubles === null || rubles === undefined ? "цена не указана" : `${Math.round(rubles)} ₽`);
 const nameOf = (store) => STORE_NAMES[store] ?? store;
@@ -67,7 +79,41 @@ const TOOLS = [
     description: "Очищает список покупок целиком.",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "stores",
+    description: "Показывает, в каких магазинах идёт поиск и какие выключены. Зовите на «где ты ищешь», «какие магазины».",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "store_on",
+    description: "Включает магазин в поиск: vkusvill, magnit, metro, pyaterochka, lenta. Зовите на «ищи и в Метро».",
+    inputSchema: {
+      type: "object",
+      properties: { store: { type: "string", description: "Название магазина или его код" } },
+      required: ["store"],
+    },
+  },
+  {
+    name: "store_off",
+    description: "Убирает магазин из поиска. Зовите на «не ищи в Магните».",
+    inputSchema: {
+      type: "object",
+      properties: { store: { type: "string", description: "Название магазина или его код" } },
+      required: ["store"],
+    },
+  },
 ];
+
+/** Код магазина по тому, как его назвали: «в метро», «Пятёрочка», «lenta». */
+function codeOf(said) {
+  const asked = String(said ?? "").trim().toLowerCase().replace(/ё/g, "е");
+  if (!asked) return "";
+  for (const [code, name] of Object.entries(STORE_NAMES)) {
+    const plain = name.toLowerCase().replace(/ё/g, "е");
+    if (asked === code || asked.includes(plain) || plain.includes(asked)) return code;
+  }
+  return "";
+}
 
 /* ── Инструменты ──────────────────────────────────────────────────────────── */
 
@@ -75,7 +121,7 @@ async function search({ query, store }) {
   const asked = String(query ?? "").trim();
   if (!asked) return "Не сказано, что искать.";
 
-  const shelves = await searchEverywhere(asked, { key: process.env.PARSE_BOT_KEY ?? "", only: store });
+  const shelves = await searchEverywhere(asked, { ...how(), only: store });
   const lines = [];
 
   for (const shelf of shelves.sort(byCheapest)) {
@@ -113,7 +159,7 @@ async function cartAdd({ query, store, amount }) {
   // другом магазине человеку не нужна. Первый добавленный товар и выбирает
   // магазин, дальше ищем только в нём.
   const chosen = store || base.store();
-  const shelves = await searchEverywhere(asked, { key: process.env.PARSE_BOT_KEY ?? "", only: chosen });
+  const shelves = await searchEverywhere(asked, { ...how(), only: chosen });
 
   const offers = shelves
     .filter((shelf) => shelf.reachable)
@@ -153,8 +199,37 @@ function cartClear() {
   return "Список покупок очищен.";
 }
 
+function stores() {
+  const off = new Set(base.disabled());
+  const key = Boolean(how().key.trim());
+  const lines = Object.entries(STORE_NAMES).map(([code, name]) => {
+    if (off.has(code)) return `${name} — выключен`;
+    if (CLOSED_STORES.includes(code) && !key) return `${name} — нужен ключ parse.bot`;
+    if (code === "lenta" && !how().lentaScraper.trim()) return `${name} — нужен номер сборщика parse.bot`;
+    return `${name} — ищем`;
+  });
+  return ["Магазины:", ...lines].join("\n");
+}
+
+function storeOn({ store }) {
+  const code = codeOf(store);
+  if (!code) return `Магазин «${store}» модулю неизвестен.`;
+  base.enable(code, true);
+  return `${nameOf(code)} — снова в поиске.`;
+}
+
+function storeOff({ store }) {
+  const code = codeOf(store);
+  if (!code) return `Магазин «${store}» модулю неизвестен.`;
+  base.enable(code, false);
+  return `${nameOf(code)} больше не спрашиваю.`;
+}
+
 const RUN = {
   search,
+  stores,
+  store_on: storeOn,
+  store_off: storeOff,
   cart_add: cartAdd,
   cart_show: cartShow,
   cart_drop: cartDrop,

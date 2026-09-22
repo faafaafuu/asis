@@ -191,3 +191,38 @@ body {
   gap: 10px;
   align-items: flex-end;
 }
+
+/* ── Ключи модуля ────────────────────────────────────────────────────────
+   Настройки модуля живут в его окне, а не на плитке в общих настройках:
+   человек открывает модуль и находит всё, что к нему относится, здесь. */
+.mod__keys {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--input-border);
+}
+
+.mod__keys h3 {
+  margin: 0 0 10px;
+  font-size: var(--size-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.mod__keys label {
+  display: block;
+  margin-top: 10px;
+}
+
+.mod__keys label span {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}
+
+.mod__hint {
+  margin: 4px 0 0;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}

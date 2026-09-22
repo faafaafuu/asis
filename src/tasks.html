@@ -39,6 +39,50 @@
       впишите сюда.
     </p>
 
+    <!-- Настройки задач живут здесь, а не в общем окне программы: вечерний
+         разбор и календарь — это про задачи, и искать их человек будет там,
+         где задачи, а не среди галочек про микрофон и модель. -->
+    <details class="tune" data-el="tune">
+      <summary class="tune__head">Настройки</summary>
+
+      <label class="tune__check">
+        <input type="checkbox" data-el="reviewEnabled" />
+        <span>Спрашивать вечером, что успел</span>
+      </label>
+      <p class="tune__hint">Ноа пройдёт по несделанным делам и предложит перенести то, до чего руки не дошли.</p>
+
+      <label class="tune__field">
+        <span>Во сколько спрашивать</span>
+        <input data-el="reviewAt" type="time" />
+      </label>
+
+      <label class="tune__check">
+        <input type="checkbox" data-el="calendarEnabled" />
+        <span>Отправлять дела в Google-календарь</span>
+      </label>
+      <p class="tune__hint">
+        Нужен свой ключ: Google пускает к календарю только программы, зарегистрированные у него
+        в облаке. Заведите проект в Google Cloud, включите Calendar API, создайте клиент типа
+        «Desktop app» и впишите его сюда.
+      </p>
+
+      <label class="tune__field">
+        <span>Идентификатор клиента</span>
+        <input data-el="calendarClientId" type="text" autocomplete="off" spellcheck="false"
+               placeholder="…apps.googleusercontent.com" />
+      </label>
+      <label class="tune__field">
+        <span>Секрет клиента</span>
+        <input data-el="calendarSecret" type="password" autocomplete="off" spellcheck="false" />
+      </label>
+
+      <div class="tune__row">
+        <button class="tune__btn" data-el="calendarConnect" type="button">Подключить</button>
+        <button class="tune__btn tune__btn--quiet" data-el="calendarForget" type="button" hidden>Отключить</button>
+        <span class="tune__status" data-el="calendarStatus"></span>
+      </div>
+    </details>
+
     <script type="module" src="./js/tasks.js"></script>
   </body>
 </html>

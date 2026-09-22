@@ -248,7 +248,9 @@ async function metro(query) {
 
 /* ── Пятёрочка ────────────────────────────────────────────────────────────── */
 
-const PARSE_BOT = "https://api.parse.bot/scraper/aae3e5f6-fa2a-444d-9fb9-c4bbdf7aced1";
+const PARSE_BOT = "https://api.parse.bot/scraper";
+/** Готовый сборщик parse.bot для Пятёрочки. */
+const PYATEROCHKA_SCRAPER = "aae3e5f6-fa2a-444d-9fb9-c4bbdf7aced1";
 
 /**
  * Сама Пятёрочка программе отвечает 403: и страницы, и API приложения закрыты
@@ -257,7 +259,27 @@ const PARSE_BOT = "https://api.parse.bot/scraper/aae3e5f6-fa2a-444d-9fb9-c4bbdf7
  * Без ключа Пятёрочку просто не спрашиваем: отсутствие ключа не поломка.
  */
 async function pyaterochka(query, key) {
-  const url = new URL(`${PARSE_BOT}/get_products`);
+  return viaParseBot("pyaterochka", query, key, PYATEROCHKA_SCRAPER, (id) => `https://5ka.ru/product/${id}/`);
+}
+
+/* ── Лента ────────────────────────────────────────────────────────────────── */
+
+/**
+ * Лента закрыта Qrator: 401 приходит на всё, включая главную страницу, — ни
+ * разметки, ни API программе не достаётся. Поэтому она спрашивается так же,
+ * как Пятёрочка: через parse.bot, чужим сборщиком, по ключу человека.
+ *
+ * Номер сборщика у каждого свой — общего готового для Ленты нет, — поэтому он
+ * приходит отдельной настройкой. Не задан — Ленту просто не спрашиваем: это
+ * не поломка, а незаполненная настройка.
+ */
+async function lenta(query, key, scraper) {
+  return viaParseBot("lenta", query, key, scraper, (id) => `https://lenta.com/product/${id}/`);
+}
+
+/** Общий разговор с parse.bot: у всех его сборщиков один вид ответа. */
+async function viaParseBot(store, query, key, scraper, link) {
+  const url = new URL(`${PARSE_BOT}/${scraper}/get_products`);
   url.searchParams.set("query", query);
   url.searchParams.set("limit", String(MAX_PRODUCTS));
 
@@ -283,18 +305,18 @@ async function pyaterochka(query, key) {
       const id = item?.id ?? item?.plu;
       if (!name || (typeof id !== "string" && typeof id !== "number")) return null;
       return {
-        store: "pyaterochka",
+        store,
         id: String(id),
         name,
         price: priceOf(item.price ?? item.prices),
-        url: `https://5ka.ru/product/${id}/`,
+        url: link(id),
         available: item.is_available !== false && item.stock !== 0,
       };
     })
     .filter(Boolean)
     .slice(0, MAX_PRODUCTS);
 
-  return { store: "pyaterochka", searchUrl: url.toString(), products };
+  return { store, searchUrl: url.toString(), products };
 }
 
 /**
@@ -318,7 +340,11 @@ export const STORE_NAMES = {
   magnit: "Магнит",
   metro: "Метро",
   pyaterochka: "Пятёрочка",
+  lenta: "Лента",
 };
+
+/** Магазины, которые сами программе не отвечают и спрашиваются через parse.bot. */
+export const CLOSED_STORES = ["pyaterochka", "lenta"];
 
 /**
  * Спрашивает магазины разом и отдаёт их полки порознь.
@@ -330,17 +356,29 @@ export const STORE_NAMES = {
  */
 const resting = new Map();
 
-export async function searchEverywhere(query, { key = "", only = "" } = {}) {
+export async function searchEverywhere(query, { key = "", lentaScraper = "", only = "", skip = [] } = {}) {
   const wanted = String(only || "").trim().toLowerCase();
   const asks = [
     ["vkusvill", () => vkusvill(query)],
     ["magnit", () => magnit(query)],
     ["metro", () => metro(query)],
   ];
-  if (key.trim()) asks.push(["pyaterochka", () => pyaterochka(query, key.trim())]);
+  // Закрытые магазины входят в поиск только с ключом: без него спрашивать
+  // некого, и молчаливый отказ в каждой выдаче был бы шумом, а не сведением.
+  if (key.trim()) {
+    asks.push(["pyaterochka", () => pyaterochka(query, key.trim())]);
+    if (lentaScraper.trim()) asks.push(["lenta", () => lenta(query, key.trim(), lentaScraper.trim())]);
+  }
 
-  const chosen = wanted ? asks.filter(([store]) => store === wanted) : asks;
-  if (!chosen.length) throw new Error(`Магазин «${only}» модулю неизвестен.`);
+  const off = new Set(skip.map((store) => String(store).toLowerCase()));
+  const chosen = wanted
+    ? asks.filter(([store]) => store === wanted)
+    : asks.filter(([store]) => !off.has(store));
+  if (!chosen.length) {
+    throw new Error(
+      wanted ? `Магазин «${only}» сейчас не спросить.` : "Все магазины выключены — включите хотя бы один.",
+    );
+  }
 
   return Promise.all(
     chosen.map(async ([store, ask]) => {

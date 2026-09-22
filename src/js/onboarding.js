@@ -501,155 +501,6 @@ ui.voiceDownload.addEventListener("click", async () => {
 
 // Сочетание клавиш включает и выключает ожидание мимо этого окна — галочка
 // должна следовать за ним, иначе она показывает вчерашнюю правду.
-/* ── Задачи: вечерний разбор и календарь ─────────────────────────────────── */
-
-async function loadTasksSettings() {
-  const review = await api?.invoke("review_settings");
-  if (review) {
-    ui.reviewEnabled.checked = Boolean(review.enabled);
-    ui.reviewAt.value = `${String(review.hour).padStart(2, "0")}:${String(review.minute).padStart(2, "0")}`;
-  }
-
-  const calendar = await api?.invoke("calendar_settings");
-  if (calendar) {
-    ui.calendarEnabled.checked = Boolean(calendar.enabled);
-    ui.calendarClientId.value = calendar.clientId ?? "";
-    ui.calendarSecret.value = calendar.clientSecret ?? "";
-    showCalendarStatus(calendar.connected);
-  }
-}
-
-function showCalendarStatus(connected) {
-  ui.calendarStatus.textContent = connected ? "Подключено" : "Не подключено";
-  ui.calendarForget.hidden = !connected;
-}
-
-async function saveReview() {
-  const [hour, minute] = (ui.reviewAt.value || "20:30").split(":").map(Number);
-  await api?.invoke("save_review_settings", {
-    settings: {
-      enabled: ui.reviewEnabled.checked,
-      hour: Number.isFinite(hour) ? hour : 20,
-      minute: Number.isFinite(minute) ? minute : 30,
-    },
-  });
-}
-
-async function saveCalendar() {
-  await api?.invoke("save_calendar_settings", {
-    settings: {
-      clientId: ui.calendarClientId.value,
-      clientSecret: ui.calendarSecret.value,
-      calendarId: "primary",
-      enabled: ui.calendarEnabled.checked,
-      connected: false,
-    },
-  });
-}
-
-ui.reviewEnabled?.addEventListener("change", saveReview);
-ui.reviewAt?.addEventListener("change", saveReview);
-ui.calendarEnabled?.addEventListener("change", saveCalendar);
-ui.calendarClientId?.addEventListener("change", saveCalendar);
-ui.calendarSecret?.addEventListener("change", saveCalendar);
-
-ui.calendarConnect?.addEventListener("click", async () => {
-  // Ключ и секрет могли только что вписать и не увести фокус с поля.
-  await saveCalendar();
-  ui.calendarStatus.textContent = "Открываю браузер…";
-  try {
-    await api?.invoke("calendar_connect");
-    showCalendarStatus(true);
-  } catch (err) {
-    ui.calendarStatus.textContent = String(err);
-  }
-});
-
-ui.calendarForget?.addEventListener("click", async () => {
-  await api?.invoke("calendar_forget");
-  showCalendarStatus(false);
-});
-
-loadTasksSettings();
-
-/* ── Заказы ──────────────────────────────────────────────────────────────── */
-
-/** Код магазина — галочка в разметке. */
-const FOOD_STORES = {
-  vkusvill: "storeVkusvill",
-  magnit: "storeMagnit",
-  metro: "storeMetro",
-  pyaterochka: "storePyaterochka",
-};
-
-async function loadFood() {
-  const food = await api?.invoke("food_settings").catch(() => null);
-  if (!food) {
-    if (ui.foodBlock) ui.foodBlock.hidden = true;
-    return;
-  }
-  ui.foodEnabled.checked = Boolean(food.enabled);
-  for (const [code, el] of Object.entries(FOOD_STORES)) ui[el].checked = food.stores.includes(code);
-  ui.foodAutoPay.checked = Boolean(food.autoPay);
-  ui.foodPerOrder.value = food.perOrder;
-  ui.foodPerDay.value = food.perDay;
-  ui.foodFreeDelivery.value = food.freeDeliveryFrom;
-  ui.foodEndpoint.value = food.endpoint;
-  ui.foodParseKey.value = food.parseKey ?? "";
-  ui.foodSpent.textContent =
-    food.perDay > 0
-      ? `Оплачено без подтверждения за сутки: ${food.spentToday} из ${food.perDay} ₽`
-      : `Оплачено без подтверждения за сутки: ${food.spentToday} ₽`;
-  ui.foodLoginStatus.textContent = food.signedIn
-    ? "Браузер Ноа уже открывался — вход сохранён в нём"
-    : "Ещё не входили";
-}
-
-async function saveFood() {
-  const amount = (el, fallback) => {
-    const value = Number(el.value);
-    return Number.isFinite(value) && value >= 0 ? Math.round(value) : fallback;
-  };
-  try {
-    await api?.invoke("save_food_settings", {
-      settings: {
-        enabled: ui.foodEnabled.checked,
-        endpoint: ui.foodEndpoint.value.trim(),
-        stores: Object.entries(FOOD_STORES)
-          .filter(([, el]) => ui[el].checked)
-          .map(([code]) => code),
-        autoPay: ui.foodAutoPay.checked,
-        perOrder: amount(ui.foodPerOrder, 3000),
-        perDay: amount(ui.foodPerDay, 5000),
-        freeDeliveryFrom: amount(ui.foodFreeDelivery, 0),
-        parseKey: ui.foodParseKey.value,
-        spentToday: 0,
-        signedIn: false,
-      },
-    });
-  } catch (err) {
-    ui.foodSpent.textContent = `Не сохранилось: ${err}`;
-    return;
-  }
-  loadFood();
-}
-
-for (const el of [
-  ui.foodEnabled,
-  ui.storeVkusvill,
-  ui.storeMagnit,
-  ui.storeMetro,
-  ui.storePyaterochka,
-  ui.foodParseKey,
-  ui.foodAutoPay,
-  ui.foodPerOrder,
-  ui.foodPerDay,
-  ui.foodFreeDelivery,
-  ui.foodEndpoint,
-]) {
-  el?.addEventListener("change", saveFood);
-}
-
 /* ── Уведомления в Telegram ───────────────────────────────────────────── */
 
 async function loadTelegram() {
@@ -689,17 +540,6 @@ ui.telegramTest?.addEventListener("click", async () => {
 
 loadTelegram();
 
-ui.foodLogin?.addEventListener("click", async () => {
-  ui.foodLoginStatus.textContent = "Открываю браузер…";
-  try {
-    await api?.invoke("food_login");
-    ui.foodLoginStatus.textContent =
-      "Войдите во ВкусВилл в открывшемся окне, выберите адрес и способ оплаты — Ноа запомнит.";
-  } catch (err) {
-    ui.foodLoginStatus.textContent = `Браузер не открылся: ${err}`;
-  }
-});
-
 /**
  * Прокручивает к разделу.
  *
@@ -735,7 +575,7 @@ for (const tab of document.querySelectorAll("[data-tab]")) {
 }
 
 /** Где в настройках живёт раздел модуля. */
-const MODULE_SETTINGS = { telegram: "telegram", order: "food" };
+const MODULE_SETTINGS = { telegram: "telegram" };
 
 function moduleCard(module) {
   const card = document.createElement("article");
@@ -759,7 +599,9 @@ function moduleCard(module) {
     open.addEventListener("click", () => api?.invoke("open_module", { id: module.id }).catch(() => {}));
     actions.append(open);
   }
-  if (module.custom && module.secrets) {
+  // Ключи модуля с окном вводятся в самом окне: настройки принадлежат модулю.
+  // Кнопка остаётся только у модулей без окна — им больше негде.
+  if (module.custom && module.secrets && !module.window) {
     const keys = document.createElement("button");
     keys.type = "button";
     keys.className = "ob__btn ob__btn--primary mod__btn";
@@ -1015,8 +857,6 @@ try {
 }
 showTab(["modules", "settings", "help"].includes(startTab) ? startTab : "modules");
 loadChips();
-
-loadFood();
 api?.invoke("settings_section").then(showSection).catch(() => {});
 api?.listen("onboarding:section", (event) => showSection(event.payload));
 
