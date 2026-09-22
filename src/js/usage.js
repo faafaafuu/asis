@@ -44,6 +44,10 @@ function render(s) {
   ];
   if (known(s.spent)) lines.push(`на счёте OpenRouter потрачено всего — ${money(s.spent)}`);
   if (known(s.balance)) lines.push(`остаток на счёте — ${money(s.balance)}`);
+  // У подписки Claude Code остатка не спросить: ни команды, ни поля в ответе
+  // для него нет. Молчать об этом хуже, чем сказать: иначе пустое место
+  // выглядит как «не сосчитали».
+  if (s.service === "мост") lines.push("остаток по подписке Claude Code не показывает сам Claude Code");
   lines.push(onTop ? "двойной щелчок — на рабочий стол" : "двойной щелчок — поверх окон");
   ui.line.title = lines.join("\n");
 }

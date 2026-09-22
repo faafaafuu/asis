@@ -43,6 +43,14 @@ impl Tally {
 #[derive(Default, Serialize, Deserialize)]
 struct Store {
     days: BTreeMap<String, Tally>,
+    /// Модель, которая отвечала последней.
+    ///
+    /// В настройках может стоять «claude» или адрес моста, а отвечает
+    /// `claude-opus-5`: имя приходит в ответе. Человек, который смотрит на
+    /// виджет расхода, спрашивает «какая модель сейчас стоит» — и ответом
+    /// должна быть та, что тратит его деньги, а не запись в поле.
+    #[serde(default)]
+    model: String,
 }
 
 static STORE: Mutex<Option<(PathBuf, Store)>> = Mutex::new(None);
@@ -86,6 +94,9 @@ pub fn record(value: &serde_json::Value) {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut guard = STORE.lock().unwrap_or_else(|err| err.into_inner());
     let Some((path, store)) = guard.as_mut() else { return };
+    if let Some(model) = value["model"].as_str().filter(|name| !name.trim().is_empty()) {
+        store.model = model.to_string();
+    }
     store.days.entry(today).or_default().add(&add);
     while store.days.len() > KEEP_DAYS {
         let oldest = store.days.keys().next().cloned();
@@ -124,7 +135,7 @@ pub fn summary(app: &AppHandle) -> Summary {
     let now = chrono::Local::now();
     let today_key = now.format("%Y-%m-%d").to_string();
     let month_key = now.format("%Y-%m").to_string();
-    let (today, month, total) = {
+    let (today, month, total, answered) = {
         let guard = STORE.lock().unwrap_or_else(|err| err.into_inner());
         let mut month = Tally::default();
         let mut today = Tally::default();
@@ -140,7 +151,8 @@ pub fn summary(app: &AppHandle) -> Summary {
                 }
             }
         }
-        (today, month, total)
+        let answered = guard.as_ref().map(|(_, store)| store.model.clone()).unwrap_or_default();
+        (today, month, total, answered)
     };
     let account = *ACCOUNT.lock().unwrap_or_else(|err| err.into_inner());
     Summary {
@@ -149,14 +161,18 @@ pub fn summary(app: &AppHandle) -> Summary {
         total,
         balance: account.map(|(balance, _)| balance),
         spent: account.map(|(_, spent)| spent),
-        model,
+        // Имя из ответа вернее записи в настройках: через мост в поле стоит
+        // одно, а отвечает то, что выбрано на той стороне.
+        model: if answered.trim().is_empty() { model } else { answered },
         cloud: !crate::config::is_local(&endpoint),
         service: service_name(&endpoint).into(),
     }
 }
 
 fn service_name(endpoint: &str) -> &'static str {
-    if endpoint.contains("openrouter.ai") {
+    if endpoint.contains("8791") || endpoint.contains("127.0.0.2") {
+        "мост"
+    } else if endpoint.contains("openrouter.ai") {
         "OpenRouter"
     } else if endpoint.contains("googleapis.com") {
         "Google"
