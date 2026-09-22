@@ -190,12 +190,17 @@
           <span class="ob__label" data-i18n="model.label">Модель</span>
           <!-- Бесплатные модели — списком, свежим от самого сервиса: они приходят
                и уходят без предупреждения. Платную вписывают в поле ниже. -->
+          <!-- Весь каталог сервиса, а не одни бесплатные: за платной моделью
+               человек уходил на сайт OpenRouter, выписывал оттуда имя руками и
+               попадал в модель, которая для чата не годится вовсе. -->
           <span class="ob__select" data-el="freeWrap" hidden>
-            <select class="ob__underline" data-el="freeModels"></select>
+            <input class="ob__underline" data-el="modelSearch" type="search" spellcheck="false"
+                   placeholder="поиск по каталогу: gpt, claude, бесплатные…" />
+            <select class="ob__underline" data-el="freeModels" size="1"></select>
             <span class="ob__chevron" aria-hidden="true"></span>
           </span>
           <input class="ob__underline" data-el="model" type="text" spellcheck="false"
-                 placeholder="или имя платной модели" />
+                 placeholder="или имя модели вручную" />
           <p class="ob__hint" data-el="catalogStatus"></p>
         </section>
       </div>

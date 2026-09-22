@@ -1157,12 +1157,60 @@ async function saveAi() {
   ui.apiKey.value = "";
 }
 
-/* ── Бесплатные модели облачного сервиса ────────────────────────────────── */
+/* ── Каталог моделей облачного сервиса ──────────────────────────────────── */
+
+/** Весь каталог сервиса, каким он пришёл: по нему ищет поле поиска. */
+let catalog = [];
+
+/** Цена модели словами: «бесплатно» или «$3 / $15 за млн токенов». */
+function priceOf(model) {
+  if (model.free === true) return "бесплатно";
+  const has = (value) => value !== null && value !== undefined;
+  if (!has(model.promptPrice) && !has(model.completionPrice)) return "";
+  const money = (value) => (has(value) ? `$${value < 1 ? value.toFixed(2) : value.toFixed(value < 10 ? 1 : 0)}` : "—");
+  return `${money(model.promptPrice)} / ${money(model.completionPrice)} за млн`;
+}
+
+/** Строка модели в списке: имя, цена и длина контекста. */
+function modelLabel(model) {
+  const parts = [model.name === model.id ? model.id : `${model.name} — ${model.id}`];
+  const price = priceOf(model);
+  if (price) parts.push(price);
+  if (model.context) parts.push(`${Math.round(model.context / 1000)}k`);
+  return parts.join(" · ");
+}
 
 /**
- * Заполняет выпадающий список бесплатными моделями выбранного сервиса — свежими,
- * от него самого. Где сервис цен не публикует (Groq, Google), показываются все:
- * там бесплатен сам тариф.
+ * Показывает каталог с учётом поиска.
+ *
+ * Бесплатные идут первыми: их выбирают чаще, а искать их среди четырёх сотен
+ * платных — работа, которой человек не просил.
+ */
+function drawModels() {
+  const asked = (ui.modelSearch?.value ?? "").trim().toLowerCase();
+  const wantsFree = ["бесплат", "free", "даром"].some((word) => asked.includes(word));
+  const found = catalog.filter((model) => {
+    if (wantsFree) return model.free === true;
+    if (!asked) return true;
+    return `${model.id} ${model.name}`.toLowerCase().includes(asked);
+  });
+  const sorted = [...found].sort((one, other) => Number(other.free === true) - Number(one.free === true));
+  const current = ui.model.value.trim();
+
+  ui.freeModels.replaceChildren(
+    new Option(sorted.length ? `Моделей: ${sorted.length}` : "Ничего не нашлось", ""),
+    ...sorted.slice(0, 300).map((model) => new Option(modelLabel(model), model.id)),
+  );
+  ui.freeModels.value = sorted.some((model) => model.id === current) ? current : "";
+}
+
+/**
+ * Заполняет список моделями выбранного сервиса — свежими, от него самого.
+ *
+ * Показываются все, а не одни бесплатные: за платной моделью человек уходил на
+ * сайт сервиса и выписывал имя руками — и однажды выписал `jev-1.13`, которая
+ * вообще не отвечает в чате. Цена рядом с именем для того же: выбор между
+ * моделями — это выбор между ценами.
  */
 async function loadFreeModels() {
   ui.freeWrap.hidden = true;
@@ -1185,16 +1233,13 @@ async function loadFreeModels() {
   // Пока ждали ответа, человек мог уйти на другой источник.
   if (ui.preset.value !== asked) return;
 
-  const free = models.filter((model) => model.free !== false);
-  if (!free.length) return;
-  const current = ui.model.value.trim();
-  ui.freeModels.replaceChildren(
-    new Option(`Бесплатные модели (${free.length})`, ""),
-    ...free.map((model) => new Option(model.name === model.id ? model.id : `${model.name} — ${model.id}`, model.id)),
-  );
-  ui.freeModels.value = free.some((model) => model.id === current) ? current : "";
+  catalog = models;
+  if (!catalog.length) return;
+  drawModels();
   ui.freeWrap.hidden = false;
 }
+
+ui.modelSearch?.addEventListener("input", drawModels);
 
 // Выбор в списке сразу сохраняется: отдельное «Сохранить» здесь лишний шаг.
 ui.freeModels.addEventListener("change", async () => {

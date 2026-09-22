@@ -114,6 +114,17 @@ impl AiError {
                  для бесплатных моделей OpenRouter включите бесплатные эндпоинты на \
                  openrouter.ai/settings/privacy"
             ),
+            // Модель есть, но она не для разговора: у OpenRouter так отвечают
+            // модели решений и прочие, у которых свой адрес. Выписанное с
+            // сайта имя человек читать в оригинале не должен — ему надо знать,
+            // что делать.
+            AiError::Refused(400, message)
+                if message.contains("cannot be used with the chat/completions")
+                    || message.contains("is not a chat model") =>
+            {
+                "Эта модель не отвечает в чате — выберите другую в настройках,                  в списке моделей"
+                    .to_string()
+            }
             other => other.to_string(),
         }
     }
@@ -632,6 +643,10 @@ pub struct ModelInfo {
     pub context: u64,
     /// Бесплатна ли модель; `None` — сервис цен не публикует (Groq, Google).
     pub free: Option<bool>,
+    /// Цена за миллион токенов запроса, доллары. `None` — цен нет.
+    pub prompt_price: Option<f64>,
+    /// Цена за миллион токенов ответа, доллары.
+    pub completion_price: Option<f64>,
 }
 
 /// Каталог разговорных моделей сервиса в его собственном порядке (у OpenRouter —
@@ -652,6 +667,15 @@ pub async fn catalog(config: &AiConfig) -> Result<Vec<ModelInfo>, String> {
                 return None;
             }
             let pricing = &model["pricing"];
+            // Цена приходит за один токен и строкой: «0.0000025». Человеку
+            // такое число ни о чём не говорит, поэтому пересчитываем на
+            // миллион — в этом виде цены и печатают сами сервисы.
+            let per_million = |key: &str| {
+                pricing[key]
+                    .as_str()
+                    .and_then(|p| p.parse::<f64>().ok())
+                    .map(|price| price * 1_000_000.0)
+            };
             let free = if id.ends_with(":free") {
                 Some(true)
             } else if pricing.is_object() {
@@ -671,7 +695,14 @@ pub async fn catalog(config: &AiConfig) -> Result<Vec<ModelInfo>, String> {
                 .as_u64()
                 .or_else(|| model["context_window"].as_u64())
                 .unwrap_or(0);
-            Some(ModelInfo { id, name, context, free })
+            Some(ModelInfo {
+                id,
+                name,
+                context,
+                free,
+                prompt_price: per_million("prompt"),
+                completion_price: per_million("completion"),
+            })
         })
         .collect())
 }
