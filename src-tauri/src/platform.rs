@@ -208,9 +208,9 @@ pub async fn publish(id: &str, description: &str, category: &str) -> Result<Stri
     ))
 }
 
-/// Связь с площадкой: Ноа забирает черновики модулей, которые нейросеть
-/// пользователя собрала через MCP по ссылке, проверяет их по регламенту,
-/// ставит прошедшие и отправляет отчёт обратно. Без ключа площадки — молчит.
+/// Связь с площадкой: Ноа забирает черновики модулей и курсов, которые
+/// нейросеть пользователя собрала через MCP по ссылке, проверяет их, ставит
+/// прошедшие и отправляет отчёт обратно. Без ключа площадки — молчит.
 pub fn sync(app: &tauri::AppHandle) {
     let _ = app;
     let _ = std::thread::Builder::new().name("sufler-platform".into()).spawn(|| {
@@ -220,7 +220,13 @@ pub fn sync(app: &tauri::AppHandle) {
             if !token.is_empty() {
                 if last_hello.elapsed() > Duration::from_secs(240) {
                     let env = crate::mcp::environment();
-                    let hello = tauri::async_runtime::block_on(post(&url, "/api/app/hello", &token, &json!({ "env": env })));
+                    let courses = crate::mcp::list_courses();
+                    let hello = tauri::async_runtime::block_on(post(
+                        &url,
+                        "/api/app/hello",
+                        &token,
+                        &json!({ "env": env, "courses": courses }),
+                    ));
                     match hello {
                         Ok(_) => last_hello = std::time::Instant::now(),
                         Err(err) => log::debug!("площадка: не поздоровались ({err})"),
@@ -228,6 +234,9 @@ pub fn sync(app: &tauri::AppHandle) {
                 }
                 if let Err(err) = take_drafts(&url, &token) {
                     log::debug!("площадка: черновики не взяты ({err})");
+                }
+                if let Err(err) = take_courses(&url, &token) {
+                    log::debug!("площадка: курсы не взяты ({err})");
                 }
             }
             std::thread::sleep(Duration::from_secs(5));
@@ -273,6 +282,75 @@ fn take_drafts(url: &str, token: &str) -> Result<(), String> {
     Ok(())
 }
 
+async fn get_with(url: &str, path: &str, token: &str) -> Result<Value, String> {
+    let response = client()?
+        .get(format!("{url}{path}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    read(response).await
+}
+
+/// Курсы, которые нейросеть отправила через ссылку MCP.
+///
+/// Курс забирается кусками по несколько килобайт, каждый своим соединением:
+/// на части каналов длинный ответ зарубежного сервера обрывается после
+/// первых десятков килобайт, а курс на двадцать тем весит сотни.
+fn take_courses(url: &str, token: &str) -> Result<(), String> {
+    let body = tauri::async_runtime::block_on(get_with(url, "/api/app/course-jobs", token))?;
+    for job in body["jobs"].as_array().cloned().unwrap_or_default() {
+        let id = job["id"].as_str().unwrap_or_default().to_string();
+        let course = job["course"].as_str().unwrap_or_default().to_string();
+        let kind = job["kind"].as_str().unwrap_or_default().to_string();
+        log::info!("площадка: {} курса «{course}» — забираю", if kind == "topic" { "тема" } else { "курс" });
+        let outcome = fetch_payload(url, token, &id, job["size"].as_u64().unwrap_or(0) as usize).and_then(|payload| {
+            let value: Value = serde_json::from_str(&payload).map_err(|err| format!("курс пришёл битым: {err}"))?;
+            if kind == "topic" {
+                let topic = serde_json::from_value(value["topic"].clone()).map_err(|err| format!("Тема не разобралась: {err}"))?;
+                crate::learning::add_topic(&course, topic)
+            } else {
+                let course = serde_json::from_value(value).map_err(|err| format!("Курс не разобрался: {err}"))?;
+                crate::learning::save_course(course)
+            }
+        });
+        let (ok, report) = match outcome {
+            Ok(text) => (true, text),
+            Err(text) => (false, text),
+        };
+        log::info!("площадка: курс «{course}» {}", if ok { "принят" } else { "не принят" });
+        let sent = tauri::async_runtime::block_on(post(
+            url,
+            &format!("/api/app/course-jobs/{id}/report"),
+            token,
+            &json!({ "ok": ok, "report": report }),
+        ));
+        if let Err(err) = sent {
+            log::warn!("площадка: отчёт по курсу «{course}» не ушёл: {err}");
+        }
+    }
+    Ok(())
+}
+
+fn fetch_payload(url: &str, token: &str, id: &str, size: usize) -> Result<String, String> {
+    let mut text = String::with_capacity(size);
+    // Сервер режет строку JavaScript — по единицам UTF-16, не по байтам.
+    let mut at = 0usize;
+    let mut size = size.max(1);
+    while at < size {
+        let part = tauri::async_runtime::block_on(get_with(url, &format!("/api/app/course-jobs/{id}/part?at={at}"), token))
+            .map_err(|err| format!("кусок курса не пришёл: {err}"))?;
+        size = part["size"].as_u64().map_or(size, |n| n as usize);
+        let chunk = part["text"].as_str().unwrap_or_default();
+        if chunk.is_empty() {
+            break;
+        }
+        at += chunk.encode_utf16().count();
+        text.push_str(chunk);
+    }
+    Ok(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,5 +359,22 @@ mod tests {
     fn query_is_encoded() {
         assert_eq!(urlencode("погода & ветер"), "%D0%BF%D0%BE%D0%B3%D0%BE%D0%B4%D0%B0%20%26%20%D0%B2%D0%B5%D1%82%D0%B5%D1%80");
         assert_eq!(urlencode("weather-1"), "weather-1");
+    }
+}
+
+#[cfg(test)]
+mod live {
+    /// Сборка курса из кусков против живой площадки:
+    /// NOAH_TEST_URL, NOAH_TEST_TOKEN, NOAH_TEST_JOB, NOAH_TEST_SIZE.
+    #[test]
+    #[ignore]
+    fn payload_is_glued_from_parts() {
+        let var = |name| std::env::var(name).expect(name);
+        let size = var("NOAH_TEST_SIZE").parse().expect("size");
+        let text = super::fetch_payload(&var("NOAH_TEST_URL"), &var("NOAH_TEST_TOKEN"), &var("NOAH_TEST_JOB"), size).expect("payload");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("json");
+        let lesson = value["topics"][0]["lesson"].as_str().expect("lesson");
+        assert!(lesson.ends_with("ёж 🦔"), "{}", &lesson[lesson.len() - 20..]);
+        assert_eq!(lesson.chars().filter(|c| *c == '—').count(), 3000);
     }
 }

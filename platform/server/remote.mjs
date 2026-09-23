@@ -6,6 +6,11 @@
 // раз в несколько секунд забирает черновики по тому же ключу, проверяет их по
 // регламенту, ставит прошедшие и присылает отчёт — нейросеть получает его
 // ответом на тот же вызов. Код модулей здесь не запускается никогда.
+//
+// Курсы обучения идут тем же путём: нейросеть собирает курс, он ждёт здесь
+// черновиком, Ноа забирает его, проверяет своим валидатором и присылает отчёт.
+// Курс забирается кусками по несколько килобайт: с части каналов длинный
+// TCP-ответ до зарубежного сервера обрывается на первых десятках килобайт.
 
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -14,6 +19,11 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STANDARD_PATH = process.env.NOAH_STANDARD ?? join(HERE, "..", "..", "src-tauri", "src", "module_format.md");
+const COURSE_FORMAT_PATH = process.env.NOAH_COURSE_FORMAT ?? join(HERE, "..", "..", "src-tauri", "src", "course_format.md");
+/** Кусок курса за один запрос Ноа — в символах JSON. */
+const PART_CHARS = 6000;
+/** Самый большой курс, который принимаем. */
+const MAX_COURSE_CHARS = 4 * 1024 * 1024;
 const PROTOCOL = "2025-06-18";
 /** Сколько ждать отчёта Ноа в одном вызове create_module. */
 const WAIT_MS = 75_000;
@@ -37,6 +47,26 @@ const REMOTE_NOTES = `
   пользователя. Спроси его перед публикацией.
 `;
 
+const COURSE_NOTES = `
+## Если ты подключён к NOAH по ссылке
+
+- \`create_course\` отправляет курс на компьютер пользователя: NOAH проверяет его и
+  показывает в окне «Обучение». Ответ — отчёт проверки: ошибки исправь и отправь курс
+  снова, «Что улучшить» — доработай, если пользователь не против.
+- Большой курс удобнее собирать по частям: \`create_course\` с первыми темами, затем
+  \`add_topic\` на каждую следующую. Тема с тем же id заменяется.
+- \`list_courses\` — какие курсы уже есть у пользователя, \`course_status\` — последний
+  отчёт, если ответ не успел прийти.
+- NOAH не на связи — курс сохранится и будет проверен, когда NOAH появится.
+`;
+
+function courseFormatText() {
+  const base = existsSync(COURSE_FORMAT_PATH)
+    ? readFileSync(COURSE_FORMAT_PATH, "utf8").replace(/\r\n/g, "\n")
+    : "Формат курса недоступен.";
+  return `${base}\n${COURSE_NOTES}`;
+}
+
 function standardText() {
   const base = existsSync(STANDARD_PATH) ? readFileSync(STANDARD_PATH, "utf8").replace(/\r\n/g, "\n") : "Регламент недоступен.";
   return `${base}\n${REMOTE_NOTES}`;
@@ -49,7 +79,10 @@ const INSTRUCTIONS =
   "голосом. Порядок строгий: 1) module_format — прочитай регламент целиком; 2) environment — узнай, " +
   "на чём писать и на связи ли NOAH; 3) уточни у пользователя задачу; 4) create_module; 5) если " +
   "в отчёте ошибки — исправь и отправь снова. Не говори, что модуль готов, до успешного отчёта. " +
-  "Прошедший модуль можно опубликовать в библиотеке (publish_module) — с согласия пользователя.";
+  "Прошедший модуль можно опубликовать в библиотеке (publish_module) — с согласия пользователя. " +
+  "Ещё здесь собирают курсы обучения по любой теме: course_format — прочитай формат и методику " +
+  "целиком, затем create_course (и add_topic для следующих тем); NOAH проверит курс и покажет его " +
+  "в окне «Обучение». Не говори, что курс готов, до успешного отчёта.";
 
 const TOOLS = [
   { name: "module_format", description: "Регламент модуля NOAH с примерами. Вызови перед create_module.", inputSchema: { type: "object", properties: {} } },
@@ -75,6 +108,27 @@ const TOOLS = [
     name: "search_modules",
     description: "Найти готовые модули в библиотеке NOAH. Перед тем как писать свой, проверь, нет ли готового.",
     inputSchema: { type: "object", properties: { query: { type: "string" } } },
+  },
+  { name: "course_format", description: "Формат и методика курса обучения NOAH с примерами. Вызови перед create_course.", inputSchema: { type: "object", properties: {} } },
+  {
+    name: "create_course",
+    description: "Создать или заменить курс обучения на компьютере пользователя. NOAH проверит его и покажет в окне «Обучение». Ответ — отчёт проверки.",
+    inputSchema: { type: "object", properties: { course: { type: "object", description: "Курс в формате из course_format" } }, required: ["course"] },
+  },
+  {
+    name: "add_topic",
+    description: "Добавить тему в курс пользователя или заменить тему с тем же id. Ответ — отчёт проверки курса.",
+    inputSchema: {
+      type: "object",
+      properties: { course: { type: "string", description: "id курса" }, topic: { type: "object", description: "Тема в формате из course_format" } },
+      required: ["course", "topic"],
+    },
+  },
+  { name: "list_courses", description: "Курсы обучения, которые уже есть у пользователя.", inputSchema: { type: "object", properties: {} } },
+  {
+    name: "course_status",
+    description: "Последний отчёт проверки курса по id.",
+    inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
   },
   { name: "list_my_modules", description: "Модули пользователя: черновики с результатом проверки и опубликованные.", inputSchema: { type: "object", properties: {} } },
   {
@@ -116,7 +170,24 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
       env TEXT NOT NULL DEFAULT '',
       seen INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS course_jobs (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      course_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      report TEXT NOT NULL DEFAULT '',
+      taken TEXT,
+      created TEXT NOT NULL DEFAULT (datetime('now')),
+      updated TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS course_jobs_user ON course_jobs(user_id, status);
   `);
+  // Список курсов с компьютера пользователя — для list_courses.
+  if (!db.prepare("SELECT name FROM pragma_table_info('devices') WHERE name = 'courses'").get()) {
+    db.exec("ALTER TABLE devices ADD COLUMN courses TEXT NOT NULL DEFAULT ''");
+  }
 
   const appUser = (req) => {
     const match = /^Bearer\s+(\S+)$/.exec(String(req.headers.authorization ?? ""));
@@ -135,9 +206,44 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
 
   route("POST", /^\/api\/app\/hello$/, async ({ req }) => {
     const user = appUser(req);
-    const { env } = await readJson(req);
+    const { env, courses } = await readJson(req);
     touch(user.id, String(env ?? "").slice(0, 2000));
+    if (typeof courses === "string") {
+      db.prepare("UPDATE devices SET courses = ? WHERE user_id = ?").run(courses.slice(0, 20000), user.id);
+    }
     return { name: user.name };
+  });
+
+  // Курсы: список ждущих, затем каждый кусками, затем отчёт.
+  route("GET", /^\/api\/app\/course-jobs$/, ({ req }) => {
+    const user = appUser(req);
+    touch(user.id, "");
+    const stuckBefore = new Date(Date.now() - STUCK_MS).toISOString();
+    db.prepare("UPDATE course_jobs SET status = 'pending' WHERE user_id = ? AND status = 'checking' AND taken < ?").run(user.id, stuckBefore);
+    const rows = db
+      .prepare("SELECT id, course_id, kind, length(payload) AS size FROM course_jobs WHERE user_id = ? AND status = 'pending' ORDER BY created LIMIT 2")
+      .all(user.id);
+    const take = db.prepare("UPDATE course_jobs SET status = 'checking', taken = ?, updated = datetime('now') WHERE id = ?");
+    for (const row of rows) take.run(new Date().toISOString(), row.id);
+    return { jobs: rows.map((row) => ({ id: row.id, course: row.course_id, kind: row.kind, size: row.size, part: PART_CHARS })) };
+  });
+
+  route("GET", /^\/api\/app\/course-jobs\/([0-9a-f-]{36})\/part$/, ({ req, match, url }) => {
+    const user = appUser(req);
+    const row = db.prepare("SELECT payload FROM course_jobs WHERE id = ? AND user_id = ?").get(match[1], user.id);
+    if (!row) throw new Fail(404, "Нет такого курса.");
+    const at = Math.max(0, Number(url.searchParams.get("at") ?? 0) | 0);
+    return { text: row.payload.slice(at, at + PART_CHARS), size: row.payload.length };
+  });
+
+  route("POST", /^\/api\/app\/course-jobs\/([0-9a-f-]{36})\/report$/, async ({ req, match }) => {
+    const user = appUser(req);
+    const { ok, report } = await readJson(req);
+    const info = db
+      .prepare("UPDATE course_jobs SET status = ?, report = ?, updated = datetime('now') WHERE id = ? AND user_id = ?")
+      .run(ok ? "passed" : "failed", String(report ?? "").slice(0, 20000), match[1], user.id);
+    if (!info.changes) throw new Fail(404, "Нет такого курса.");
+    return { ok: true };
   });
 
   route("GET", /^\/api\/app\/drafts$/, ({ req }) => {
@@ -172,7 +278,7 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
   /* ── Инструменты MCP ───────────────────────────────────────────────────── */
 
   const online = (user) => {
-    const row = db.prepare("SELECT env, seen FROM devices WHERE user_id = ?").get(user.id);
+    const row = db.prepare("SELECT env, seen, courses FROM devices WHERE user_id = ?").get(user.id);
     return { row, on: Boolean(row && Date.now() - row.seen < ONLINE_MS) };
   };
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -181,8 +287,72 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
     "в NOAH → Настройки → Площадка (ключ — в кабинете на сайте). Черновик сохранён: NOAH проверит его, как только " +
     "появится на связи, — тогда вызови module_status.";
 
+  /** Ставит курс или тему в очередь и ждёт отчёта Ноа. */
+  const courseJob = async (user, courseId, kind, payload) => {
+    const text = JSON.stringify(payload);
+    if (text.length > MAX_COURSE_CHARS) throw new Error("Курс слишком большой — отправь первые темы create_course, остальные add_topic.");
+    const id = randomUUID();
+    // Новый курс целиком заменяет ещё не взятый прежний — темы к нему остаются.
+    if (kind === "course") {
+      db.prepare("UPDATE course_jobs SET status = 'replaced' WHERE user_id = ? AND course_id = ? AND kind = 'course' AND status = 'pending'").run(
+        user.id,
+        courseId,
+      );
+    }
+    db.prepare("INSERT INTO course_jobs (id, user_id, course_id, kind, payload) VALUES (?, ?, ?, ?, ?)").run(id, user.id, courseId, kind, text);
+    if (!online(user).on) {
+      return offlineHint.replace("Черновик сохранён", "Курс сохранён").replace("module_status", "course_status");
+    }
+    // Большой курс Ноа забирает кусками — ждём дольше, чем модуль.
+    const deadline = Date.now() + WAIT_MS + Math.min(120_000, (text.length / PART_CHARS) * 400);
+    while (Date.now() < deadline) {
+      await sleep(1500);
+      const row = db.prepare("SELECT status, report FROM course_jobs WHERE id = ?").get(id);
+      if (row.status === "passed") return row.report;
+      if (row.status === "failed") throw new Error(row.report);
+    }
+    return `NOAH ещё принимает курс «${courseId}». Вызови course_status("${courseId}") через минуту.`;
+  };
+  const courseId = (value) => {
+    const id = String(value ?? "").trim();
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new Error("id курса — латиница, цифры, дефис или подчёркивание.");
+    return id;
+  };
+
   const tools = {
     module_format: () => standardText(),
+
+    course_format: () => courseFormatText(),
+
+    create_course: (user, args) => {
+      const course = args.course;
+      if (!course || typeof course !== "object" || Array.isArray(course)) throw new Error("course — объект курса по course_format.");
+      if (!Array.isArray(course.topics) || !course.topics.length) throw new Error("В курсе нет тем (topics). Сначала прочитай course_format.");
+      return courseJob(user, courseId(course.id), "course", course);
+    },
+
+    add_topic: (user, args) => {
+      const topic = args.topic;
+      if (!topic || typeof topic !== "object" || Array.isArray(topic)) throw new Error("topic — объект темы по course_format.");
+      const id = courseId(args.course);
+      return courseJob(user, id, "topic", { course: id, topic });
+    },
+
+    list_courses: (user) => {
+      const { row, on } = online(user);
+      const list = row?.courses || "";
+      if (!row) return `NOAH ещё ни разу не подключался к этому аккаунту.\n${offlineHint}`;
+      return `${on ? "" : "NOAH сейчас не на связи — список на момент последней связи.\n"}${list || "Курсов пока нет."}`;
+    },
+
+    course_status: (user, args) => {
+      const row = db
+        .prepare("SELECT status, report FROM course_jobs WHERE user_id = ? AND course_id = ? AND status != 'replaced' ORDER BY created DESC LIMIT 1")
+        .get(user.id, String(args.id ?? ""));
+      if (!row) return `Курс «${args.id}» сюда не отправляли.`;
+      const state = { pending: "ждёт, пока NOAH его заберёт", checking: "NOAH проверяет", passed: "принят", failed: "не принят" }[row.status];
+      return `Курс «${args.id}»: ${state}.${row.report ? `\n\n${row.report}` : ""}`;
+    },
 
     environment: (user) => {
       const { row, on } = online(user);

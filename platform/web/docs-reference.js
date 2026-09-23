@@ -87,6 +87,9 @@ export const REFERENCE = [
 | \`search_modules\` | поиск в библиотеке |
 | \`list_my_modules\` | черновики и опубликованные |
 | \`publish_module\` | выложить в библиотеку |
+| \`course_format\` | формат и методика курса обучения |
+| \`create_course\`, \`add_topic\` | отправить курс или тему; NOAH проверит и вернёт отчёт |
+| \`list_courses\`, \`course_status\` | курсы пользователя и отчёт последней проверки |
 
 ## Локально (\`sufler.exe --mcp\`)
 
@@ -108,7 +111,7 @@ export const REFERENCE = [
       body: `
 ## By link (\`/mcp?key=…\`)
 
-\`module_format\`, \`environment\`, \`create_module\`, \`module_status\`, \`search_modules\`, \`list_my_modules\`, \`publish_module\`.
+\`module_format\`, \`environment\`, \`create_module\`, \`module_status\`, \`search_modules\`, \`list_my_modules\`, \`publish_module\`, \`course_format\`, \`create_course\`, \`add_topic\`, \`list_courses\`, \`course_status\`.
 
 ## Local (\`sufler.exe --mcp\`)
 

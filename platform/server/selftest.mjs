@@ -88,6 +88,41 @@ expect("пакет для установки", r.data.manifest?.id === manifest.
 r = await call(`/api/modules/${manifest.id}`);
 expect("счётчик установок", r.data.installs === 1, r);
 
+// Курс по ссылке MCP: нейросеть отправляет, «Ноа» забирает кусками и отвечает.
+const mcp = (id, name, args) =>
+  call(`/mcp?key=${token}`, { method: "POST", body: { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } } });
+const app = { headers: { Authorization: `Bearer ${token}` } };
+r = await call(`/mcp?key=${token}`, { method: "POST", body: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
+expect("инструменты курсов", ["course_format", "create_course", "add_topic", "list_courses", "course_status"].every((n) => r.data.result?.tools?.some((t) => t.name === n)), r);
+r = await mcp(2, "course_format", {});
+expect("формат курса", /concepts/.test(r.data.result?.content?.[0]?.text ?? ""), r);
+r = await call("/api/app/hello", { method: "POST", body: { env: "selftest", courses: "Курсов нет." }, ...app });
+expect("Ноа на связи", r.status === 200, r);
+const lesson = "Урок — ".repeat(3000) + "ёж 🦔";
+const sent = mcp(3, "create_course", { course: { id: `selftest-${stamp}`, title: "Проверка", topics: [{ id: "t", lesson }] } });
+let jobs = [];
+for (let i = 0; i < 20 && !jobs.length; i++) {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  jobs = (await call("/api/app/course-jobs", app)).data.jobs ?? [];
+}
+expect("курс в очереди", jobs.length === 1 && jobs[0].kind === "course", jobs);
+let text = "";
+let size = 1;
+while (jobs[0] && text.length < size) {
+  r = await call(`/api/app/course-jobs/${jobs[0].id}/part?at=${text.length}`, app);
+  size = r.data.size;
+  if (!r.data.text) break;
+  text += r.data.text;
+}
+expect("курс собран из кусков", JSON.parse(text || "{}").topics?.[0]?.lesson === lesson, text.length);
+r = await call(`/api/app/course-jobs/${jobs[0]?.id}/report`, { method: "POST", body: { ok: true, report: "Курс сохранён." }, ...app });
+r = await sent;
+expect("отчёт дошёл до нейросети", r.data.result?.content?.[0]?.text === "Курс сохранён.", r);
+r = await mcp(4, "course_status", { id: `selftest-${stamp}` });
+expect("статус курса", /принят/.test(r.data.result?.content?.[0]?.text ?? ""), r);
+r = await mcp(5, "list_courses", {});
+expect("список курсов", /Курсов нет/.test(r.data.result?.content?.[0]?.text ?? ""), r);
+
 cookie = saved;
 r = await call("/api/my/modules");
 expect("мои модули", r.data.modules?.length === 1, r);

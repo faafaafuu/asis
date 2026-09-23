@@ -405,11 +405,23 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
       title: "Свой курс обучения",
       lead: "Окно «Обучение» пустое, пока вы не соберёте курс. Собирает его ваша нейросеть.",
       body: `
-1. [Подключите нейросеть](#/docs/connect-ai) к NOAH.
-2. Попросите: «Собери мне курс NOAH по английскому для путешествий: пять тем, в каждой урок, задачи и мини-экзамен».
-3. Нейросеть прочитает формат (\`course_format\`) и отправит курс (\`create_course\`). NOAH проверит его и покажет в окне «Обучение».
+1. [Подключите нейросеть](#/docs/connect-ai) к NOAH — по ссылке с сайта или локально.
+2. Попросите: «Собери мне курс NOAH по английскому для путешествий: пять тем». Можно дать свои материалы — конспекты, описание вакансии, программу экзамена.
+3. Нейросеть прочитает формат (\`course_format\`) и отправит курс (\`create_course\`), большой — по теме (\`add_topic\`). NOAH проверит его, вернёт отчёт с замечаниями и покажет курс в окне «Обучение».
 
-Дальше голосом: «погоняй меня по курсу», «как мой прогресс». Тему можно добавить позже: «добавь в курс тему про аэропорт» (\`add_topic\`).
+## Как устроена тема
+
+- **Урок** читается по разделам; после раздела — вспомнить одно понятие без подсказки.
+- **Понятия** — определение, зацепка для памяти, аналогия, частая ошибка и связи с другими темами.
+- **Карта** — понятия темы и их связи с остальным курсом; на обзоре — карта всего курса.
+- **Повторение** — карточки по расписанию: вспомнили — вернутся через 1, 3, 8, 20 дней и дальше, забыли — сегодня же. Ошибка на экзамене возвращает понятие в повторение.
+- **Задачи, мини-экзамен, шпаргалка**; в конце курса — финальный экзамен на стык тем.
+
+## Фокус-сессия
+
+На обзоре курса — **🎯 Фокус-сессия**: отрезок 15, 25 или 50 минут и перерыв после него. Перед началом — одна конкретная цель и минута на то, чтобы убрать отвлечения. Мысль, пришедшую посреди отрезка, запишите «на потом» через таймер в заголовке. В конце — выгрузка: записать по памяти, что поняли. Окно показывает минуты фокуса за день и неделю и серию дней подряд.
+
+Голосом: «давай повторим», «погоняй меня по курсу», «как мой прогресс».
 `,
     },
     en: {
@@ -418,7 +430,9 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
       body: `
 1. [Connect your AI](#/docs/connect-ai) to NOAH.
 2. Ask: “Build me a NOAH course on travel English: five topics, each with a lesson, tasks and a quiz”.
-3. The AI reads the format (\`course_format\`) and sends the course (\`create_course\`). NOAH checks it and shows it in the Learning window.
+3. The AI reads the format (\`course_format\`) and sends the course (\`create_course\`), a large one topic by topic (\`add_topic\`). NOAH checks it and shows it in the Learning window.
+
+Each topic has a lesson read section by section, concepts with memory hooks, a concept map, spaced-repetition cards, tasks, a quiz and a cheat sheet. **🎯 Focus session** on the course overview runs a 15, 25 or 50-minute block with a goal, a “later” list for stray thoughts and a recall note at the end.
 `,
     },
   },

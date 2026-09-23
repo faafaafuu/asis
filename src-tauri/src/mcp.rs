@@ -260,7 +260,7 @@ fn call(name: &str, args: &Value) -> Value {
     }
 }
 
-fn list_courses() -> String {
+pub(crate) fn list_courses() -> String {
     let cards = crate::learning::overview();
     if cards.is_empty() {
         return "Курсов нет.".into();
