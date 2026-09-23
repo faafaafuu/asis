@@ -275,6 +275,9 @@ pub async fn cloud_models(
     }
     ai.endpoint = endpoint;
     ai.proxy = proxy;
+    if crate::local_cli::is_cli(&ai.endpoint) {
+        return Ok(Vec::new());
+    }
     if ai.endpoint.trim().is_empty() {
         return Err("Сначала укажите адрес сервиса".into());
     }

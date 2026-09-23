@@ -563,6 +563,13 @@ impl HttpProvider {
     }
 
     async fn send_once(&self, body: &serde_json::Value) -> Result<serde_json::Value, AiError> {
+        // Подписка на этом компьютере — её программа, а не сетевой сервис.
+        if crate::local_cli::is_cli(&self.endpoint) {
+            return crate::local_cli::ask(&self.endpoint, body).await.map_err(|err| {
+                log::warn!("запрос к модели не удался: {err}");
+                AiError::Refused(502, err)
+            });
+        }
         let mut request = self.client.post(&self.endpoint).json(body);
         if !self.api_key.is_empty() {
             request = request.bearer_auth(&self.api_key);

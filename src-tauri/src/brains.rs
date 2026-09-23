@@ -112,7 +112,9 @@ pub fn spoken_name(model: &str) -> String {
 }
 
 fn kind(brain: &Brain) -> &'static str {
-    if brain.endpoint.contains("127.0.0.2") || brain.model.contains("bridge") {
+    if crate::local_cli::is_cli(&brain.endpoint) {
+        "подписка"
+    } else if brain.endpoint.contains("127.0.0.2") || brain.model.contains("bridge") {
         "мост"
     } else if brain.local() {
         "своя"
@@ -239,6 +241,16 @@ async fn candidates(app: &AppHandle) -> Vec<Brain> {
     // Мост умеет несколько подписок (Claude, ChatGPT через Codex, Gemini, Qwen):
     // что у него есть, он сам скажет списком. Вариант «:free» — тот, при
     // котором разбор реплик делает своя модель, а мост только отвечает.
+    // Подписки на этом компьютере: Qwen Code, Gemini CLI, Codex, Claude Code —
+    // те, что установлены. «:free» — разбор реплик делает своя модель.
+    let installed = tauri::async_runtime::spawn_blocking(crate::local_cli::installed).await.unwrap_or_default();
+    for (endpoint, _) in installed {
+        let id = endpoint.trim_start_matches("cli:");
+        let brain = Brain { endpoint: endpoint.clone(), model: format!("{id}-cli:free"), ..Default::default() };
+        if !list.iter().any(|known| known.same(&brain)) {
+            list.push(brain);
+        }
+    }
     let bridges: Vec<Brain> = list.iter().filter(|b| kind(b) == "мост").cloned().collect();
     let mut seen = std::collections::HashSet::new();
     for bridge in bridges {

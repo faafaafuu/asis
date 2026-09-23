@@ -1140,7 +1140,7 @@ async function loadSettings() {
 
 /* ── Мои модели ─────────────────────────────────────────────────────────── */
 
-const KIND = { мост: "мост", облако: "облако", своя: "на этом компьютере" };
+const KIND = { подписка: "подписки на этом компьютере", мост: "мост на сервере", облако: "облако", своя: "своя модель на этом компьютере" };
 
 /** Подписки, которые умеет мост, — по-человечески. */
 const BRIDGE_NAMES = {
@@ -1148,6 +1148,10 @@ const BRIDGE_NAMES = {
   "codex-bridge": "ChatGPT — подписка через Codex",
   "gemini-bridge": "Gemini — аккаунт Google через мост",
   "qwen-bridge": "Qwen — аккаунт qwen.ai через мост",
+  "qwen-cli": "Qwen — аккаунт qwen.ai (Qwen Code)",
+  "gemini-cli": "Gemini — аккаунт Google (Gemini CLI)",
+  "codex-cli": "ChatGPT — подписка (Codex)",
+  "claude-cli": "Claude — подписка (Claude Code)",
 };
 
 /** Имя модели для списка: без владельца, как её называют. */

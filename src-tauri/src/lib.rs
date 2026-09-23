@@ -34,6 +34,7 @@ mod timers;
 mod shots;
 mod focus;
 mod learning;
+mod local_cli;
 mod recall;
 mod srs;
 mod alarms;
