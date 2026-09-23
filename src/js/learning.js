@@ -258,7 +258,10 @@ function renderHome() {
       `${course.topicPass}% — тема засчитана.`,
     "Повторение по расписанию: вспомнили — карточка вернётся через 1, 3, 8, 20 дней и дальше; " +
       "забыли — сегодня же. «Уверенно» — понятие держится три недели и дольше.",
-    "Вопросы с вариантами проверяются сразу, открытые ответы оценивает модель по ключевым пунктам эталона.",
+    "Вопросы с вариантами проверяются сразу. Открытые ответы модель оценивает по смыслу: пункт, сказанный " +
+      "своими словами или другой верной командой, засчитан, раскрытый наполовину — половиной.",
+    "Под каждым разделом урока: «Разобрать подробно» — раздел по шагам, с примерами и ошибками; " +
+      "«Обсудить» — вопросы о нём текстом или голосом.",
     `Финальный экзамен открывается после всех тем, проходной балл — ${course.finalPass}%.`,
     "Ошибки копятся во вкладке «Ошибки» каждой темы — повторяйте, пока не исчезнут.",
     "Голосом: «Ноа, давай повторим», «погоняй меня по курсу», «как мой прогресс».",
@@ -385,6 +388,30 @@ function conceptOf(section, at, topic) {
 }
 
 /**
+ * Объяснено ли понятие в разделе: встречается ли в нём хотя бы половина
+ * значимых слов определения. Так же проверяет Rust (`explained_in`).
+ *
+ * Упомянуть не значит объяснить: «маршруты объявляют по BGP» называет BGP, но
+ * не говорит, что это. Спросить «что такое BGP» после такого раздела — спросить
+ * то, чего человеку не рассказывали; такое понятие показывается как новое.
+ */
+function explainedIn(text, definition) {
+  const words = (value) =>
+    value
+      .toLowerCase()
+      .replace(/ё/g, "е")
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((word) => [...word].length >= 4)
+      .map((word) => [...word].slice(0, 5).join(""));
+  const known = new Set(words(text));
+  const wanted = new Set(words(definition));
+  if (!wanted.size) return true;
+  let hits = 0;
+  for (const word of wanted) if (known.has(word)) hits += 1;
+  return hits * 2 >= wanted.size;
+}
+
+/**
  * Урок кусками. Раздел на экран и после него — одно понятие вспомнить.
  *
  * Прочитанное подряд создаёт ощущение, что всё понятно: текст знакомый, глаз
@@ -412,8 +439,12 @@ function renderLesson(root, topic) {
   lesson.innerHTML = markdown(parts[at]);
   root.append(lesson);
 
+  root.append(deepBox(topic, at));
+
   const concept = conceptOf(parts[at], at, topic);
-  if (concept) root.append(recallBox(topic, concept));
+  if (concept) {
+    root.append(explainedIn(parts[at], concept.definition) ? recallBox(topic, concept) : newConceptBox(concept));
+  }
 
   const actions = el("div", "actions");
   if (at > 0) {
@@ -442,8 +473,64 @@ function renderLesson(root, topic) {
       }),
     );
   }
-  actions.append(discussButton(root, topic));
+  actions.append(discussButton(root, { course: course.id, topic: topic.id, section: at }));
   root.append(actions);
+}
+
+/** Понятие, которое раздел только называет: определение сразу, без вопроса. */
+function newConceptBox(concept) {
+  const box = el("div", "recall recall--new");
+  box.append(el("div", "recall__label", "Новое понятие"));
+  box.append(el("p", "recall__q", concept.term));
+  box.append(el("p", "", concept.definition));
+  if (concept.mnemonic) box.append(el("p", "hook", `🧠 ${concept.mnemonic}`));
+  if (concept.analogy) box.append(el("p", "hook", `≈ ${concept.analogy}`));
+  return box;
+}
+
+/**
+ * «Разобрать подробно»: модель раскрывает раздел по шагам — механизм, кто что
+ * делает, пример, типичные ошибки. Готовый разбор лежит на диске и
+ * показывается сразу; новый пишется по щелчку, до минуты.
+ */
+function deepBox(topic, at) {
+  const box = el("div", "deep");
+  const body = el("div", "lesson deep__body");
+  body.hidden = true;
+  let loaded = false;
+  const toggle = button("🔍 Разобрать подробно", () => {
+    if (loaded) {
+      body.hidden = !body.hidden;
+      toggle.textContent = body.hidden ? "🔍 Показать разбор" : "Свернуть разбор";
+    } else {
+      load(false);
+    }
+  }, true);
+  const load = async (cachedOnly) => {
+    if (!api) return;
+    if (!cachedOnly) {
+      toggle.disabled = true;
+      toggle.textContent = "Разбираю раздел… (до минуты)";
+    }
+    try {
+      const text = await api.invoke("learn_deep", { course: course.id, topic: topic.id, section: at, cached: cachedOnly });
+      if (text) {
+        loaded = true;
+        body.innerHTML = markdown(text);
+        body.hidden = cachedOnly;
+        toggle.textContent = cachedOnly ? "🔍 Показать разбор" : "Свернуть разбор";
+      }
+    } catch (err) {
+      toggle.textContent = "🔍 Разобрать ещё раз";
+      body.replaceChildren(el("p", "bad", String(err)));
+      body.hidden = false;
+    } finally {
+      toggle.disabled = false;
+    }
+  };
+  box.append(toggle, body);
+  load(true);
+  return box;
 }
 
 /** Вспомнить понятие раздела: вопрос сразу, ответ — по щелчку. */
@@ -463,23 +550,99 @@ function recallBox(topic, concept) {
   return box;
 }
 
-function discussButton(root, topic) {
-  return button("💬 Обсудить тему", async () => {
-    try {
-      await api?.invoke("learn_discuss", { course: course.id, topic: topic.id });
-      showNote(root, "Ноа говорит — спрашивай голосом. «Спроси меня» — вопрос по теме, «спасибо» — закончить.");
-    } catch (err) {
-      showNote(root, String(err));
+/** Открытая панель обсуждения: реплики, сказанные голосом, дописываются в неё. */
+let talk = null;
+
+/**
+ * «Обсудить»: разговор о том, что на экране — разделе урока или вопросе.
+ * Спросить можно текстом или голосом; это один разговор, и Ноа знает, о чём
+ * он: раздел целиком с его понятиями или вопрос с эталоном и ответом.
+ */
+function discussButton(root, target) {
+  return button("💬 Обсудить", () => {
+    let panel = root.querySelector(":scope > .talk");
+    if (!panel) {
+      panel = talkPanel(target);
+      root.append(panel);
     }
+    panel.querySelector("textarea")?.focus();
+    panel.scrollIntoView({ block: "nearest" });
   }, true);
 }
+
+function talkPanel(target) {
+  const panel = el("div", "talk");
+  const log = el("div", "talk__log");
+  const hint = el(
+    "p",
+    "note",
+    "Спросите о том, что на экране: «не понял, зачем тут iowait», «разбери первый пункт на примере». Enter — отправить.",
+  );
+  const area = el("textarea", "answer talk__input");
+  area.rows = 2;
+  area.placeholder = "Ваш вопрос";
+
+  const line = (who, text) => {
+    const node = el("div", `talk__line talk__line--${who}`);
+    if (who === "noa") node.innerHTML = markdown(text);
+    else node.textContent = text;
+    log.append(node);
+    node.scrollIntoView({ block: "nearest" });
+    return node;
+  };
+  const send = button("Отправить", async () => {
+    const text = area.value.trim();
+    if (!text || send.disabled || !api) return;
+    area.value = "";
+    line("me", text);
+    const wait = line("wait", "Ноа думает…");
+    send.disabled = true;
+    try {
+      const reply = await api.invoke("learn_ask", { target, text });
+      wait.remove();
+      line("noa", reply);
+    } catch (err) {
+      wait.remove();
+      line("error", String(err));
+    } finally {
+      send.disabled = false;
+      area.focus();
+    }
+  });
+  const voice = button("🎙 Голосом", async () => {
+    try {
+      await api?.invoke("learn_discuss", { target });
+      hint.textContent = "Ноа слушает — спрашивай голосом. «Спроси меня» — вопрос по теме, «спасибо» — закончить.";
+    } catch (err) {
+      hint.textContent = String(err);
+    }
+  }, true);
+  area.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      send.click();
+    }
+  });
+  const actions = el("div", "actions talk__actions");
+  actions.append(send, voice);
+  panel.append(log, area, actions, hint);
+  talk = { panel, line };
+  return panel;
+}
+
+// Сказанное голосом в обсуждении — в ту же ленту, что и напечатанное.
+api?.listen("learn:talk", (event) => {
+  if (!talk?.panel.isConnected) return;
+  talk.line("me", `🎙 ${event.payload.q}`);
+  talk.line("noa", event.payload.a);
+});
 
 function renderWholeLesson(root, topic) {
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(topic.lesson);
   root.append(lesson);
   const actions = el("div", "actions");
-  actions.append(discussButton(root, topic));
+  actions.append(discussButton(root, { course: course.id, topic: topic.id, section: 0 }));
   actions.append(
     button(topic.concepts?.length ? "Прочитал — закрепить понятия" : "Прочитал — к задачам", async () => {
       await api?.invoke("learn_read", { course: course.id, topic: topic.id }).catch(() => {});
@@ -641,13 +804,18 @@ function renderVerdict(verdict, q, allowSelf, answer) {
     const list = el("ul", "verdict__points");
     verdict.points.forEach((point, at) => {
       const covered = verdict.covered?.includes(at + 1);
-      list.append(el("li", covered ? "covered" : "missed", `${covered ? "✓" : "○"} ${point}`));
+      const partial = !covered && verdict.partial?.includes(at + 1);
+      const [cls, mark] = covered ? ["covered", "✓"] : partial ? ["partial", "◐"] : ["missed", "○"];
+      list.append(el("li", cls, `${mark} ${point}`));
     });
     box.append(list);
   }
   if (verdict.reference) {
     const details = el("details");
-    details.append(el("summary", "", q.kind === "choice" ? "Почему так" : "Эталонный ответ"));
+    details.append(el("summary", "", q.kind === "choice" ? "Почему так" : "Пример сильного ответа"));
+    if (q.kind !== "choice") {
+      details.append(el("p", "note", "Один из верных вариантов, а не единственный: засчитывается смысл, а не слова."));
+    }
     details.append(el("p", "verdict__reference", verdict.reference));
     if (unknown) details.open = true;
     box.append(details);
@@ -667,21 +835,9 @@ function renderVerdict(verdict, q, allowSelf, answer) {
     // Вариант уходит словами, а не номером: модели «ответил 2» ничего не скажет.
     const said =
       q.kind === "choice" && typeof answer === "number" ? (q.options?.[answer] ?? "") : String(answer ?? "");
-    const talk = el("div", "actions");
-    talk.append(
-      button(
-        "💬 Обсудить этот вопрос",
-        async () => {
-          try {
-            await api?.invoke("learn_discuss_question", { course: course.id, question: q.id, answer: said });
-          } catch (err) {
-            talk.append(el("p", "bad", String(err)));
-          }
-        },
-        true,
-      ),
-    );
-    box.append(talk);
+    const actions = el("div", "actions");
+    actions.append(discussButton(box, { course: course.id, question: q.id, answer: said }));
+    box.append(actions);
   }
   return box;
 }

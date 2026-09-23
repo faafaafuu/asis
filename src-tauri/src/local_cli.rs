@@ -157,7 +157,12 @@ pub async fn ask(endpoint: &str, body: &serde_json::Value) -> Result<serde_json:
                 "--ephemeral".into(), "--color".into(), "never".into(), "-o".into(),
                 answer_file.to_string_lossy().into_owned(), "-".into(),
             ]),
-            "claude" => args.extend(["-p".into(), "--output-format".into(), "text".into()]),
+            // MCP-серверы, подключённые к Claude Code, Ноа не нужны, а описания
+            // их инструментов уходят в каждый вызов — десятки тысяч токенов на
+            // объяснение одного слова.
+            "claude" => args.extend([
+                "-p".into(), "--output-format".into(), "text".into(), "--strict-mcp-config".into(),
+            ]),
             // Qwen Code и Gemini CLI читают вопрос из stdin, если `-p` пустой:
             // так вопрос любой длины не упирается в предел командной строки.
             _ => args.extend(["-p".into(), " ".into()]),

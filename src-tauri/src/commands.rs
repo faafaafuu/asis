@@ -1682,26 +1682,35 @@ pub fn learn_oral(app: AppHandle, course: String, topic: Option<String>) -> Resu
     Ok(())
 }
 
-/// Обсуждение темы голосом: модель отвечает, зная урок.
+/// Обсуждение голосом: раздела урока или вопроса. Ноа открывает разговор
+/// короткой фразой и слушает.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn learn_discuss(app: AppHandle, course: String, topic: String) -> Result<(), String> {
-    let text = crate::learning::discuss(&course, &topic)?;
-    crate::say_then_listen(&app, text);
+pub fn learn_discuss(app: AppHandle, target: crate::tutor::Target) -> Result<(), String> {
+    let intro = crate::tutor::open_voice(&target)?;
+    crate::say_then_listen(&app, intro);
     Ok(())
 }
 
-/// Обсудить один вопрос: после проверки, прочитав эталон.
+/// Вопрос текстом в том же обсуждении: ответ приходит в окно, вслух не звучит.
 #[tauri::command]
-pub fn learn_discuss_question(
+pub async fn learn_ask(app: AppHandle, target: crate::tutor::Target, text: String) -> Result<String, String> {
+    crate::tutor::ask(&app, &target, &text).await
+}
+
+/// Подробный разбор раздела урока. `cached` — только готовый, без модели.
+#[tauri::command]
+pub async fn learn_deep(
     app: AppHandle,
     course: String,
-    question: String,
-    answer: String,
-) -> Result<(), String> {
-    let text = crate::learning::discuss_question(&course, &question, &answer)?;
-    crate::say_then_listen(&app, text);
-    Ok(())
+    topic: String,
+    section: usize,
+    cached: Option<bool>,
+) -> Result<Option<String>, String> {
+    if cached.unwrap_or(false) {
+        return Ok(crate::tutor::deep_cached(&app, &course, &topic, section));
+    }
+    crate::tutor::deep(&app, &course, &topic, section).await.map(Some)
 }
 
 /// Что сейчас с заказом. `null` — заказа ещё не было.

@@ -978,3 +978,81 @@ button {
   padding-left: 18px;
   color: var(--text-muted);
 }
+
+/* Половина пункта: направление верное, но не до конца. */
+.verdict__points .partial {
+  color: var(--lvl-learning);
+}
+
+/* Понятие, которое раздел только называет, — показано, а не спрошено. */
+.recall--new {
+  border-left-color: var(--lvl-young);
+  background: color-mix(in srgb, var(--lvl-young) 8%, transparent);
+}
+.recall--new .recall__label {
+  color: var(--lvl-young);
+}
+
+/* Подробный разбор раздела. */
+.deep {
+  margin: 16px 0 0;
+}
+.deep__body {
+  margin-top: 10px;
+  padding: 4px 16px 8px;
+  border: 1px solid var(--divider);
+  border-radius: 10px;
+}
+
+/* Обсуждение: лента реплик, поле вопроса, голос. */
+.talk {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--divider);
+  border-radius: 10px;
+}
+.talk__log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.talk__log:not(:empty) {
+  margin-bottom: 10px;
+}
+.talk__line {
+  max-width: 88%;
+  padding: 8px 12px;
+  border-radius: 10px;
+  white-space: pre-line;
+}
+.talk__line--me {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.talk__line--noa {
+  align-self: flex-start;
+  background: var(--btn-hover-bg);
+  white-space: normal;
+}
+.talk__line--noa > :first-child {
+  margin-top: 0;
+}
+.talk__line--noa > :last-child {
+  margin-bottom: 0;
+}
+.talk__line--wait {
+  align-self: flex-start;
+  color: var(--text-muted);
+}
+.talk__line--error {
+  align-self: flex-start;
+  color: var(--bad);
+}
+.talk__input {
+  min-height: 56px;
+}
+.talk__actions {
+  margin-top: 8px;
+}

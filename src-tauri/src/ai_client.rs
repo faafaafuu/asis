@@ -160,6 +160,32 @@ pub trait AiProvider: Send + Sync {
     async fn advise(&self, rules: &str, said: &str) -> Result<String, AiError> {
         self.interpret(rules, said).await
     }
+
+    /// Занятие с репетитором: свои указания, история разговора и новая реплика.
+    ///
+    /// Не `ask`: у того указания про выделенный термин и ответ в пару фраз, а
+    /// репетитору нужно объяснять — по шагам, с примером, столько, сколько
+    /// требует непонятое. `long` — подробный разбор раздела урока, ему нужен
+    /// потолок длины в несколько раз выше обычного.
+    ///
+    /// По умолчанию история складывается в одну реплику и уходит в `advise`.
+    async fn tutor(
+        &self,
+        rules: &str,
+        thread: &[ThreadItem],
+        said: &str,
+        _long: bool,
+    ) -> Result<String, AiError> {
+        let mut text = String::new();
+        for item in thread {
+            text.push_str(&format!("Ученик: {}
+Репетитор: {}
+
+", item.q, item.a));
+        }
+        text.push_str(said);
+        self.advise(rules, &text).await
+    }
 }
 
 /// Навешивает прокси на клиент, если он задан.
@@ -444,7 +470,17 @@ impl HttpProvider {
 
     /// `json` — ответ обязан быть объектом JSON (разбор реплик).
     async fn answer_as(&self, messages: Vec<Message<'_>>, json: bool) -> Result<String, AiError> {
-        let value = self.send_as(messages, json).await?;
+        self.answer_limited(messages, json, answer_limit(&self.endpoint)).await
+    }
+
+    /// То же, что `answer_as`, но со своим потолком длины ответа.
+    async fn answer_limited(
+        &self,
+        messages: Vec<Message<'_>>,
+        json: bool,
+        limit: u32,
+    ) -> Result<String, AiError> {
+        let value = self.send_limited(messages, json, limit).await?;
         let text = extract_text(&value)
             .map(|text| strip_reasoning(&text))
             .map(|text| strip_code_fence(&text).to_string())
@@ -468,13 +504,22 @@ impl HttpProvider {
     }
 
     async fn send_as(&self, messages: Vec<Message<'_>>, json: bool) -> Result<serde_json::Value, AiError> {
+        self.send_limited(messages, json, answer_limit(&self.endpoint)).await
+    }
+
+    async fn send_limited(
+        &self,
+        messages: Vec<Message<'_>>,
+        json: bool,
+        limit: u32,
+    ) -> Result<serde_json::Value, AiError> {
         let mut body = serde_json::json!({
             "model": (!self.model.is_empty()).then(|| self.model.clone()),
             "messages": messages,
             // Ollama по умолчанию отвечает потоком построчного JSON — разобрать его
             // как один объект нельзя. Для OpenAI-совместимых API поле безвредно.
             "stream": false,
-            "max_tokens": answer_limit(&self.endpoint),
+            "max_tokens": limit,
             "temperature": TEMPERATURE,
         });
 
@@ -483,7 +528,7 @@ impl HttpProvider {
         // сервисам лишние ключи ни к чему.
         if self.endpoint.contains("/api/chat") {
             body["options"] = serde_json::json!({
-                "num_predict": ANSWER_LIMIT,
+                "num_predict": limit,
                 "temperature": TEMPERATURE,
             });
             // Иначе Ollama выгружает модель из памяти после пяти минут простоя,
@@ -1166,6 +1211,35 @@ fn strip_foreign(text: &str) -> String {
 
 #[async_trait]
 impl AiProvider for HttpProvider {
+    async fn tutor(
+        &self,
+        rules: &str,
+        thread: &[ThreadItem],
+        said: &str,
+        long: bool,
+    ) -> Result<String, AiError> {
+        let mut messages = vec![Message {
+            role: "system",
+            content: rules.to_string(),
+        }];
+        for item in thread {
+            messages.push(Message {
+                role: "user",
+                content: item.q.clone(),
+            });
+            messages.push(Message {
+                role: "assistant",
+                content: item.a.clone(),
+            });
+        }
+        messages.push(Message {
+            role: "user",
+            content: said.to_string(),
+        });
+        let limit = if long { ANSWER_LIMIT * 4 } else { answer_limit(&self.endpoint) };
+        self.answer_limited(messages, false, limit).await
+    }
+
     async fn advise(&self, rules: &str, said: &str) -> Result<String, AiError> {
         self.answer_as(vec![
             Message {

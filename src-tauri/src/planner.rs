@@ -167,6 +167,17 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(reply) = timer_request(app, said, Local::now()) {
         return Some(reply);
     }
+    // Обсуждают урок: сказанное — вопрос по нему, а не распоряжение. Опрос и
+    // карточки, начатые из обсуждения, своё слышат — они проверяются первыми.
+    if crate::tutor::active() {
+        if let Some(reply) = crate::recall::hear(app, said).await {
+            return Some(reply);
+        }
+        if let Some(reply) = crate::learning::quiz_answer(app, said).await {
+            return Some(reply);
+        }
+        return crate::tutor::command(app, said).await;
+    }
     // «Включи музыку» без уточнений — своя станция из настроек.
     if let Some(reply) = music_request(app, said) {
         return Some(reply);

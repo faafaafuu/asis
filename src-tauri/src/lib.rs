@@ -34,6 +34,7 @@ mod timers;
 mod shots;
 mod focus;
 mod learning;
+mod tutor;
 mod local_cli;
 mod recall;
 mod srs;
@@ -313,7 +314,8 @@ pub fn run() {
             commands::learn_dictate_stop,
             commands::learn_oral,
             commands::learn_discuss,
-            commands::learn_discuss_question,
+            commands::learn_ask,
+            commands::learn_deep,
             commands::delete_model,
             commands::watch_chart,
             commands::close_watchlist,
@@ -956,7 +958,7 @@ fn answer_aloud(app: &tauri::AppHandle, text: &str) {
 
     // Окно с ответами выключено или идёт обсуждение темы курса — отвечаем
     // голосом: обсуждение знает урок, а окно ответов о нём не знает.
-    if !show_window(app) || learning::discussion().is_some() {
+    if !show_window(app) || tutor::active() {
         answer_without_window(app, text);
         return;
     }
@@ -1674,7 +1676,14 @@ pub(crate) fn say_then_listen(app: &tauri::AppHandle, text: String) {
         .name("sufler-oral".into())
         .spawn(move || {
             stop_wake();
+            // Esc под вступление значит «не надо»: разговор после него не
+            // начинается, иначе Ноа замолкала и тут же начинала слушать.
+            let cancels = CANCELS.load(std::sync::atomic::Ordering::SeqCst);
             speak_with_hud(&app, text, true);
+            if CANCELS.load(std::sync::atomic::Ordering::SeqCst) != cancels {
+                log::info!("вступление остановили Esc — разговор не начинаю");
+                return;
+            }
             EXPLICIT_TALK.store(true, std::sync::atomic::Ordering::SeqCst);
             start_conversation(&app);
         })
@@ -2159,7 +2168,7 @@ pub(crate) fn stop_conversation(app: &tauri::AppHandle) {
 /// звали бы друг друга по кругу.
 #[cfg(desktop)]
 fn finish_conversation(app: &tauri::AppHandle) {
-    learning::end_discussion();
+    tutor::end();
     end_conversation(app, true, true);
 }
 
@@ -2556,10 +2565,20 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
         let skip = thread.0.len().saturating_sub(depth);
         thread.0[skip..].to_vec()
     };
-    // Обсуждают тему курса — модель отвечает, зная урок.
-    let (term, context) = learning::discussion().unwrap_or_default();
+    // Обсуждают урок — отвечает репетитор, зная раздел, и со своей историей:
+    // разговор об уроке не мешается с разговором обо всём остальном.
+    if tutor::active() {
+        let answer = tauri::async_runtime::block_on(tutor::answer(app, question, true))
+            .unwrap_or_else(|err| err);
+        if turn_cancelled() {
+            overlay::hide_hud(app);
+            return;
+        }
+        speak_with_hud(app, answer, true);
+        return;
+    }
     let asked = tauri::async_runtime::block_on(async {
-        tokio::time::timeout(limit, provider.ask(&term, &context, &history, question)).await
+        tokio::time::timeout(limit, provider.ask("", "", &history, question)).await
     });
     let answer = match asked {
         Ok(Ok(answer)) if !answer.trim().is_empty() => answer.trim().to_string(),

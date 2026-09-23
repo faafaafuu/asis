@@ -411,7 +411,10 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
 
 ## Как устроена тема
 
-- **Урок** читается по разделам; после раздела — вспомнить одно понятие без подсказки.
+- **Урок** читается по разделам; после раздела — вспомнить одно понятие без подсказки. Понятие, которое раздел только называет, показывается как новое, с определением.
+- **🔍 Разобрать подробно** под разделом — модель раскрывает его по шагам: как устроено, кто что делает, пример, где ошибаются. Разбор пишется один раз и дальше открывается сразу.
+- **💬 Обсудить** — вопросы о том, что на экране: текстом в окне или голосом. NOAH знает раздел целиком, его понятия, а у вопроса — эталон и ваш ответ. Голос и текст — один разговор.
+- **Проверка открытых ответов** — по смыслу, а не по словам: пункт, сказанный своими словами или другой верной командой, засчитан; раскрытый наполовину — половиной. Эталон — пример сильного ответа, а не единственно верный.
 - **Понятия** — определение, зацепка для памяти, аналогия, частая ошибка и связи с другими темами.
 - **Карта** — понятия темы и их связи с остальным курсом; на обзоре — карта всего курса.
 - **Повторение** — карточки по расписанию: вспомнили — вернутся через 1, 3, 8, 20 дней и дальше, забыли — сегодня же. Ошибка на экзамене возвращает понятие в повторение.
@@ -432,7 +435,7 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
 2. Ask: “Build me a NOAH course on travel English: five topics, each with a lesson, tasks and a quiz”.
 3. The AI reads the format (\`course_format\`) and sends the course (\`create_course\`), a large one topic by topic (\`add_topic\`). NOAH checks it and shows it in the Learning window.
 
-Each topic has a lesson read section by section, concepts with memory hooks, a concept map, spaced-repetition cards, tasks, a quiz and a cheat sheet. **🎯 Focus session** on the course overview runs a 15, 25 or 50-minute block with a goal, a “later” list for stray thoughts and a recall note at the end.
+Each topic has a lesson read section by section — with **🔍 Explain in depth** for a step-by-step breakdown and **💬 Discuss** to ask about it by text or voice — concepts with memory hooks, a concept map, spaced-repetition cards, tasks, a quiz and a cheat sheet. **🎯 Focus session** on the course overview runs a 15, 25 or 50-minute block with a goal, a “later” list for stray thoughts and a recall note at the end.
 `,
     },
   },

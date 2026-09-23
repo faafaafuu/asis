@@ -352,12 +352,18 @@ unsafe fn write_clipboard_text(text: &str) {
     }
 }
 
-/// Отпустили ли мышь над собственным окном Суфлёра.
+/// Заголовок окна ответа Ноа — см. `overlay::ensure_popup_window`.
+const POPUP_TITLE: &str = "Суфлёр";
+
+/// Отпустили ли мышь над окном ответа Ноа.
 ///
 /// В ответе Ноа выделяют текст с Ctrl, чтобы спросить про выделенное, — это
 /// продолжение разговора внутри окна, и вопрос окно отправит само. Без этой
 /// проверки тот же жест открывал бы поверх разговора новое объяснение.
-fn over_our_window() -> bool {
+///
+/// Прочие окна Суфлёра — обучение, задачи — такие же места чтения, как чужие
+/// программы: термин из урока объясняется тем же жестом, что и в браузере.
+fn over_our_popup() -> bool {
     use windows::Win32::System::Threading::GetCurrentProcessId;
     use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetWindowThreadProcessId, WindowFromPoint, GA_ROOT};
 
@@ -379,7 +385,12 @@ fn over_our_window() -> bool {
         let window = if root.0.is_null() { window } else { root };
         let mut pid = 0u32;
         GetWindowThreadProcessId(window, Some(&mut pid as *mut u32));
-        pid == GetCurrentProcessId()
+        if pid != GetCurrentProcessId() {
+            return false;
+        }
+        let mut title = [0u16; 64];
+        let length = GetWindowTextW(window, &mut title).max(0) as usize;
+        String::from_utf16_lossy(&title[..length]) == POPUP_TITLE
     }
 }
 
@@ -414,7 +425,7 @@ impl PlatformIntegration for Platform {
         if config.require_left_ctrl && !had_left_ctrl {
             return None;
         }
-        if over_our_window() {
+        if over_our_popup() {
             return None;
         }
 

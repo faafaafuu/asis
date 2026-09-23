@@ -35,6 +35,33 @@ const RIGHT: u32 = 60;
 const MIN_CONCEPTS: usize = 6;
 /// Предел длины определения и ответа карточки.
 const MAX_DEFINITION: usize = 320;
+/// Урок короче этого — перечень, а не объяснение: совет его раскрыть.
+const LESSON_WORDS: usize = 1200;
+
+/// Объяснено ли понятие в тексте: встречается ли в нём хотя бы половина
+/// значимых слов определения.
+///
+/// Упомянуть не значит объяснить. «Между AS маршруты объявляют по BGP» называет
+/// BGP, но не говорит, что это; спросить после такого раздела «что такое BGP»
+/// — спросить то, чего человеку не рассказывали. Слова сравниваются по
+/// первым пяти буквам: «объявляют» и «объявлять» — одно слово.
+pub(crate) fn explained_in(text: &str, definition: &str) -> bool {
+    let stem = |word: &str| word.chars().take(5).collect::<String>();
+    let words = |text: &str| -> Vec<String> {
+        text.to_lowercase()
+            .replace('ё', "е")
+            .split(|ch: char| !ch.is_alphanumeric())
+            .filter(|word| word.chars().count() >= 4)
+            .map(stem)
+            .collect()
+    };
+    let known: std::collections::HashSet<String> = words(text).into_iter().collect();
+    let wanted: std::collections::HashSet<String> = words(definition).into_iter().collect();
+    if wanted.is_empty() {
+        return true;
+    }
+    wanted.iter().filter(|word| known.contains(*word)).count() * 2 >= wanted.len()
+}
 
 /* ── Материал ──────────────────────────────────────────────────────────── */
 
@@ -429,6 +456,26 @@ pub fn advice(course: &Course) -> Vec<String> {
                 topic.id
             ));
         }
+        let words = topic.lesson.split_whitespace().count();
+        if words < LESSON_WORDS {
+            notes.push(format!(
+                "{}: урок — {words} слов; раскрой каждый раздел: как устроено, кто что делает, пример, ошибки — от {LESSON_WORDS} слов",
+                topic.id
+            ));
+        }
+        let unexplained: Vec<&str> = topic
+            .concepts
+            .iter()
+            .filter(|c| !explained_in(&topic.lesson, &c.definition))
+            .map(|c| c.term.as_str())
+            .collect();
+        if !unexplained.is_empty() {
+            notes.push(format!(
+                "{}: в уроке названы, но не объяснены: {} — Ноа спросит их после раздела, а ответа в тексте нет",
+                topic.id,
+                unexplained.join(", ")
+            ));
+        }
         let linked = topic.exam.iter().chain(&topic.tasks).filter(|q| !q.concept.is_empty()).count();
         if linked * 2 < topic.exam.len() + topic.tasks.len() {
             notes.push(format!(
@@ -522,7 +569,7 @@ pub(crate) fn topic<'a>(course: &'a Course, id: &str) -> Result<&'a Topic, Strin
 }
 
 /// Вопрос курса по номеру — из задач, экзаменов или финала.
-fn question<'a>(course: &'a Course, id: &str) -> Option<(&'a Question, Option<&'a Topic>)> {
+pub(crate) fn question<'a>(course: &'a Course, id: &str) -> Option<(&'a Question, Option<&'a Topic>)> {
     for topic in &course.topics {
         if let Some(found) = topic.tasks.iter().chain(&topic.exam).find(|q| q.id == id) {
             return Some((found, Some(topic)));
@@ -813,6 +860,8 @@ pub struct Verdict {
     pub reference: String,
     /// Какие пункты эталона раскрыты.
     pub covered: Vec<usize>,
+    /// Какие раскрыты наполовину: направление верное, но не до конца.
+    pub partial: Vec<usize>,
     pub points: Vec<String>,
     pub options: Vec<String>,
     pub chosen: Option<usize>,
@@ -829,6 +878,7 @@ pub async fn grade(app: &AppHandle, q: &Question, answer: &serde_json::Value) ->
         feedback: String::new(),
         reference: if q.kind == "choice" { q.explain.clone() } else { q.reference.clone() },
         covered: Vec::new(),
+        partial: Vec::new(),
         points: q.points.clone(),
         options: q.options.clone(),
         chosen: None,
@@ -857,16 +907,12 @@ pub async fn grade(app: &AppHandle, q: &Question, answer: &serde_json::Value) ->
         return verdict;
     }
     match grade_open(app, q, text).await {
-        Some((covered, wrong, feedback)) => {
-            let total = q.points.len().max(1) as f64;
-            let mut score = (covered.len() as f64 / total * 100.0).round() as i64;
-            if !wrong.is_empty() {
-                score -= 20;
-            }
-            let score = score.clamp(0, 100) as u32;
+        Some(Graded { covered, partial, wrong, feedback }) => {
+            let score = open_score(q.points.len(), covered.len(), partial.len(), !wrong.is_empty());
             verdict.score = Some(score);
             verdict.right = score >= RIGHT;
             verdict.covered = covered;
+            verdict.partial = partial;
             verdict.feedback = match (wrong.is_empty(), feedback.is_empty()) {
                 (true, true) if score >= RIGHT => "Хороший ответ.".into(),
                 (true, _) => feedback,
@@ -883,27 +929,65 @@ pub async fn grade(app: &AppHandle, q: &Question, answer: &serde_json::Value) ->
     verdict
 }
 
-/// Открытый ответ — модели: какие пункты эталона раскрыты и что неверно.
-async fn grade_open(
-    app: &AppHandle,
-    q: &Question,
-    answer: &str,
-) -> Option<(Vec<usize>, String, String)> {
+/// Балл открытого ответа: пункт раскрыт — целиком, наполовину — половиной.
+///
+/// Фактическая ошибка снимает десять баллов, а не отменяет раскрытое: верный
+/// ход рассуждения с одной оговоркой — это не ответ «мимо». Прежде ошибка
+/// снимала двадцать, и ответ с верной картиной и одной неточностью получал
+/// пять баллов из ста.
+fn open_score(points: usize, covered: usize, partial: usize, wrong: bool) -> u32 {
+    let total = points.max(1) as f64;
+    let mut score = ((covered as f64 + partial as f64 * 0.5) / total * 100.0).round() as i64;
+    if wrong {
+        score -= 10;
+    }
+    score.clamp(0, 100) as u32
+}
+
+/// Что сказала модель об открытом ответе.
+struct Graded {
+    covered: Vec<usize>,
+    partial: Vec<usize>,
+    wrong: String,
+    feedback: String,
+}
+
+/// Открытый ответ — модели: какие пункты раскрыты, какие наполовину и что
+/// неверно.
+///
+/// Пункты — ориентир, а не список слов: «htop» показывает и нагрузку, и
+/// память, и процессы, и назвавший его человек прошёл по всем трём, хотя
+/// слова «free» не написал. Поэтому модели прямо сказано судить по смыслу,
+/// засчитывать равноценные команды и другой верный путь.
+async fn grade_open(app: &AppHandle, q: &Question, answer: &str) -> Option<Graded> {
     let points = q
         .points
         .iter()
         .enumerate()
         .map(|(at, point)| format!("{}. {point}", at + 1))
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("
+");
+    let reference = if q.reference.is_empty() {
+        String::new()
+    } else {
+        format!("
+
+Пример сильного ответа (один из возможных): {}", q.reference)
+    };
     let rules = format!(
-        "Ты — экзаменатор. Сравни ответ ученика с \
-         ключевыми пунктами эталона. Пункт раскрыт, если ученик передал его смысл \
-         своими словами, пусть коротко; не упомянут или сказан неверно — не раскрыт. \
-         Не придирайся к формулировкам. Верни только JSON без пояснений: \
-         {{\"covered\":[номера раскрытых пунктов],\"wrong\":\"что в ответе фактически \
-         неверно, иначе пустая строка\",\"feedback\":\"одно предложение по-русски: \
-         чего не хватило\"}}.\n\nВопрос: {}\n\nКлючевые пункты:\n{points}",
+        "Ты — доброжелательный экзаменатор на собеседовании. Оцени, понимает ли ученик суть,          по ключевым пунктам ниже. Пункты — ориентир, а не слова, которые надо повторить.
+         - Пункт раскрыт (covered), если ученик передал его смысл: своими словами, другими          терминами, равноценной командой или инструментом (htop вместо top, ss вместо netstat),          другим верным путём к той же цели.
+         - Наполовину (partial), если направление верное, но не хватает важной детали или          пункт следует из названного лишь частично.
+         - Не раскрыт — только если ничего близкого по смыслу нет.
+         - wrong — только существенная фактическая ошибка, которая выдаёт непонимание;          оговорки и неточные слова ошибкой не считай.
+         - Не придирайся к формулировкам, порядку и краткости.
+         Верни только JSON: {{\"covered\":[номера],\"partial\":[номера],\"wrong\":\"ошибка          или пустая строка\",\"feedback\":\"одно-два предложения по-русски: что верно и чего          не хватило\"}}.
+
+Вопрос: {}
+
+Ключевые пункты:
+{points}{reference}",
         q.q
     );
     let provider = app.state::<crate::state::AppState>().provider();
@@ -918,25 +1002,35 @@ async fn grade_open(
         .find('{')
         .zip(raw.rfind('}'))
         .and_then(|(start, end)| serde_json::from_str(&raw[start..=end]).ok())?;
-    let mut covered: Vec<usize> = parsed["covered"]
-        .as_array()
-        .map(|list| {
-            list.iter()
-                .filter_map(|item| item.as_u64().or_else(|| item.as_str()?.trim().parse().ok()))
-                .map(|at| at as usize)
-                .filter(|at| (1..=q.points.len()).contains(at))
-                .collect()
-        })
-        .unwrap_or_default();
-    covered.sort_unstable();
-    covered.dedup();
+    let numbers = |key: &str| -> Vec<usize> {
+        let mut list: Vec<usize> = parsed[key]
+            .as_array()
+            .map(|list| {
+                list.iter()
+                    .filter_map(|item| item.as_u64().or_else(|| item.as_str()?.trim().parse().ok()))
+                    .map(|at| at as usize)
+                    .filter(|at| (1..=q.points.len()).contains(at))
+                    .collect()
+            })
+            .unwrap_or_default();
+        list.sort_unstable();
+        list.dedup();
+        list
+    };
+    let covered = numbers("covered");
+    let partial: Vec<usize> = numbers("partial").into_iter().filter(|at| !covered.contains(at)).collect();
     let text = |key: &str| {
         parsed[key]
             .as_str()
             .map(|text| text.trim().to_string())
             .unwrap_or_default()
     };
-    Some((covered, text("wrong"), text("feedback")))
+    Some(Graded {
+        covered,
+        partial,
+        wrong: text("wrong"),
+        feedback: text("feedback"),
+    })
 }
 
 /// Вариант по сказанному: «второй», «2», «б», или слова самого варианта.
@@ -1189,102 +1283,6 @@ fn find_in(all: &[Course], said: &str) -> (Option<Course>, Option<Topic>) {
     (course, None)
 }
 
-/// Тема, которую сейчас обсуждают голосом: курс, тема и что знает модель.
-struct Discussion {
-    course: String,
-    topic: String,
-    title: String,
-    context: String,
-}
-
-static DISCUSSION: Mutex<Option<Discussion>> = Mutex::new(None);
-
-/// Начинает обсуждение темы: модель отвечает, зная урок. Отдаёт, что сказать.
-pub fn discuss(course_id: &str, topic_id: &str) -> Result<String, String> {
-    let course = course(course_id)?;
-    let topic = topic(&course, topic_id)?;
-    // Урок целиком не нужен и не влезет в память маленькой модели: берётся
-    // начало — там главное — и ключевые пункты задач.
-    let lesson: String = topic.lesson.chars().take(2500).collect();
-    let points = topic
-        .tasks
-        .iter()
-        .flat_map(|task| task.points.iter())
-        .take(12)
-        .map(|point| format!("- {point}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    *DISCUSSION.lock().unwrap_or_else(|err| err.into_inner()) = Some(Discussion {
-        course: course.id.clone(),
-        topic: topic.id.clone(),
-        title: format!("{} (курс «{}»)", topic.title, course.title),
-        context: format!("Урок:\n{lesson}\n\nГлавное из задач:\n{points}"),
-    });
-    log::info!("обсуждаем тему «{}»", topic.title);
-    Ok(format!(
-        "Давай обсудим «{}». Спрашивай что угодно по теме — объясню и приведу примеры. \
-         Скажи «спроси меня» — задам вопрос; «спасибо» — закончим.",
-        topic.title
-    ))
-}
-
-/// О чём сейчас разговор: название и знания для модели.
-pub fn discussion() -> Option<(String, String)> {
-    DISCUSSION
-        .lock()
-        .unwrap_or_else(|err| err.into_inner())
-        .as_ref()
-        .map(|talk| (talk.title.clone(), talk.context.clone()))
-}
-
-/// Разговор кончился — обсуждение тоже.
-pub fn end_discussion() {
-    DISCUSSION.lock().unwrap_or_else(|err| err.into_inner()).take();
-}
-
-/// Обсуждение одного вопроса.
-///
-/// Человек ответил, прочитал эталон и хочет разобраться. Модель получает сам
-/// вопрос, его ответ, верный вариант, эталон и ключевые пункты — иначе на
-/// «а почему не так?» ей было бы не от чего оттолкнуться.
-pub fn discuss_question(course_id: &str, question_id: &str, answer: &str) -> Result<String, String> {
-    let course = course(course_id)?;
-    let (q, topic) = question(&course, question_id).ok_or("Такого вопроса нет.")?;
-    let topic_title = topic.map(|t| t.title.clone()).unwrap_or_else(|| "итоговый экзамен".into());
-
-    let mut context = format!(
-        "Идёт обучение. Курс «{}», тема «{topic_title}».\nВопрос: {}\n",
-        course.title, q.q
-    );
-    if !q.options.is_empty() {
-        context.push_str(&format!("Варианты: {}\n", q.options.join("; ")));
-    }
-    if !answer.trim().is_empty() {
-        context.push_str(&format!("Ответ ученика: {}\n", answer.trim()));
-    }
-    if let Some(right) = q.answer.and_then(|at| q.options.get(at)) {
-        context.push_str(&format!("Верный вариант: {right}\n"));
-    }
-    if !q.reference.is_empty() {
-        context.push_str(&format!("Эталонный ответ: {}\n", q.reference));
-    }
-    if !q.explain.is_empty() {
-        context.push_str(&format!("Пояснение: {}\n", q.explain));
-    }
-    if !q.points.is_empty() {
-        context.push_str(&format!("Ключевые пункты: {}\n", q.points.join("; ")));
-    }
-
-    *DISCUSSION.lock().unwrap_or_else(|err| err.into_inner()) = Some(Discussion {
-        course: course.id.clone(),
-        topic: topic.map(|t| t.id.clone()).unwrap_or_default(),
-        title: format!("вопрос «{}»", q.q.chars().take(120).collect::<String>()),
-        context,
-    });
-    log::info!("обсуждаем вопрос «{}»", q.id);
-    Ok("Давай разберём этот вопрос. Что непонятно?".into())
-}
-
 /// Устный зачёт по теме (или по курсу): Ноа задаёт вопросы вслух.
 pub fn oral(course_id: &str, topic_id: Option<&str>) -> Result<String, String> {
     let course = course(course_id)?;
@@ -1299,7 +1297,7 @@ pub fn oral(course_id: &str, topic_id: Option<&str>) -> Result<String, String> {
 pub async fn voice(app: &AppHandle, action: &str, about: &str) -> String {
     let (course, topic) = find(about);
     // Идёт обсуждение темы, а тему не назвали — «спроси меня» про неё же.
-    let (course, topic) = match (&topic, discussion_topic()) {
+    let (course, topic) = match (&topic, crate::tutor::current_topic()) {
         (None, Some((course_id, topic_id))) => match self::course(&course_id) {
             Ok(found) => {
                 let topic = found.topics.iter().find(|t| t.id == topic_id).cloned();
@@ -1326,14 +1324,6 @@ pub async fn voice(app: &AppHandle, action: &str, about: &str) -> String {
             summary(&course)
         }
     }
-}
-
-fn discussion_topic() -> Option<(String, String)> {
-    DISCUSSION
-        .lock()
-        .unwrap_or_else(|err| err.into_inner())
-        .as_ref()
-        .map(|talk| (talk.course.clone(), talk.topic.clone()))
 }
 
 /// Прогресс словами.
@@ -1548,6 +1538,25 @@ pub async fn quiz_answer(app: &AppHandle, said: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mention_is_not_an_explanation() {
+        let section = "Автономная система (AS) — сеть под управлением одной организации с номером ASN.                        Между AS маршруты объявляют по BGP.";
+        let bgp = "BGP — протокол, которым автономные системы сообщают друг другу, какие адреса                    через них доступны, и выбирают пути между собой.";
+        assert!(!explained_in(section, bgp));
+        let as_def = "Автономная система — сеть одной организации со своим номером ASN.";
+        assert!(explained_in(section, as_def));
+    }
+
+    #[test]
+    fn open_score_counts_half_points_and_mild_penalty() {
+        // Нагрузка раскрыта, память, диск и процесс — наполовину, одна
+        // неточность: верная картина с оговоркой, а не ответ мимо.
+        assert_eq!(open_score(4, 1, 3, true), 53);
+        assert_eq!(open_score(4, 4, 0, false), 100);
+        assert_eq!(open_score(4, 0, 0, true), 0);
+        assert_eq!(open_score(0, 0, 0, false), 0);
+    }
 
     #[test]
     fn built_in_courses_pass_validation() {
