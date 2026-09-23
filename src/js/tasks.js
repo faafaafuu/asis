@@ -561,7 +561,9 @@ document.addEventListener("keydown", (event) => {
     refresh();
     return;
   }
-  closeWindow();
+  // Окно Esc не закрывает: Esc — это «замолчи» для голоса Ноа, и нажатый
+  // под её речь, он уносил бы вместе с речью и окно, в котором человек
+  // работает. Закрывает Esc только окно объяснения выделенного слова.
 });
 
 api?.invoke("runtime_config").then((config) => applyTheme(config?.theme));

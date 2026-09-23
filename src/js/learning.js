@@ -702,14 +702,13 @@ ui.head.addEventListener("pointerdown", (event) => {
   win?.startDragging();
 });
 
-// Esc в поле ответа — выйти из поля; вне поля — закрыть окно.
+// Esc в поле ответа — выйти из поля.
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
-  if (document.activeElement?.matches("textarea, input")) {
-    document.activeElement.blur();
-    return;
-  }
-  api?.invoke("close_learning").catch(() => {});
+  // Окно Esc не закрывает: Esc — это «замолчи» для голоса Ноа, и нажатый
+  // под её речь, он уносил бы вместе с речью и окно, в котором человек
+  // работает. Закрывает Esc только окно объяснения выделенного слова.
+  if (document.activeElement?.matches("textarea, input")) document.activeElement.blur();
 });
 
 ui.close.addEventListener("click", () => {

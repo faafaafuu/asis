@@ -135,9 +135,6 @@ ui.head.addEventListener("pointerdown", (event) => {
   win?.startDragging();
 });
 
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") api?.invoke("close_order").catch(() => {});
-});
 
 api?.invoke("runtime_config").then((config) => applyTheme(config?.theme));
 api?.listen("order:changed", refresh);

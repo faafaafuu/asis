@@ -19,9 +19,7 @@ applyTheme(globalThis.__SUFLER_VIEW__?.theme);
 
 ui.close?.addEventListener("click", () => win?.close());
 ui.minimize?.addEventListener("click", () => win?.minimize());
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") win?.close();
-});
+
 
 // Окно без системной рамки: за заголовок его двигают.
 document.querySelector(".head")?.addEventListener("mousedown", (event) => {

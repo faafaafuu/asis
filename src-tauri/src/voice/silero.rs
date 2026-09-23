@@ -209,9 +209,30 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
     if !ready(app) {
         return Err("голоса Silero ещё не скачаны".into());
     }
-    if let Some(mut stale) = SERVER.lock().unwrap_or_else(|err| err.into_inner()).take() {
-        let _ = stale.kill();
-        let _ = stale.wait();
+    // Прежний сервер убиваем, только если он умер или завис насовсем. Живой,
+    // но ещё поднимающийся сервер не трогаем: раньше вторая фраза убивала его
+    // за секунды до готовности и начинала заново — и ждать приходилось дважды.
+    {
+        let mut slot = SERVER.lock().unwrap_or_else(|err| err.into_inner());
+        let still_starting = slot
+            .as_mut()
+            .map(|child| matches!(child.try_wait(), Ok(None)))
+            .unwrap_or(false);
+        if still_starting {
+            drop(slot);
+            for _ in 0..240 {
+                std::thread::sleep(Duration::from_millis(250));
+                if alive() {
+                    log::info!("голосовой сервер Silero готов");
+                    return Ok(());
+                }
+            }
+            slot = SERVER.lock().unwrap_or_else(|err| err.into_inner());
+        }
+        if let Some(mut stale) = slot.take() {
+            let _ = stale.kill();
+            let _ = stale.wait();
+        }
     }
 
     let root = root(app)?;
@@ -236,7 +257,11 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
     *SERVER.lock().unwrap_or_else(|err| err.into_inner()) = Some(child);
     log::info!("поднимаю голосовой сервер Silero");
 
-    for _ in 0..120 {
+    // Полторы минуты, а не полминуты. Холодный старт — это PyTorch и модель
+    // голоса, и на загруженной машине (распознавание, своя модель, всё разом)
+    // он шёл дольше тридцати секунд. Сдавались раньше — и следующая фраза
+    // убивала почти поднявшийся сервер, чтобы начать его заново.
+    for _ in 0..360 {
         std::thread::sleep(Duration::from_millis(250));
         if alive() {
             log::info!("голосовой сервер Silero готов");
@@ -256,7 +281,7 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
             ));
         }
     }
-    Err("голосовой сервер не поднялся за 30 секунд".into())
+    Err("голосовой сервер не поднялся за полторы минуты".into())
 }
 
 /// Поднимает сервер заранее — пока человек ещё говорит, — и прогревает модель:
