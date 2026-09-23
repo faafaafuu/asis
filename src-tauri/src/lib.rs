@@ -2594,7 +2594,7 @@ fn fragment(text: &str) -> bool {
 /// ни вернуться к инструкции по разрешениям.
 #[cfg(desktop)]
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem};
+    use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
     let tasks = MenuItem::with_id(app, "tasks", "Задачи", true, None::<&str>)?;
@@ -2602,11 +2602,16 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let watchlist = MenuItem::with_id(app, "watchlist", "Активы", true, None::<&str>)?;
     let learning = MenuItem::with_id(app, "learning", "Обучение", true, None::<&str>)?;
     let onboarding = MenuItem::with_id(app, "onboarding", "Настройка и проверка…", true, None::<&str>)?;
+    // Виджет расхода — часть самой Ноа, а не модуль: включается галочкой.
+    let widget_on = app.state::<AppState>().config().widget.enabled;
+    let widget = CheckMenuItem::with_id(app, "widget", "Виджет расхода", true, widget_on, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
         app,
-        &[&tasks, &order, &watchlist, &learning, &onboarding, &quit],
+        &[&tasks, &order, &watchlist, &learning, &separator, &widget, &onboarding, &quit],
     )?;
+    let widget_item = widget.clone();
 
     let mut tray = TrayIconBuilder::with_id("sufler-tray")
         .tooltip("Суфлёр")
@@ -2620,7 +2625,26 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         tray = tray.icon(icon.clone());
     }
 
-    tray.on_menu_event(|app, event| match event.id().as_ref() {
+    tray.on_menu_event(move |app, event| match event.id().as_ref() {
+        "widget" => {
+            let state = app.state::<AppState>();
+            let enabled = {
+                let mut config = state.config_mut();
+                config.widget.enabled = !config.widget.enabled;
+                config.widget.enabled
+            };
+            let _ = widget_item.set_checked(enabled);
+            if let Err(err) = commands::persist(app, &state) {
+                log::warn!("виджет: настройка не сохранилась: {err}");
+            }
+            if enabled {
+                let on_top = state.config().widget.on_top;
+                let _ = overlay::show_usage_widget(app);
+                overlay::pin_usage_widget(app, on_top);
+            } else {
+                overlay::hide_usage_widget(app);
+            }
+        }
         "tasks" => {
             if let Err(err) = overlay::show_tasks(app) {
                 log::error!("не удалось открыть окно задач: {err}");

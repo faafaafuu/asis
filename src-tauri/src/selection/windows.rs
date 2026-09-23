@@ -359,7 +359,7 @@ unsafe fn write_clipboard_text(text: &str) {
 /// проверки тот же жест открывал бы поверх разговора новое объяснение.
 fn over_our_window() -> bool {
     use windows::Win32::System::Threading::GetCurrentProcessId;
-    use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, WindowFromPoint};
+    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetWindowThreadProcessId, WindowFromPoint, GA_ROOT};
 
     let mut point = POINT::default();
     // SAFETY: только читают состояние системы.
@@ -371,6 +371,12 @@ fn over_our_window() -> bool {
         if window.0.is_null() {
             return false;
         }
+        // Под курсором — окно WebView2, а оно живёт в своём процессе
+        // (msedgewebview2.exe). Наше — верхнее окно, в которое оно вложено:
+        // без этого выделение в ответе Ноа считалось выделением в чужой
+        // программе, и вместо продолжения в том же окне открывалось новое.
+        let root = GetAncestor(window, GA_ROOT);
+        let window = if root.0.is_null() { window } else { root };
         let mut pid = 0u32;
         GetWindowThreadProcessId(window, Some(&mut pid as *mut u32));
         pid == GetCurrentProcessId()
