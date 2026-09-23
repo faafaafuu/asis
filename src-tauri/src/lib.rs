@@ -1793,7 +1793,13 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
                 // Имя и одно слово, не вопрос — ослышка: в комнате говорят, а
                 // распознавание дописывает за ними что-то короткое. Просьбу из
                 // одного слова («открой», «закажи») всё равно не выполнить.
-                if !question.trim().is_empty() && fragment(&question) {
+                //
+                // Именно одно слово. Раньше здесь стояло общее правило обрывков —
+                // «два слова и меньше», — и «Чувак, как слышно» Ноа выбрасывала
+                // как ослышку: человек звал и не получал ничего. Вопрос из двух
+                // слов — обычный вопрос, а знак вопроса распознавание ставит
+                // через раз.
+                if !question.trim().is_empty() && lone_word(&question) {
                     log::info!("«{text}» — похоже на ослышку, слушаю дальше");
                     continue;
                 }
@@ -2522,6 +2528,16 @@ const THREAD_KEEP: usize = 12;
 
 /// Обрывок в одно-два слова без вопроса — скорее ослышка, чем вопрос.
 #[cfg(desktop)]
+/// Одно слово без вопроса и не приветствие — так выглядит ослышка после имени.
+#[cfg(desktop)]
+fn lone_word(text: &str) -> bool {
+    let words = text
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|w| !w.is_empty())
+        .count();
+    words == 1 && fragment(text)
+}
+
 fn fragment(text: &str) -> bool {
     const GREETINGS: &[&str] = &["привет", "здравств", "здорово", "хай", "салют", "добр"];
     let lower = text.to_lowercase();
@@ -2621,6 +2637,14 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 #[cfg(all(test, desktop))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_short_question_after_the_name_is_heard() {
+        // Из журнала: на это Ноа не ответила, приняв за ослышку.
+        assert!(!lone_word("как слышно."), "два слова — вопрос");
+        assert!(!lone_word("привет"), "приветствие — зов");
+        assert!(lone_word("открою"), "одно слово — ослышка");
+    }
 
     #[test]
     fn an_echo_of_the_hint_is_not_a_call() {
