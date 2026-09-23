@@ -301,6 +301,7 @@ pub fn run() {
             commands::learn_map,
             commands::learn_focus_done,
             commands::brains_list,
+            commands::esc_went_to_voice,
             commands::brains_use,
             commands::learn_focus_bell,
             commands::learn_check,
@@ -1180,8 +1181,13 @@ const WAKE_REQUESTS: &[&str] = &[
     "откр", "закр", "запуст", "включ", "выключ", "найд", "поищ", "покаж", "постав", "напомн",
     "закаж", "скаж", "расскаж", "объясн", "перевед", "посчит", "сверн", "листа", "полиста",
     "сдела", "добав", "убер", "удал", "перенес", "отмет", "помог", "куп", "прочит", "останов",
-    "сним", "заверш", "слыш",
+    "сним", "заверш", "слыш", "поменя", "смени", "переключ", "дай", "подскаж", "спрос", "запомн",
+    "повтор", "отправ", "напиш", "созда", "позов", "вруби", "выруб", "погоня", "давай",
 ];
+
+/// Обращения между именем и просьбой: «Но, друг мой, поменяй модель».
+#[cfg(desktop)]
+const CALL_FILLERS: &[&str] = &["друг", "мой", "дружище", "брат", "братан", "слушай", "пожалуйста", "короче", "чел"];
 
 /// Имя, от которого распознавание оставило «Но» или «Ну, а».
 ///
@@ -1207,7 +1213,14 @@ fn clipped_name(words: &[(String, usize)]) -> Option<usize> {
     };
     let next = &words.get(next_at)?.0;
     let after = words.get(next_at + 1).map(|(word, _)| word.as_str()).unwrap_or("");
-    let request = WAKE_REQUESTS.iter().any(|stem| next.starts_with(stem));
+    // Просьба — сразу или после обращения: «Но, друг мой, поменяй модель».
+    let request = words[next_at..]
+        .iter()
+        .take(4)
+        .map(|(word, _)| word.as_str())
+        .skip_while(|word| CALL_FILLERS.contains(word))
+        .next()
+        .is_some_and(|word| WAKE_REQUESTS.iter().any(|stem| word.starts_with(stem)));
     // Проверка связи и приветствие — тоже зов, и по журналу самый частый:
     // «Ну а как слышно?», «Ну а привет!», «Ну а, проверка связи», «Но
     // здорово!» — человек звал Ноа, а она молчала, потому что после «ну»
@@ -1237,7 +1250,38 @@ const CALL_GREETINGS: &[&str] = &["привет", "здоров", "здравс�
 /// имени. «Ну а как слышно?» и «Но здорово!» тогда не узнавались как зов вовсе.
 #[cfg(desktop)]
 fn is_default_name(name: &str) -> bool {
-    name.trim().to_lowercase() == crate::config::DEFAULT_WAKE_NAME.to_lowercase()
+    let name = name.trim().to_lowercase();
+    // «Noah», «Noa» латиницей — то же имя: распознавание речи пишет его
+    // кириллицей, и с латинским именем Ноа не отзывалась никогда.
+    name == crate::config::DEFAULT_WAKE_NAME.to_lowercase() || ["noah", "noa", "ноах"].contains(&name.as_str())
+}
+
+/// Латинское имя кириллицей — так его запишет распознавание русской речи.
+fn cyrillic(name: &str) -> String {
+    const PAIRS: &[(&str, &str)] = &[
+        ("shch", "щ"), ("sch", "щ"), ("sh", "ш"), ("ch", "ч"), ("zh", "ж"), ("kh", "х"), ("ts", "ц"),
+        ("ya", "я"), ("yu", "ю"), ("yo", "ё"), ("ye", "е"), ("ph", "ф"), ("th", "т"),
+        ("a", "а"), ("b", "б"), ("c", "к"), ("d", "д"), ("e", "е"), ("f", "ф"), ("g", "г"), ("h", "х"),
+        ("i", "и"), ("j", "дж"), ("k", "к"), ("l", "л"), ("m", "м"), ("n", "н"), ("o", "о"), ("p", "п"),
+        ("q", "к"), ("r", "р"), ("s", "с"), ("t", "т"), ("u", "у"), ("v", "в"), ("w", "в"), ("x", "кс"),
+        ("y", "й"), ("z", "з"),
+    ];
+    let lower = name.to_lowercase();
+    let mut out = String::new();
+    let mut rest = lower.as_str();
+    'next: while !rest.is_empty() {
+        for (latin, russian) in PAIRS {
+            if let Some(tail) = rest.strip_prefix(latin) {
+                out.push_str(russian);
+                rest = tail;
+                continue 'next;
+            }
+        }
+        let mut chars = rest.chars();
+        out.extend(chars.next());
+        rest = chars.as_str();
+    }
+    out
 }
 
 /// Отделяет обращение от вопроса.
@@ -1253,6 +1297,9 @@ fn wake_split(text: &str, name: &str) -> Option<String> {
     // общее правило «на одну-две буквы мимо».
     if is_default_name(name) {
         wake_split_default(text)
+    } else if name.chars().any(|c| c.is_ascii_alphabetic()) {
+        // Латинское имя слышится кириллицей: «Jarvis» — «Джарвис».
+        wake_split_custom(text, name).or_else(|| wake_split_custom(text, &cyrillic(name)))
     } else {
         wake_split_custom(text, name)
     }
@@ -2700,6 +2747,20 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 #[cfg(all(test, desktop))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn todays_real_calls_are_heard() {
+        // Дословно из журнала 23.09: ни на один из этих зовов Ноа не отозвалась.
+        for said in ["— Ну а ты здесь?", "Ну а проверка связи?", "Но проверка связи.", "Но поменяй модель на хайку.", "Но, друг мой, поменяй модель на хайку."] {
+            assert!(wake_split(said, "ноа").is_some(), "не услышан зов: {said}");
+        }
+    }
+
+    #[test]
+    fn a_latin_name_is_heard_in_cyrillic() {
+        assert_eq!(wake_split("Ноа, который час?", "noah").as_deref(), Some("который час?"));
+        assert_eq!(wake_split("Джарвис, свет", "Jarvis").as_deref(), Some("свет"));
+    }
 
     #[test]
     fn a_clipped_noa_with_a_greeting_or_a_check_is_a_call() {

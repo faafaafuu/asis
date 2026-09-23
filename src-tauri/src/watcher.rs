@@ -86,6 +86,7 @@ pub fn spawn(app: &AppHandle) -> Integration {
         log::info!("наблюдатель за выделением запущен");
         // Последнее показанное выделение — чтобы отличить новый жест от повтора.
         let mut last_shown: Option<(String, Instant)> = None;
+        let mut escape_was_down = false;
         // Отметка предыдущего круга — по ней виден сон компьютера, см. ниже.
         let mut last_tick = Instant::now();
         loop {
@@ -150,7 +151,16 @@ pub fn spawn(app: &AppHandle) -> Integration {
                 }
             }
 
-            if overlay::is_popup_visible(&app) && worker.is_escape_pressed() {
+            // Окно закрывает только новое нажатие Esc, и только если оно не
+            // ушло на то, чтобы голос замолчал: первый Esc — голосу, второй —
+            // окну. Зажатая клавиша — одно нажатие, а не по одному на опрос.
+            let escape = worker.is_escape_pressed();
+            let pressed = escape && !escape_was_down;
+            escape_was_down = escape;
+            if pressed
+                && overlay::is_popup_visible(&app)
+                && !crate::voice::hotkey::esc_went_to_voice(700)
+            {
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || overlay::hide_popup(&handle));
                 std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));

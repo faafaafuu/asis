@@ -242,6 +242,13 @@ pub fn save_ai_settings(
     Ok(())
 }
 
+/// Этот Esc только что остановил голос: окно его не отдаёт на закрытие.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn esc_went_to_voice() -> bool {
+    crate::voice::hotkey::esc_went_to_voice(700)
+}
+
 /// Модели, между которыми можно переключиться одним щелчком.
 #[tauri::command]
 pub async fn brains_list(app: AppHandle) -> Vec<crate::brains::Choice> {

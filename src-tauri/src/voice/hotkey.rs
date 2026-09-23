@@ -137,6 +137,22 @@ pub fn press_speak() {
     send(Event::Speak);
 }
 
+/// Когда Esc последний раз ушёл на то, чтобы заставить голос замолчать, мс
+/// от старта. Это нажатие окно объяснения не закрывает: первый Esc — голосу,
+/// второй — окну.
+static ESC_FOR_VOICE: AtomicU64 = AtomicU64::new(0);
+
+fn esc_clock() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64 + 1
+}
+
+/// Esc, нажатый только что, остановил голос — окну его не отдавать.
+pub fn esc_went_to_voice(within_ms: u64) -> bool {
+    let at = ESC_FOR_VOICE.load(Ordering::SeqCst);
+    at != 0 && esc_clock().saturating_sub(at) < within_ms
+}
+
 fn send(event: Event) {
     if let Some(tx) = EVENTS.get() {
         let _ = tx.send(event);
@@ -250,8 +266,14 @@ unsafe extern "system" fn keyboard_proc(
             || crate::voice::speaking()
             || crate::alarms::ringing())
     {
-        if let Some(tx) = CANCELS.get() {
-            let _ = tx.send(());
+        // Повтор от удержания — не новое нажатие.
+        if esc_clock().saturating_sub(ESC_FOR_VOICE.load(Ordering::SeqCst)) > 400 {
+            ESC_FOR_VOICE.store(esc_clock(), Ordering::SeqCst);
+            if let Some(tx) = CANCELS.get() {
+                let _ = tx.send(());
+            }
+        } else {
+            ESC_FOR_VOICE.store(esc_clock(), Ordering::SeqCst);
         }
         return pass(());
     }

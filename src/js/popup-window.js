@@ -235,7 +235,13 @@ if (api) {
 document.addEventListener(
   "keydown",
   (e) => {
-    if (e.key === "Escape") close();
+    if (e.key !== "Escape") return;
+    // Первый Esc — голосу, второй — окну: если это нажатие заставило Ноа
+    // замолчать, окно остаётся.
+    const toVoice = api ? api.invoke("esc_went_to_voice").catch(() => false) : Promise.resolve(false);
+    toVoice.then((went) => {
+      if (!went) close();
+    });
   },
   true,
 );
