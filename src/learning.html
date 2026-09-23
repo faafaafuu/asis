@@ -17,6 +17,7 @@
         <span class="bar"><span class="bar__fill" data-el="courseBar"></span></span>
         <span class="head__percent" data-el="coursePercent"></span>
       </div>
+      <button class="head__focus" data-el="focusChip" type="button" hidden title="Фокус-сессия: пауза, заметка на потом, стоп"></button>
       <button class="head__button" data-el="minimize" type="button" title="Свернуть" aria-label="Свернуть окно обучения">—</button>
       <button class="head__button head__close" data-el="close" type="button" title="Закрыть" aria-label="Закрыть окно обучения">×</button>
     </header>
@@ -31,6 +32,10 @@
 
       <main class="main" data-el="main"></main>
     </div>
+
+    <!-- Фокус-сессия: подготовка, конец отрезка, перерыв. Поверх страницы,
+         чтобы не терять недописанный ответ экзамена. -->
+    <div class="focus-layer" data-el="focusLayer" hidden></div>
 
     <script type="module" src="./js/learning.js"></script>
   </body>

@@ -1518,6 +1518,36 @@ pub fn learn_topic(course: String, topic: String) -> Result<crate::learning::Top
     crate::learning::topic_view(&course, &topic)
 }
 
+/// Очередь повторения: что пора повторить и новые на сегодня. Тема — только
+/// её карточки.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn learn_review(course: String, topic: Option<String>) -> Result<Vec<crate::recall::ReviewCard>, String> {
+    crate::recall::queue(&course, topic.as_deref())
+}
+
+/// Ответ на карточку: снова, трудно, хорошо, легко.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn learn_grade(course: String, card: String, grade: String) -> Result<crate::recall::Graded, String> {
+    let grade = crate::srs::Grade::parse(&grade).ok_or("Оценка — again, hard, good или easy.")?;
+    crate::recall::answer(&course, &card, grade)
+}
+
+/// Понятия темы с тем, насколько каждое усвоено, и связями.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn learn_concepts(course: String, topic: String) -> Result<Vec<crate::recall::ConceptView>, String> {
+    crate::recall::concepts(&course, &topic)
+}
+
+/// Карта курса: темы, понятия, связи.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn learn_map(course: String) -> Result<crate::recall::MapView, String> {
+    crate::recall::map(&course)
+}
+
 /// Урок прочитан.
 #[tauri::command]
 pub fn learn_read(course: String, topic: String) -> Result<(), String> {
@@ -1584,6 +1614,20 @@ pub async fn learn_dictate_stop(app: AppHandle) -> Result<String, String> {
     let wav = wav.ok_or("Ничего не записалось — проверьте микрофон в настройках.")?;
     let text = crate::voice::whisper::transcribe(&app, wav, "ru", "").await?;
     Ok(text.trim().to_string())
+}
+
+/// Фокус-сессия закончилась: записать минуты, цель и то, что вспомнилось.
+#[tauri::command]
+pub fn learn_focus_done(course: String, session: crate::focus::Session) -> Result<crate::focus::Stats, String> {
+    crate::focus::record(&course, session)
+}
+
+/// Конец отрезка фокуса или перерыва: Ноа говорит об этом, даже если окно
+/// обучения закрыто или под другими окнами.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn learn_focus_bell(app: AppHandle, text: String) {
+    crate::announce(&app, text.chars().take(300).collect(), false);
 }
 
 /// Устный зачёт: Ноа задаёт вопросы темы вслух и слушает ответы.

@@ -31,6 +31,10 @@ pub const FINAL_PASS: u32 = 75;
 const FINAL_PER_TOPIC: usize = 2;
 /// Ответ с таким баллом и выше считается верным.
 const RIGHT: u32 = 60;
+/// Сколько понятий должно быть в теме, чтобы ей было что повторять.
+const MIN_CONCEPTS: usize = 6;
+/// Предел длины определения и ответа карточки.
+const MAX_DEFINITION: usize = 320;
 
 /* ── Материал ──────────────────────────────────────────────────────────── */
 
@@ -55,6 +59,10 @@ pub struct Question {
     /// Образцовый ответ — показывается после проверки.
     #[serde(default)]
     pub reference: String,
+    /// Какое понятие проверяет вопрос. Ошибка в нём возвращает понятие в
+    /// повторение: экзамен показал, что оно не держится.
+    #[serde(default)]
+    pub concept: String,
 }
 
 impl Question {
@@ -70,6 +78,50 @@ impl Question {
     }
 }
 
+/// Понятие темы — то, что нужно знать «от зубов».
+///
+/// Урок объясняет, а понятие закрепляет: из каждого получается карточка для
+/// повторения, узел на карте и строка шпаргалки. Мнемоника, аналогия и частая
+/// ошибка не украшения — это то, за что память цепляется: голое определение
+/// забывается за неделю, определение с образом держится месяцами.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Concept {
+    pub id: String,
+    /// Как понятие называется: «ReplicaSet», «TTL», «идемпотентность».
+    pub term: String,
+    /// Определение в одно-два предложения. Длинное не запоминается.
+    pub definition: String,
+    /// Зацепка для памяти: созвучие, первые буквы, картинка.
+    #[serde(default)]
+    pub mnemonic: String,
+    /// На что похоже из обычной жизни.
+    #[serde(default)]
+    pub analogy: String,
+    /// Пример: команда, строка конфига, случай из практики.
+    #[serde(default)]
+    pub example: String,
+    /// С чем путают или в чём ошибаются.
+    #[serde(default)]
+    pub pitfall: String,
+    /// Связанные понятия: `id` в этой же теме или `тема/id` в другой.
+    #[serde(default)]
+    pub related: Vec<String>,
+}
+
+/// Карточка для повторения сверх тех, что выходят из понятий: вопрос —
+/// ответ, который надо вспомнить, а не узнать.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Card {
+    pub id: String,
+    pub front: String,
+    pub back: String,
+    /// Понятие, к которому карточка относится.
+    #[serde(default)]
+    pub concept: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Topic {
@@ -83,6 +135,13 @@ pub struct Topic {
     pub lesson: String,
     pub tasks: Vec<Question>,
     pub exam: Vec<Question>,
+    #[serde(default)]
+    pub concepts: Vec<Concept>,
+    #[serde(default)]
+    pub cards: Vec<Card>,
+    /// Шпаргалка на одну страницу. Пусто — Ноа соберёт её из понятий.
+    #[serde(default)]
+    pub cheatsheet: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,7 +235,7 @@ fn user_courses() -> Vec<Course> {
     found
 }
 
-fn course(id: &str) -> Result<Course, String> {
+pub(crate) fn course(id: &str) -> Result<Course, String> {
     courses()
         .into_iter()
         .find(|course| course.id == id)
@@ -210,6 +269,67 @@ pub fn validate(course: &Course) -> Vec<String> {
         if topic.lesson.trim().chars().count() < 200 {
             problems.push(format!("{}: урок слишком короткий (меньше 200 знаков)", topic.id));
         }
+        // Урок читается кусками: без подзаголовков его нечем разбить, и он
+        // превращается в стену текста, которую пролистывают.
+        let sections = topic.lesson.lines().filter(|line| line.starts_with("## ")).count();
+        if sections < 3 {
+            problems.push(format!("{}: в уроке меньше трёх разделов «## …» — урок читают кусками", topic.id));
+        }
+        // Без понятий нечего повторять, а без повторения прочитанное уходит.
+        if topic.concepts.len() < MIN_CONCEPTS {
+            problems.push(format!(
+                "{}: понятий {} — нужно не меньше {MIN_CONCEPTS}: из них карточки, карта и шпаргалка",
+                topic.id,
+                topic.concepts.len()
+            ));
+        }
+        let mut concept_ids = std::collections::HashSet::new();
+        for concept in &topic.concepts {
+            if !id_ok(&concept.id) {
+                problems.push(format!("{}: у понятия «{}» id — латиница, цифры, дефис", topic.id, concept.term));
+            }
+            if !concept_ids.insert(concept.id.clone()) {
+                problems.push(format!("{}: понятие {} повторяется", topic.id, concept.id));
+            }
+            if concept.term.trim().is_empty() || concept.definition.trim().is_empty() {
+                problems.push(format!("{}/{}: нужны term и definition", topic.id, concept.id));
+            }
+            // Карточка — один факт. Определение на абзац не вспоминается, его
+            // узнают, а узнавание на собеседовании не помогает.
+            if concept.definition.chars().count() > MAX_DEFINITION {
+                problems.push(format!(
+                    "{}/{}: определение длиннее {MAX_DEFINITION} знаков — сократи до одной мысли, детали — в урок или example",
+                    topic.id, concept.id
+                ));
+            }
+        }
+        for concept in &topic.concepts {
+            for reference in &concept.related {
+                let (t, c) = reference.split_once('/').unwrap_or((topic.id.as_str(), reference.as_str()));
+                let found = course
+                    .topics
+                    .iter()
+                    .find(|known| known.id == t)
+                    .is_some_and(|known| known.concepts.iter().any(|known| known.id == c));
+                if !found {
+                    problems.push(format!(
+                        "{}/{}: связь «{reference}» никуда не ведёт — id понятия этой темы или «тема/id»",
+                        topic.id, concept.id
+                    ));
+                }
+            }
+        }
+        for card in &topic.cards {
+            if card.front.trim().is_empty() || card.back.trim().is_empty() {
+                problems.push(format!("{}/{}: у карточки нужны front и back", topic.id, card.id));
+            }
+            if card.back.chars().count() > MAX_DEFINITION {
+                problems.push(format!("{}/{}: ответ карточки длиннее {MAX_DEFINITION} знаков", topic.id, card.id));
+            }
+            if !card.concept.is_empty() && !topic.concepts.iter().any(|c| c.id == card.concept) {
+                problems.push(format!("{}/{}: понятия «{}» в теме нет", topic.id, card.id, card.concept));
+            }
+        }
         if topic.tasks.is_empty() {
             problems.push(format!("{}: нет практических задач (tasks)", topic.id));
         }
@@ -217,13 +337,35 @@ pub fn validate(course: &Course) -> Vec<String> {
             problems.push(format!("{}: нет вопросов мини-экзамена (exam)", topic.id));
         }
     }
+    let mut card_ids = std::collections::HashSet::new();
+    for topic in &course.topics {
+        for card in &topic.cards {
+            if !card_ids.insert(format!("{}/{}", topic.id, card.id)) {
+                problems.push(format!("{}: карточка {} повторяется", topic.id, card.id));
+            }
+        }
+    }
     let mut ids = std::collections::HashSet::new();
     let questions = course
         .topics
         .iter()
-        .flat_map(|topic| topic.tasks.iter().chain(&topic.exam))
-        .chain(&course.final_exam);
-    for q in questions {
+        .flat_map(|topic| topic.tasks.iter().chain(&topic.exam).map(|q| (Some(topic.id.as_str()), q)))
+        .chain(course.final_exam.iter().map(|q| (None, q)));
+    for (home, q) in questions {
+        // Понятие вопроса — id в его теме или «тема/id»; у финальных — только
+        // «тема/id»: иначе ошибка не вернёт понятие в повторение.
+        if !q.concept.is_empty() {
+            let (t, c) = match q.concept.split_once('/') {
+                Some((t, c)) => (Some(t), c),
+                None => (home, q.concept.as_str()),
+            };
+            let found = t
+                .and_then(|t| course.topics.iter().find(|known| known.id == t))
+                .is_some_and(|known| known.concepts.iter().any(|known| known.id == c));
+            if !found {
+                problems.push(format!("{}: понятия «{}» нет — id понятия темы или «тема/id»", q.id, q.concept));
+            }
+        }
         if !ids.insert(q.id.clone()) {
             problems.push(format!("номер вопроса {} повторяется", q.id));
         }
@@ -253,6 +395,51 @@ pub fn validate(course: &Course) -> Vec<String> {
     problems
 }
 
+/// Замечания о качестве: курс принимается, но автору говорится, что сделать
+/// лучше.
+///
+/// Здесь то, без чего курс работает, но запоминается хуже: понятия без
+/// зацепок, темы, не связанные с остальными, экзамен без привязки к понятиям.
+pub fn advice(course: &Course) -> Vec<String> {
+    let mut notes = Vec::new();
+    for topic in &course.topics {
+        let total = topic.concepts.len();
+        if total == 0 {
+            continue;
+        }
+        let hooked = topic
+            .concepts
+            .iter()
+            .filter(|c| !c.mnemonic.trim().is_empty() || !c.analogy.trim().is_empty())
+            .count();
+        if hooked * 2 < total {
+            notes.push(format!(
+                "{}: зацепка (mnemonic или analogy) есть у {hooked} из {total} понятий — добавь хотя бы половине",
+                topic.id
+            ));
+        }
+        let pitfalls = topic.concepts.iter().filter(|c| !c.pitfall.trim().is_empty()).count();
+        if pitfalls * 3 < total {
+            notes.push(format!("{}: частых ошибок (pitfall) мало — {pitfalls} из {total}", topic.id));
+        }
+        let cross = topic.concepts.iter().flat_map(|c| &c.related).filter(|r| r.contains('/')).count();
+        if course.topics.len() > 1 && cross < 2 {
+            notes.push(format!(
+                "{}: связей с другими темами {cross} — знание держится связями, свяжи хотя бы два понятия с другими темами",
+                topic.id
+            ));
+        }
+        let linked = topic.exam.iter().chain(&topic.tasks).filter(|q| !q.concept.is_empty()).count();
+        if linked * 2 < topic.exam.len() + topic.tasks.len() {
+            notes.push(format!(
+                "{}: у вопросов не указано concept — ошибка на экзамене не вернёт понятие в повторение",
+                topic.id
+            ));
+        }
+    }
+    notes
+}
+
 /// Сохраняет свой курс — из MCP. Отдаёт итог или список ошибок.
 pub fn save_course(course: Course) -> Result<String, String> {
     if builtin().iter().any(|known| known.id == course.id) {
@@ -273,8 +460,15 @@ pub fn save_course(course: Course) -> Result<String, String> {
         .sum::<usize>()
         + course.final_exam.len();
     log::info!("свой курс «{}»: тем {}", course.title, course.topics.len());
+    let concepts: usize = course.topics.iter().map(|t| t.concepts.len()).sum();
+    let notes = advice(&course);
+    let tail = if notes.is_empty() {
+        String::new()
+    } else {
+        format!("\nЧто улучшить:\n- {}", notes.join("\n- "))
+    };
     Ok(format!(
-        "Курс «{}» сохранён: тем {}, вопросов {}. Он уже в окне «Обучение» Ноа.",
+        "Курс «{}» сохранён: тем {}, понятий {concepts}, вопросов {}. Он уже в окне «Обучение» Ноа.{tail}",
         course.title,
         course.topics.len(),
         questions
@@ -313,47 +507,13 @@ pub fn delete_course(course_id: &str) -> Result<String, String> {
 }
 
 /// Формат курса — для клиентов MCP, которые собирают курсы.
-pub const FORMAT: &str = r#"Курс Ноа — JSON-объект:
-{
-  "id": "chinese",                        // латиница, цифры, - и _; уникален
-  "title": "Китайский язык",
-  "aliases": ["китайский", "chinese"],    // как курс назовут голосом
-  "description": "Для кого курс и что внутри — пара предложений.",
-  "final": [ ...вопросы финального экзамена на стык тем... ],
-  "topics": [ тема, тема, ... ]
-}
+/// Как составить курс — для нейросети, которая его собирает (`course_format`).
+///
+/// Отдельным файлом, как регламент модулей: это методичка, а не строка кода,
+/// и читать её удобнее целиком.
+pub const FORMAT: &str = include_str!("course_format.md");
 
-Тема:
-{
-  "id": "tones",
-  "title": "Тоны",
-  "aliases": ["тоны", "тон"],             // как тему назовут голосом: «погоняй меня по тонам»
-  "summary": "Одна строка: о чём тема.",
-  "lesson": "Урок в Markdown: ## подзаголовки, списки, `код`, **жирный**. 300–900 слов, по делу, с примерами.",
-  "tasks": [ 3–5 практических вопросов ],
-  "exam":  [ 6–10 вопросов мини-экзамена ]
-}
-
-Вопрос — одного из двух видов. id уникальны во всём курсе (например tones-t1, tones-e1).
-
-С вариантами:
-{ "id": "tones-e1", "kind": "choice", "q": "Сколько тонов в путунхуа?",
-  "options": ["Два", "Четыре", "Шесть", "Восемь"], "answer": 1,
-  "explain": "Четыре основных тона и нейтральный." }
-answer — номер верного варианта, СЧИТАЯ С НУЛЯ.
-
-Ответ своими словами:
-{ "id": "tones-t1", "kind": "open", "q": "Чем третий тон отличается от второго?",
-  "points": ["ключевой пункт 1", "ключевой пункт 2", "ключевой пункт 3"],
-  "reference": "Образцовый ответ целиком." }
-points — 2–5 ключевых пунктов: по ним Ноа ставит балл. reference — образцовый ответ.
-
-Проходной балл мини-экзамена — 70%, финального — 75%. В финал попадают вопросы "final"
-и по два вопроса из каждой темы. Задачи и ответы своими словами можно отвечать и голосом.
-Большой курс создавай по частям: create_course с одной-двумя темами, затем add_topic для
-каждой следующей."#;
-
-fn topic<'a>(course: &'a Course, id: &str) -> Result<&'a Topic, String> {
+pub(crate) fn topic<'a>(course: &'a Course, id: &str) -> Result<&'a Topic, String> {
     course
         .topics
         .iter()
@@ -387,13 +547,22 @@ struct TopicProgress {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
-struct CourseProgress {
+pub(crate) struct CourseProgress {
     topics: BTreeMap<String, TopicProgress>,
     final_best: Option<u32>,
     final_attempts: u32,
     /// На какой теме остановились.
     current: Option<String>,
     updated: Option<String>,
+    /// Состояние каждой карточки в памяти: `тема/карточка` → расписание.
+    pub(crate) cards: BTreeMap<String, crate::srs::CardState>,
+    /// Сколько новых карточек взято сегодня: день и счёт.
+    pub(crate) new_day: String,
+    pub(crate) new_count: u32,
+    /// Дни занятий: дата → минут фокуса (0 — занимались без таймера).
+    pub(crate) days: BTreeMap<String, u32>,
+    /// Фокус-сессии, последние.
+    pub(crate) sessions: Vec<crate::focus::Session>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -415,7 +584,7 @@ pub fn load(dir: PathBuf) {
 }
 
 /// Меняет прогресс курса под замком и сохраняет.
-fn with<T>(course: &str, change: impl FnOnce(&mut CourseProgress) -> T) -> T {
+pub(crate) fn with<T>(course: &str, change: impl FnOnce(&mut CourseProgress) -> T) -> T {
     let mut guard = STORE.lock().unwrap_or_else(|err| err.into_inner());
     let (path, store) = guard.get_or_insert_with(|| (PathBuf::new(), Store::default()));
     let progress = store.courses.entry(course.to_string()).or_default();
@@ -434,7 +603,7 @@ fn with<T>(course: &str, change: impl FnOnce(&mut CourseProgress) -> T) -> T {
     value
 }
 
-fn progress(course: &str) -> CourseProgress {
+pub(crate) fn progress(course: &str) -> CourseProgress {
     STORE
         .lock()
         .unwrap_or_else(|err| err.into_inner())
@@ -453,6 +622,16 @@ fn note_answer(progress: &mut CourseProgress, topic: Option<&str>, id: &str, sco
     }
 }
 
+/// Темы, урок которых прочитан.
+pub(crate) fn read_topics(course: &str) -> Vec<String> {
+    progress(course)
+        .topics
+        .into_iter()
+        .filter(|(_, own)| own.read)
+        .map(|(id, _)| id)
+        .collect()
+}
+
 /* ── Обзор для окна ────────────────────────────────────────────────────── */
 
 #[derive(Debug, Clone, Serialize)]
@@ -468,6 +647,9 @@ pub struct TopicCard {
     pub tasks_total: usize,
     pub exam_best: Option<u32>,
     pub mistakes: usize,
+    pub concepts_total: usize,
+    /// Понятия, которые держатся уверенно — три недели и дольше.
+    pub concepts_mature: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -484,9 +666,14 @@ pub struct CourseCard {
     pub current: Option<String>,
     pub topic_pass: u32,
     pub final_pass: u32,
+    /// Усвоение: сколько карточек новых, учится, держится, пора повторить.
+    pub mastery: crate::recall::Mastery,
+    /// Минуты фокуса и серия дней занятий.
+    pub focus: crate::focus::Stats,
 }
 
 fn card(course: &Course, progress: &CourseProgress) -> CourseCard {
+    let by_topic = crate::recall::topic_mastery(course);
     let topics: Vec<TopicCard> = course
         .topics
         .iter()
@@ -517,6 +704,8 @@ fn card(course: &Course, progress: &CourseProgress) -> CourseCard {
                 tasks_total: topic.tasks.len(),
                 exam_best: own.exam_best,
                 mistakes: own.mistakes.len(),
+                concepts_total: by_topic.get(&topic.id).map_or(0, |(total, _)| *total),
+                concepts_mature: by_topic.get(&topic.id).map_or(0, |(_, mature)| *mature),
             }
         })
         .collect();
@@ -531,6 +720,8 @@ fn card(course: &Course, progress: &CourseProgress) -> CourseCard {
         topics,
         topic_pass: TOPIC_PASS,
         final_pass: FINAL_PASS,
+        mastery: crate::recall::mastery(course),
+        focus: crate::focus::stats(&progress.days, &progress.sessions),
     }
 }
 
@@ -572,6 +763,8 @@ pub struct TopicView {
     pub topic: Topic,
     pub scores: BTreeMap<String, u32>,
     pub mistakes: Vec<Question>,
+    /// Шпаргалка: своя у темы или собранная из понятий.
+    pub cheatsheet: String,
 }
 
 pub fn topic_view(course_id: &str, topic_id: &str) -> Result<TopicView, String> {
@@ -583,6 +776,7 @@ pub fn topic_view(course_id: &str, topic_id: &str) -> Result<TopicView, String> 
     // Вопросы экзамена уходят в окно без ответов: экзамен выдаётся отдельно.
     shown.exam = Vec::new();
     Ok(TopicView {
+        cheatsheet: crate::recall::cheatsheet(topic),
         mistakes: own
             .mistakes
             .iter()
@@ -703,8 +897,8 @@ async fn grade_open(
         .collect::<Vec<_>>()
         .join("\n");
     let rules = format!(
-        "Ты — интервьюер на собеседовании DevOps-инженера. Сравни ответ кандидата с \
-         ключевыми пунктами эталона. Пункт раскрыт, если кандидат передал его смысл \
+        "Ты — экзаменатор. Сравни ответ ученика с \
+         ключевыми пунктами эталона. Пункт раскрыт, если ученик передал его смысл \
          своими словами, пусть коротко; не упомянут или сказан неверно — не раскрыт. \
          Не придирайся к формулировкам. Верни только JSON без пояснений: \
          {{\"covered\":[номера раскрытых пунктов],\"wrong\":\"что в ответе фактически \
@@ -806,6 +1000,9 @@ pub async fn check(
             }
             note_answer(progress, topic.map(|t| t.id.as_str()), &q.id, score);
         });
+        if score < RIGHT {
+            crate::recall::relapse(course_id, topic.map(|t| t.id.as_str()), &q.concept);
+        }
     }
     Ok(verdict)
 }
@@ -929,6 +1126,13 @@ pub async fn submit(
             own.exam_best = Some(own.exam_best.unwrap_or(0).max(score));
         }
     });
+    for item in &items {
+        if item.score.is_some_and(|score| score < RIGHT) {
+            if let Some((q, topic)) = question(&course, &item.id) {
+                crate::recall::relapse(course_id, topic.map(|t| t.id.as_str()), &q.concept);
+            }
+        }
+    }
     log::info!("экзамен {course_id}/{scope}: {score}%");
     Ok(ExamResult {
         score,
@@ -1110,6 +1314,7 @@ pub async fn voice(app: &AppHandle, action: &str, about: &str) -> String {
     };
     match action.trim() {
         "quiz" => start_quiz(&course, topic.as_ref()),
+        "review" => crate::recall::start(&course, topic.as_ref()),
         "progress" => summary(&course),
         _ => {
             if let Some(topic) = topic {
@@ -1134,6 +1339,15 @@ fn discussion_topic() -> Option<(String, String)> {
 /// Прогресс словами.
 pub fn summary(course: &Course) -> String {
     let card = card(course, &progress(&course.id));
+    let memory = &card.mastery;
+    let remembered = if memory.total == 0 {
+        String::new()
+    } else {
+        format!(
+            " Уверенно держится {} из {} понятий; повторить сегодня — {}.",
+            memory.mature, memory.total, memory.due
+        )
+    };
     let done = card.topics.iter().filter(|topic| topic.status == "done").count();
     let mistakes: usize = card.topics.iter().map(|topic| topic.mistakes).sum();
     let next = card
@@ -1151,7 +1365,7 @@ pub fn summary(course: &Course) -> String {
         String::new()
     };
     format!(
-        "{}: пройдено {}%, тем сдано {done} из {}.{next}{weak}",
+        "{}: пройдено {}%, тем сдано {done} из {}.{remembered}{next}{weak}",
         course.title,
         card.percent,
         card.topics.len()
@@ -1347,13 +1561,16 @@ mod tests {
     fn a_broken_course_is_explained() {
         let course: Course = serde_json::from_str(
             r#"{"id":"x y","title":"","description":"","topics":[{"id":"t","title":"T","summary":"",
-               "lesson":"коротко","tasks":[],"exam":[{"id":"q","kind":"choice","q":"?","options":["a"],"answer":3}]}]}"#,
+               "lesson":"коротко","tasks":[],"exam":[{"id":"q","kind":"choice","q":"?","options":["a"],"answer":3,"concept":"nope"}]}],
+               "final":[{"id":"f","kind":"choice","q":"?","options":["a","b"],"answer":0,"concept":"nope"}]}"#,
         )
         .expect("разбор");
         let problems = validate(&course).join("\n");
         assert!(problems.contains("id курса"));
         assert!(problems.contains("урок слишком короткий"));
         assert!(problems.contains("answer"));
+        assert!(problems.contains("q: понятия «nope» нет"));
+        assert!(problems.contains("f: понятия «nope» нет"));
     }
 
     #[test]
@@ -1377,6 +1594,8 @@ mod tests {
             tasks_total: 4,
             exam_best: best,
             mistakes: 0,
+            concepts_total: 0,
+            concepts_mature: 0,
         };
         assert_eq!(percent(&[topic(false, 0, None)], None), 0);
         assert_eq!(percent(&[topic(true, 4, Some(90))], Some(80)), 100);

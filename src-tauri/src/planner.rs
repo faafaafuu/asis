@@ -183,6 +183,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if awaiting_time() {
         return Some(finish_pending(app, said).await);
     }
+    // Идёт повторение карточек — сказанное и есть ответ на карточку.
+    if let Some(reply) = crate::recall::hear(app, said).await {
+        return Some(reply);
+    }
     // Идёт опрос по курсу — сказанное и есть ответ на вопрос.
     if let Some(reply) = crate::learning::quiz_answer(app, said).await {
         return Some(reply);
@@ -2604,8 +2608,8 @@ fn rules_with_context(open: &[Task], name: &str, context: &str) -> String {
          watch — про список отслеживаемых активов (вотчлист, «мои активы»): \
          показать его, добавить или убрать монету, акцию, валюту.\n\
          learn — обучение по курсу (DevOps и другие): открыть курс или тему, \
-         узнать прогресс, «погоняй меня», «задай вопрос по докеру», подготовка \
-         к собеседованию.\n\
+         узнать прогресс, «погоняй меня», «задай вопрос по докеру», «давай \
+         повторим» (карточки по расписанию), подготовка к собеседованию.\n\
          \n\
          Остальные поля:\n\
          title — название дела для add: коротко, без слов «напомни» и «запиши»;\n\
@@ -2770,6 +2774,8 @@ const EXAMPLES: &str = "Примеры при «Сейчас 2026-09-03 11:00, �
      «покажи вкладку фонды» → {\"intent\":\"watch\",\"action\":\"show\",\"asset\":\"\",\"tab\":\"фонды\"}\n\
      «поставь алерт на биткоин на 80 тысяч» → {\"intent\":\"watch\",\"action\":\"alert\",\"asset\":\"bitcoin\",\"price\":80000}\n\
      «погоняй меня по докеру» → {\"intent\":\"learn\",\"action\":\"quiz\",\"topic\":\"докер\"}\n\
+     «давай повторим» → {\"intent\":\"learn\",\"action\":\"review\",\"topic\":\"\"}\n\
+     «повтори со мной карточки по куберу» → {\"intent\":\"learn\",\"action\":\"review\",\"topic\":\"кубер\"}\n\
      «как мой прогресс по девопсу» → {\"intent\":\"learn\",\"action\":\"progress\",\"topic\":\"девопс\"}\n\
      «открой обучение» → {\"intent\":\"learn\",\"action\":\"open\",\"topic\":\"\"}";
 

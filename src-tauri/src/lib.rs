@@ -32,7 +32,10 @@ mod watchlist;
 mod telegram;
 mod timers;
 mod shots;
+mod focus;
 mod learning;
+mod recall;
+mod srs;
 mod alarms;
 mod mcp;
 mod module_kit;
@@ -291,6 +294,12 @@ pub fn run() {
             commands::learn_overview,
             commands::learn_topic,
             commands::learn_read,
+            commands::learn_review,
+            commands::learn_grade,
+            commands::learn_concepts,
+            commands::learn_map,
+            commands::learn_focus_done,
+            commands::learn_focus_bell,
             commands::learn_check,
             commands::learn_self_grade,
             commands::learn_exam,
@@ -695,7 +704,7 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                                 if alarms::stop() {
                                     respond(&app, "Выключил будильник.".into());
                                 }
-                                if let Some(summary) = learning::stop_quiz() {
+                                if let Some(summary) = learning::stop_quiz().or_else(recall::stop) {
                                     respond(&app, summary);
                                 }
                                 overlay::hide_hud(&app);
@@ -1689,7 +1698,7 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                             respond(&app, "Выключил будильник.".into());
                         }
                         // Шёл опрос по курсу — прощание его заканчивает с итогом.
-                        if let Some(summary) = learning::stop_quiz() {
+                        if let Some(summary) = learning::stop_quiz().or_else(recall::stop) {
                             respond(&app, summary);
                         }
                         break;
@@ -2404,7 +2413,7 @@ pub(crate) fn ask(app: &tauri::AppHandle, text: String) {
                     respond(&app, "Выключил будильник.".into());
                 }
                 // Прощание заканчивает и опрос по курсу — с итогом.
-                if let Some(summary) = learning::stop_quiz() {
+                if let Some(summary) = learning::stop_quiz().or_else(recall::stop) {
                     respond(&app, summary);
                 }
             } else if !handled_as_task(&app, &text) {
