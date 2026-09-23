@@ -1132,10 +1132,80 @@ async function loadSettings() {
     ui.apiKey.value = "";
     ui.apiKey.placeholder = settings.apiKey ? t("key.saved") : t("key.placeholder");
     loadFreeModels();
+    loadMine();
   } catch (err) {
     ui.aiStatus.textContent = `Не удалось прочитать настройки: ${err}`;
   }
 }
+
+/* ── Мои модели ─────────────────────────────────────────────────────────── */
+
+const KIND = { мост: "мост", облако: "облако", своя: "на этом компьютере" };
+
+/** Подписки, которые умеет мост, — по-человечески. */
+const BRIDGE_NAMES = {
+  "claude-code-bridge": "Claude — подписка через мост",
+  "codex-bridge": "ChatGPT — подписка через Codex",
+  "gemini-bridge": "Gemini — аккаунт Google через мост",
+  "qwen-bridge": "Qwen — аккаунт qwen.ai через мост",
+};
+
+/** Имя модели для списка: без владельца, как её называют. */
+function shortModel(model) {
+  const bare = model.replace(/:free$/, "");
+  return BRIDGE_NAMES[bare] ?? model.split("/").pop();
+}
+
+/**
+ * Все модели, на которых Ноа уже работала, и те, что стоят в Ollama.
+ *
+ * Раньше переключиться можно было только выбрав источник и вписав имя модели
+ * руками: у моста и «другого сервиса» списка моделей нет, и имя приходилось
+ * помнить наизусть. Здесь — щелчок, ключ подставляется тот, что к этой модели.
+ */
+async function loadMine() {
+  if (!api) return;
+  let list = [];
+  try {
+    list = await api.invoke("brains_list");
+  } catch {
+    return;
+  }
+  ui.mineBlock.hidden = !list.length;
+  if (!list.length) return;
+  const current = list.find((item) => item.current);
+  const groups = new Map();
+  for (const item of list) {
+    if (!groups.has(item.kind)) groups.set(item.kind, []);
+    groups.get(item.kind).push(item);
+  }
+  const options = [];
+  if (!current) options.push(new Option("Выберите модель", ""));
+  for (const [kind, items] of groups) {
+    const group = document.createElement("optgroup");
+    group.label = KIND[kind] ?? kind;
+    for (const item of items) {
+      const option = new Option(shortModel(item.model), JSON.stringify([item.endpoint, item.model]));
+      option.title = `${item.model} — ${item.endpoint}`;
+      group.append(option);
+    }
+    options.push(group);
+  }
+  ui.mine.replaceChildren(...options);
+  ui.mine.value = current ? JSON.stringify([current.endpoint, current.model]) : "";
+}
+
+ui.mine?.addEventListener("change", async () => {
+  if (!ui.mine.value) return;
+  const [endpoint, model] = JSON.parse(ui.mine.value);
+  ui.mineStatus.textContent = "Переключаю…";
+  try {
+    ui.mineStatus.textContent = await api.invoke("brains_use", { endpoint, model });
+    await loadSettings();
+  } catch (err) {
+    ui.mineStatus.textContent = String(err);
+  }
+});
 
 ui.preset.addEventListener("change", () => {
   applyPreset(ui.preset.value);
@@ -1155,6 +1225,7 @@ async function saveAi() {
     },
   });
   ui.apiKey.value = "";
+  loadMine();
 }
 
 /* ── Каталог моделей облачного сервиса ──────────────────────────────────── */

@@ -347,14 +347,17 @@ impl AiProvider for MockProvider {
 
 const SYSTEM_PROMPT_RU: &str = concat!(
     "Ты объясняешь термин, который выделил пользователь. Ответь одним-двумя предложениями ",
-    "обычным текстом, по-русски — даже если сам термин на другом языке. Только объяснение: ",
-    "без вступлений, без списков, без разметки и без JSON."
+    "обычным текстом, по-русски — даже если сам термин на другом языке. Объясняй в том смысле, ",
+    "в каком термин стоит в контексте (окно и текст вокруг): «ядро» в статье про Linux — ядро ",
+    "системы, а не ядро ореха. Если выделена фраза или предложение — объясни её смысл в этом ",
+    "тексте. Только объяснение: без вступлений, без списков, без разметки и без JSON."
 );
 
 const SYSTEM_PROMPT_EN: &str = concat!(
     "You explain a term the user selected. Answer in one or two plain-text sentences ",
-    "in English, even if the term itself is in another language. The explanation only: ",
-    "no preamble, no lists, no markup, no JSON."
+    "in English, even if the term itself is in another language. Explain it in the sense it has ",
+    "in the given context (window and surrounding text); if a phrase or sentence is selected, ",
+    "explain what it means in that text. The explanation only: no preamble, no lists, no markup, no JSON."
 );
 
 /// Подсказка модели на языке интерфейса.

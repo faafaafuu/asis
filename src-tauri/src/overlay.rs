@@ -247,6 +247,8 @@ pub fn show_hud(app: &AppHandle, mode: &str) {
     // разворачивает: запись шла, а на экране ничего не было.
     let _ = window.unminimize();
     let _ = window.show();
+    #[cfg(target_os = "windows")]
+    make_passive(&window);
     // Пока индикатор на экране, голос занят: Esc его остановит.
     crate::voice::hotkey::voice_active(true);
 }
@@ -1066,6 +1068,8 @@ const USAGE_HEIGHT: f64 = 30.0;
 pub fn show_usage_widget(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(USAGE_LABEL) {
         window.show()?;
+        #[cfg(target_os = "windows")]
+        make_passive(&window);
         return Ok(());
     }
     let widget = app.state::<AppState>().config().widget.clone();
@@ -1118,6 +1122,11 @@ pub fn show_usage_widget(app: &AppHandle) -> tauri::Result<()> {
     };
     window.set_position(position)?;
     window.show()?;
+    // Показ возвращает окну стиль «окно приложения»: без повтора виджет
+    // оказывался в группе Суфлёра на панели задач и в доке, рядом с настоящими
+    // окнами, и сворачивался вместо них.
+    #[cfg(target_os = "windows")]
+    make_passive(&window);
 
     let handle = app.clone();
     let widget_window = window.clone();
@@ -1130,6 +1139,8 @@ pub fn show_usage_widget(app: &AppHandle) -> tauri::Result<()> {
                 std::thread::spawn(move || {
                     std::thread::sleep(std::time::Duration::from_millis(300));
                     let _ = widget.unminimize();
+                    #[cfg(target_os = "windows")]
+                    make_passive(&widget);
                 });
                 return;
             }
@@ -1150,6 +1161,8 @@ pub fn pin_usage_widget(app: &AppHandle, on_top: bool) {
     if let Some(window) = app.get_webview_window(USAGE_LABEL) {
         let _ = window.set_always_on_bottom(!on_top);
         let _ = window.set_always_on_top(on_top);
+        #[cfg(target_os = "windows")]
+        make_passive(&window);
     }
 }
 

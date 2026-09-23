@@ -21,13 +21,15 @@ use windows::Win32::System::Ole::{
     CF_UNICODETEXT,
 };
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
+    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, IUIAutomationTextRange,
+    TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit_Character,
+    TextUnit_Paragraph, UIA_TextPatternId,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VIRTUAL_KEY,
     VK_CONTROL, VK_ESCAPE, VK_LBUTTON, VK_LCONTROL,
 };
-use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, GetWindowTextW};
 
 use super::{Capability, Diagnostics, PlatformIntegration, ScreenRect, Selection};
 use crate::config::TriggerConfig;
@@ -96,7 +98,55 @@ fn cursor() -> Option<(f64, f64)> {
 /// а это Telegram, Discord, VS Code, Slack) не держит дерево доступности постоянно.
 /// Он строит его в ответ на первое обращение извне, и этот самый первый запрос
 /// возвращает пустоту. Одна попытка означала бы «в браузере не работает никогда».
-fn selection_via_uia() -> Option<(String, Option<ScreenRect>)> {
+/// Сколько текста вокруг выделения отдавать модели.
+const CONTEXT_CHARS: i32 = 1500;
+
+/// Текст вокруг выделения: абзац с ним и по абзацу до и после.
+///
+/// Раньше модель получала одно выделенное слово: «ядро» в статье про Linux и
+/// в рецепте объяснялось одинаково, и объяснение шло мимо. Если приложение
+/// абзацев не различает, берётся по нескольку сотен знаков в обе стороны.
+unsafe fn surrounding(range: &IUIAutomationTextRange) -> String {
+    let Ok(around) = range.Clone() else { return String::new() };
+    let by_paragraph = around.MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Paragraph, -1).is_ok()
+        && around.MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Paragraph, 1).is_ok();
+    let mut text = if by_paragraph { around.GetText(CONTEXT_CHARS).map(|t| t.to_string()).unwrap_or_default() } else { String::new() };
+    if text.trim().chars().count() < 40 {
+        if let Ok(around) = range.Clone() {
+            let _ = around.MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Character, -(CONTEXT_CHARS / 2));
+            let _ = around.MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, CONTEXT_CHARS / 2);
+            text = around.GetText(CONTEXT_CHARS).map(|t| t.to_string()).unwrap_or_default();
+        }
+    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Заголовок окна, где выделяли: хотя бы откуда слово, если текста вокруг нет.
+fn window_title() -> String {
+    unsafe {
+        let window = GetForegroundWindow();
+        let mut title = [0u16; 256];
+        let length = GetWindowTextW(window, &mut title).max(0) as usize;
+        String::from_utf16_lossy(&title[..length]).trim().to_string()
+    }
+}
+
+/// Контекст для модели: текст вокруг и окно.
+fn context_of(around: &str, text: &str) -> String {
+    let title = window_title();
+    let mut parts = Vec::new();
+    if !title.is_empty() {
+        parts.push(format!("Окно: {title}."));
+    }
+    // Вокруг — ровно само выделение: нового ничего не сказано.
+    if !around.is_empty() && around.trim() != text.trim() {
+        parts.push(format!("Текст вокруг: {around}"));
+    }
+    parts.join("
+")
+}
+
+fn selection_via_uia() -> Option<(String, Option<ScreenRect>, String)> {
     for attempt in 0..3 {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_millis(80));
@@ -108,7 +158,7 @@ fn selection_via_uia() -> Option<(String, Option<ScreenRect>)> {
     None
 }
 
-fn selection_via_uia_once() -> Option<(String, Option<ScreenRect>)> {
+fn selection_via_uia_once() -> Option<(String, Option<ScreenRect>, String)> {
     ensure_com();
     unsafe {
         let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
@@ -127,7 +177,8 @@ fn selection_via_uia_once() -> Option<(String, Option<ScreenRect>)> {
         }
 
         let rect = last_bounding_rect(&range);
-        Some((text, rect))
+        let around = surrounding(&range);
+        Some((text, rect, around))
     }
 }
 
@@ -363,14 +414,15 @@ impl PlatformIntegration for Platform {
 
         let cursor = cursor().unwrap_or((0.0, 0.0));
 
-        if let Some((text, rect)) = selection_via_uia() {
+        if let Some((text, rect, around)) = selection_via_uia() {
             let text = text.trim().to_string();
+            let context = context_of(&around, &text);
             self.note(format!("получено слово «{}»", short(&text)), "UI Automation", true);
             return Some(Selection {
                 text,
                 rect,
                 cursor,
-                context: String::new(),
+                context,
             });
         }
 
@@ -384,11 +436,12 @@ impl PlatformIntegration for Platform {
                         "буфер обмена",
                         true,
                     );
+                    let context = context_of("", &text);
                     return Some(Selection {
                         text,
                         rect: None,
                         cursor,
-                        context: String::new(),
+                        context,
                     });
                 }
                 None => {

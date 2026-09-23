@@ -52,6 +52,59 @@ pub fn remember(config: &mut Config) {
     config.brains.truncate(KEEP);
 }
 
+/// Ключ, который Ноа помнит для этого адреса: у каждого сервиса свой.
+///
+/// Нужен, когда источник меняют в окне, не вводя ключ заново. Без этого
+/// оставался ключ прежнего сервиса: после своей модели — пустой, и OpenRouter
+/// отвечал «Missing Authentication header»; после моста — чужой.
+pub fn key_for(config: &Config, endpoint: &str) -> String {
+    let wanted = endpoint.trim().trim_end_matches('/');
+    config
+        .brains
+        .iter()
+        .find(|brain| brain.endpoint.trim().trim_end_matches('/') == wanted && !brain.api_key.is_empty())
+        .map(|brain| brain.api_key.clone())
+        .unwrap_or_default()
+}
+
+/// Модель в списке окна: одна строка, выбирается щелчком.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Choice {
+    pub endpoint: String,
+    pub model: String,
+    /// «мост», «облако» или «своя».
+    pub kind: String,
+    pub current: bool,
+}
+
+/// Все модели, на которые можно переключиться: запомненные и те, что стоят в
+/// Ollama. Имени наизусть помнить не нужно — оно здесь.
+pub async fn choices(app: &AppHandle) -> Vec<Choice> {
+    let current = Brain::of(&app.state::<AppState>().config().ai);
+    candidates(app)
+        .await
+        .into_iter()
+        .map(|brain| Choice {
+            current: brain.same(&current),
+            kind: kind(&brain).into(),
+            endpoint: brain.endpoint,
+            model: brain.model,
+        })
+        .collect()
+}
+
+/// Переключает на модель из списка окна.
+pub async fn choose(app: &AppHandle, endpoint: &str, model: &str) -> Result<String, String> {
+    let wanted = Brain { endpoint: endpoint.into(), model: model.into(), ..Default::default() };
+    let brain = candidates(app)
+        .await
+        .into_iter()
+        .find(|brain| brain.same(&wanted))
+        .ok_or("Такой модели в списке уже нет.")?;
+    Ok(switch(app, brain))
+}
+
 /// Как назвать модель вслух: без владельца и служебных хвостов.
 pub fn spoken_name(model: &str) -> String {
     let short = model.rsplit('/').next().unwrap_or(model);
@@ -89,6 +142,10 @@ const ALIASES: &[(&str, &str)] = &[
     ("фи", "phi"),
     ("мост", "bridge"),
     ("кими", "kimi"),
+    ("кодекс", "codex"),
+    ("чатгпт", "codex"),
+    ("чатжпт", "codex"),
+    ("опенаи", "codex"),
     ("глм", "glm"),
 ];
 
@@ -174,7 +231,32 @@ fn score(brain: &Brain, wanted: &[String]) -> usize {
 }
 
 async fn candidates(app: &AppHandle) -> Vec<Brain> {
-    let mut list = app.state::<AppState>().config().brains.clone();
+    let (mut list, base) = {
+        let state = app.state::<AppState>();
+        let config = state.config();
+        (config.brains.clone(), config.ai.clone())
+    };
+    // Мост умеет несколько подписок (Claude, ChatGPT через Codex, Gemini, Qwen):
+    // что у него есть, он сам скажет списком. Вариант «:free» — тот, при
+    // котором разбор реплик делает своя модель, а мост только отвечает.
+    let bridges: Vec<Brain> = list.iter().filter(|b| kind(b) == "мост").cloned().collect();
+    let mut seen = std::collections::HashSet::new();
+    for bridge in bridges {
+        if !seen.insert(bridge.endpoint.clone()) {
+            continue;
+        }
+        let mut ai = base.clone();
+        ai.endpoint = bridge.endpoint.clone();
+        ai.api_key = bridge.api_key.clone();
+        ai.proxy = bridge.proxy.clone();
+        let Ok(models) = crate::ai_client::catalog(&ai).await else { continue };
+        for model in models.into_iter().filter(|m| m.id.ends_with(":free")) {
+            let brain = Brain { model: model.id, ..bridge.clone() };
+            if !list.iter().any(|known| known.same(&brain)) {
+                list.push(brain);
+            }
+        }
+    }
     let status = crate::ollama::status(crate::ollama::DEFAULT_HOST).await;
     for model in status.installed.iter().filter(|m| !m.name.contains("embed")) {
         let brain = Brain {

@@ -212,14 +212,19 @@ pub fn save_ai_settings(
     {
         let mut config = state.config_mut();
         config.ai.provider = settings.provider;
-        config.ai.endpoint = settings.endpoint;
         config.ai.model = settings.model;
         config.ai.proxy = settings.proxy;
         // Пустое поле ключа означает «не менять»: в окно он приходит замаскированным,
         // и сохранять маску вместо настоящего ключа нельзя.
+        let moved = config.ai.endpoint.trim().trim_end_matches('/') != settings.endpoint.trim().trim_end_matches('/');
         if !settings.api_key.is_empty() && !settings.api_key.starts_with('•') {
             config.ai.api_key = settings.api_key;
+        } else if moved {
+            // Другой сервис, а ключ не введён — берём тот, что Ноа помнит для
+            // него; чужой ключ прежнего сервиса сюда не годится.
+            config.ai.api_key = crate::brains::key_for(&config, &settings.endpoint);
         }
+        config.ai.endpoint = settings.endpoint;
         crate::brains::remember(&mut config);
     }
 
@@ -237,6 +242,18 @@ pub fn save_ai_settings(
     Ok(())
 }
 
+/// Модели, между которыми можно переключиться одним щелчком.
+#[tauri::command]
+pub async fn brains_list(app: AppHandle) -> Vec<crate::brains::Choice> {
+    crate::brains::choices(&app).await
+}
+
+/// Переключиться на модель из списка.
+#[tauri::command]
+pub async fn brains_use(app: AppHandle, endpoint: String, model: String) -> Result<String, String> {
+    crate::brains::choose(&app, &endpoint, &model).await
+}
+
 /// Свежий каталог моделей облачного сервиса — по тому, что сейчас введено в окне,
 /// ещё до сохранения.
 ///
@@ -251,7 +268,7 @@ pub async fn cloud_models(
 ) -> Result<Vec<crate::ai_client::ModelInfo>, String> {
     let mut ai = state.config().ai.clone();
     if ai.endpoint.trim() != endpoint.trim() {
-        ai.api_key = String::new();
+        ai.api_key = crate::brains::key_for(&state.config(), &endpoint);
     }
     if !api_key.is_empty() && !api_key.starts_with('•') {
         ai.api_key = api_key;
@@ -882,9 +899,22 @@ pub async fn voice_speak(
     app: AppHandle,
     state: State<'_, AppState>,
     text: String,
+    request: Option<u64>,
 ) -> Result<(), String> {
+    // Просьбу по пробелу успели оборвать или сменить новой — не читаем.
+    if let Some(request) = request {
+        if !crate::voice::read_is_current(request) {
+            log::info!("чтение отменено до начала — не озвучиваю");
+            return Ok(());
+        }
+        if text.trim().is_empty() {
+            crate::voice::read_done();
+            return Ok(());
+        }
+    }
     let config = state.config().voice.clone();
     if !config.enabled {
+        crate::voice::read_done();
         log::info!("просили озвучить, но голос выключен в настройках");
         return Err("голос выключен в настройках".into());
     }
@@ -897,6 +927,9 @@ pub async fn voice_speak(
         text.chars().take(90).collect::<String>()
     );
     let result = crate::voice::speak(&app, &config, &text).await;
+    if request.is_some_and(crate::voice::read_is_current) {
+        crate::voice::read_done();
+    }
     if let Err(err) = &result {
         log::warn!("озвучить не вышло: {err}");
     }

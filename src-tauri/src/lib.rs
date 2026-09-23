@@ -299,6 +299,8 @@ pub fn run() {
             commands::learn_concepts,
             commands::learn_map,
             commands::learn_focus_done,
+            commands::brains_list,
+            commands::brains_use,
             commands::learn_focus_bell,
             commands::learn_check,
             commands::learn_self_grade,
@@ -602,7 +604,8 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         }
 
                         log::info!("пробел: читаю вслух");
-                        let _ = app.emit_to(overlay::POPUP_LABEL, "voice:speak", ());
+                        let request = voice::request_read();
+                        let _ = app.emit_to(overlay::POPUP_LABEL, "voice:speak", request);
                         show_speaking(&app);
                     }
                     // Ctrl с Alt и пробелом — включить или выключить ожидание

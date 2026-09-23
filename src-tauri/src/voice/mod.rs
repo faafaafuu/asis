@@ -112,12 +112,51 @@ pub fn level() -> f32 {
     audio::level()
 }
 
+/// Номер последней просьбы прочитать вслух. `stop` его сдвигает — и все
+/// просьбы, отданные раньше, но ещё не дошедшие до синтезатора, отменяются.
+static READ_REQUEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Когда попросили прочитать, мс от старта программы; 0 — не просили.
+static READ_PENDING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Сколько чтение может готовиться: синтезатор просыпается до пары десятков секунд.
+const READ_PENDING_MS: u64 = 20_000;
+
+fn now_ms() -> u64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64 + 1
+}
+
+/// Пробел попросил прочитать: номер просьбы, которую окно вернёт с текстом.
+///
+/// Между нажатием и первым звуком проходят секунды — окно ищет текст,
+/// синтезатор просыпается. Раньше в эти секунды Ноа считалась молчащей:
+/// второе нажатие не обрывало чтение, а запускало его заново, а обрыв не
+/// отменял уже отданную просьбу, и чтение начиналось после него.
+pub fn request_read() -> u64 {
+    READ_PENDING.store(now_ms(), std::sync::atomic::Ordering::SeqCst);
+    READ_REQUEST.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+}
+
+/// Эта просьба ещё в силе — её не отменили обрывом и не сменили новой.
+pub fn read_is_current(request: u64) -> bool {
+    READ_REQUEST.load(std::sync::atomic::Ordering::SeqCst) == request
+}
+
+/// Чтение закончилось или не состоялось.
+pub fn read_done() {
+    READ_PENDING.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn read_pending() -> bool {
+    let since = READ_PENDING.load(std::sync::atomic::Ordering::SeqCst);
+    since != 0 && now_ms().saturating_sub(since) < READ_PENDING_MS
+}
+
 /// Идёт ли сейчас речь: звучит из колонок или ещё синтезируется.
 ///
 /// Одной очереди воспроизведения мало — между предложениями она пустеет, пока
 /// синтезатор считает следующее, и пауза посреди ответа выглядела бы концом.
 pub fn speaking() -> bool {
-    audio::speaking() || piper::busy() || silero::busy()
+    audio::speaking() || piper::busy() || silero::busy() || read_pending()
 }
 
 /// Что именно сейчас считается речью: звук в колонках и идущий синтез.
@@ -158,6 +197,8 @@ pub fn chime() {
 
 /// Замолчать: и звук, и работу, которая его готовит.
 pub fn stop() {
+    READ_REQUEST.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    read_done();
     piper::stop();
     azure::stop();
     silero::stop();
