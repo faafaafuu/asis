@@ -29,8 +29,28 @@ function money(value) {
 const count = (tally) => (tally?.prompt ?? 0) + (tally?.completion ?? 0);
 const known = (value) => value !== null && value !== undefined;
 
+/** «5ч 66% · нед 62%» — коротко, по самому тесному окну первым. */
+function limitsLine(limits) {
+  const short = { "5 ч": "5ч", неделя: "нед", месяц: "мес", сегодня: "день" };
+  return (limits ?? []).map((limit) => `${short[limit.name] ?? limit.name} ${Math.round(limit.used)}%`).join(" · ");
+}
+
+/** Когда обнулится — «через 2 ч 10 мин», «через 2 дн». */
+function resetsIn(iso) {
+  if (!iso) return "";
+  const minutes = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+  if (!Number.isFinite(minutes) || minutes <= 0) return "";
+  if (minutes < 60) return ` · обнулится через ${minutes} мин`;
+  if (minutes < 48 * 60) return ` · обнулится через ${Math.floor(minutes / 60)} ч ${minutes % 60} мин`;
+  return ` · обнулится через ${Math.round(minutes / 1440)} дн`;
+}
+
 function render(s) {
   ui.tokens.textContent = `всего ${tokens(count(s.total))}`;
+  const limits = s.limits ?? [];
+  ui.limits.textContent = limitsLine(limits);
+  ui.limits.hidden = !limits.length;
+  ui.limits.classList.toggle("low", limits.some((limit) => limit.used >= 85));
   ui.money.textContent = s.cloud ? money(s.total.cost) : "";
   ui.money.classList.toggle("low", known(s.balance) && s.balance < 1);
 
@@ -47,7 +67,9 @@ function render(s) {
   // У подписки Claude Code остатка не спросить: ни команды, ни поля в ответе
   // для него нет. Молчать об этом хуже, чем сказать: иначе пустое место
   // выглядит как «не сосчитали».
-  if (s.service === "мост") lines.push("остаток по подписке Claude Code не показывает сам Claude Code");
+  for (const limit of limits) {
+    lines.push(`лимит ${limit.name}: использовано ${Math.round(limit.used)}%, ${limit.left}${resetsIn(limit.resets)}`);
+  }
   lines.push(onTop ? "двойной щелчок — на рабочий стол" : "двойной щелчок — поверх окон");
   ui.line.title = lines.join("\n");
 }

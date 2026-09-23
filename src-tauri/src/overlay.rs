@@ -1060,7 +1060,7 @@ pub fn show_module(app: &AppHandle, manifest: &crate::module_kit::Manifest) -> t
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
     Ok(())
 }
-const USAGE_WIDTH: f64 = 200.0;
+const USAGE_WIDTH: f64 = 330.0;
 const USAGE_HEIGHT: f64 = 30.0;
 
 /// Виджет расхода: маленькая карточка на рабочем столе, живёт, пока работает

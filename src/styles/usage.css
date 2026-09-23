@@ -48,3 +48,12 @@ body {
   content: "•";
   color: var(--accent);
 }
+
+/* Лимиты подписки: сколько израсходовано. Краснеют, когда почти всё. */
+.limits {
+  opacity: 0.85;
+}
+
+.limits.low {
+  color: var(--error-text);
+}
