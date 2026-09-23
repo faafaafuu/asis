@@ -1193,12 +1193,38 @@ fn clipped_name(words: &[(String, usize)]) -> Option<usize> {
         _ => (first.1, 1),
     };
     let next = &words.get(next_at)?.0;
+    let after = words.get(next_at + 1).map(|(word, _)| word.as_str()).unwrap_or("");
     let request = WAKE_REQUESTS.iter().any(|stem| next.starts_with(stem));
-    let checking = next == "ты"
-        && words
-            .get(next_at + 1)
-            .is_some_and(|(word, _)| word == "тут" || word == "здесь");
-    (request || checking).then_some(name_end)
+    // Проверка связи и приветствие — тоже зов, и по журналу самый частый:
+    // «Ну а как слышно?», «Ну а привет!», «Ну а, проверка связи», «Но
+    // здорово!» — человек звал Ноа, а она молчала, потому что после «ну»
+    // ждала только просьбу. Обычная речь так не начинается: «ну а привет»
+    // и «но проверка связи» говорят не соседу, а помощнику.
+    let checking = (next == "ты" && (after == "тут" || after == "здесь"))
+        || (next == "как" && (after.starts_with("слыш") || after == "дела"))
+        || WAKE_CHECKS.iter().any(|stem| next.starts_with(stem));
+    let greeting = CALL_GREETINGS.iter().any(|stem| next.starts_with(stem));
+    (request || checking || greeting).then_some(name_end)
+}
+
+/// Проверка связи после имени: «приём», «проверка», «алло».
+#[cfg(desktop)]
+const WAKE_CHECKS: &[&str] = &["приём", "прием", "провер", "алло"];
+
+/// Приветствия, которыми зовут. Основами, а не словами: «здорово» и «здорова»
+/// распознавание пишет через раз, и перечислять каждое написание бессмысленно.
+#[cfg(desktop)]
+const CALL_GREETINGS: &[&str] = &["привет", "здоров", "здравств", "хай", "салют", "добр"];
+
+/// Встроенное ли это имя — «Ноа» в любом регистре.
+///
+/// Сравнение должно понимать кириллицу. `eq_ignore_ascii_case` её не понимает:
+/// для него «ноа» и «Ноа» — разные слова, и человек, вписавший имя маленькими
+/// буквами, получал вместо разбора ослышек «Ноа» строгое правило для чужого
+/// имени. «Ну а как слышно?» и «Но здорово!» тогда не узнавались как зов вовсе.
+#[cfg(desktop)]
+fn is_default_name(name: &str) -> bool {
+    name.trim().to_lowercase() == crate::config::DEFAULT_WAKE_NAME.to_lowercase()
 }
 
 /// Отделяет обращение от вопроса.
@@ -1212,7 +1238,7 @@ fn wake_split(text: &str, name: &str) -> Option<String> {
     // слипшиеся написания. Своё имя такой разборки не получало и вряд ли
     // получит на каждое возможное имя: у него нет типичных ослышек, есть только
     // общее правило «на одну-две буквы мимо».
-    if name.eq_ignore_ascii_case(crate::config::DEFAULT_WAKE_NAME) {
+    if is_default_name(name) {
         wake_split_default(text)
     } else {
         wake_split_custom(text, name)
@@ -1478,7 +1504,7 @@ fn is_farewell(text: &str, name: &str) -> bool {
     // Своё имя ли это — точно (список типичных написаний «Ноа») или похоже на
     // выбранное человеком (см. `wake_split_custom`).
     let is_name = |w: &str| -> bool {
-        if name.eq_ignore_ascii_case(crate::config::DEFAULT_WAKE_NAME) {
+        if is_default_name(name) {
             NAMES.contains(&w)
         } else {
             let lower = name.to_lowercase();
@@ -2539,7 +2565,7 @@ fn lone_word(text: &str) -> bool {
 }
 
 fn fragment(text: &str) -> bool {
-    const GREETINGS: &[&str] = &["привет", "здравств", "здорово", "хай", "салют", "добр"];
+    const GREETINGS: &[&str] = &["привет", "здравств", "здоров", "хай", "салют", "добр"];
     let lower = text.to_lowercase();
     let words: Vec<&str> = lower
         .split(|c: char| !c.is_alphabetic())
@@ -2637,6 +2663,22 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 #[cfg(all(test, desktop))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_clipped_noa_with_a_greeting_or_a_check_is_a_call() {
+        // Дословно из журнала: всё это были зовы, оставшиеся без ответа.
+        assert_eq!(wake_split("— Ну, а как слышно?", "ноа").as_deref(), Some("как слышно?"));
+        assert_eq!(wake_split("Ну а привет!", "ноа").as_deref(), Some("привет!"));
+        assert_eq!(wake_split("Ну а, проверка связи...", "ноа").as_deref(), Some("проверка связи..."));
+        assert_eq!(wake_split("Но здорово!", "ноа").as_deref(), Some("здорово!"));
+        assert!(!lone_word("здорова!"), "«здорова» — приветствие, не ослышка");
+        assert!(is_default_name("ноа") && is_default_name("НОА"), "имя в любом регистре");
+
+        // А обычная речь зовом не становится.
+        assert_eq!(wake_split("Ну ладно, поехали", "ноа"), None);
+        assert_eq!(wake_split("Но всё по-прежнему открыто", "ноа"), None);
+        assert_eq!(wake_split("Ну а что делать", "ноа"), None);
+    }
 
     #[test]
     fn a_short_question_after_the_name_is_heard() {
