@@ -1,9 +1,9 @@
 // Страницы кабинета: вход, аккаунт, кабинет автора, подключение ИИ, студия.
 // Грузятся, только когда их открыли, — главной они не нужны.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=39";
-import { DOCS } from "./i18n.js?v=39";
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=39";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=40";
+import { DOCS } from "./i18n.js?v=40";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=40";
 
 export function renderStudio(page) {
   const tr = t();
@@ -479,7 +479,14 @@ export async function renderConnect(page) {
           }
         },
       }, tr.connRotate);
+      // Главный адрес — без ключа: нейросеть сама проходит вход на сайте и
+      // продлевает его. Ссылка с ключом — для клиентов, которые входить не умеют.
+      const plain = `${SITE}/mcp`;
+      const copyPlain = h("button", { type: "button", class: "btn btn--small", onclick: () => copy(plain, copyPlain, tr.connCopy) }, tr.connCopy);
       result.replaceChildren(
+        h("div", { class: "secret-once" }, h("code", {}, plain), copyPlain),
+        h("p", { class: "hint" }, tr.connPlainHint(state.user.name)),
+        h("div", { class: "step__head" }, tr.connKeyLink),
         h("div", { class: "secret-once" }, h("code", {}, url), copyLink),
         h("p", { class: "hint" }, tr.connLinkHint),
         h("div", { class: "step__head" }, tr.connKey),

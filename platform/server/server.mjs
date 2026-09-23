@@ -17,6 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import { CATEGORIES, FORMAT, lint, validId } from "./standard.mjs";
 import { mountRemote } from "./remote.mjs";
 import { mountOAuth } from "./oauth.mjs";
+import { mountMcpAuth } from "./mcpauth.mjs";
 
 const scrypt = promisify(scryptCb);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -610,7 +611,9 @@ async function latestInstaller() {
 }
 
 const oauthHandler = mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies });
-const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY });
+const PUBLIC_URL = (process.env.NOAH_PUBLIC_URL ?? `http://127.0.0.1:${PORT}`).replace(/\/$/, "");
+const mcpAuthHandler = mountMcpAuth({ db, publicUrl: PUBLIC_URL, sessionUser });
+const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY, publicUrl: PUBLIC_URL });
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://local");
@@ -625,6 +628,8 @@ const server = http.createServer(async (req, res) => {
   try {
     // MCP по ссылке: нейросеть пользователя подключается сюда адресом с ключом.
     if (url.pathname === "/mcp") return await mcpHandler(req, res, url);
+    // Вход нейросети в MCP по OAuth: описание сервера, регистрация, согласие, токены.
+    if ((url.pathname.startsWith("/.well-known/") || url.pathname.startsWith("/oauth/")) && (await mcpAuthHandler(req, res, url))) return;
     if (url.pathname === "/download") {
       res.writeHead(302, { Location: await latestInstaller(), "Cache-Control": "no-store" });
       return res.end();

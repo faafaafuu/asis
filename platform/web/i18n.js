@@ -1,6 +1,6 @@
 // Тексты интерфейса площадки: английский и русский.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=39";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=40";
 
 export const T = {
   en: {
@@ -75,7 +75,7 @@ export const T = {
       ["NOAH", [["About", "#/"], ["Download", RELEASES], ["Source code", REPO], ["Contact", REPO + "/issues"]]],
       ["LEGAL", [["Privacy policy", "#/privacy"], ["Terms of service", "#/terms"]]],
     ],
-    connCopy: "COPY", connRotate: "Change link", connRotateAsk: "Issue a new link? The current one stops working — you will need to paste the new one into your AI.", connRotated: "New link issued.", connLinkHint: "Your permanent link: paste it into your AI once. It stays the same until you change it.", permBuiltin: "Part of the NOAH app — runs on your computer and updates with it.", orWith: "or", with: (name) => `Continue with ${name}`, tgWait: "Press «Start» in Telegram — you are signed in here automatically.", tgOpen: "Open Telegram",
+    connCopy: "COPY", connRotate: "Change link", connRotateAsk: "Issue a new link? The current one stops working — you will need to paste the new one into your AI.", connRotated: "New link issued.", connLinkHint: "For clients that cannot sign in: the key is inside the link. It stays the same until you change it.", connKeyLink: "Link with a key", connPlainHint: (name) => `Paste this address into Claude, Cursor or another MCP client. The AI opens NOAH sign-in once — confirm under the account «${name}» — and keeps access by itself. The address is the same for everyone and never changes.`, permBuiltin: "Part of the NOAH app — runs on your computer and updates with it.", orWith: "or", with: (name) => `Continue with ${name}`, tgWait: "Press «Start» in Telegram — you are signed in here automatically.", tgOpen: "Open Telegram",
     connKicker: "CONNECT AI", connTitle: "Your AI + NOAH",
     connLead: "One link gives your AI hands on your computer. Paste it into Claude, Cursor or any MCP client and describe the module you want — your AI writes it, NOAH checks it and runs it.",
     connNeedLogin: "Sign in to get your personal MCP link.",
@@ -174,7 +174,7 @@ export const T = {
       ["NOAH", [["О проекте", "#/"], ["Скачать", RELEASES], ["Исходный код", REPO], ["Связаться", REPO + "/issues"]]],
       ["ПРАВОВОЕ", [["Политика конфиденциальности", "#/privacy"], ["Пользовательское соглашение", "#/terms"]]],
     ],
-    connCopy: "КОПИРОВАТЬ", connRotate: "Сменить ссылку", connRotateAsk: "Выпустить новую ссылку? Текущая перестанет работать — новую нужно будет вставить в нейросеть.", connRotated: "Новая ссылка выпущена.", connLinkHint: "Постоянная ссылка: вставьте её в нейросеть один раз. Она не меняется, пока вы сами её не смените.", permBuiltin: "Часть приложения NOAH — работает на вашем компьютере и обновляется вместе с ним.", orWith: "или", with: (name) => `Войти через ${name}`, tgWait: "Нажмите «Старт» в Telegram — здесь вход выполнится сам.", tgOpen: "Открыть Telegram",
+    connCopy: "КОПИРОВАТЬ", connRotate: "Сменить ссылку", connRotateAsk: "Выпустить новую ссылку? Текущая перестанет работать — новую нужно будет вставить в нейросеть.", connRotated: "Новая ссылка выпущена.", connLinkHint: "Для клиентов, которые не умеют входить сами: ключ зашит в ссылку. Она не меняется, пока вы её не смените.", connKeyLink: "Ссылка с ключом", connPlainHint: (name) => `Вставьте этот адрес в Claude, Cursor или другой клиент MCP. Нейросеть один раз откроет вход в NOAH — подтвердите его в аккаунте «${name}» — и дальше держит доступ сама. Адрес у всех один и не меняется.`, permBuiltin: "Часть приложения NOAH — работает на вашем компьютере и обновляется вместе с ним.", orWith: "или", with: (name) => `Войти через ${name}`, tgWait: "Нажмите «Старт» в Telegram — здесь вход выполнится сам.", tgOpen: "Открыть Telegram",
     connKicker: "ПОДКЛЮЧИТЬ ИИ", connTitle: "Ваша нейросеть + NOAH",
     connLead: "Одна ссылка даёт вашей нейросети руки на вашем компьютере. Вставьте её в Claude, Cursor или другой клиент с MCP и опишите, какой модуль нужен, — нейросеть напишет его, NOAH проверит и запустит.",
     connNeedLogin: "Войдите, чтобы получить свою ссылку MCP.",

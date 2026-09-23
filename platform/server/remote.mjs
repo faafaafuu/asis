@@ -13,6 +13,7 @@
 // TCP-ответ до зарубежного сервера обрывается на первых десятках килобайт.
 
 import { randomUUID } from "node:crypto";
+import { authChallenge } from "./mcpauth.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -146,7 +147,7 @@ const TOOLS = [
   },
 ];
 
-export function mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody }) {
+export function mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody, publicUrl }) {
   // Регламент для раздела документации на сайте — тот же текст, что читает нейросеть.
   route("GET", /^\/api\/docs\/standard$/, () => ({ text: standardText() }));
 
@@ -474,20 +475,24 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
   }
 
   return async function mcp(req, res, url) {
-    const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, authorization, mcp-session-id, mcp-protocol-version", "Access-Control-Allow-Methods": "POST, GET, OPTIONS" };
+    const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type, authorization, mcp-session-id, mcp-protocol-version", "Access-Control-Allow-Methods": "POST, GET, OPTIONS", "Access-Control-Expose-Headers": "WWW-Authenticate, mcp-session-id" };
     if (req.method === "OPTIONS") {
       res.writeHead(204, headers);
       return res.end();
     }
     const bearer0 = /^Bearer\s+(\S+)$/.exec(String(req.headers.authorization ?? ""))?.[1];
+    // Ключ в ссылке — прежний способ, вход OAuth — нынешний. Устаревший ключ в
+    // ссылке не должен перебивать рабочий токен входа: пробуем оба.
+    const who = () => userForKey(url.searchParams.get("key")) ?? userForKey(bearer0);
+    const denied = { ...headers, "Content-Type": "application/json", "WWW-Authenticate": authChallenge(publicUrl) };
     // GET — необязательный по протоколу поток для сообщений от сервера. Мы их
     // не шлём — ответы и так уходят прямо на POST, — но часть клиентов (Qwen
     // и другие) открывает этот поток первым делом и обрывается на отказе.
     // Держим его молча открытым, чтобы не мешать таким клиентам.
     if (req.method === "GET") {
-      if (!userForKey(url.searchParams.get("key") ?? bearer0)) {
-        res.writeHead(401, { ...headers, "Content-Type": "application/json" });
-        return res.end(JSON.stringify({ error: "Нужен ключ площадки в ссылке: …/mcp?key=noah_…" }));
+      if (!who()) {
+        res.writeHead(401, denied);
+        return res.end(JSON.stringify({ error: "Нужен вход: подключите NOAH в нейросети по адресу …/mcp — она сама откроет вход на сайте" }));
       }
       res.writeHead(200, { ...headers, "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
       res.write(": открыт\n\n");
@@ -499,8 +504,7 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
       res.writeHead(405, { ...headers, Allow: "POST, GET", "Content-Type": "application/json" });
       return res.end(JSON.stringify({ error: "MCP принимает POST и GET." }));
     }
-    const bearer = bearer0;
-    const user = userForKey(url.searchParams.get("key") ?? bearer);
+    const user = who();
     let body;
     try {
       body = await readJson(req);
@@ -509,9 +513,9 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
       return res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: err.message } }));
     }
     if (!user) {
-      res.writeHead(401, { ...headers, "Content-Type": "application/json" });
+      res.writeHead(401, denied);
       return res.end(
-        JSON.stringify({ jsonrpc: "2.0", id: body?.id ?? null, error: { code: -32001, message: "Нужен ключ площадки в ссылке: …/mcp?key=noah_…" } }),
+        JSON.stringify({ jsonrpc: "2.0", id: body?.id ?? null, error: { code: -32001, message: "Нужен вход: подключите NOAH в нейросети по адресу …/mcp — она сама откроет вход на сайте" } }),
       );
     }
     const batch = Array.isArray(body);

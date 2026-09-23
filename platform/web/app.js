@@ -1,9 +1,9 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=39";
+import { renderHome, stopHome } from "./home.js?v=40";
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=39";
-import { DOCS } from "./i18n.js?v=39";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=40";
+import { DOCS } from "./i18n.js?v=40";
 
 // Шрифты — после первой отрисовки, чтобы не держать страницу (см. index.html).
 {
@@ -17,10 +17,10 @@ import { DOCS } from "./i18n.js?v=39";
 }
 
 
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=39";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=40";
 
 /** Страницы кабинета — отдельным файлом, по требованию. */
-const account = () => import("./account.js?v=39");
+const account = () => import("./account.js?v=40");
 
 // Страницам кабинета нужны route и renderChrome — функции объявлены ниже,
 // но доступны с начала модуля.
@@ -287,7 +287,30 @@ function renderDoc(page, name) {
 /* ── Маршруты ────────────────────────────────────────────────────────────── */
 
 let routeId = 0;
+/**
+ * Куда вернуться после входа: страница подключения нейросети (OAuth MCP)
+ * отправляет на вход с `next`. Хранится в sessionStorage, потому что вход через
+ * Google или Telegram уходит со страницы и возвращается на другую.
+ */
+function resumeAfterLogin() {
+  const query = new URLSearchParams(location.hash.split("?")[1] ?? "");
+  const next = query.get("next");
+  try {
+    if (next && next.startsWith("/oauth/authorize?")) sessionStorage.setItem("noah_next", next);
+    const saved = sessionStorage.getItem("noah_next");
+    if (saved && state.user) {
+      sessionStorage.removeItem("noah_next");
+      location.href = saved;
+      return true;
+    }
+  } catch {
+    /* без sessionStorage вернуться нельзя — останемся на сайте */
+  }
+  return false;
+}
+
 async function route() {
+  if (resumeAfterLogin()) return;
   const id = ++routeId;
   const [view, arg] = location.hash.replace(/^#\/?/, "").split("?")[0].split("/");
   const name = view || "home";
@@ -327,7 +350,7 @@ async function route() {
     else if (name === "standard") renderStandard(page);
     // Документация грузится, только когда её открыли: главной она не нужна.
     else if (name === "docs") {
-      const { renderDocs } = await import("./docs.js?v=39");
+      const { renderDocs } = await import("./docs.js?v=40");
       await renderDocs(page, arg, { h, lang: state.lang });
     }
     else if (name === "login" || name === "signup") {
