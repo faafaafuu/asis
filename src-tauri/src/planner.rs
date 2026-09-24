@@ -215,6 +215,19 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         return Some(crate::sysinfo::diagnose(app, said).await);
     }
 
+    // «Вот, показываю», «смотри, что я скопировал», «сделал скрин» — Ноа
+    // смотрит в буфер обмена, даже посреди разговора об открытом окне: человек
+    // показывает именно скопированное, а не окно.
+    if shows_clipboard(said) && crate::screen::fresh() {
+        let asked = if said.contains('?') || said.split_whitespace().count() > 6 {
+            said.to_string()
+        } else {
+            format!("{said} — что здесь? Объясни коротко, простыми словами.")
+        };
+        log::info!("показывают буфер обмена: «{said}»");
+        return Some(crate::screen::answer(app, &asked, false).await);
+    }
+
     // «Поищи в интернете», «погугли», «узнай» — сразу поиск. Если сказано «про
     // это», запрос собирается из того, о чём только что говорили.
     if let Some(query) = search_request(said) {
@@ -1992,6 +2005,18 @@ pub fn take_file() -> Option<std::path::PathBuf> {
 }
 
 /// «Пришли последний скриншот», «скинь снимок из буфера»: не снимать заново,
+/// «Вот, показываю», «глянь, что скопировал», «сделал скрин — что тут».
+///
+/// Показ — не просьба прислать: скриншот или текст уже в буфере, и человек
+/// хочет, чтобы Ноа на него посмотрела.
+fn shows_clipboard(said: &str) -> bool {
+    let words = words_of(said);
+    let has = |stems: &[&str]| words.iter().any(|w| stems.iter().any(|s| w.starts_with(s)));
+    has(&["показыва", "покажу"])
+        || (has(&["скопир", "буфер"]) && has(&["смотр", "гляд", "глян", "вот", "это", "что", "объясн", "прочит"]))
+        || (has(&["скрин", "снимок", "снял", "заскрин"]) && has(&["сделал", "вот", "смотр", "глян", "что", "это"]) && !has(&["пришл", "скин", "отправ", "перешл"]))
+}
+
 /// а отдать уже сделанное — из буфера обмена или самый свежий снимок в папках
 /// снимков экрана.
 fn recent_image_request(app: &AppHandle, said: &str) -> Option<String> {
@@ -3309,6 +3334,16 @@ pub fn changed(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn showing_the_clipboard_is_heard() {
+        for said in ["вот, показываю", "смотри, что я скопировал", "сделал скрин, глянь", "что в буфере?"] {
+            assert!(shows_clipboard(said), "{said}");
+        }
+        for said in ["пришли последний скрин", "поставь таймер", "что такое dns"] {
+            assert!(!shows_clipboard(said), "{said}");
+        }
+    }
 
     #[test]
     fn timers_are_measured_by_the_clock() {

@@ -69,7 +69,7 @@ pub fn watch() {
 }
 
 /// Свежее ли содержимое буфера.
-fn fresh() -> bool {
+pub(crate) fn fresh() -> bool {
     let seen = *CLIPBOARD.lock().unwrap_or_else(|err| err.into_inner());
     matches!(seen, Some((number, Some(at))) if number == sequence() && at.elapsed() < FRESH)
 }
