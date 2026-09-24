@@ -589,21 +589,14 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                 // от открытия.
                 overlay::touch_popup();
                 match event {
+                    // Коротко нажатым пробелом и начинают читать, и обрывают
+                    // чтение. Слушать — зажатым: так «замолчи» и «я скажу»
+                    // не путаются.
                     voice::hotkey::Event::Speak => {
-                        // Тем же пробелом и начинают читать, и обрывают чтение.
-                        //
-                        // Прервали — значит услышали достаточно и хотят сказать
-                        // своё, а не молча смотреть в текст. Поэтому сразу за
-                        // тишиной начинается слушание.
                         if voice::speaking() {
-                            log::info!("пробел: обрываю чтение и слушаю");
+                            log::info!("пробел: обрываю чтение");
                             voice::stop();
-                            // Звук уходит не мгновенно: то, что уже отдано
-                            // звуковой системе, доигрывает из её буфера. Включив
-                            // микрофон раньше, мы записывали бы конец собственной
-                            // фразы и отвечали сами себе.
-                            std::thread::sleep(std::time::Duration::from_millis(700));
-                            start_conversation_by_hand(&app);
+                            overlay::hide_hud(&app);
                             continue;
                         }
 
@@ -616,6 +609,18 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                     // обращения. Отдельным сочетанием, потому что просьба была
                     // именно такая: чтобы память не занималась впустую, когда
                     // помощник не нужен.
+                    voice::hotkey::Event::Listen => {
+                        log::info!("пробел зажат: слушаю");
+                        if voice::speaking() {
+                            voice::stop();
+                            // Звук уходит не мгновенно: то, что уже отдано
+                            // звуковой системе, доигрывает из её буфера. Включив
+                            // микрофон раньше, мы записывали бы конец собственной
+                            // фразы и отвечали сами себе.
+                            std::thread::sleep(std::time::Duration::from_millis(700));
+                        }
+                        start_conversation_by_hand(&app);
+                    }
                     voice::hotkey::Event::ToggleWake => toggle_wake(&app),
                     voice::hotkey::Event::ToggleWindow => {
                         let shown = app.state::<AppState>().config().voice.show_window;
@@ -768,7 +773,7 @@ fn drop_stale(
     for event in events.try_iter() {
         match event {
             Event::ToggleWake | Event::ToggleWindow => backlog.push_back(event),
-            Event::Speak | Event::TalkStart | Event::TalkStop => dropped += 1,
+            Event::Speak | Event::Listen | Event::TalkStart | Event::TalkStop => dropped += 1,
         }
     }
     if dropped > 0 {
@@ -956,16 +961,24 @@ fn hear_hinted(app: &tauri::AppHandle, wav: Vec<u8>, hint: &str) -> Option<Strin
 fn answer_aloud(app: &tauri::AppHandle, text: &str) {
     use tauri::Emitter;
 
-    // Окно с ответами выключено или идёт обсуждение темы курса — отвечаем
-    // голосом: обсуждение знает урок, а окно ответов о нём не знает.
-    if !show_window(app) || tutor::active() {
+    // Идёт обсуждение урока — отвечает репетитор голосом: он знает раздел,
+    // а окно ответов о нём не знает.
+    if tutor::active() {
         answer_without_window(app, text);
         return;
     }
 
+    // Окно объяснения на экране — разговор продолжается в нём, даже когда
+    // окно для новых вопросов выключено. Вопрос вслух после объяснения слова —
+    // уточнение о нём: окно помнит слово и прошлые реплики и пишет ответ
+    // текстом. Мимо окна ответ уходил без слова, и модель переспрашивала,
+    // о чём речь.
     let text = text.to_string();
     if overlay::is_popup_visible(app) {
         let _ = app.emit_to(overlay::POPUP_LABEL, "voice:question", text.clone());
+    } else if !show_window(app) {
+        answer_without_window(app, &text);
+        return;
     } else {
         // Окна нет — вопрос задан с чистого места, окно откроется этим вопросом.
         if let Err(err) = overlay::show_for_voice(app, text.clone()) {

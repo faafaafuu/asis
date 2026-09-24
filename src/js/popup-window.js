@@ -127,16 +127,28 @@ view.onChange = stillHere;
 //
 // Хук пробел нашего окна не забирает — в поле ввода он нужен для слов. Но если
 // поле пустое, человек не печатает, а просит прочитать вслух: отдаём нажатие
-// Rust, и оно значит ровно то же, что пробел поверх чужого окна — прочитать,
-// а во время чтения оборвать и слушать.
+// и отпускание Rust, и они значат ровно то же, что пробел поверх чужого окна —
+// коротко нажать: прочитать или замолчать, зажать на полсекунды: слушать.
+let spaceDown = false;
 document.addEventListener(
   "keydown",
   (e) => {
     if (e.code !== "Space" || e.ctrlKey || e.altKey || e.metaKey) return;
     if (!view.inputEmpty) return;
     e.preventDefault();
-    if (e.repeat) return;
-    api?.invoke("popup_space").catch(() => {});
+    if (e.repeat || spaceDown) return;
+    spaceDown = true;
+    api?.invoke("popup_space", { down: true }).catch(() => {});
+  },
+  true,
+);
+document.addEventListener(
+  "keyup",
+  (e) => {
+    if (e.code !== "Space" || !spaceDown) return;
+    e.preventDefault();
+    spaceDown = false;
+    api?.invoke("popup_space", { down: false }).catch(() => {});
   },
   true,
 );

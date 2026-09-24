@@ -771,15 +771,21 @@ pub fn popup_active() {
     crate::overlay::touch_popup();
 }
 
-/// Пробел в самом окне попапа при пустом поле ввода.
+/// Пробел в самом окне попапа при пустом поле ввода: `down` — нажат, иначе
+/// отпущен.
 ///
 /// Хук такой пробел не забирает — окно наше, — поэтому окно передаёт его само,
-/// и нажатие значит то же, что пробел поверх чужой программы.
+/// и нажатие значит то же, что пробел поверх чужой программы: коротко —
+/// прочитать, зажать — слушать.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn popup_space() {
+pub fn popup_space(down: Option<bool>) {
     crate::overlay::touch_popup();
-    crate::voice::hotkey::press_speak();
+    if down.unwrap_or(true) {
+        crate::voice::hotkey::space_down();
+    } else {
+        crate::voice::hotkey::space_up();
+    }
 }
 
 /* ── Заказы: настройки, вход, оплата кнопкой ────────────────────────────── */

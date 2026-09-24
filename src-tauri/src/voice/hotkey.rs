@@ -99,8 +99,11 @@ pub fn cancels() -> Receiver<()> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
-    /// Пробел: прочитать вслух то, что сейчас в окне.
+    /// Пробел нажали и отпустили: прочитать вслух то, что в окне, а если
+    /// уже читается — замолчать.
     Speak,
+    /// Пробел держат дольше `HOLD_MS`: слушать человека.
+    Listen,
     /// Левый Alt с пробелом зажаты: пишем голос.
     TalkStart,
     /// Отпустили: расшифровываем и отправляем вопросом.
@@ -128,13 +131,54 @@ pub fn arm(on: bool) {
     }
 }
 
-/// Пробел, нажатый в самом окне попапа.
+/// Сколько держать пробел, чтобы это было «слушай», а не «прочитай».
 ///
-/// Хук такой пробел не забирает: окно наше, и в его поле ввода пробел нужен
-/// для слов. Но если поле пустое, человек не печатает — он просит прочитать,
-/// и окно передаёт нажатие сюда, чтобы оно значило то же, что и снаружи.
-pub fn press_speak() {
-    send(Event::Speak);
+/// Полсекунды: обычное нажатие короче в разы, а ждать дольше, уже решив
+/// говорить, человеку неудобно.
+const HOLD_MS: u64 = 500;
+
+/// Номер текущего нажатия пробела; ноль — пробел отпущен.
+static PRESS: AtomicU64 = AtomicU64::new(0);
+static PRESSES: AtomicU64 = AtomicU64::new(0);
+/// Удержание текущего нажатия уже засчитано как «слушай».
+static HELD_LONG: AtomicBool = AtomicBool::new(false);
+static HOLD_TIMER: OnceLock<Sender<u64>> = OnceLock::new();
+
+/// Пробел нажат: чем это было, решится по отпусканию или по таймеру.
+///
+/// Решение ждёт: короткое нажатие — прочитать, долгое — слушать, а понять,
+/// какое оно, можно только отпустив или продержав. Таймер — отдельный поток:
+/// хук обязан вернуться мгновенно.
+pub fn space_down() {
+    let press = PRESSES.fetch_add(1, Ordering::SeqCst) + 1;
+    PRESS.store(press, Ordering::SeqCst);
+    HELD_LONG.store(false, Ordering::SeqCst);
+    let timer = HOLD_TIMER.get_or_init(|| {
+        let (tx, rx) = channel::<u64>();
+        std::thread::Builder::new()
+            .name("sufler-space-hold".into())
+            .spawn(move || {
+                for press in rx {
+                    std::thread::sleep(std::time::Duration::from_millis(HOLD_MS));
+                    if PRESS.load(Ordering::SeqCst) == press && !HELD_LONG.swap(true, Ordering::SeqCst) {
+                        send(Event::Listen);
+                    }
+                }
+            })
+            .ok();
+        tx
+    });
+    let _ = timer.send(press);
+}
+
+/// Пробел отпущен: не додержали до «слушай» — значит, «прочитай».
+pub fn space_up() {
+    if PRESS.swap(0, Ordering::SeqCst) == 0 {
+        return;
+    }
+    if !HELD_LONG.swap(true, Ordering::SeqCst) {
+        send(Event::Speak);
+    }
 }
 
 /// Когда Esc последний раз ушёл на то, чтобы заставить голос замолчать, мс
@@ -367,7 +411,7 @@ unsafe extern "system" fn keyboard_proc(
             RECORDING.store(true, Ordering::Relaxed);
             send(Event::TalkStart);
         } else {
-            send(Event::Speak);
+            space_down();
         }
         return LRESULT(1);
     }
@@ -377,6 +421,7 @@ unsafe extern "system" fn keyboard_proc(
         if RECORDING.swap(false, Ordering::Relaxed) {
             send(Event::TalkStop);
         }
+        space_up();
         return LRESULT(1);
     }
 
