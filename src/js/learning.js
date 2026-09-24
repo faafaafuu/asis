@@ -169,7 +169,7 @@ function renderSide() {
       node.title = topic.conceptsTotal
         ? `${topic.summary}\nУверенно: ${topic.conceptsMature} из ${topic.conceptsTotal} понятий`
         : topic.summary;
-      node.addEventListener("click", () => openTopic(topic.id, topic.read ? "concepts" : "lesson"));
+      node.addEventListener("click", () => resumeTopic(topic.id));
       item.append(node);
       return item;
     }),
@@ -244,7 +244,7 @@ function renderHome() {
   const actions = el("div", "actions");
   if (next) {
     actions.append(
-      button(`Продолжить: ${next.title}`, () => openTopic(next.id, next.read ? "concepts" : "lesson"), true),
+      button(`Продолжить: ${next.title}`, () => resumeTopic(next.id), true),
     );
   } else {
     actions.append(button("К финальному экзамену", () => openFinal()));
@@ -285,7 +285,25 @@ function renderHome() {
   }
 }
 
-async function openTopic(id, step = "lesson") {
+/**
+ * Где в теме остановились: вкладка и раздел урока. Тему, которую ещё не
+ * открывали, — с урока, прочитанную — с понятий.
+ */
+function placeOf(id) {
+  const card = course?.topics.find((t) => t.id === id);
+  return {
+    step: card?.step || (card?.read ? "concepts" : "lesson"),
+    section: card?.section ?? 0,
+  };
+}
+
+/** Открывает тему там, где в ней остановились. */
+function resumeTopic(id) {
+  const place = placeOf(id);
+  return openTopic(id, place.step, place.section);
+}
+
+async function openTopic(id, step = "lesson", section = 0) {
   if (!api || busy) return;
   try {
     topicView = await api.invoke("learn_topic", { course: course.id, topic: id });
@@ -293,14 +311,27 @@ async function openTopic(id, step = "lesson") {
     page("Тема не открылась", String(err));
     return;
   }
-  view = { kind: "topic", topic: id, step, section: 0, whole: false };
+  view = { kind: "topic", topic: id, step, section, whole: false };
   exam = null;
   review = null;
   renderTopic();
 }
 
+/** Запоминает место в теме — окно откроется на нём же. */
+function savePlace() {
+  if (view.kind !== "topic" || !course) return;
+  const card = course.topics.find((t) => t.id === view.topic);
+  const section = view.section ?? 0;
+  if (card) {
+    card.step = view.step;
+    card.section = section;
+  }
+  api?.invoke("learn_place", { course: course.id, topic: view.topic, step: view.step, section }).catch(() => {});
+}
+
 function renderTopic() {
   renderSide();
+  savePlace();
   const card = course.topics.find((t) => t.id === view.topic);
   const topic = topicView.topic;
   const root = page(topic.title, topic.summary);
@@ -1905,6 +1936,6 @@ document.addEventListener("visibilitychange", async () => {
 refreshOverview().then(() => {
   const current = course?.topics.find((t) => t.id === course.current);
   // На главную, если есть что повторить: сначала повторение, потом новое.
-  if (current && !(course?.mastery?.due > 0)) openTopic(current.id, current.read ? "concepts" : "lesson");
+  if (current && !(course?.mastery?.due > 0)) resumeTopic(current.id);
   else renderHome();
 });

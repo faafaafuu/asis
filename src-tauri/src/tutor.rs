@@ -289,7 +289,7 @@ pub async fn answer(app: &AppHandle, said: &str, voice: bool) -> Result<String, 
         (state.provider(), limit)
     };
     let rules = rules(app, &material, voice);
-    let asked = tokio::time::timeout(limit, provider.tutor(&rules, &thread, said, false)).await;
+    let asked = tokio::time::timeout(limit, provider.converse(&rules, &thread, said, false)).await;
     let text = match asked {
         Ok(Ok(text)) if !text.trim().is_empty() => text.trim().to_string(),
         Ok(Ok(_)) => return Err("Модель прислала пустой ответ.".into()),
@@ -398,7 +398,7 @@ pub async fn deep(app: &AppHandle, course_id: &str, topic_id: &str, at: usize) -
         (state.provider(), limit)
     };
     log::info!("подробный разбор раздела «{name}»");
-    let asked = tokio::time::timeout(limit, provider.tutor(&rules, &[], &format!("Разбери раздел «{name}»."), true)).await;
+    let asked = tokio::time::timeout(limit, provider.converse(&rules, &[], &format!("Разбери раздел «{name}»."), true)).await;
     let text = match asked {
         Ok(Ok(text)) if text.trim().chars().count() > 200 => text.trim().to_string(),
         Ok(Ok(_)) => return Err("Модель ответила слишком коротко — попробуйте ещё раз.".into()),

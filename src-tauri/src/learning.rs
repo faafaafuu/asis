@@ -590,6 +590,9 @@ struct TopicProgress {
     exam_attempts: u32,
     /// Вопросы, на которых ошибся, — для повторения.
     mistakes: Vec<String>,
+    /// Где в теме остановились: вкладка и раздел урока.
+    step: String,
+    section: usize,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -697,6 +700,9 @@ pub struct TopicCard {
     pub concepts_total: usize,
     /// Понятия, которые держатся уверенно — три недели и дольше.
     pub concepts_mature: usize,
+    /// Где в теме остановились: вкладка (пусто — ещё не открывали) и раздел.
+    pub step: String,
+    pub section: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -753,6 +759,8 @@ fn card(course: &Course, progress: &CourseProgress) -> CourseCard {
                 mistakes: own.mistakes.len(),
                 concepts_total: by_topic.get(&topic.id).map_or(0, |(total, _)| *total),
                 concepts_mature: by_topic.get(&topic.id).map_or(0, |(_, mature)| *mature),
+                step: own.step.clone(),
+                section: own.section,
             }
         })
         .collect();
@@ -832,6 +840,24 @@ pub fn topic_view(course_id: &str, topic_id: &str) -> Result<TopicView, String> 
         scores: own.tasks,
         topic: shown,
     })
+}
+
+/// Запоминает, где в теме остановились: окно открывается на этом месте, а
+/// не с начала урока.
+pub fn remember_place(course_id: &str, topic_id: &str, step: &str, section: usize) -> Result<(), String> {
+    let course = course(course_id)?;
+    topic(&course, topic_id)?;
+    // Экзамен и повторение — не место, куда возвращаться: к ним приходят сами.
+    if !["lesson", "concepts", "map", "tasks", "sheet", "mistakes"].contains(&step) {
+        return Ok(());
+    }
+    with(course_id, |progress| {
+        let own = progress.topics.entry(topic_id.to_string()).or_default();
+        own.step = step.to_string();
+        own.section = section;
+        progress.current = Some(topic_id.to_string());
+    });
+    Ok(())
 }
 
 /// Урок прочитан.
@@ -1605,6 +1631,8 @@ mod tests {
             mistakes: 0,
             concepts_total: 0,
             concepts_mature: 0,
+            step: String::new(),
+            section: 0,
         };
         assert_eq!(percent(&[topic(false, 0, None)], None), 0);
         assert_eq!(percent(&[topic(true, 4, Some(90))], Some(80)), 100);

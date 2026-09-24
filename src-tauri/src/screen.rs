@@ -284,7 +284,7 @@ fn clipboard_text() -> Option<String> {
 
 /// Распознаёт текст на картинке средствами Windows — строками, как на экране.
 #[cfg(target_os = "windows")]
-fn recognize(image: &Image) -> Result<String, String> {
+pub(crate) fn recognize(image: &Image) -> Result<String, String> {
     use windows::Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap};
     use windows::Storage::Streams::DataWriter;
 

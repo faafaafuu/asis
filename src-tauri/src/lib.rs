@@ -35,6 +35,7 @@ mod shots;
 mod focus;
 mod learning;
 mod tutor;
+mod glance;
 mod local_cli;
 mod recall;
 mod srs;
@@ -296,6 +297,7 @@ pub fn run() {
             commands::learn_overview,
             commands::learn_topic,
             commands::learn_read,
+            commands::learn_place,
             commands::learn_review,
             commands::learn_grade,
             commands::learn_concepts,
@@ -621,6 +623,36 @@ fn listen_for_voice_keys(app: &tauri::AppHandle) {
                         }
                         start_conversation_by_hand(&app);
                     }
+                    // Shift с пробелом — посмотреть на окно, где человек
+                    // работает, и слушать вопрос о нём. Снимок и распознавание
+                    // — секунда, поэтому своим потоком: клавиши ждать не должны.
+                    voice::hotkey::Event::Glance => {
+                        let target = voice::hotkey::glance_window();
+                        let app = app.clone();
+                        std::thread::Builder::new()
+                            .name("sufler-glance".into())
+                            .spawn(move || {
+                                overlay::show_hud(&app, "thinking");
+                                match glance::capture(target) {
+                                    Ok(()) => {
+                                        if voice::speaking() {
+                                            voice::stop();
+                                            std::thread::sleep(std::time::Duration::from_millis(700));
+                                        }
+                                        // Разговор уже шёл — он продолжится
+                                        // об этом окне.
+                                        start_conversation_by_hand(&app);
+                                        if in_conversation() {
+                                            overlay::show_hud(&app, "listening");
+                                        } else {
+                                            overlay::hide_hud(&app);
+                                        }
+                                    }
+                                    Err(message) => speak_with_hud(&app, message, false),
+                                }
+                            })
+                            .ok();
+                    }
                     voice::hotkey::Event::ToggleWake => toggle_wake(&app),
                     voice::hotkey::Event::ToggleWindow => {
                         let shown = app.state::<AppState>().config().voice.show_window;
@@ -773,7 +805,7 @@ fn drop_stale(
     for event in events.try_iter() {
         match event {
             Event::ToggleWake | Event::ToggleWindow => backlog.push_back(event),
-            Event::Speak | Event::Listen | Event::TalkStart | Event::TalkStop => dropped += 1,
+            Event::Speak | Event::Listen | Event::Glance | Event::TalkStart | Event::TalkStop => dropped += 1,
         }
     }
     if dropped > 0 {
@@ -961,9 +993,9 @@ fn hear_hinted(app: &tauri::AppHandle, wav: Vec<u8>, hint: &str) -> Option<Strin
 fn answer_aloud(app: &tauri::AppHandle, text: &str) {
     use tauri::Emitter;
 
-    // Идёт обсуждение урока — отвечает репетитор голосом: он знает раздел,
-    // а окно ответов о нём не знает.
-    if tutor::active() {
+    // Идёт обсуждение урока или разговор об окне — отвечают голосом те, кто
+    // знает, о чём речь: окно ответов не знает ни раздела, ни окна.
+    if tutor::active() || glance::active() {
         answer_without_window(app, text);
         return;
     }
@@ -2182,6 +2214,7 @@ pub(crate) fn stop_conversation(app: &tauri::AppHandle) {
 #[cfg(desktop)]
 fn finish_conversation(app: &tauri::AppHandle) {
     tutor::end();
+    glance::end();
     end_conversation(app, true, true);
 }
 
@@ -2580,9 +2613,13 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
     };
     // Обсуждают урок — отвечает репетитор, зная раздел, и со своей историей:
     // разговор об уроке не мешается с разговором обо всём остальном.
-    if tutor::active() {
-        let answer = tauri::async_runtime::block_on(tutor::answer(app, question, true))
-            .unwrap_or_else(|err| err);
+    if tutor::active() || glance::active() {
+        let answer = if tutor::active() {
+            tauri::async_runtime::block_on(tutor::answer(app, question, true))
+        } else {
+            tauri::async_runtime::block_on(glance::answer(app, question))
+        }
+        .unwrap_or_else(|err| err);
         if turn_cancelled() {
             overlay::hide_hud(app);
             return;

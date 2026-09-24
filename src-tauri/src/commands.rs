@@ -1597,6 +1597,12 @@ pub fn learn_map(course: String) -> Result<crate::recall::MapView, String> {
     crate::recall::map(&course)
 }
 
+/// Где в теме остановились — вкладка и раздел урока.
+#[tauri::command]
+pub fn learn_place(course: String, topic: String, step: String, section: usize) -> Result<(), String> {
+    crate::learning::remember_place(&course, &topic, &step, section)
+}
+
 /// Урок прочитан.
 #[tauri::command]
 pub fn learn_read(course: String, topic: String) -> Result<(), String> {

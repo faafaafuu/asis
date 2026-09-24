@@ -104,6 +104,9 @@ pub enum Event {
     Speak,
     /// Пробел держат дольше `HOLD_MS`: слушать человека.
     Listen,
+    /// Левый Shift с пробелом: посмотреть на окно, где человек работает, и
+    /// слушать вопрос о нём. Окно — `glance_window`.
+    Glance,
     /// Левый Alt с пробелом зажаты: пишем голос.
     TalkStart,
     /// Отпустили: расшифровываем и отправляем вопросом.
@@ -129,6 +132,21 @@ pub fn arm(on: bool) {
             send(Event::TalkStop);
         }
     }
+}
+
+/// Окно, которое было впереди, когда нажали Shift с пробелом.
+static GLANCE_WINDOW: AtomicIsize = AtomicIsize::new(0);
+
+/// Окно для фокуса — см. `Event::Glance`.
+pub fn glance_window() -> isize {
+    GLANCE_WINDOW.load(Ordering::SeqCst)
+}
+
+/// Печатали ли только что: Shift с пробелом посреди набора — заглавная
+/// буква и пробел, а не зов.
+fn typed_recently() -> bool {
+    let at = LAST_TYPED.load(Ordering::Relaxed);
+    at != 0 && now_ms().saturating_sub(at - 1) < 800
 }
 
 /// Сколько держать пробел, чтобы это было «слушай», а не «прочитай».
@@ -268,8 +286,8 @@ unsafe extern "system" fn keyboard_proc(
 ) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::Foundation::LRESULT;
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, VK_CONTROL, VK_ESCAPE, VK_LMENU, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
-        VK_SPACE,
+        GetAsyncKeyState, VK_CONTROL, VK_ESCAPE, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RWIN,
+        VK_SHIFT, VK_SPACE,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, HC_ACTION, KBDLLHOOKSTRUCT, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN,
@@ -368,6 +386,14 @@ unsafe extern "system" fn keyboard_proc(
     // оно принадлежит ему — как и Alt+пробел.
     let toggle = ctrl && shift && alt;
     let window_toggle = ctrl && alt && !shift;
+    // Левый Shift с пробелом — посмотреть на окно. Только не посреди набора
+    // текста: там это заглавная буква перед пробелом.
+    let glance = down
+        && !ctrl
+        && !alt
+        && held(VK_LSHIFT.0 as i32)
+        && !typed_recently()
+        && !SPACE_HELD.load(Ordering::Relaxed);
 
     // Что именно мы забираем себе.
     //
@@ -387,7 +413,7 @@ unsafe extern "system" fn keyboard_proc(
         && !TYPED.load(Ordering::Relaxed)
         && still_over_popup();
     let finishing = up && SPACE_HELD.load(Ordering::Relaxed);
-    let ours = popup_claims || alt || RECORDING.load(Ordering::Relaxed) || finishing;
+    let ours = popup_claims || alt || glance || RECORDING.load(Ordering::Relaxed) || finishing;
     if !ours {
         return pass(());
     }
@@ -405,6 +431,9 @@ unsafe extern "system" fn keyboard_proc(
         // зажат, считалось бы обычным «Alt с пробелом».
         if toggle {
             send(Event::ToggleWake);
+        } else if glance {
+            GLANCE_WINDOW.store(foreground_window(), Ordering::SeqCst);
+            send(Event::Glance);
         } else if window_toggle {
             send(Event::ToggleWindow);
         } else if alt {

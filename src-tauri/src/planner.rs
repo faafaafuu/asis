@@ -231,6 +231,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     let open = open_tasks();
     match read_intent(app, said, &open).await {
         Intent::Chat => None,
+        // Смотрят на окно — «что тут написано» и «где эта выставка» про него,
+        // а не про буфер обмена и не про поиск в интернете.
+        Intent::Screen { .. } if crate::glance::active() => None,
+        Intent::Lookup { .. } if crate::glance::refers_to_window(said) => None,
         Intent::Add {
             title,
             due,
@@ -2548,6 +2552,7 @@ fn intent_rules(app: &AppHandle, open: &[Task]) -> String {
             crate::web::site_line(),
             order_line(),
             crate::screen::clipboard_line(),
+            crate::glance::context_line(),
         ]
         .join(" "),
     )

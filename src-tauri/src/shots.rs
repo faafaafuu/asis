@@ -73,6 +73,40 @@ pub fn window(handle: isize) -> Result<Vec<u8>, String> {
     png(&grab(rect.left, rect.top, width, height)?, width as u32, height as u32)
 }
 
+/// Пиксели окна как есть на экране — для распознавания текста.
+///
+/// В отличие от `window`, окно вперёд не выводится: снимают то, в котором
+/// человек и так работает.
+#[cfg(target_os = "windows")]
+pub(crate) fn window_image(handle: isize) -> Result<crate::screen::Image, String> {
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+
+    let hwnd = HWND(handle as *mut c_void);
+    let mut rect = RECT::default();
+    // SAFETY: пишет в свою же переменную ровно её размер.
+    let bounds = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut rect as *mut RECT as *mut c_void,
+            std::mem::size_of::<RECT>() as u32,
+        )
+    };
+    if bounds.is_err() {
+        // SAFETY: то же, запасной путь.
+        unsafe { GetWindowRect(hwnd, &mut rect) }.map_err(|err| format!("окно не нашлось: {err}"))?;
+    }
+    let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
+    if width <= 0 || height <= 0 {
+        return Err("окно не видно на экране".into());
+    }
+    Ok(crate::screen::Image {
+        width: width as u32,
+        height: height as u32,
+        bgra: grab(rect.left, rect.top, width, height)?,
+    })
+}
+
 /// Кладёт снимок в «Изображения\Суфлёр» и отдаёт путь и то, как назвать
 /// папку вслух.
 ///
