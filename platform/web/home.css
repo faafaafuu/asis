@@ -715,23 +715,47 @@ body.is-home .page {
   line-height: 1.5;
 }
 
-/* Системы под кнопкой «Скачать»: та же версия под Windows, macOS, Linux и
-   Android. Появляются, только если файл для системы в релизе есть. */
-.platforms {
+/* Карточки одного ряда делят общие строки: заголовок, текст и нижняя часть
+   (метки, кнопки, отчёт) у соседей начинаются на одной высоте, даже если
+   у одной карточки заголовок в две строки, а у другой — в одну. Без
+   subgrid (старые браузеры) — просто столбик: текст, затем нижняя часть. */
+.bento {
+  align-items: stretch;
+}
+
+.bento__cell,
+.how__step,
+.who__card {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  grid-row: span 3;
+  grid-template-rows: subgrid;
+  row-gap: 12px;
+  align-content: start;
+}
+
+.how__step,
+.who__card {
+  grid-template-rows: auto auto auto;
+  grid-template-rows: subgrid;
+  align-items: start;
+}
+
+.bento__cell .pills {
+  margin-top: 0;
+  align-content: flex-start;
+}
+
+.bento__foot {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  margin-top: 12px;
-  font-size: 13px;
-  color: inherit;
-  opacity: 0.8;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  min-width: 0;
 }
-.platforms a {
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.platforms a:hover {
-  opacity: 1;
-  color: #f2c14e;
+
+.bento__report,
+.bento__mods {
+  margin-top: 0;
+  align-self: start;
 }

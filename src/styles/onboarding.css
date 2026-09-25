@@ -877,6 +877,32 @@ body {
   font-weight: 600;
 }
 
+/* Сочетание клавиш не рвётся на строки: колонка клавиш шириной в самое
+   длинное сочетание, описание — в остальном месте. В узком окне описание
+   уходит под клавиши. */
+.cheat__list--keys {
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+.cheat__list--keys dt {
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .cheat__list--keys {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2px;
+  }
+
+  .cheat__list--keys dd {
+    margin-bottom: 8px;
+  }
+}
+
+.cheat__foot {
+  margin-top: 16px;
+}
+
 .cheat__list dd {
   margin: 0;
   opacity: 0.8;

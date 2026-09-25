@@ -1,6 +1,6 @@
 // Тексты интерфейса площадки: английский и русский.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=41";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=43";
 
 export const T = {
   en: {
@@ -15,7 +15,7 @@ export const T = {
     sortPopular: "Popular", sortNew: "New", sortFree: "Free",
     statModules: "MODULES", statAuthors: "AUTHORS", statBrains: "BRAINS SUPPORTED", statInstalls: "INSTALLS",
     cat: { all: "All", free: "Free", work: "Work", home: "Home", finance: "Finance", dev: "Dev tools", health: "Health", local: "Local-only", media: "Media", other: "Other" },
-    free: "free", install: "Install", installsWord: "installs", fresh: "new", noModules: "Nothing found. Try another word or category — or build the module yourself in the Studio.",
+    free: "free", install: "Install", installsWord: "installs", fresh: "new", dlPick: "Pick your system", dlSoon: "soon", dlAuto: "Download for this computer", noModules: "Nothing found. Try another word or category — or build the module yourself in the Studio.",
     backLib: "BACK TO LIBRARY", core: "noah-core", builtIn: "built into NOAH", builtInLong: "Built into NOAH — comes with the app, nothing to install separately.", builtInBtn: "DOWNLOAD NOAH", builtInTransport: "part of the shell", open: "Open",
     installBtn: "INSTALL", copyAsk: "COPY REQUEST",
     toolsExposed: "TOOLS EXPOSED", noTools: "Tools are listed after the module is published from NOAH.",
@@ -114,7 +114,7 @@ export const T = {
     sortPopular: "Популярные", sortNew: "Новые", sortFree: "Бесплатные",
     statModules: "МОДУЛЕЙ", statAuthors: "АВТОРОВ", statBrains: "МОЗГОВ", statInstalls: "УСТАНОВОК",
     cat: { all: "Все", free: "Бесплатные", work: "Работа", home: "Дом", finance: "Финансы", dev: "Разработка", health: "Здоровье", local: "Только локально", media: "Медиа", other: "Другое" },
-    free: "бесплатно", install: "Поставить", installsWord: "установок", fresh: "новый", noModules: "Ничего не нашлось. Попробуйте другое слово или раздел — или соберите модуль сами в Студии.",
+    free: "бесплатно", install: "Поставить", installsWord: "установок", fresh: "новый", dlPick: "Выберите систему", dlSoon: "скоро", dlAuto: "Для этого компьютера", noModules: "Ничего не нашлось. Попробуйте другое слово или раздел — или соберите модуль сами в Студии.",
     backLib: "НАЗАД В БИБЛИОТЕКУ", core: "noah-core", builtIn: "встроен в NOAH", builtInLong: "Встроен в NOAH — ставится вместе с приложением, отдельно ставить не нужно.", builtInBtn: "СКАЧАТЬ NOAH", builtInTransport: "часть оболочки", open: "Подробнее",
     installBtn: "ПОСТАВИТЬ", copyAsk: "СКОПИРОВАТЬ ЗАПРОС",
     toolsExposed: "ДОСТУПНЫЕ ИНСТРУМЕНТЫ", noTools: "Инструменты появятся, когда модуль опубликуют из NOAH.",

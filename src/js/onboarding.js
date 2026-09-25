@@ -20,7 +20,7 @@ for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] =
 function tuckHints() {
   const groups = new Map();
   const bodies = document.querySelectorAll(
-    ".ob__lead:not([data-el]):not([data-keep]), .ob__hint:not([data-el])",
+    ".ob__lead:not([data-el]):not([data-keep]), .ob__hint:not([data-el]):not([data-keep])",
   );
   for (const body of bodies) {
     const check = body.closest(".ob__check-text");

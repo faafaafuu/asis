@@ -1044,11 +1044,68 @@ button {
   color: #7a5b12;
 }
 
+/* Три шага студии — три колонки одной высоты. На средней ширине манифест
+   уходит под первые два во всю ширину, на телефоне — всё в столбик. */
 .steps {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
+}
+
+.steps > .code {
+  display: flex;
+  flex-direction: column;
+}
+
+.steps > .code pre {
+  flex: 1;
+}
+
+@media (max-width: 1440px) {
+  .steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .steps > .code {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .steps {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.step__row.step__row--center {
+  align-items: center;
+}
+
+.step__row--center > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Статус шага — справа, одной ширины у всех строк. */
+.state {
+  flex: none;
+  margin-left: auto;
+  min-width: 64px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--state, var(--ink-3));
+}
+
+/* Команда подключения переносится, а не уезжает под полосу прокрутки:
+   её копируют кнопкой, а читать должно быть удобно целиком. */
+.code.code--wrap pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .step__head {
@@ -2274,4 +2331,76 @@ body.is-home .foot {
   .top__docs {
     display: none;
   }
+}
+
+/* ── Меню «Скачать» ─────────────────────────────────────────────────────── */
+
+.dlmenu {
+  position: fixed;
+  z-index: 80;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--ink);
+  box-shadow: 6px 6px 0 var(--chrome);
+}
+
+.dlmenu__head {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hair);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.dlmenu__item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--hair-2);
+  text-align: left;
+}
+
+a.dlmenu__item:hover,
+a.dlmenu__item:focus-visible {
+  background: #fbf2dc;
+  outline: none;
+}
+
+.dlmenu__item.is-off {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.dlmenu__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.dlmenu__mine {
+  padding: 2px 6px;
+  background: var(--gold);
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dlmenu__kind {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.dlmenu__ver {
+  padding: 8px 14px;
+  font-size: 10px;
+  color: var(--ink-3);
+  text-align: right;
 }

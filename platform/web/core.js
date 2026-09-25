@@ -3,7 +3,7 @@
 // части сетей соединение замирает после ~16 КБ, и каждый файл держится
 // меньше этого вместе с TLS-рукопожатием.
 
-import { T } from "./i18n.js?v=41";
+import { T } from "./i18n.js?v=43";
 
 /** Функции, которые живут в app.js, а нужны страницам кабинета. */
 export const hooks = { route: () => {}, renderChrome: () => {} };
@@ -151,12 +151,12 @@ export function highlight(json) {
   return pre;
 }
 
-export function codeBlock(name, text, { highlightJson = false } = {}) {
+export function codeBlock(name, text, { highlightJson = false, wrap = false } = {}) {
   const copyLabel = state.lang === "ru" ? "КОПИЯ" : "COPY";
   const button = h("button", { type: "button", class: "code__copy", onclick: () => copy(text, button, copyLabel) }, copyLabel);
   return h(
     "div",
-    { class: "code" },
+    { class: wrap ? "code code--wrap" : "code" },
     h("div", { class: "code__head" }, h("span", { class: "label" }, name), button),
     highlightJson ? highlight(text) : h("pre", {}, text),
   );
@@ -184,3 +184,99 @@ export const EXAMPLE_MANIFEST = JSON.stringify(
   2,
 );
 
+
+/* ── Меню «Скачать» ──────────────────────────────────────────────────────── */
+
+// Любая ссылка на /download открывает список систем: какая есть в последнем
+// релизе — ссылкой, какой нет — серой строкой «скоро». Без скриптов ссылка
+// работает сама: сервер узнаёт систему по браузеру и отдаёт нужный файл.
+const SYSTEMS = [
+  ["windows", "Windows", ".exe"],
+  ["mac", "macOS", ".dmg"],
+  ["linux", "Linux", ".deb · .AppImage"],
+  ["android", "Android", ".apk"],
+];
+let downloads = null;
+const loadDownloads = () =>
+  (downloads ??= fetch("/api/downloads")
+    .then((response) => (response.ok ? response.json() : { files: {} }))
+    .catch(() => ((downloads = null), { files: {} })));
+
+function thisSystem() {
+  const ua = navigator.userAgent;
+  if (/Android/i.test(ua)) return "android";
+  if (/Mac OS X|Macintosh/i.test(ua) && !/iPhone|iPad/i.test(ua)) return "mac";
+  if (/Linux|X11/i.test(ua)) return "linux";
+  return "windows";
+}
+
+const megabytes = (size) => (size ? `${Math.max(1, Math.round(size / 1048576))} ${state.lang === "ru" ? "МБ" : "MB"}` : "");
+
+function closeDownloadMenu() {
+  const open = document.querySelector(".dlmenu");
+  if (!open) return;
+  open.owner?.setAttribute("aria-expanded", "false");
+  open.remove();
+}
+
+async function openDownloadMenu(link) {
+  closeDownloadMenu();
+  const tr = t();
+  const mine = thisSystem();
+  const list = h("div", { class: "dlmenu__list" });
+  const menu = h("div", { class: "dlmenu", role: "menu" }, h("div", { class: "dlmenu__head mono" }, tr.dlPick), list);
+  menu.owner = link;
+  link.setAttribute("aria-expanded", "true");
+  const place = () => {
+    const box = link.getBoundingClientRect();
+    const width = Math.min(300, window.innerWidth - 24);
+    const left = Math.min(Math.max(12, box.left), window.innerWidth - width - 12);
+    const below = box.bottom + 6;
+    menu.style.width = `${width}px`;
+    menu.style.left = `${left}px`;
+    // Не помещается снизу — открываем над кнопкой.
+    const height = menu.offsetHeight || 260;
+    menu.style.top = below + height > window.innerHeight - 8 && box.top > height + 8 ? `${box.top - height - 6}px` : `${below}px`;
+  };
+  document.body.append(menu);
+  const paint = ({ files = {}, version = "" }) => {
+    list.replaceChildren(
+      ...SYSTEMS.map(([os, name, kind]) => {
+        const file = files[os];
+        const body = [
+          h("span", { class: "dlmenu__name" }, name, os === mine ? h("span", { class: "dlmenu__mine mono" }, tr.dlAuto) : null),
+          h("span", { class: "dlmenu__kind mono" }, file ? [kind, megabytes(file.size)].filter(Boolean).join(" · ") : tr.dlSoon),
+        ];
+        return file
+          ? h("a", { class: "dlmenu__item", role: "menuitem", href: `/download?os=${os}`, onclick: closeDownloadMenu }, ...body)
+          : h("span", { class: "dlmenu__item is-off", role: "menuitem", "aria-disabled": "true" }, ...body);
+      }),
+      version ? h("div", { class: "dlmenu__ver mono" }, `v${version}`) : null,
+    );
+    place();
+    (list.querySelector(`a[href$="${mine}"]`) ?? list.querySelector("a"))?.focus();
+  };
+  paint({ files: {} });
+  paint(await loadDownloads());
+}
+
+document.addEventListener("click", (event) => {
+  const link = event.target.closest?.('a[href="/download"]');
+  if (link) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (document.querySelector(".dlmenu")?.owner === link) closeDownloadMenu();
+    else openDownloadMenu(link);
+    return;
+  }
+  if (!event.target.closest?.(".dlmenu")) closeDownloadMenu();
+}, true);
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !document.querySelector(".dlmenu")) return;
+  const owner = document.querySelector(".dlmenu").owner;
+  closeDownloadMenu();
+  owner?.focus();
+});
+window.addEventListener("resize", closeDownloadMenu);
+window.addEventListener("scroll", closeDownloadMenu, { passive: true });
+window.addEventListener("hashchange", closeDownloadMenu);
