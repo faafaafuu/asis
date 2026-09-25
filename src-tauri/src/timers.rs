@@ -16,8 +16,10 @@ use chrono::{DateTime, Local};
 
 #[derive(Debug, Clone)]
 pub struct Timer {
-    id: u64,
+    pub id: u64,
     pub at: DateTime<Local>,
+    /// Что сказать, когда время выйдет.
+    pub label: String,
 }
 
 static TIMERS: Mutex<Vec<Timer>> = Mutex::new(Vec::new());
@@ -29,7 +31,7 @@ pub fn start(app: &tauri::AppHandle, at: DateTime<Local>, label: String) {
     TIMERS
         .lock()
         .unwrap_or_else(|err| err.into_inner())
-        .push(Timer { id, at });
+        .push(Timer { id, at, label: label.clone() });
     log::info!("таймер на {}: «{label}»", at.format("%H:%M:%S"));
 
     let app = app.clone();
@@ -64,7 +66,6 @@ pub fn start(app: &tauri::AppHandle, at: DateTime<Local>, label: String) {
 /// таймер ставят и тогда, когда отходят от компьютера.
 fn ring(app: &tauri::AppHandle, label: &str) {
     log::info!("таймер сработал: «{label}»");
-    #[cfg(desktop)]
     for _ in 0..3 {
         crate::voice::chime();
         std::thread::sleep(Duration::from_millis(700));

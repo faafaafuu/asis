@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.net.Uri
@@ -23,17 +24,15 @@ import android.speech.tts.UtteranceProgressListener
 import android.webkit.WebView
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import app.tauri.PermissionState
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
-import app.tauri.annotation.Permission
-import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
@@ -81,12 +80,7 @@ class UrlArgs {
  *     событие `voiceRequest` (или `pendingVoice`, если приложение запускалось);
  *   • `chime`, `notify`, `openUrl` — сигнал, уведомление, ссылка.
  */
-@TauriPlugin(
-    permissions = [
-        Permission(strings = [Manifest.permission.RECORD_AUDIO], alias = "microphone"),
-        Permission(strings = [Manifest.permission.POST_NOTIFICATIONS], alias = "notifications"),
-    ]
-)
+@TauriPlugin
 class SuflerPlugin(private val activity: Activity) : Plugin(activity) {
 
     private val main = Handler(Looper.getMainLooper())
@@ -101,10 +95,6 @@ class SuflerPlugin(private val activity: Activity) : Plugin(activity) {
     private var listening: Invoke? = null
     private var lastLevel = 0L
 
-    /** На экране ли приложение: уведомление нужно, только когда его не видно. */
-    @Volatile
-    private var visible = true
-
     override fun load(webView: WebView) {
         super.load(webView)
         SelectionBus.listener = { text ->
@@ -116,6 +106,7 @@ class SuflerPlugin(private val activity: Activity) : Plugin(activity) {
         startTts()
         addShortcut()
         watchInsets(webView)
+        visible = true
     }
 
     /* ── Системные панели ───────────────────────────────────────────────── */
@@ -294,20 +285,30 @@ class SuflerPlugin(private val activity: Activity) : Plugin(activity) {
     /** Слушать одну фразу. Ответ — `{ text }`; пустой текст — ничего не сказали. */
     @Command
     fun listen(invoke: Invoke) {
-        if (getPermissionState("microphone") != PermissionState.GRANTED) {
-            requestPermissionForAlias("microphone", invoke, "microphoneAnswered")
-            return
+        ask(Manifest.permission.RECORD_AUDIO) { granted ->
+            if (granted) startListening(invoke)
+            else invoke.reject("Нет доступа к микрофону — разрешите его Ноа в настройках телефона.")
         }
-        startListening(invoke)
     }
 
-    @PermissionCallback
-    private fun microphoneAnswered(invoke: Invoke) {
-        if (getPermissionState("microphone") == PermissionState.GRANTED) {
-            startListening(invoke)
-        } else {
-            invoke.reject("Нет доступа к микрофону — разрешите его Ноа в настройках телефона.")
+    private fun granted(permission: String) =
+        ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Спросить разрешение и дождаться ответа. Спрашивает [PermissionActivity]:
+     * системное окно прямо поверх WebView роняло его при уходе в фон.
+     */
+    private fun ask(permission: String, then: (Boolean) -> Unit) {
+        if (granted(permission)) {
+            then(true)
+            return
         }
+        PermissionBus.wait { main.post { then(granted(permission)) } }
+        val intent = Intent(activity, PermissionActivity::class.java)
+            .putExtra(PermissionActivity.EXTRA_PERMISSIONS, arrayOf(permission))
+        activity.startActivity(intent)
+        @Suppress("DEPRECATION")
+        activity.overridePendingTransition(0, 0)
     }
 
     private fun startListening(invoke: Invoke) {
@@ -447,57 +448,29 @@ class SuflerPlugin(private val activity: Activity) : Plugin(activity) {
     /** Разрешение на уведомления — спрашивается с экрана, не из фона. */
     @Command
     fun allowNotifications(invoke: Invoke) {
-        if (Build.VERSION.SDK_INT < 33 ||
-            getPermissionState("notifications") == PermissionState.GRANTED
-        ) {
+        if (Build.VERSION.SDK_INT < 33) {
             invoke.resolve()
             return
         }
-        requestPermissionForAlias("notifications", invoke, "notificationsAnswered")
-    }
-
-    @PermissionCallback
-    private fun notificationsAnswered(invoke: Invoke) {
-        invoke.resolve()
+        ask(Manifest.permission.POST_NOTIFICATIONS) { invoke.resolve() }
     }
 
     /** Уведомление в шторке — только когда приложения не видно. */
     @Command
     fun notify(invoke: Invoke) {
         val args = invoke.parseArgs(NotifyArgs::class.java)
-        if (visible || args.text.isBlank()) {
-            invoke.resolve()
-            return
-        }
-        val manager = NotificationManagerCompat.from(activity)
-        if (!manager.areNotificationsEnabled()) {
-            invoke.resolve()
-            return
-        }
-        if (Build.VERSION.SDK_INT >= 26) {
-            val channel = NotificationChannel(CHANNEL, "Ноа", NotificationManager.IMPORTANCE_HIGH)
-            channel.description = "Напоминания, будильники и ответы Ноа"
-            activity.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-        }
-        val open = activity.packageManager.getLaunchIntentForPackage(activity.packageName)
-        val tap = PendingIntent.getActivity(
-            activity, 0, open,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val notification = NotificationCompat.Builder(activity, CHANNEL)
-            .setSmallIcon(activity.applicationInfo.icon)
-            .setContentTitle(args.title)
-            .setContentText(args.text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(args.text))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
-            .setContentIntent(tap)
-            .build()
-        try {
-            manager.notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notification)
-        } catch (_: SecurityException) {
-            // Разрешение отозвали между проверкой и показом.
-        }
+        if (!visible) Schedule.show(activity, args.title, args.text, false)
+        invoke.resolve()
+    }
+
+    /**
+     * Расписание будильников, таймеров и напоминаний — целиком, заново при
+     * каждом изменении. Срабатывает и тогда, когда приложения нет в памяти.
+     */
+    @Command
+    fun schedule(invoke: Invoke) {
+        val items = invoke.getArgs().getJSONArray("items")
+        Schedule.apply(activity.applicationContext, items)
         invoke.resolve()
     }
 
@@ -573,7 +546,10 @@ class SuflerPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     companion object {
-        private const val CHANNEL = "noa"
+        /** На экране ли приложение: уведомление нужно, только когда его не видно.
+         *  По умолчанию — нет: приёмник будильника будит процесс без окна. */
+        @Volatile
+        var visible = false
 
         /** Режет текст по предложениям так, чтобы кусок не превышал `limit`. */
         fun split(text: String, limit: Int): List<String> {

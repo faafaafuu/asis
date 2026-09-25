@@ -282,6 +282,7 @@ pub fn run() {
                 usage::watch(app.handle().clone());
                 plugins::watch(app.handle());
                 platform::sync(app.handle());
+                watch_schedule();
             }
 
             Ok(())
@@ -494,15 +495,15 @@ pub(crate) fn turn_cancelled() -> bool {
 
 /// Сообщение от Ноа на телефоне — напоминание, будильник, итог разбора.
 ///
-/// Экран разговора показывает его репликой, голос читает вслух, а если
-/// приложение свёрнуто — до человека доходит уведомление в шторке.
+/// Экран разговора показывает его репликой, голос читает вслух. Уведомление
+/// в шторке у сроков своё — из системного расписания (`sync_schedule`): оно
+/// приходит и тогда, когда приложения уже нет в памяти.
 #[cfg(mobile)]
 pub(crate) fn announce(app: &tauri::AppHandle, text: String, wait: bool) {
     use tauri::Emitter;
 
     log::info!("сообщение: «{text}»");
     let _ = app.emit("noa:message", text.clone());
-    mobile::notify("Ноа", &text);
     let voice = app.state::<AppState>().config().voice.clone();
     if !voice.enabled {
         return;
@@ -547,6 +548,14 @@ pub(crate) fn say_then_listen(app: &tauri::AppHandle, text: String) {
 #[cfg(mobile)]
 #[tauri::command]
 async fn phone_ask(app: tauri::AppHandle, text: String) -> Result<String, String> {
+    let answer = phone_answer(&app, text).await;
+    let _ = tauri::async_runtime::spawn_blocking(sync_schedule).await;
+    answer
+}
+
+#[cfg(mobile)]
+async fn phone_answer(app: &tauri::AppHandle, text: String) -> Result<String, String> {
+    let app = app.clone();
     let text = text.trim().to_string();
     if text.is_empty() {
         return Ok(String::new());
@@ -629,6 +638,79 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
 #[cfg(mobile)]
 pub(crate) fn in_conversation() -> bool {
     false
+}
+
+/// Отдаёт Android расписание будильников, таймеров и напоминаний.
+///
+/// Свёрнутое приложение Android закрывает, когда ему нужна память, — и
+/// напоминание из памяти программы тогда не прозвучит. Поэтому сроки ставятся
+/// ещё и в системный будильник: уведомление придёт и без приложения. Список
+/// уходит целиком и только когда изменился.
+#[cfg(mobile)]
+pub(crate) fn sync_schedule() {
+    static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    let now = chrono::Local::now();
+    let mut items = Vec::new();
+    for alarm in alarms::list() {
+        let Some(at) = alarm.next(now) else { continue };
+        let text = if alarm.label.trim().is_empty() {
+            format!("Будильник на {:02}:{:02}", alarm.hour, alarm.minute)
+        } else {
+            alarm.label.clone()
+        };
+        items.push(serde_json::json!({
+            "id": format!("alarm-{}", alarm.id),
+            "at": at.timestamp_millis(),
+            "title": "Будильник",
+            "text": text,
+            "alarm": true,
+        }));
+    }
+    for timer in timers::pending() {
+        items.push(serde_json::json!({
+            "id": format!("timer-{}", timer.id),
+            "at": timer.at.timestamp_millis(),
+            "title": "Таймер",
+            "text": timer.label,
+            "alarm": true,
+        }));
+    }
+    for task in tasks::all() {
+        let Some(at) = task.remind_at else { continue };
+        if task.done_at.is_some() || task.reminded || at <= now {
+            continue;
+        }
+        items.push(serde_json::json!({
+            "id": format!("task-{}", task.id),
+            "at": at.timestamp_millis(),
+            "title": "Напоминание",
+            "text": task.title,
+            "alarm": false,
+        }));
+    }
+    let list = serde_json::Value::Array(items);
+    let text = list.to_string();
+    {
+        let mut last = LAST.lock().unwrap_or_else(|err| err.into_inner());
+        if *last == text {
+            return;
+        }
+        *last = text;
+    }
+    match mobile::call::<serde_json::Value>("schedule", serde_json::json!({ "items": list })) {
+        Ok(_) => log::info!("расписание для Android: {} сроков", list.as_array().map_or(0, Vec::len)),
+        Err(err) => log::warn!("расписание для Android не ушло: {err}"),
+    }
+}
+
+/// Следит за сроками и отдаёт их Android — раз в полминуты и после каждого
+/// вопроса: будильник, поставленный голосом, должен попасть в систему сразу.
+#[cfg(mobile)]
+fn watch_schedule() {
+    let _ = std::thread::Builder::new().name("sufler-schedule".into()).spawn(|| loop {
+        sync_schedule();
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    });
 }
 
 /// Отменён ли ход, который ведёт этот поток.

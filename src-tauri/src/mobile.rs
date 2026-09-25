@@ -1,5 +1,5 @@
 //! Нативный плагин на Android и iOS: пункт «Объяснить» в меню выделения,
-//! голос (синтез и распознавание речи), сигнал и уведомления.
+//! голос (синтез и распознавание речи), сигнал, расписание будильников.
 //!
 //! Сам плагин живёт в `mobile/android-plugin` (Kotlin) и `mobile/ios-plugin` (Swift);
 //! здесь — связка с ядром Tauri и вызов его команд из Rust.
@@ -47,15 +47,4 @@ pub async fn call_async<T: DeserializeOwned>(command: &str, payload: serde_json:
         .run_mobile_plugin_async(command, payload)
         .await
         .map_err(|err| err.to_string())
-}
-
-/// Уведомление в шторке: напоминание, будильник, таймер — когда приложение
-/// свёрнуто, голос и окно до человека не дойдут.
-pub fn notify(title: &str, text: &str) {
-    if let Err(err) = call::<serde_json::Value>(
-        "notify",
-        serde_json::json!({ "title": title, "text": text }),
-    ) {
-        log::warn!("уведомление не показано: {err}");
-    }
 }

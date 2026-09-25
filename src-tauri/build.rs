@@ -19,6 +19,7 @@ fn main() {
                     "chime",
                     "allowNotifications",
                     "notify",
+                    "schedule",
                     "openUrl",
                     "clipboard",
                     "openAssistantSettings",
