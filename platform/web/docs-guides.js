@@ -16,7 +16,7 @@ export const GUIDES = [
 | Система | Файл | Что есть |
 |---|---|---|
 | [Windows 10 и 11](/download?os=windows) | \`.exe\` | всё |
-| [macOS](/download?os=mac) (Apple Silicon) | \`.dmg\` | всё, кроме снимков экрана; файл не подписан — первый запуск через «Открыть» в меню по правому щелчку |
+| [macOS](/download?os=mac) (Intel и Apple Silicon) | \`.dmg\` | всё, кроме снимков экрана; файл не подписан — первый запуск через «Открыть» в меню по правому щелчку |
 | [Linux](/download?os=linux) | \`.AppImage\`, \`.deb\` | всё, кроме снимков экрана |
 | [Android](/download?os=android) | \`.apk\` | объяснения, задачи, обучение, модели; голос и окна поверх экрана — в настольной версии |
 
@@ -49,7 +49,7 @@ export const GUIDES = [
       body: `
 ## 1. Install NOAH
 
-[Download the installer](/download) — the site picks the file for your system — and run it. NOAH lives in the tray; double-click the icon to open settings. Builds: [Windows](/download?os=windows), [macOS](/download?os=mac) (Apple Silicon, unsigned — open it via right-click → Open the first time), [Linux](/download?os=linux) (.AppImage, .deb), [Android](/download?os=android) (.apk, without the desktop voice and overlay windows).
+[Download the installer](/download) — the site picks the file for your system — and run it. NOAH lives in the tray; double-click the icon to open settings. Builds: [Windows](/download?os=windows), [macOS](/download?os=mac) (Intel and Apple Silicon, unsigned — open it via right-click → Open the first time), [Linux](/download?os=linux) (.AppImage, .deb), [Android](/download?os=android) (.apk, without the desktop voice and overlay windows).
 
 ## 2. Pick a brain
 
