@@ -37,3 +37,56 @@ export function appWindow() {
 export function applyTheme(theme) {
   document.documentElement.dataset.theme = theme ?? "system";
 }
+
+/**
+ * Телефон ли это. На телефоне у Ноа одно окно на всё: страницы модулей
+ * открываются в нём же, а системные панели лежат поверх страницы.
+ */
+export function isPhone() {
+  return /Android|iPhone|iPad/i.test(globalThis.navigator?.userAgent ?? "");
+}
+
+/**
+ * Отступы под строку состояния, жестовую панель и клавиатуру — CSS-переменными
+ * `--inset-*` на <html>. Android рисует приложение от края до края, и без них
+ * заголовок уезжал под часы, а поле ввода — под клавиатуру.
+ */
+function followInsets() {
+  const api = globalThis.__TAURI__;
+  if (!isPhone() || !api?.core?.invoke) return;
+  const root = document.documentElement;
+  root.classList.add("is-phone");
+  const apply = (insets) => {
+    for (const side of ["top", "bottom", "left", "right"]) {
+      root.style.setProperty(`--inset-${side}`, `${Number(insets?.[side] ?? 0)}px`);
+    }
+    root.classList.toggle("has-keyboard", Boolean(insets?.keyboard));
+  };
+  api.core.invoke("plugin:sufler|insets").then(apply).catch(() => {});
+  api.core.addPluginListener?.("sufler", "insets", apply).catch(() => {});
+
+  // Значки строки состояния — под фон страницы: тёмные на светлой теме,
+  // светлые на тёмной. Тема меняется атрибутом, за ним и следим.
+  const bars = () => {
+    const [r, g, b] = (getComputedStyle(document.body).backgroundColor.match(/\d+/g) ?? [0, 0, 0]).map(Number);
+    const light = 0.299 * r + 0.587 * g + 0.114 * b > 150;
+    api.core.invoke("plugin:sufler|barStyle", { light }).catch(() => {});
+  };
+  const watch = () => {
+    bars();
+    new MutationObserver(() => requestAnimationFrame(bars)).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+  };
+  if (document.body) watch();
+  else addEventListener("DOMContentLoaded", watch, { once: true });
+}
+followInsets();
+
+/** Закрыть страницу: на компьютере — окно, на телефоне — назад, к главному экрану. */
+export function closePage(win) {
+  if (isPhone()) {
+    if (history.length > 1) history.back();
+    else location.href = "onboarding.html";
+    return;
+  }
+  win?.close();
+}

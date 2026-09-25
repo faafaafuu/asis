@@ -945,3 +945,205 @@ body {
     display: none;
   }
 }
+
+/* ── Телефон ────────────────────────────────────────────────────────────── */
+
+/* То, что бывает только на одной из систем. Класс is-phone ставит bridge.js. */
+html:not(.is-phone) .phone-only {
+  display: none !important;
+}
+
+html.is-phone .desk-only {
+  display: none !important;
+}
+
+html.is-phone .ob {
+  padding: 8px 18px 0;
+  gap: 26px;
+}
+
+html.is-phone .ob__tabs {
+  top: var(--inset-top, 0px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+html.is-phone .ob__hero-title {
+  font-size: 32px;
+}
+
+/* Разговор: реплики сверху, микрофон и поле ввода прижаты к низу экрана. */
+html.is-phone .ob {
+  box-sizing: border-box;
+  min-height: calc(100dvh - var(--inset-top, 0px) - var(--inset-bottom, 0px));
+}
+
+.phone {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Подсказка пустого разговора — там, где потом появятся реплики. */
+.phone__empty {
+  order: -1;
+  padding-top: 20px;
+}
+
+.phone__log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  padding-top: 20px;
+}
+
+.phone__line {
+  max-width: 88%;
+  margin: 0;
+  padding: 10px 13px;
+  border-radius: var(--pop-radius);
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.phone__line--me {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text);
+}
+
+.phone__line--noa {
+  align-self: flex-start;
+  border: 1px solid var(--divider);
+  color: var(--text-body);
+}
+
+.phone__line--note {
+  align-self: center;
+  max-width: 100%;
+  padding: 2px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.phone__empty {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+/* Что слышно прямо сейчас — пока человек говорит. */
+.phone__heard {
+  min-height: 1.5em;
+  font-size: 15px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.phone__dock {
+  position: sticky;
+  bottom: var(--inset-bottom, 0px);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0 10px;
+  background: var(--bg-solid);
+  border-top: 1px solid var(--divider);
+}
+
+.phone__mic {
+  --size: 76px;
+  width: var(--size);
+  height: var(--size);
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  cursor: pointer;
+  /* Громкость голоса раздувает кольцо вокруг кнопки. */
+  box-shadow: 0 0 0 calc(var(--level, 0) * 18px) color-mix(in srgb, var(--accent) 35%, transparent);
+  transition: box-shadow 0.08s linear, transform 0.12s ease;
+}
+
+.phone__mic svg {
+  width: 34px;
+  height: 34px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.phone__mic:active {
+  transform: scale(0.96);
+}
+
+.phone[data-state="listening"] .phone__mic {
+  background: var(--accent);
+}
+
+.phone[data-state="thinking"] .phone__mic,
+.phone[data-state="speaking"] .phone__mic {
+  opacity: 0.75;
+}
+
+.phone__mic-label {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.phone__ask {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.phone__input {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+}
+
+.phone__send {
+  align-self: center;
+  padding: 10px 16px;
+}
+
+.phone__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 14px;
+}
+
+.phone__row .ob__btn--quiet {
+  padding: 8px 2px;
+  font-size: 13px;
+}
+
+.phone__row [aria-pressed="true"] {
+  color: var(--accent);
+}
+
+/* Клавиатура на экране — микрофон и подписи уступают место полю ввода. */
+html.has-keyboard .phone__mic,
+html.has-keyboard .phone__mic-label,
+html.has-keyboard .phone__row {
+  display: none;
+}
+
+html.is-phone .ob__pane:not(.phone) {
+  padding-bottom: 28px;
+}

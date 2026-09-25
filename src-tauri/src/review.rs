@@ -43,7 +43,6 @@ pub fn stop() {
 }
 
 /// Следит за временем и начинает разбор, когда пора.
-#[cfg(desktop)]
 pub fn watch(app: &AppHandle) {
     let app = app.clone();
     std::thread::Builder::new()
@@ -59,7 +58,6 @@ pub fn watch(app: &AppHandle) {
 }
 
 /// Пора ли начинать.
-#[cfg(desktop)]
 fn due_now(app: &AppHandle) -> bool {
     use tauri::Manager;
 
@@ -98,7 +96,6 @@ fn due_now(app: &AppHandle) -> bool {
 }
 
 /// Начинает разбор: задаёт первый вопрос и включает разговор.
-#[cfg(desktop)]
 pub fn start(app: &AppHandle) {
     let queue = tasks::unfinished_by(Local::now());
     if queue.is_empty() {
@@ -132,7 +129,6 @@ fn pending_line(count: usize) -> String {
 }
 
 /// Разбирает ответ человека. `None` — разбор не идёт, фраза не наша.
-#[cfg(desktop)]
 pub fn answer(app: &AppHandle, said: &str) -> Option<String> {
     let mut guard = SESSION.lock().unwrap_or_else(|err| err.into_inner());
     let session = guard.as_mut()?;

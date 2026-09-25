@@ -888,7 +888,11 @@ fn theme_script(app: &AppHandle) -> String {
 pub const TASKS_LABEL: &str = "tasks";
 
 /// Показывает список задач. Если окно уже есть — поднимает его наверх.
+#[cfg_attr(mobile, allow(unreachable_code))]
 pub fn show_tasks(app: &AppHandle) -> tauri::Result<()> {
+    #[cfg(mobile)]
+    return open_page(app, "tasks.html");
+
     if let Some(window) = app.get_webview_window(TASKS_LABEL) {
         bring_forward(&window);
         return Ok(());
@@ -943,7 +947,11 @@ fn tasks_corner(window: &WebviewWindow) -> (i32, i32) {
 pub const ORDER_LABEL: &str = "order";
 
 /// Показывает, что сейчас с заказом.
+#[cfg_attr(mobile, allow(unreachable_code))]
 pub fn show_order(app: &AppHandle) -> tauri::Result<()> {
+    #[cfg(mobile)]
+    return open_page(app, "order.html");
+
     if let Some(window) = app.get_webview_window(ORDER_LABEL) {
         bring_forward(&window);
         return Ok(());
@@ -971,7 +979,11 @@ pub fn show_order(app: &AppHandle) -> tauri::Result<()> {
 pub const LEARN_LABEL: &str = "learning";
 
 /// Показывает окно обучения. Если окно уже есть — поднимает его наверх.
+#[cfg_attr(mobile, allow(unreachable_code))]
 pub fn show_learning(app: &AppHandle) -> tauri::Result<()> {
+    #[cfg(mobile)]
+    return open_page(app, "learning.html");
+
     if let Some(window) = app.get_webview_window(LEARN_LABEL) {
         bring_forward(&window);
         return Ok(());
@@ -990,7 +1002,11 @@ pub fn show_learning(app: &AppHandle) -> tauri::Result<()> {
 }
 
 /// Прячет окно обучения.
+#[cfg_attr(mobile, allow(unreachable_code))]
 pub fn hide_learning(app: &AppHandle) {
+    #[cfg(mobile)]
+    return back_home(app);
+
     if let Some(window) = app.get_webview_window(LEARN_LABEL) {
         let _ = window.hide();
     }
@@ -999,7 +1015,11 @@ pub fn hide_learning(app: &AppHandle) {
 pub const WATCH_LABEL: &str = "watchlist";
 
 /// Показывает список активов. Если окно уже есть — поднимает его наверх.
+#[cfg_attr(mobile, allow(unreachable_code))]
 pub fn show_watchlist(app: &AppHandle) -> tauri::Result<()> {
+    #[cfg(mobile)]
+    return open_page(app, "watchlist.html");
+
     if let Some(window) = app.get_webview_window(WATCH_LABEL) {
         bring_forward(&window);
         return Ok(());
@@ -1029,7 +1049,11 @@ pub const USAGE_LABEL: &str = "usage";
 ///
 /// Модуль описывает окно разметкой, а рамку, заголовок и оформление даёт Ноа:
 /// окно модуля — это окно Ноа, а не страница в браузере.
+#[cfg_attr(mobile, allow(unreachable_code))]
 pub fn show_module(app: &AppHandle, manifest: &crate::module_kit::Manifest) -> tauri::Result<()> {
+    #[cfg(mobile)]
+    return open_page(app, &format!("module.html?id={}", manifest.id));
+
     let label = format!("module-{}", manifest.id.replace(|c: char| !c.is_alphanumeric(), "-"));
     if let Some(window) = app.get_webview_window(&label) {
         bring_forward(&window);
@@ -1201,23 +1225,58 @@ fn remember_widget_position(app: &AppHandle, x: i32, y: i32) {
 }
 
 /// Прячет окно активов.
+#[cfg_attr(mobile, allow(unreachable_code))]
 pub fn hide_watchlist(app: &AppHandle) {
+    #[cfg(mobile)]
+    return back_home(app);
+
     if let Some(window) = app.get_webview_window(WATCH_LABEL) {
         let _ = window.hide();
     }
 }
 
 /// Прячет окно заказа.
+#[cfg_attr(mobile, allow(unreachable_code))]
 pub fn hide_order(app: &AppHandle) {
+    #[cfg(mobile)]
+    return back_home(app);
+
     if let Some(window) = app.get_webview_window(ORDER_LABEL) {
         let _ = window.hide();
     }
 }
 
 /// Прячет окно задач.
+#[cfg_attr(mobile, allow(unreachable_code))]
 pub fn hide_tasks(app: &AppHandle) {
+    #[cfg(mobile)]
+    return back_home(app);
+
     if let Some(window) = app.get_webview_window(TASKS_LABEL) {
         let _ = window.hide();
+    }
+}
+
+/// На телефоне окно одно: страница модуля открывается в нём же, поверх
+/// главного экрана, а «Закрыть» и системное «назад» возвращают к нему.
+#[cfg(mobile)]
+fn open_page(app: &AppHandle, page: &str) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window(ONBOARDING_LABEL) else {
+        return show_onboarding(app);
+    };
+    let page = serde_json::to_string(page).unwrap_or_default();
+    window.eval(format!("location.href = {page}"))
+}
+
+/// Возврат со страницы модуля на главный экран телефона.
+#[cfg(mobile)]
+fn back_home(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(ONBOARDING_LABEL) {
+        let _ = window.eval(
+            r"if (!/onboarding\.html/.test(location.pathname)) {
+                history.length > 1 ? history.back() : (location.href = 'onboarding.html');
+            }",
+        );
     }
 }
 

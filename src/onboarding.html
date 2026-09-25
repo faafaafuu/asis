@@ -20,7 +20,7 @@
          из меню выделения должен что-то показать. -->
     <div class="ob__overlay" data-el="overlay" hidden>
       <div class="ob__overlay-mount" data-el="overlayMount"></div>
-      <button class="ob__btn" type="button" data-el="overlayClose">Закрыть</button>
+      <button class="ob__btn ob__btn--primary" type="button" data-el="overlayClose">Закрыть</button>
     </div>
 
     <main class="ob">
@@ -47,7 +47,7 @@
       <!-- Главное: кто такой Ноа и в каком он состоянии. -->
       <section class="ob__hero">
         <h1 class="ob__hero-title">Ноа</h1>
-        <p class="ob__hero-lead" data-keep>
+        <p class="ob__hero-lead" data-el="heroLead" data-keep>
           Голосовой помощник и его модули. Позовите по имени, нажмите левый Alt с пробелом
           или откройте модуль ниже.
         </p>
@@ -69,10 +69,46 @@
       </section>
 
       <nav class="ob__tabs" role="tablist">
+        <button class="ob__tab phone-only" type="button" role="tab" data-tab="noa" aria-selected="false">Ноа</button>
         <button class="ob__tab" type="button" role="tab" data-tab="modules" aria-selected="true">Модули</button>
         <button class="ob__tab" type="button" role="tab" data-tab="settings" aria-selected="false">Настройки</button>
         <button class="ob__tab" type="button" role="tab" data-tab="help" data-el="tabHelp" aria-selected="false">Помощь</button>
       </nav>
+
+      <!-- Разговор с Ноа — главный экран телефона (см. phone.js). На компьютере
+           его нет: там Ноа зовут именем и клавишами, а отвечает он у курсора. -->
+      <div class="ob__pane phone" data-pane="noa" data-el="phone" hidden>
+        <div class="phone__log" data-el="phoneLog" aria-live="polite"></div>
+        <p class="phone__empty" data-el="phoneEmpty">
+          Спросите что угодно или дайте поручение: «напомни через час позвонить маме»,
+          «поставь будильник на семь», «что такое альбедо», «какие у меня дела».
+        </p>
+        <p class="phone__heard" data-el="phoneHeard" hidden></p>
+
+        <div class="phone__dock">
+          <button class="phone__mic" type="button" data-el="phoneMic" aria-pressed="false"
+                  aria-label="Сказать голосом">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3" />
+              <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
+            </svg>
+          </button>
+          <span class="phone__mic-label" data-el="phoneMicLabel">Коснитесь и говорите</span>
+
+          <form class="phone__ask" data-el="phoneForm">
+            <input class="ob__underline phone__input" data-el="phoneInput" type="text"
+                   enterkeyhint="send" autocomplete="off" placeholder="Или напишите…" />
+            <button class="ob__btn ob__btn--primary phone__send" type="submit" aria-label="Отправить">→</button>
+          </form>
+
+          <div class="phone__row">
+            <button class="ob__btn ob__btn--quiet" type="button" data-el="phoneStop">Стоп</button>
+            <button class="ob__btn ob__btn--quiet" type="button" data-el="phoneClip">Из буфера</button>
+            <button class="ob__btn ob__btn--quiet" type="button" data-el="phoneHands" aria-pressed="false">Без рук: выкл</button>
+            <button class="ob__btn ob__btn--quiet" type="button" data-el="phoneNew">Новый разговор</button>
+          </div>
+        </div>
+      </div>
 
       <!-- Модули — инструменты Ноа: у каждого своё окно и свои команды голосом
            и в Telegram. Карточки собираются из modules_overview. -->
@@ -103,9 +139,13 @@
           <h2 class="ob__subtitle">Подключить MCP-сервер</h2>
           <span class="ob__label">Название</span>
           <input class="ob__underline" data-el="connectTitle" type="text" placeholder="Погода" />
-          <span class="ob__label">Команда запуска</span>
+          <span class="ob__label">Команда запуска или ссылка</span>
           <input class="ob__underline" data-el="connectCommand" type="text" spellcheck="false"
                  placeholder="npx -y @scope/mcp-server" />
+          <p class="ob__hint" data-keep>
+            Программа на этом компьютере — командой, как в описании сервера. Сервер в сети —
+            ссылкой https://…/mcp: такой модуль работает и на телефоне.
+          </p>
           <span class="ob__label">Что умеет</span>
           <input class="ob__underline" data-el="connectAbout" type="text" placeholder="Прогноз погоды по городам" />
           <span class="ob__label">Пример фразы</span>
@@ -218,18 +258,29 @@
            чем пользуются каждый день. На телефоне скрыт (см. onboarding.js). -->
       <section class="ob__block" data-el="voiceBlock">
         <h2 class="ob__subtitle" data-i18n="voice.title">Голос</h2>
-        <p class="ob__lead" data-i18n="voice.lead">
+        <p class="ob__lead desk-only" data-i18n="voice.lead">
           Пробел в открытом окне — прочитать вслух. Левый Alt с пробелом — сказать вопрос голосом.
         </p>
+        <p class="ob__lead phone-only" data-keep>
+          Ответы читает вслух синтезатор телефона, вопросы слушает распознавание речи Android —
+          ничего скачивать не нужно. Позвать Ноа можно кнопкой микрофона на вкладке «Ноа»,
+          ярлыком «Спросить голосом» (долгое нажатие на иконку), плиткой «Ноа» в шторке
+          быстрых настроек и жестом помощника, если выбрать Ноа помощником.
+        </p>
+        <div class="ob__actions phone-only">
+          <button class="ob__btn ob__btn--quiet" type="button" data-el="assistantSettings">Сделать Ноа помощником</button>
+        </div>
 
         <label class="ob__check">
           <input type="checkbox" data-el="voiceEnabled" />
           <span class="ob__check-text">
-            <span data-i18n="voice.enabled">Озвучивать объяснения</span>
+            <span class="desk-only" data-i18n="voice.enabled">Озвучивать объяснения</span>
+            <span class="phone-only">Читать ответы вслух</span>
           </span>
         </label>
 
         <div data-el="voiceFields">
+          <div class="desk-only">
           <span class="ob__label" data-i18n="voice.engine">Чем говорить</span>
           <span class="ob__select">
             <select class="ob__underline" data-el="voiceEngine">
@@ -262,6 +313,7 @@
             <select class="ob__underline" data-el="voiceName"></select>
             <span class="ob__chevron" aria-hidden="true"></span>
           </span>
+          </div>
 
           <span class="ob__label">
             <span data-i18n="voice.rate">Скорость</span>
@@ -276,14 +328,14 @@
           <p class="ob__hint" data-el="voiceStatus"></p>
 
           <span class="ob__label ob__group" data-i18n="speech.title">Голосовые вопросы</span>
-          <p class="ob__hint" data-i18n="speech.lead">
+          <p class="ob__hint desk-only" data-i18n="speech.lead">
             Зажмите левый Alt с пробелом и говорите. Распознавание работает на этом компьютере.
           </p>
           <span class="ob__label" data-i18n="speech.name">Имя помощника</span>
           <input class="ob__underline" data-el="wakeName" type="text" maxlength="24"
                  spellcheck="false" autocomplete="off" placeholder="Ноа" />
           <p class="ob__hint" data-i18n="speech.nameHint">По этому имени к помощнику обращаются голосом, им же он себя называет. Лучше всего слышно имя из двух-трёх слогов, которое не встречается в обычной речи: «Ноа», «Джарвис», «Вега». Короткие и частые слова — «Макс», «Лена», «Мир» — помощник будет путать с разговором в комнате.</p>
-          <label class="ob__check">
+          <label class="ob__check desk-only">
             <input type="checkbox" data-el="wakeWord" />
             <span class="ob__check-text">
               <span data-i18n="speech.wake">Отзываться на имя</span>
@@ -291,6 +343,7 @@
             </span>
           </label>
 
+          <div class="desk-only">
           <span class="ob__label" data-i18n="speech.device">Микрофон</span>
           <span class="ob__select">
             <select class="ob__underline" data-el="speechDevice"></select>
@@ -302,6 +355,7 @@
             <button class="ob__btn ob__btn--primary" type="button" data-el="speechDownload" hidden></button>
           </div>
           <p class="ob__hint" data-el="speechStatus"></p>
+          </div>
         </div>
       </section>
 

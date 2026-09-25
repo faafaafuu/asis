@@ -243,7 +243,6 @@ pub fn save_ai_settings(
 }
 
 /// Этот Esc только что остановил голос: окно его не отдаёт на закрытие.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn esc_went_to_voice() -> bool {
     crate::voice::hotkey::esc_went_to_voice(700)
@@ -325,7 +324,6 @@ pub struct VoiceSettings {
     pub azure_region: String,
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn voice_settings(app: AppHandle, state: State<'_, AppState>) -> VoiceSettings {
     let config = state.config();
@@ -357,7 +355,6 @@ pub fn voice_settings(app: AppHandle, state: State<'_, AppState>) -> VoiceSettin
     }
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn save_voice_settings(
     app: AppHandle,
@@ -410,7 +407,6 @@ pub fn default_wake_name() -> &'static str {
 
 /// Голоса, между которыми можно выбирать. Оба списка сразу: окно показывает
 /// подходящий по выбранному способу и не ходит за вторым отдельно.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn voice_list() -> serde_json::Value {
     let to_json = |list: &[(&str, &str)]| -> Vec<serde_json::Value> {
@@ -426,14 +422,12 @@ pub fn voice_list() -> serde_json::Value {
 }
 
 /// Скачивает Python, PyTorch и голоса Silero. Ход — событием `voice:install`.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn silero_install(app: AppHandle) -> Result<(), String> {
     crate::voice::silero_install(app).await
 }
 
 /// Расход модели для виджета.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn usage_summary(app: AppHandle) -> crate::usage::Summary {
     crate::usage::summary(&app)
@@ -446,7 +440,6 @@ pub struct WidgetSettings {
     pub on_top: bool,
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn widget_settings(state: State<'_, AppState>) -> WidgetSettings {
     let config = state.config();
@@ -457,7 +450,6 @@ pub fn widget_settings(state: State<'_, AppState>) -> WidgetSettings {
 }
 
 /// Включает или выключает виджет и закрепляет его поверх окон.
-#[cfg(desktop)]
 // Асинхронная: окно, созданное из синхронной команды, на Windows вешает
 // программу — команда ждёт главный поток, а он ждёт команду.
 #[tauri::command]
@@ -506,7 +498,6 @@ fn module_id(title: &str, parts: &[String]) -> String {
 }
 
 /// Подключает MCP-сервер как свой модуль: название, командная строка, пример фразы.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn plugins_connect(
     app: AppHandle,
@@ -534,7 +525,6 @@ pub fn plugins_connect(
 }
 
 /// Ставит модуль из библиотеки.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn plugins_install(app: AppHandle, manifest: crate::plugins::Manifest) -> Result<(), String> {
     // С площадки — вместе с файлами сервера; без площадки — описание из
@@ -548,20 +538,17 @@ pub async fn plugins_install(app: AppHandle, manifest: crate::plugins::Manifest)
     }
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn plugins_remove(app: AppHandle, id: String) -> Result<(), String> {
     crate::plugins::uninstall(&app, &id)
 }
 
 /// Ключи модуля: названия и есть ли значение. Самих значений окно не видит.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn plugins_secrets(app: AppHandle, id: String) -> Result<Vec<crate::plugins::SecretField>, String> {
     crate::plugins::secret_fields(&app, &id)
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn plugins_save_secrets(
     app: AppHandle,
@@ -572,14 +559,12 @@ pub fn plugins_save_secrets(
 }
 
 /// Проверить модуль заново.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn plugins_recheck(app: AppHandle, id: String) -> Result<(), String> {
     crate::plugins::recheck(&app, &id)
 }
 
 /// Библиотека модулей из репозитория.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn plugins_library() -> Result<Vec<crate::plugins::Manifest>, String> {
     match crate::platform::list("").await {
@@ -615,14 +600,12 @@ pub struct PlatformSettings {
 
 /// Какая версия установлена. Нужна окну настроек, чтобы человеку было с чем
 /// сравнивать найденное.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn app_version(app: tauri::AppHandle) -> String {
     crate::update::current(&app)
 }
 
 /// Смотрит, вышло ли новое. `null` — стоит последнее.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn update_check(app: tauri::AppHandle) -> Result<Option<crate::update::Found>, String> {
     crate::update::look(&app).await
@@ -630,14 +613,12 @@ pub async fn update_check(app: tauri::AppHandle) -> Result<Option<crate::update:
 
 /// Ставит новую версию поверх текущей и перезапускает программу. Ответа отсюда
 /// окно не дождётся: к этому времени программа уже перезапускается.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
     crate::update::install(app).await
 }
 
 /// Что нарисовать в окне модуля: заголовок, значок и его разметка.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn module_window(app: tauri::AppHandle, id: String) -> Result<serde_json::Value, String> {
     let manifest = crate::plugins::installed(&app)
@@ -661,7 +642,6 @@ pub fn module_window(app: tauri::AppHandle, id: String) -> Result<serde_json::Va
 }
 
 /// Вызов инструмента модуля из его окна.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn module_call(id: String, tool: String, args: serde_json::Value) -> Result<String, String> {
     let full = format!("{id}.{tool}");
@@ -670,7 +650,6 @@ pub async fn module_call(id: String, tool: String, args: serde_json::Value) -> R
         .map_err(|err| format!("вызов не выполнился: {err}"))?
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn platform_settings(state: State<'_, AppState>) -> PlatformSettings {
     let config = state.config();
@@ -681,7 +660,6 @@ pub fn platform_settings(state: State<'_, AppState>) -> PlatformSettings {
     }
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn save_platform_settings(
     app: AppHandle,
@@ -718,14 +696,12 @@ pub async fn save_platform_settings(
 }
 
 /// Модули и их состояние — для главного окна.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn modules_overview(app: AppHandle) -> Vec<crate::modules::ModuleCard> {
     crate::modules::overview(&app)
 }
 
 /// Открывает окно модуля.
-#[cfg(desktop)]
 // Асинхронная: окно, созданное из синхронной команды, на Windows вешает
 // программу — команда ждёт главный поток, а он ждёт команду.
 #[tauri::command]
@@ -735,7 +711,6 @@ pub async fn open_module(app: AppHandle, id: String) -> Result<(), String> {
 
 /// Пробный запрос к Azure — для кнопки «Послушать»: озвучивание при неудаче
 /// тихо переходит на свой голос, а человеку нужна причина.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn azure_check(state: State<'_, AppState>) -> Result<(), String> {
     let config = state.config().voice.clone();
@@ -743,7 +718,6 @@ pub async fn azure_check(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 /// Скачивает синтезатор и выбранный голос.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn voice_install(app: AppHandle, voice: String) -> Result<(), String> {
     crate::voice::assets::install(app, voice).await
@@ -765,7 +739,6 @@ pub fn popup_taken_over(moved: bool, sized: bool) {
 /// Зовётся из попапа на движение мыши, нажатие клавиши и прокрутку — с большим
 /// запасом по частоте, не на каждое событие. Нужно, чтобы окно, в котором
 /// человек читает длинный ответ, не закрылось у него на глазах.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn popup_active() {
     crate::overlay::touch_popup();
@@ -777,7 +750,6 @@ pub fn popup_active() {
 /// Хук такой пробел не забирает — окно наше, — поэтому окно передаёт его само,
 /// и нажатие значит то же, что пробел поверх чужой программы: коротко —
 /// прочитать, зажать — слушать.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn popup_space(down: Option<bool>) {
     crate::overlay::touch_popup();
@@ -876,14 +848,12 @@ pub fn save_food_settings(
 }
 
 /// Открывает браузер Ноа на ВкусВилле, чтобы человек вошёл в первый раз.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn food_login(app: AppHandle) -> Result<(), String> {
     crate::food::open_session(&app, false).await.map(|_| ())
 }
 
 /// Оплачивает заказ, который ждёт подтверждения: человек нажал «Оплатить».
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn order_pay(app: AppHandle) -> Result<(), String> {
     crate::planner::pay_confirmed(&app).await
@@ -899,7 +869,6 @@ pub fn settings_section() -> Option<String> {
 ///
 /// Адрес берётся из состояния заказа, а не из окна: окно просит «открой
 /// корзину», и открыть по этой просьбе можно только то, что собрал сам Ноа.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn open_order_link() -> Result<(), String> {
     let link = crate::order::current()
@@ -909,7 +878,6 @@ pub fn open_order_link() -> Result<(), String> {
 }
 
 /// Произнести текст. Возвращается сразу: речь идёт своим чередом.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn voice_speak(
     app: AppHandle,
@@ -957,14 +925,12 @@ pub async fn voice_speak(
 /// `async` здесь не для ожидания, а ради потока: Tauri выполняет обычные
 /// команды в главном потоке, а эта снимает процесс синтезатора — работа хоть
 /// и короткая, но с ожиданием чужого процесса, и в главном потоке ей не место.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn voice_stop() {
     crate::voice::stop();
 }
 
 /// Готово ли распознавание речи и чем оно будет считать.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn speech_status(app: AppHandle) -> serde_json::Value {
     let vram = crate::ollama::hardware().vram_gb;
@@ -987,14 +953,12 @@ pub fn hud_mode() -> String {
 }
 
 /// Микрофоны, которые видит система.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn input_devices() -> Vec<String> {
     crate::voice::stt::devices()
 }
 
 /// Скачивает распознавание речи.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn speech_install(app: AppHandle) -> Result<(), String> {
     crate::voice::whisper::install(app).await
@@ -1137,7 +1101,6 @@ pub fn open_key_page(provider: String) -> Result<(), String> {
 }
 
 /// Открывает площадку модулей — по сохранённому адресу, не по строке из окна.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn open_platform(state: State<'_, AppState>) -> Result<(), String> {
     let url = state.config().platform.url.clone();
@@ -1149,6 +1112,13 @@ pub fn open_platform(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Отдаёт ссылку системе — пусть открывает тем, чем человек обычно читает.
 pub(crate) fn open_externally(target: &str) -> Result<(), String> {
+    // На телефоне открывает система — Intent, а не программа из PATH.
+    #[cfg(mobile)]
+    return crate::mobile::call::<serde_json::Value>("openUrl", serde_json::json!({ "url": target }))
+        .map(|_| ())
+        .map_err(|err| format!("не удалось открыть {target}: {err}"));
+
+    #[cfg(desktop)]
     let opener = if cfg!(target_os = "windows") {
         "explorer"
     } else if cfg!(target_os = "macos") {
@@ -1157,6 +1127,7 @@ pub(crate) fn open_externally(target: &str) -> Result<(), String> {
         "xdg-open"
     };
 
+    #[cfg(desktop)]
     std::process::Command::new(opener)
         .arg(target)
         .spawn()
@@ -1569,14 +1540,12 @@ pub fn learn_topic(course: String, topic: String) -> Result<crate::learning::Top
 
 /// Очередь повторения: что пора повторить и новые на сегодня. Тема — только
 /// её карточки.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn learn_review(course: String, topic: Option<String>) -> Result<Vec<crate::recall::ReviewCard>, String> {
     crate::recall::queue(&course, topic.as_deref())
 }
 
 /// Ответ на карточку: снова, трудно, хорошо, легко.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn learn_grade(course: String, card: String, grade: String) -> Result<crate::recall::Graded, String> {
     let grade = crate::srs::Grade::parse(&grade).ok_or("Оценка — again, hard, good или easy.")?;
@@ -1584,14 +1553,12 @@ pub fn learn_grade(course: String, card: String, grade: String) -> Result<crate:
 }
 
 /// Понятия темы с тем, насколько каждое усвоено, и связями.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn learn_concepts(course: String, topic: String) -> Result<Vec<crate::recall::ConceptView>, String> {
     crate::recall::concepts(&course, &topic)
 }
 
 /// Карта курса: темы, понятия, связи.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn learn_map(course: String) -> Result<crate::recall::MapView, String> {
     crate::recall::map(&course)
@@ -1671,6 +1638,24 @@ pub async fn learn_dictate_stop(app: AppHandle) -> Result<String, String> {
     Ok(text.trim().to_string())
 }
 
+/// На телефоне диктует системное распознавание.
+#[cfg(mobile)]
+#[tauri::command]
+pub fn learn_dictate_start() -> Result<(), String> {
+    crate::voice::dictate_start();
+    Ok(())
+}
+
+#[cfg(mobile)]
+#[tauri::command]
+pub async fn learn_dictate_stop() -> Result<String, String> {
+    let text = crate::voice::dictate_stop().await?;
+    if text.is_empty() {
+        return Err("Ничего не расслышал — попробуйте ещё раз.".into());
+    }
+    Ok(text)
+}
+
 /// Фокус-сессия закончилась: записать минуты, цель и то, что вспомнилось.
 #[tauri::command]
 pub fn learn_focus_done(course: String, session: crate::focus::Session) -> Result<crate::focus::Stats, String> {
@@ -1679,14 +1664,12 @@ pub fn learn_focus_done(course: String, session: crate::focus::Session) -> Resul
 
 /// Конец отрезка фокуса или перерыва: Ноа говорит об этом, даже если окно
 /// обучения закрыто или под другими окнами.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn learn_focus_bell(app: AppHandle, text: String) {
     crate::announce(&app, text.chars().take(300).collect(), false);
 }
 
 /// Устный зачёт: Ноа задаёт вопросы темы вслух и слушает ответы.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn learn_oral(app: AppHandle, course: String, topic: Option<String>) -> Result<(), String> {
     let text = crate::learning::oral(&course, topic.as_deref())?;
@@ -1696,7 +1679,6 @@ pub fn learn_oral(app: AppHandle, course: String, topic: Option<String>) -> Resu
 
 /// Обсуждение голосом: раздела урока или вопроса. Ноа открывает разговор
 /// короткой фразой и слушает.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn learn_discuss(app: AppHandle, target: crate::tutor::Target) -> Result<(), String> {
     let intro = crate::tutor::open_voice(&target)?;
@@ -1908,7 +1890,6 @@ pub fn save_calendar_settings(
 }
 
 /// Проводит через согласие Google и запоминает ключ.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn calendar_connect(app: AppHandle) -> Result<(), String> {
     let token = crate::calendar::connect(&app).await?;
@@ -1926,7 +1907,6 @@ pub async fn calendar_connect(app: AppHandle) -> Result<(), String> {
 }
 
 /// Отключает календарь: ключ забывается.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn calendar_forget(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     {
@@ -1982,7 +1962,6 @@ pub fn task_step(app: AppHandle, id: String, at: usize, done: bool) -> Option<Ta
 }
 
 /// Просит модель разбить задачу на шаги.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn task_plan(app: AppHandle, id: String) -> Result<Option<TaskView>, String> {
     let task = crate::planner::plan_task(&app, &id).await?;

@@ -1,14 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Точка входа на Android: intent-filter ACTION_PROCESS_TEXT.
-  Система сама добавляет зарегистрированную активность пунктом в контекстное меню
-  выделения текста в любом приложении, которое поддерживает android:process_text —
-  это подавляющее большинство текстовых полей и WebView.
+  Системные входы Ноа на Android.
 
-  Активность прозрачная и без истории: пользователь не должен видеть переключение
-  задач, он видит только попап поверх приложения, из которого выделял текст.
+  «Объяснить» — intent-filter ACTION_PROCESS_TEXT: система сама добавляет его в
+  меню выделения текста почти любого приложения.
+
+  «Слушай» — жест ассистента (ACTION_ASSIST), голосовая команда гарнитуры
+  (VOICE_COMMAND), ярлык на иконке и плитка в быстрых настройках. Это замена
+  клавишам и имени вслух, которыми Ноа зовут на компьютере.
+
+  Обе активности прозрачные и без истории: человек видит не переключение
+  задач, а сразу Ноа.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- С Android 11 чужие службы видны только объявленные: без этого
+         распознавание речи и синтезатор «не установлены». -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
 
     <application>
         <activity
@@ -25,6 +47,35 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name="app.sufler.plugin.AssistActivity"
+            android:label="@string/sufler_listen_label"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name="app.sufler.plugin.ListenTileService"
+            android:label="@string/sufler_tile_label"
+            android:icon="@android:drawable/ic_btn_speak_now"
+            android:exported="true"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

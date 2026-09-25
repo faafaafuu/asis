@@ -55,11 +55,17 @@ mod secret;
 mod tasks;
 #[cfg(desktop)]
 mod update;
+#[cfg(mobile)]
+#[path = "update_mobile.rs"]
+mod update;
 mod selection;
 mod state;
 #[cfg(mobile)]
 mod mobile_shim;
 #[cfg(desktop)]
+mod voice;
+#[cfg(mobile)]
+#[path = "voice_mobile.rs"]
 mod voice;
 mod watcher;
 
@@ -261,28 +267,40 @@ pub fn run() {
             // экране ничего. Открываем то же окно настройки: выбор источника и
             // модели на телефоне осмыслен ровно так же.
             #[cfg(mobile)]
-            if let Err(err) = overlay::show_onboarding(app.handle()) {
-                log::error!("не удалось открыть окно: {err}");
+            {
+                let _ = APP.set(app.handle().clone());
+                if let Err(err) = overlay::show_onboarding(app.handle()) {
+                    log::error!("не удалось открыть окно: {err}");
+                }
+                // То, что на компьютере живёт в трее, на телефоне живёт, пока
+                // открыто приложение: напоминания, будильники, Telegram, модули.
+                watch_reminders(app.handle());
+                review::watch(app.handle());
+                watchlist::watch_alerts(app.handle().clone());
+                telegram::listen(app.handle().clone());
+                alarms::watch(app.handle().clone());
+                usage::watch(app.handle().clone());
+                plugins::watch(app.handle());
+                platform::sync(app.handle());
             }
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(mobile)]
+            phone_ask,
+            #[cfg(mobile)]
+            phone_forget,
             commands::runtime_config,
             commands::popup_ready,
             commands::pending_open,
             commands::close_popup,
-            #[cfg(desktop)]
             commands::popup_active,
-            #[cfg(desktop)]
             commands::popup_space,
-            #[cfg(desktop)]
             commands::open_order_link,
             commands::food_settings,
             commands::save_food_settings,
-            #[cfg(desktop)]
             commands::food_login,
-            #[cfg(desktop)]
             commands::order_pay,
             commands::settings_section,
             #[cfg(desktop)]
@@ -312,33 +330,23 @@ pub fn run() {
             commands::learn_topic,
             commands::learn_read,
             commands::learn_place,
-            #[cfg(desktop)]
             commands::learn_review,
-            #[cfg(desktop)]
             commands::learn_grade,
-            #[cfg(desktop)]
             commands::learn_concepts,
-            #[cfg(desktop)]
             commands::learn_map,
             commands::learn_focus_done,
             commands::brains_list,
-            #[cfg(desktop)]
             commands::esc_went_to_voice,
             commands::brains_use,
-            #[cfg(desktop)]
             commands::learn_focus_bell,
             commands::learn_check,
             commands::learn_self_grade,
             commands::learn_exam,
             commands::learn_submit,
             commands::close_learning,
-            #[cfg(desktop)]
             commands::learn_dictate_start,
-            #[cfg(desktop)]
             commands::learn_dictate_stop,
-            #[cfg(desktop)]
             commands::learn_oral,
-            #[cfg(desktop)]
             commands::learn_discuss,
             commands::learn_ask,
             commands::learn_deep,
@@ -352,7 +360,6 @@ pub fn run() {
             commands::task_edit,
             commands::task_remove,
             commands::task_step,
-            #[cfg(desktop)]
             commands::task_plan,
             commands::task_postpone,
             commands::task_step_remove,
@@ -360,9 +367,7 @@ pub fn run() {
             commands::task_clear_done,
             commands::calendar_settings,
             commands::save_calendar_settings,
-            #[cfg(desktop)]
             commands::calendar_connect,
-            #[cfg(desktop)]
             commands::calendar_forget,
             commands::review_settings,
             commands::save_review_settings,
@@ -387,71 +392,39 @@ pub fn run() {
             commands::ollama_install_size,
             commands::install_ollama,
             commands::recommended_model,
-            #[cfg(desktop)]
             commands::voice_settings,
-            #[cfg(desktop)]
             commands::save_voice_settings,
-            #[cfg(desktop)]
             commands::default_wake_name,
-            #[cfg(desktop)]
             commands::voice_list,
-            #[cfg(desktop)]
             commands::voice_install,
-            #[cfg(desktop)]
             commands::silero_install,
-            #[cfg(desktop)]
             commands::modules_overview,
-            #[cfg(desktop)]
             commands::open_module,
-            #[cfg(desktop)]
             commands::plugins_connect,
-            #[cfg(desktop)]
             commands::plugins_install,
-            #[cfg(desktop)]
             commands::plugins_remove,
-            #[cfg(desktop)]
             commands::update_check,
-            #[cfg(desktop)]
             commands::update_install,
-            #[cfg(desktop)]
             commands::app_version,
-            #[cfg(desktop)]
             commands::module_window,
-            #[cfg(desktop)]
             commands::module_call,
-            #[cfg(desktop)]
             commands::plugins_secrets,
-            #[cfg(desktop)]
             commands::plugins_save_secrets,
-            #[cfg(desktop)]
             commands::plugins_recheck,
-            #[cfg(desktop)]
             commands::plugins_library,
-            #[cfg(desktop)]
             commands::platform_settings,
-            #[cfg(desktop)]
             commands::save_platform_settings,
-            #[cfg(desktop)]
             commands::open_platform,
-            #[cfg(desktop)]
             commands::usage_summary,
-            #[cfg(desktop)]
             commands::widget_settings,
-            #[cfg(desktop)]
             commands::save_widget_settings,
-            #[cfg(desktop)]
             commands::azure_check,
-            #[cfg(desktop)]
             commands::voice_speak,
-            #[cfg(desktop)]
             commands::voice_stop,
-            #[cfg(desktop)]
             commands::speech_status,
-            #[cfg(desktop)]
             commands::input_devices,
             #[cfg(desktop)]
             commands::hud_mode,
-            #[cfg(desktop)]
             commands::speech_install,
             commands::startup_settings,
             commands::save_startup_settings,
@@ -519,11 +492,143 @@ pub(crate) fn turn_cancelled() -> bool {
     false
 }
 
-/// На телефоне своего голоса и окна сообщений нет: фраза остаётся в журнале,
-/// а до человека её доносит Telegram, если он подключён.
+/// Сообщение от Ноа на телефоне — напоминание, будильник, итог разбора.
+///
+/// Экран разговора показывает его репликой, голос читает вслух, а если
+/// приложение свёрнуто — до человека доходит уведомление в шторке.
 #[cfg(mobile)]
-pub(crate) fn announce(_app: &tauri::AppHandle, text: String, _wait: bool) {
+pub(crate) fn announce(app: &tauri::AppHandle, text: String, wait: bool) {
+    use tauri::Emitter;
+
     log::info!("сообщение: «{text}»");
+    let _ = app.emit("noa:message", text.clone());
+    mobile::notify("Ноа", &text);
+    let voice = app.state::<AppState>().config().voice.clone();
+    if !voice.enabled {
+        return;
+    }
+    let speaking = async move {
+        if let Err(err) = voice::speak(&voice_app(), &voice, &text).await {
+            log::warn!("сообщение не прочитано вслух: {err}");
+        }
+    };
+    if wait {
+        tauri::async_runtime::block_on(speaking);
+    } else {
+        tauri::async_runtime::spawn(speaking);
+    }
+}
+
+/// Ручка приложения для голоса — `speak` её не использует на телефоне, но
+/// сигнатура общая с компьютером.
+#[cfg(mobile)]
+fn voice_app() -> tauri::AppHandle {
+    APP.get().cloned().expect("приложение запущено")
+}
+
+#[cfg(mobile)]
+static APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// Сказать и слушать ответ — устный зачёт и обсуждение урока. На телефоне
+/// слушает экран разговора: фраза уходит ему, он её читает и включает микрофон.
+#[cfg(mobile)]
+pub(crate) fn say_then_listen(app: &tauri::AppHandle, text: String) {
+    use tauri::Emitter;
+
+    let _ = app.emit("noa:say-then-listen", text);
+}
+
+/// Вопрос с экрана разговора на телефоне — текстом или голосом. Ответ
+/// приходит текстом: экран его показывает и сам читает вслух.
+///
+/// Путь тот же, что у голоса на компьютере: сначала распоряжения (задачи,
+/// будильники, поиск, модули), потом обсуждение урока, потом модель с
+/// памятью о разговоре.
+#[cfg(mobile)]
+#[tauri::command]
+async fn phone_ask(app: tauri::AppHandle, text: String) -> Result<String, String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Ok(String::new());
+    }
+    log::info!("вопрос с телефона: «{text}»");
+
+    if is_farewell(&text, &app.state::<AppState>().wake_name()) {
+        let mut said = Vec::new();
+        if alarms::stop() {
+            said.push("Выключил будильник.".to_string());
+        }
+        if let Some(summary) = learning::stop_quiz().or_else(recall::stop) {
+            said.push(summary);
+        }
+        voice::stop();
+        return Ok(if said.is_empty() { "До связи.".into() } else { said.join(" ") });
+    }
+
+    if let Some(reply) = review::answer(&app, &text) {
+        return Ok(reply);
+    }
+    if let Some(reply) = planner::handle(&app, &text).await {
+        remember_exchange(&text, &reply);
+        planner::take_handoff();
+        return Ok(reply);
+    }
+    if tutor::active() {
+        return tutor::answer(&app, &text, true).await;
+    }
+    if glance::active() {
+        return glance::answer(&app, &text).await;
+    }
+
+    let (provider, limit) = {
+        let state = app.state::<AppState>();
+        let limit = state.config().ai.call_limit();
+        (state.provider(), limit)
+    };
+    let depth = thread_depth(&app);
+    let history = {
+        let mut thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
+        if thread.1.is_some_and(|at| at.elapsed() > THREAD_TTL) {
+            thread.0.clear();
+        }
+        let skip = thread.0.len().saturating_sub(depth);
+        thread.0[skip..].to_vec()
+    };
+    let answer = match tokio::time::timeout(limit, provider.ask("", "", &history, &text)).await {
+        Ok(Ok(answer)) if !answer.trim().is_empty() => answer.trim().to_string(),
+        Ok(Ok(_)) => return Err("Модель ответила пустотой.".into()),
+        Ok(Err(err)) => {
+            log::warn!("ответ с телефона не пришёл: {err}");
+            return Err(format!(
+                "Не получилось ответить: {}.",
+                err.user_text("модель не ответила").trim_end_matches('.')
+            ));
+        }
+        Err(_) => return Err("Не получилось ответить: модель не успела.".into()),
+    };
+    remember_exchange(&text, &answer);
+    Ok(answer)
+}
+
+/// Забыть разговор — кнопка «Новый разговор».
+#[cfg(mobile)]
+#[tauri::command]
+fn phone_forget() {
+    VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner()).0.clear();
+}
+
+/// Разговор без рук на телефоне — это экран разговора с включённым
+/// микрофоном: вечерний разбор задаёт вопрос и ждёт ответа голосом.
+#[cfg(mobile)]
+pub(crate) fn start_conversation(app: &tauri::AppHandle) {
+    use tauri::Emitter;
+
+    let _ = app.emit("noa:listen", ());
+}
+
+#[cfg(mobile)]
+pub(crate) fn in_conversation() -> bool {
+    false
 }
 
 /// Отменён ли ход, который ведёт этот поток.
@@ -1150,7 +1255,6 @@ const WAKE_CALLS: &[&str] = &[
 ///
 /// Считается расстояние Левенштейна с ранним выходом — слова здесь в три-четыре
 /// буквы, дороже ничего не нужно.
-#[cfg(desktop)]
 fn close_enough(word: &str, sample: &str, allowed: usize) -> bool {
     if word == sample {
         return true;
@@ -1340,7 +1444,6 @@ const CALL_GREETINGS: &[&str] = &["привет", "здоров", "здравс�
 /// для него «ноа» и «Ноа» — разные слова, и человек, вписавший имя маленькими
 /// буквами, получал вместо разбора ослышек «Ноа» строгое правило для чужого
 /// имени. «Ну а как слышно?» и «Но здорово!» тогда не узнавались как зов вовсе.
-#[cfg(desktop)]
 fn is_default_name(name: &str) -> bool {
     let name = name.trim().to_lowercase();
     // «Noah», «Noa» латиницей — то же имя: распознавание речи пишет его
@@ -1400,7 +1503,6 @@ fn wake_split(text: &str, name: &str) -> Option<String> {
 /// Допуск в буквах для своего имени: длиннее имя — больше запас, оно всё
 /// равно останется собой. Короче двух букв — только точное совпадение,
 /// иначе однобуквенный допуск цепляет половину обычной речи.
-#[cfg(desktop)]
 fn name_tolerance(name: &str) -> usize {
     // Трёхбуквенному имени одна ошибка — это уже обычные слова: под «чел»
     // подходили «шёл», «дел», «чек», и помощник просыпался от разговора в
@@ -1560,7 +1662,6 @@ fn wake_split_default(text: &str) -> Option<String> {
 ///
 /// Все они настолько однозначны, что посреди вопроса не встречаются: «до
 /// связи», «до свидания», «спасибо».
-#[cfg(desktop)]
 const FAREWELL_ANYWHERE: &[&str] = &[
     "спасибо",
     "до свидания",
@@ -1596,7 +1697,6 @@ const FAREWELL_ANYWHERE: &[&str] = &[
 /// объяснишь». Проверка на вхождение обрывала бы разговор ровно посреди
 /// вопроса, поэтому такие слова засчитываются только когда сказано именно
 /// прощание и ничего больше.
-#[cfg(desktop)]
 const FAREWELL_ALONE: &[&str] = &["пока", "покеда", "чао", "бай", "адьос"];
 
 /// Не прощание, а «хватит» — но значит то же: разговор окончен.
@@ -1604,7 +1704,6 @@ const FAREWELL_ALONE: &[&str] = &["пока", "покеда", "чао", "бай"
 /// Только когда фраза этим и исчерпывается. В проверку «прощание в конце
 /// мысли» эти слова не идут: «стоп, подожди, я про другое» — не конец
 /// разговора, хоть за «стоп» и стоит запятая.
-#[cfg(desktop)]
 const STOP_ALONE: &[&str] = &[
     "хватит", "стоп", "замолчи", "замолкни", "отбой", "отмена", "заткнись", "отстань",
     "выключись", "закройся",
@@ -1612,11 +1711,9 @@ const STOP_ALONE: &[&str] = &[
 
 /// Имя в обращении — не часть прощания: «Ноа, хватит» — это «хватит», а одно
 /// «Ноа» — зов, а не прощание.
-#[cfg(desktop)]
 const NAMES: &[&str] = &["ноа", "ноя", "ноэ"];
 
 /// Фразы, которые целиком — конец разговора: ответ на «что-то ещё?».
-#[cfg(desktop)]
 const FAREWELL_PHRASES: &[&str] = &[
     "это все", "все", "на этом все", "это пока все", "ничего", "больше ничего",
     "ничего не надо", "не надо",
@@ -1624,14 +1721,12 @@ const FAREWELL_PHRASES: &[&str] = &[
 
 /// Слова, которые в прощании ничего не значат и мешают его узнать:
 /// «ну всё, пока», «ладно, пока», «ок, пока».
-#[cfg(desktop)]
 const FILLER: &[&str] = &[
     "ну", "всё", "все", "ладно", "хорошо", "ок", "окей", "давай", "тогда", "и", "а", "так",
 ];
 
 /// Прощаются ли с программой. `name` — как зовут помощника: имя в обращении
 /// не должно мешать распознать прощание («{Имя}, хватит» — это «хватит»).
-#[cfg(desktop)]
 fn is_farewell(text: &str, name: &str) -> bool {
     let lower = text.to_lowercase();
     // «Спасибо» в длинной фразе — вежливость посреди разговора, а не прощание:
@@ -1689,7 +1784,6 @@ fn is_farewell(text: &str, name: &str) -> bool {
 /// паузы за ним нет. Без этой проверки пришлось бы выбирать между «не узнаём
 /// прощание» и «обрываем разговор посреди вопроса»; знак препинания разводит
 /// эти случаи там, где список слов бессилен.
-#[cfg(desktop)]
 fn closed_with_goodbye(lower: &str) -> bool {
     for word in FAREWELL_ALONE {
         let mut from = 0;
@@ -2100,11 +2194,9 @@ pub(crate) fn restart_wake(_app: &tauri::AppHandle) {}
 ///
 /// Полминуты хватает: сроки человек ставит с точностью до минуты, и опоздание
 /// на полминуты незаметно. Чаще — впустую будить процессор, реже — заметно.
-#[cfg(desktop)]
 const REMINDER_STEP: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Следит за сроками задач и напоминает о них.
-#[cfg(desktop)]
 fn watch_reminders(app: &tauri::AppHandle) {
     let app = app.clone();
     std::thread::Builder::new()
@@ -2119,7 +2211,6 @@ fn watch_reminders(app: &tauri::AppHandle) {
 }
 
 /// Напоминает об одной задаче.
-#[cfg(desktop)]
 fn remind(app: &tauri::AppHandle, task: &tasks::Task) {
     log::info!("напоминаю: «{}»", task.title);
     announce(app, format!("Напоминаю: {}", task.title), false);
@@ -2618,16 +2709,13 @@ fn respond(app: &tauri::AppHandle, text: String) {
 /// Разговор кончается от паузы, а тема — нет: следующий вызов через минуту
 /// обычно о том же. Поэтому история живёт `THREAD_TTL` после последнего
 /// обмена, а не до конца разговора.
-#[cfg(desktop)]
 static VOICE_THREAD: std::sync::Mutex<(Vec<ai_client::ThreadItem>, Option<std::time::Instant>)> =
     std::sync::Mutex::new((Vec::new(), None));
 
-#[cfg(desktop)]
 const THREAD_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 /// Сколько обменов помнить. Своей маленькой модели — три: на большем она
 /// начинает пересказывать прежнее вместо ответа на новое. Облачной — двенадцать.
-#[cfg(desktop)]
 fn thread_depth(app: &tauri::AppHandle) -> usize {
     let local = crate::config::is_local(&app.state::<AppState>().config().ai.endpoint);
     if local {
@@ -2696,7 +2784,6 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
 }
 
 /// Последний обмен разговора, если тема ещё жива: о чём «это» в «поищи про это».
-#[cfg(desktop)]
 pub(crate) fn last_exchange() -> Option<(String, String)> {
     let thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
     if thread.1.is_some_and(|at| at.elapsed() > THREAD_TTL) {
@@ -2706,7 +2793,6 @@ pub(crate) fn last_exchange() -> Option<(String, String)> {
 }
 
 /// Кладёт вопрос и ответ в историю разговора (см. `VOICE_THREAD`).
-#[cfg(desktop)]
 fn remember_exchange(question: &str, answer: &str) {
     let mut thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
     if thread.1.is_some_and(|at| at.elapsed() > THREAD_TTL) {
@@ -2722,7 +2808,6 @@ fn remember_exchange(question: &str, answer: &str) {
 }
 
 /// Сколько обменов хранится; модели отдаётся не больше `thread_depth`.
-#[cfg(desktop)]
 const THREAD_KEEP: usize = 12;
 
 /// Обрывок в одно-два слова без вопроса — скорее ослышка, чем вопрос.

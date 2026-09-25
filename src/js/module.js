@@ -6,7 +6,7 @@
 // (что подставить) и `data-out` (куда положить ответ). Своих скриптов у модуля
 // нет: чужой код в окне Ноа не исполняется, а окно везде выглядит одинаково.
 
-import { tauri, appWindow, applyTheme } from "./bridge.js";
+import { tauri, appWindow, applyTheme, closePage } from "./bridge.js";
 
 const ui = {};
 for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] = node;
@@ -17,7 +17,7 @@ const id = new URLSearchParams(location.search).get("id") ?? "";
 
 applyTheme(globalThis.__SUFLER_VIEW__?.theme);
 
-ui.close?.addEventListener("click", () => win?.close());
+ui.close?.addEventListener("click", () => closePage(win));
 ui.minimize?.addEventListener("click", () => win?.minimize());
 
 

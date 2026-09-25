@@ -278,15 +278,23 @@ pub fn lint(manifest: &Manifest, files: &BTreeMap<String, Vec<u8>>) -> Vec<Strin
     let spec = &manifest.mcp;
     let command = spec.command.trim();
     let own_file = command.starts_with("%MODULE_DIR%");
+    let remote = is_remote(spec);
     need(!command.is_empty(), "mcp.command — чем запускать сервер.");
     if !command.is_empty() {
         need(
-            own_file || RUNTIMES.contains(&command),
+            own_file || remote || RUNTIMES.contains(&command),
             &format!(
-                "mcp.command «{command}» не разрешён: только {} или файл модуля через %MODULE_DIR%.",
+                "mcp.command «{command}» не разрешён: только {}, файл модуля через %MODULE_DIR% или ссылка https://….",
                 RUNTIMES.join(", ")
             ),
         );
+    }
+    if remote {
+        need(
+            command.starts_with("https://") || command.starts_with("http://127.0.0.1") || command.starts_with("http://localhost"),
+            "Модуль по ссылке — только https://: ключи и ответы не должны идти по сети открытым текстом.",
+        );
+        need(spec.args.is_empty(), "У модуля по ссылке нет аргументов запуска: всё — в самой ссылке.");
     }
     need(
         !has_shell_meta(command) && spec.args.iter().all(|arg| !has_shell_meta(arg)),
@@ -295,12 +303,15 @@ pub fn lint(manifest: &Manifest, files: &BTreeMap<String, Vec<u8>>) -> Vec<Strin
     need(spec.args.len() <= 20, "mcp.args — не больше 20 аргументов.");
 
     for (key, value) in &spec.env {
+        // У модуля по ссылке env — заголовки запроса: «Authorization», «X-Api-Key».
+        let header = remote && !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
         need(
-            valid_secret_name(key),
+            header || valid_secret_name(key),
             &format!("mcp.env: имя «{key}» — заглавная латиница, цифры и подчёркивание."),
         );
         need(
-            !looks_secret(key) || value.trim().is_empty(),
+            // Заголовок со ссылкой на ключ («Bearer %TOKEN%») ключа не содержит.
+            !looks_secret(key) || value.trim().is_empty() || (header && value.contains('%')),
             &format!("mcp.env.{key} похоже на ключ: ключи не пишутся в module.json, их объявляют в secrets."),
         );
     }
@@ -571,11 +582,31 @@ enum Line {
 }
 
 pub struct Server {
-    child: Child,
-    stdin: ChildStdin,
-    lines: Receiver<Line>,
+    link: Link,
     next_id: u64,
     garbage: Vec<String>,
+}
+
+/// Как Ноа говорит с сервером модуля.
+enum Link {
+    /// Своя программа: JSON-RPC построчно через stdin и stdout.
+    Process { child: Child, stdin: ChildStdin, lines: Receiver<Line> },
+    /// Сервер по ссылке — MCP Streamable HTTP. Единственный вид модулей,
+    /// который работает и на телефоне: запускать там npx или python нечем.
+    Remote(Remote),
+}
+
+/// Модуль по ссылке: адрес, заголовки и номер сессии, выданный сервером.
+struct Remote {
+    url: String,
+    headers: Vec<(String, String)>,
+    session: Option<String>,
+}
+
+/// Модуль по ссылке: в поле команды — адрес `https://…`.
+pub fn is_remote(spec: &McpSpec) -> bool {
+    let command = spec.command.trim();
+    command.starts_with("https://") || command.starts_with("http://")
 }
 
 /// `%MODULE_DIR%`, ключи и переменные окружения в аргументах.
@@ -652,6 +683,28 @@ impl Server {
         if spec.command.trim().is_empty() {
             return Err("не указана команда MCP-сервера".into());
         }
+        if is_remote(spec) {
+            // Заголовки — из env: у сервера по ссылке переменных окружения нет,
+            // а ключ ему передают заголовком («Authorization: Bearer %TOKEN%»).
+            let headers = spec
+                .env
+                .iter()
+                .map(|(name, value)| (name.clone(), expand(value, dir, secrets)))
+                .collect();
+            let remote = Remote { url: expand(spec.command.trim(), dir, secrets), headers, session: None };
+            return Ok(Server { link: Link::Remote(remote), next_id: 0, garbage: Vec::new() });
+        }
+        #[cfg(mobile)]
+        return Err(format!(
+            "«{}» — программа для компьютера: на телефоне модули работают только по ссылке https://…",
+            spec.command.trim()
+        ));
+        #[cfg(desktop)]
+        Self::spawn_process(dir, spec, secrets)
+    }
+
+    #[cfg(desktop)]
+    fn spawn_process(dir: &Path, spec: &McpSpec, secrets: &BTreeMap<String, String>) -> Result<Server, String> {
         std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
         let log = std::fs::File::create(dir.join(LOG_FILE)).map_err(|err| err.to_string())?;
 
@@ -696,31 +749,62 @@ impl Server {
                 }
             }
         });
-        Ok(Server { child, stdin, lines, next_id: 0, garbage: Vec::new() })
+        let link = Link::Process { child, stdin, lines };
+        Ok(Server { link, next_id: 0, garbage: Vec::new() })
     }
 
     pub fn alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+        match &mut self.link {
+            Link::Process { child, .. } => matches!(child.try_wait(), Ok(None)),
+            Link::Remote(_) => true,
+        }
     }
 
     pub fn kill(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Link::Process { child, .. } = &mut self.link {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 
     fn send(&mut self, message: &Value) -> Result<(), String> {
-        writeln!(self.stdin, "{message}").map_err(|_| "сервер модуля закрылся".to_string())?;
-        self.stdin.flush().map_err(|_| "сервер модуля закрылся".to_string())
+        match &mut self.link {
+            Link::Process { stdin, .. } => {
+                writeln!(stdin, "{message}").map_err(|_| "сервер модуля закрылся".to_string())?;
+                stdin.flush().map_err(|_| "сервер модуля закрылся".to_string())
+            }
+            Link::Remote(remote) => remote.post(message, CALL_TIMEOUT).map(|_| ()),
+        }
     }
 
     pub fn request(&mut self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
         self.next_id += 1;
         let id = self.next_id;
-        self.send(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
+        let message = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        let lines = match &mut self.link {
+            Link::Remote(remote) => {
+                let replies = remote.post(&message, timeout)?;
+                let reply = replies
+                    .into_iter()
+                    .find(|reply| reply["id"].as_u64() == Some(id))
+                    .ok_or_else(|| format!("модуль не ответил на {method}"))?;
+                if let Some(error) = reply.get("error") {
+                    return Err(error["message"].as_str().unwrap_or("ошибка модуля").to_string());
+                }
+                return Ok(reply["result"].clone());
+            }
+            Link::Process { .. } => {
+                self.send(&message)?;
+                match &self.link {
+                    Link::Process { lines, .. } => lines,
+                    Link::Remote(_) => unreachable!(),
+                }
+            }
+        };
         let deadline = Instant::now() + timeout;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
-            let line = match self.lines.recv_timeout(left) {
+            let line = match lines.recv_timeout(left) {
                 Ok(line) => line,
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                     return Err(format!("модуль не ответил на {method} за {} с", timeout.as_secs()))
@@ -777,6 +861,95 @@ impl Server {
         }
         Ok(text)
     }
+}
+
+impl Remote {
+    /// Отправляет сообщение и отдаёт все JSON-RPC ответы, пришедшие на него.
+    ///
+    /// Сервер отвечает либо обычным JSON, либо потоком событий (SSE) — оба
+    /// вида разбираются одинаково. Уведомление сервер принимает кодом 202 без
+    /// тела. Запрос идёт в своём потоке со своим рантаймом: модули зовут и из
+    /// обычных потоков, и изнутри асинхронного кода, а блокироваться на общем
+    /// рантайме изнутри него же нельзя.
+    fn post(&mut self, message: &Value, timeout: Duration) -> Result<Vec<Value>, String> {
+        let url = self.url.clone();
+        let headers = self.headers.clone();
+        let session = self.session.clone();
+        let body = message.to_string();
+        let (session, text) = std::thread::scope(|scope| {
+            scope
+                .spawn(move || -> Result<(Option<String>, String), String> {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|err| err.to_string())?;
+                    runtime.block_on(async move {
+                        let client = crate::net::client_builder()
+                            .timeout(timeout)
+                            .build()
+                            .map_err(|err| err.to_string())?;
+                        let mut request = client
+                            .post(&url)
+                            .header("Content-Type", "application/json")
+                            .header("Accept", "application/json, text/event-stream")
+                            .body(body);
+                        for (name, value) in &headers {
+                            request = request.header(name.as_str(), value.as_str());
+                        }
+                        if let Some(session) = &session {
+                            request = request.header("Mcp-Session-Id", session.as_str());
+                        }
+                        let answer = request
+                            .send()
+                            .await
+                            .map_err(|err| format!("модуль по ссылке не ответил: {}", err.without_url()))?;
+                        let status = answer.status();
+                        let session = answer
+                            .headers()
+                            .get("mcp-session-id")
+                            .and_then(|value| value.to_str().ok())
+                            .map(str::to_string)
+                            .or(session);
+                        let text = answer.text().await.map_err(|err| err.without_url().to_string())?;
+                        if !status.is_success() {
+                            let detail: String = text.chars().take(200).collect();
+                            return Err(format!("модуль по ссылке ответил {status}: {detail}"));
+                        }
+                        Ok((session, text))
+                    })
+                })
+                .join()
+                .map_err(|_| "запрос к модулю оборвался".to_string())?
+        })?;
+        self.session = session;
+        Ok(replies(&text))
+    }
+}
+
+/// JSON-RPC ответы из тела: обычный JSON, массив или поток событий SSE.
+fn replies(text: &str) -> Vec<Value> {
+    let flatten = |value: Value| match value {
+        Value::Array(items) => items,
+        value if value.is_object() => vec![value],
+        _ => Vec::new(),
+    };
+    if let Ok(value) = serde_json::from_str::<Value>(text.trim()) {
+        return flatten(value);
+    }
+    // SSE: события разделены пустой строкой, данные — строки «data: …».
+    text.replace("\r\n", "\n")
+        .split("\n\n")
+        .filter_map(|event| {
+            let data: Vec<&str> = event
+                .lines()
+                .filter_map(|line| line.strip_prefix("data:"))
+                .map(str::trim_start)
+                .collect();
+            (!data.is_empty()).then(|| data.join("\n"))
+        })
+        .filter_map(|data| serde_json::from_str::<Value>(&data).ok())
+        .flat_map(flatten)
+        .collect()
 }
 
 impl Drop for Server {
@@ -1056,6 +1229,23 @@ pub fn modules_root() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn remote_answers_come_as_json_or_events() {
+        let plain = replies(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
+        assert_eq!(plain.len(), 1);
+        let stream = replies("event: message\r\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"note\"}\r\n\r\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"ok\":true}}\n\n");
+        assert_eq!(stream.len(), 2);
+        assert_eq!(stream[1]["id"], 2);
+        assert!(replies("").is_empty());
+    }
+
+    #[test]
+    fn link_in_command_means_remote_module() {
+        let spec = |command: &str| McpSpec { command: command.into(), ..Default::default() };
+        assert!(is_remote(&spec("https://mcp.example.com/mcp")));
+        assert!(!is_remote(&spec("npx")));
+    }
+
     fn weather() -> Manifest {
         serde_json::from_value(json!({
             "id": "weather", "title": "Погода", "icon": "☀", "about": "Погода в любом городе",
@@ -1167,3 +1357,4 @@ mod tests {
         assert!(manifest.missing_secrets(&have).is_empty());
     }
 }
+

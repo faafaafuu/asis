@@ -3,4 +3,8 @@
     <!-- Название пункта в системном меню выделения текста.
          Интерфейс продукта русскоязычный, поэтому и здесь русский. -->
     <string name="sufler_process_text_label">Объяснить</string>
+    <!-- Ярлык и жест ассистента: Ноа сразу слушает. -->
+    <string name="sufler_listen_label">Спросить Ноа</string>
+    <!-- Плитка в быстрых настройках. -->
+    <string name="sufler_tile_label">Ноа</string>
 </resources>

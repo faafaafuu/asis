@@ -8,12 +8,11 @@ plugins {
 
 android {
     namespace = "app.sufler.plugin"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
-        // ACTION_PROCESS_TEXT появился в API 23 (Android 6.0) — ниже опускаться нет смысла:
-        // без него у плагина нет точки входа.
-        minSdk = 23
+        // Как у приложения Tauri: плитке в быстрых настройках нужен API 24.
+        minSdk = 24
     }
 
     compileOptions {

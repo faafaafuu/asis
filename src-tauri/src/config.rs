@@ -281,9 +281,17 @@ impl Default for AiConfig {
             // Модель здесь намеренно не названа: подходящая зависит от того, сколько
             // на машине видеопамяти, и выбирается при первом запуске (`ollama::pick`).
             provider: "http".into(),
+            #[cfg(desktop)]
             endpoint: crate::ollama::DEFAULT_ENDPOINT.into(),
+            // На телефоне своей модели нет — из коробки бесплатные модели
+            // OpenRouter: нужен только ключ, окно разговора подскажет, где его взять.
+            #[cfg(mobile)]
+            endpoint: "https://openrouter.ai/api/v1/chat/completions".into(),
             api_key: String::new(),
+            #[cfg(desktop)]
             model: String::new(),
+            #[cfg(mobile)]
+            model: "z-ai/glm-5.2:free".into(),
             proxy: String::new(),
             // Девяносто секунд, а не двенадцать, как было.
             //

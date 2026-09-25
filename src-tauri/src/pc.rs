@@ -1851,13 +1851,22 @@ fn shell_execute_verb(
 
 #[cfg(not(target_os = "windows"))]
 fn shell_execute(file: &str, parameters: &str, _directory: Option<&Path>) -> Result<(), String> {
-    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    let mut command = std::process::Command::new(opener);
-    command.arg(file);
-    if !parameters.is_empty() {
-        command.args(parameters.split_whitespace());
+    // На телефоне программ по пути не запускают: ссылку открывает система.
+    #[cfg(mobile)]
+    {
+        let _ = parameters;
+        return crate::commands::open_externally(file);
     }
-    command.spawn().map(|_| ()).map_err(|err| err.to_string())
+    #[cfg(desktop)]
+    {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let mut command = std::process::Command::new(opener);
+        command.arg(file);
+        if !parameters.is_empty() {
+            command.args(parameters.split_whitespace());
+        }
+        command.spawn().map(|_| ()).map_err(|err| err.to_string())
+    }
 }
 
 /* ── Сравнение названий на слух ─────────────────────────────────────────── */

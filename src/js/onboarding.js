@@ -4,6 +4,7 @@ import { tauri, applyTheme } from "./bridge.js";
 import { PopupView } from "./popup-view.js";
 import { TauriProvider, DEFAULT_ERROR_TEXT } from "./ai-client.js";
 import { attachMobileEntry } from "./mobile-entry.js";
+import { attachPhone } from "./phone.js";
 import { LANGUAGES, setLanguage, t, translateDom } from "./i18n.js";
 
 const api = tauri();
@@ -180,16 +181,29 @@ async function applyPlatform() {
   }
   if (!isMobile) return;
 
+  document.documentElement.classList.add("is-phone");
   ui.note.textContent = t("note.mobile");
+  ui.heroLead.textContent =
+    "Голосовой помощник и его модули. Коснитесь микрофона на вкладке «Ноа» или напишите — " +
+    "он ответит вслух, поставит напоминание, откроет модуль.";
   // Проверка перехвата — про мышь и левый Ctrl, на телефоне проверять нечего.
   ui.captureBlock.hidden = true;
+  ui.connectCommand.placeholder = "https://…/mcp";
   // «Запуск при входе в систему» — понятие настольное: на телефоне вход в
   // систему один раз в жизни, а приложения запускает пользователь.
   ui.startupBlock.hidden = true;
-  // Голос завязан на клавиши и на программы, которых на телефоне нет.
-  ui.voiceBlock.hidden = true;
 
-  attachExplainOverlay(config);
+  const explain = attachExplainOverlay(config);
+  attachPhone(api, ui, { explain, show: () => showTab("noa") });
+  ui.assistantSettings.addEventListener("click", () => {
+    api.invoke("plugin:sufler|openAssistantSettings").catch((err) => {
+      ui.voiceStatus.textContent = String(err);
+    });
+  });
+  if (ui.updateInstall) ui.updateInstall.textContent = "Скачать новую версию";
+  // Напоминания и будильники, когда приложение свёрнуто, приходят в шторку —
+  // разрешение спрашиваем сразу, с экрана, а не из фона.
+  api.invoke("plugin:sufler|allowNotifications").catch(() => {});
 }
 
 /**
@@ -223,10 +237,12 @@ function attachExplainOverlay(config) {
     view.close();
   });
 
-  attachMobileEntry(api, (term) => {
+  const explain = (term) => {
     ui.overlay.hidden = false;
     view.open({ term, context: "" });
-  });
+  };
+  attachMobileEntry(api, explain);
+  return explain;
 }
 
 const READY = {
@@ -747,6 +763,13 @@ function libraryCard(manifest) {
   install.className = "ob__btn ob__btn--primary mod__btn";
   install.textContent = installed ? "Установлен" : "Поставить";
   install.disabled = installed;
+  // На телефоне программы вроде npx и python запускать нечем — работают
+  // только модули по ссылке. Говорим об этом на плитке, а не ошибкой после.
+  const remote = /^https?:\/\//.test(manifest.mcp?.command ?? "");
+  if (isMobile && !remote && !installed) {
+    install.textContent = "Только на компьютере";
+    install.disabled = true;
+  }
   install.addEventListener("click", async () => {
     install.disabled = true;
     install.textContent = "Ставлю…";
@@ -823,10 +846,16 @@ async function loadChips() {
     const local = /127\.0\.0\.1|localhost/.test(ai.endpoint || "");
     const brain = ai.provider === "wikipedia" ? "Википедия" : `${ai.model || "модель"}${local ? "" : " · облако"}`;
     const engines = { piper: "голос Piper", silero: "голос Silero", azure: "голос Azure" };
+    // На телефоне говорит системный синтезатор, а имя вслух не слушается —
+    // микрофон включают кнопкой, жестом помощника или плиткой.
     ui.chips.replaceChildren(
       chip(brain, true),
-      chip(voice.enabled ? engines[voice.engine] ?? "голос" : "голос выключен", voice.enabled),
-      chip(voice.wakeWord ? `слушает «${voice.wakeName || "Ноа"}»` : "имя не слушает", voice.wakeWord),
+      isMobile
+        ? chip(voice.enabled ? "голос телефона" : "голос выключен", voice.enabled)
+        : chip(voice.enabled ? engines[voice.engine] ?? "голос" : "голос выключен", voice.enabled),
+      ...(isMobile
+        ? []
+        : [chip(voice.wakeWord ? `слушает «${voice.wakeName || "Ноа"}»` : "имя не слушает", voice.wakeWord)]),
     );
   } catch {
     /* окно открыто вне приложения */
@@ -849,14 +878,16 @@ ui.widgetEnabled.addEventListener("change", () => {
     .catch(() => {});
 });
 
-let startTab = "modules";
+let startTab = null;
 try {
-  startTab = localStorage.getItem(TAB_KEY) ?? "modules";
+  startTab = localStorage.getItem(TAB_KEY);
 } catch {
   /* хранилище недоступно */
 }
 showTab(["modules", "settings", "help"].includes(startTab) ? startTab : "modules");
-loadChips();
+// На телефоне главный экран — разговор: его вкладка появляется после того,
+// как стало известно, что это телефон (applyPlatform).
+const phoneStart = () => showTab(["noa", "modules", "settings", "help"].includes(startTab) ? startTab : "noa");
 api?.invoke("settings_section").then(showSection).catch(() => {});
 api?.listen("onboarding:section", (event) => showSection(event.payload));
 
@@ -1804,7 +1835,12 @@ ui.settings.addEventListener("click", async () => {
 // Платформа следом: она правит текст низа и прячет разделы, которых на
 // телефоне нет. Остальное — уже поверх готового языка.
 loadView().then(() => applyPlatform()).then(() => {
-  refresh();
+  if (isMobile) phoneStart();
+  loadChips();
+  // Доступ к выделению на телефоне проверять не у кого: «Объяснить» в меню
+  // выделения система даёт сама.
+  if (isMobile) render({ title: "", hint: "", canOpenSettings: false, ready: true });
+  else refresh();
   loadSettings();
   loadTrigger();
   refreshCapture();
@@ -1859,18 +1895,15 @@ loadPlatform();
 function showUpdate(found, version) {
   if (!ui.updateStatus) return;
   ui.updateStatus.textContent = found
-    ? `Стоит ${version}, вышла ${found.version}. Программа поставит её поверх и перезапустится — настройки и модули останутся на месте.`
+    ? isMobile
+      ? `Стоит ${version}, вышла ${found.version}. Скачайте новый .apk и откройте его — Android поставит его поверх, настройки и модули останутся на месте.`
+      : `Стоит ${version}, вышла ${found.version}. Программа поставит её поверх и перезапустится — настройки и модули останутся на месте.`
     : `Стоит ${version} — это последняя версия.`;
   if (ui.updateInstall) ui.updateInstall.hidden = !found;
 }
 
 async function loadUpdate() {
   if (!api || !ui.updateBlock) return;
-  // На телефоне обновляет магазин приложений, а не программа сама.
-  if (isMobile) {
-    ui.updateBlock.hidden = true;
-    return;
-  }
   try {
     const version = await api.invoke("app_version");
     ui.updateStatus.textContent = `Стоит ${version}.`;
@@ -1892,9 +1925,15 @@ ui.updateInstall?.addEventListener("click", async () => {
   ui.updateCheck.disabled = true;
   // Загрузка идёт минуту-другую, и всё это время окно должно объяснять, чего
   // ждать: молчащая кнопка выглядит сломанной.
-  ui.updateStatus.textContent = "Загружаю и ставлю — программа перезапустится сама.";
+  ui.updateStatus.textContent = isMobile
+    ? "Открываю загрузку — когда .apk скачается, откройте его из уведомления."
+    : "Загружаю и ставлю — программа перезапустится сама.";
   try {
     await api.invoke("update_install");
+    if (isMobile) {
+      ui.updateInstall.disabled = false;
+      ui.updateCheck.disabled = false;
+    }
   } catch (err) {
     ui.updateStatus.textContent = `Не удалось обновить: ${err}`;
     ui.updateInstall.disabled = false;
