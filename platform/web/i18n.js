@@ -1,6 +1,6 @@
 // Тексты интерфейса площадки: английский и русский.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=40";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=41";
 
 export const T = {
   en: {
@@ -15,7 +15,7 @@ export const T = {
     sortPopular: "Popular", sortNew: "New", sortFree: "Free",
     statModules: "MODULES", statAuthors: "AUTHORS", statBrains: "BRAINS SUPPORTED", statInstalls: "INSTALLS",
     cat: { all: "All", free: "Free", work: "Work", home: "Home", finance: "Finance", dev: "Dev tools", health: "Health", local: "Local-only", media: "Media", other: "Other" },
-    free: "free", install: "Install", installsWord: "installs", noModules: "Nothing found. Try another word or category — or build the module yourself in the Studio.",
+    free: "free", install: "Install", installsWord: "installs", fresh: "new", noModules: "Nothing found. Try another word or category — or build the module yourself in the Studio.",
     backLib: "BACK TO LIBRARY", core: "noah-core", builtIn: "built into NOAH", builtInLong: "Built into NOAH — comes with the app, nothing to install separately.", builtInBtn: "DOWNLOAD NOAH", builtInTransport: "part of the shell", open: "Open",
     installBtn: "INSTALL", copyAsk: "COPY REQUEST",
     toolsExposed: "TOOLS EXPOSED", noTools: "Tools are listed after the module is published from NOAH.",
@@ -75,11 +75,11 @@ export const T = {
       ["NOAH", [["About", "#/"], ["Download", RELEASES], ["Source code", REPO], ["Contact", REPO + "/issues"]]],
       ["LEGAL", [["Privacy policy", "#/privacy"], ["Terms of service", "#/terms"]]],
     ],
-    connCopy: "COPY", connRotate: "Change link", connRotateAsk: "Issue a new link? The current one stops working — you will need to paste the new one into your AI.", connRotated: "New link issued.", connLinkHint: "For clients that cannot sign in: the key is inside the link. It stays the same until you change it.", connKeyLink: "Link with a key", connPlainHint: (name) => `Paste this address into Claude, Cursor or another MCP client. The AI opens NOAH sign-in once — confirm under the account «${name}» — and keeps access by itself. The address is the same for everyone and never changes.`, permBuiltin: "Part of the NOAH app — runs on your computer and updates with it.", orWith: "or", with: (name) => `Continue with ${name}`, tgWait: "Press «Start» in Telegram — you are signed in here automatically.", tgOpen: "Open Telegram",
+    connCopy: "COPY", connRotate: "Change link", connRotateAsk: "Issue a new link? The current one stops working — you will need to paste the new one into your AI.", connRotated: "New link issued.", connLinkHint: "For clients that cannot sign in: the key is inside the link. It stays the same until you change it.", connKeyLink: "Link with a key", connPlainHint: (name) => `Paste this address into your AI's settings — Connectors or MCP servers in Claude, Cursor, ChatGPT — not into a chat message. The AI opens NOAH sign-in once — confirm under the account «${name}» — and keeps access by itself. The address is the same for everyone and never changes.`, permBuiltin: "Part of the NOAH app — runs on your computer and updates with it.", orWith: "or", with: (name) => `Continue with ${name}`, tgWait: "Press «Start» in Telegram — you are signed in here automatically.", tgOpen: "Open Telegram",
     connKicker: "CONNECT AI", connTitle: "Your AI + NOAH",
     connLead: "One link gives your AI hands on your computer. Paste it into Claude, Cursor or any MCP client and describe the module you want — your AI writes it, NOAH checks it and runs it.",
     connNeedLogin: "Sign in to get your personal MCP link.",
-    connLinkTitle: "YOUR MCP LINK", connMake: "Create my link",
+    connLinkTitle: "YOUR MCP LINK", connGuestHint: "Paste this address into your AI's settings — Connectors or MCP servers — not into a chat message. When the AI connects, it opens NOAH sign-in once: create an account or sign in there.", connMake: "Create my link",
     connOnce: "Copy it now — it is shown only once. The same key goes into NOAH → Settings → Platform, so NOAH picks up your modules.",
     connKey: "Key for NOAH", connKeyHint: "The same key without the link: NOAH on your computer asks for it in Settings → Platform. It is always here, so there is nothing to lose.", connHave: "You already have keys. A new link doesn't break the old ones; delete unused keys in the author space.",
     connStatus: "NOAH ON YOUR COMPUTER", connOnline: "Online — modules are picked up in seconds.", connOffline: "Offline. Start NOAH and paste the key into Settings → Platform.", connNever: "Hasn't connected yet. Paste the key into NOAH → Settings → Platform.",
@@ -108,13 +108,13 @@ export const T = {
     signIn: "Войти", signUp: "Создать аккаунт", signOut: "Выйти", myModules: "Мои модули", apiKeys: "Ключи площадки",
     privacy: "Конфиденциальность", terms: "Соглашение",
     navDiscover: "НАЙТИ", navBuild: "СОБРАТЬ", navAccount: "ЗАРАБОТОК",
-    navHome: "Главная", navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navDocs: "Документация", navDocsFull: "Документация", navSeller: "Кабинет",
+    navHome: "Главная", navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navDocs: "Справка", navDocsFull: "Документация", navSeller: "Кабинет",
     menu: ["Мои модули", "Ключи площадки", "Настройки аккаунта"],
     libKicker: "МАРКЕТПЛЕЙС", libTitle: "Библиотека модулей",
     sortPopular: "Популярные", sortNew: "Новые", sortFree: "Бесплатные",
     statModules: "МОДУЛЕЙ", statAuthors: "АВТОРОВ", statBrains: "МОЗГОВ", statInstalls: "УСТАНОВОК",
     cat: { all: "Все", free: "Бесплатные", work: "Работа", home: "Дом", finance: "Финансы", dev: "Разработка", health: "Здоровье", local: "Только локально", media: "Медиа", other: "Другое" },
-    free: "бесплатно", install: "Поставить", installsWord: "установок", noModules: "Ничего не нашлось. Попробуйте другое слово или раздел — или соберите модуль сами в Студии.",
+    free: "бесплатно", install: "Поставить", installsWord: "установок", fresh: "новый", noModules: "Ничего не нашлось. Попробуйте другое слово или раздел — или соберите модуль сами в Студии.",
     backLib: "НАЗАД В БИБЛИОТЕКУ", core: "noah-core", builtIn: "встроен в NOAH", builtInLong: "Встроен в NOAH — ставится вместе с приложением, отдельно ставить не нужно.", builtInBtn: "СКАЧАТЬ NOAH", builtInTransport: "часть оболочки", open: "Подробнее",
     installBtn: "ПОСТАВИТЬ", copyAsk: "СКОПИРОВАТЬ ЗАПРОС",
     toolsExposed: "ДОСТУПНЫЕ ИНСТРУМЕНТЫ", noTools: "Инструменты появятся, когда модуль опубликуют из NOAH.",
@@ -174,11 +174,11 @@ export const T = {
       ["NOAH", [["О проекте", "#/"], ["Скачать", RELEASES], ["Исходный код", REPO], ["Связаться", REPO + "/issues"]]],
       ["ПРАВОВОЕ", [["Политика конфиденциальности", "#/privacy"], ["Пользовательское соглашение", "#/terms"]]],
     ],
-    connCopy: "КОПИРОВАТЬ", connRotate: "Сменить ссылку", connRotateAsk: "Выпустить новую ссылку? Текущая перестанет работать — новую нужно будет вставить в нейросеть.", connRotated: "Новая ссылка выпущена.", connLinkHint: "Для клиентов, которые не умеют входить сами: ключ зашит в ссылку. Она не меняется, пока вы её не смените.", connKeyLink: "Ссылка с ключом", connPlainHint: (name) => `Вставьте этот адрес в Claude, Cursor или другой клиент MCP. Нейросеть один раз откроет вход в NOAH — подтвердите его в аккаунте «${name}» — и дальше держит доступ сама. Адрес у всех один и не меняется.`, permBuiltin: "Часть приложения NOAH — работает на вашем компьютере и обновляется вместе с ним.", orWith: "или", with: (name) => `Войти через ${name}`, tgWait: "Нажмите «Старт» в Telegram — здесь вход выполнится сам.", tgOpen: "Открыть Telegram",
+    connCopy: "КОПИРОВАТЬ", connRotate: "Сменить ссылку", connRotateAsk: "Выпустить новую ссылку? Текущая перестанет работать — новую нужно будет вставить в нейросеть.", connRotated: "Новая ссылка выпущена.", connLinkHint: "Для клиентов, которые не умеют входить сами: ключ зашит в ссылку. Она не меняется, пока вы её не смените.", connKeyLink: "Ссылка с ключом", connPlainHint: (name) => `Вставьте этот адрес в настройки нейросети — «Коннекторы» или «MCP-серверы» в Claude, Cursor, ChatGPT, — а не в сообщение чату. Нейросеть один раз откроет вход в NOAH — подтвердите его в аккаунте «${name}» — и дальше держит доступ сама. Адрес у всех один и не меняется.`, permBuiltin: "Часть приложения NOAH — работает на вашем компьютере и обновляется вместе с ним.", orWith: "или", with: (name) => `Войти через ${name}`, tgWait: "Нажмите «Старт» в Telegram — здесь вход выполнится сам.", tgOpen: "Открыть Telegram",
     connKicker: "ПОДКЛЮЧИТЬ ИИ", connTitle: "Ваша нейросеть + NOAH",
     connLead: "Одна ссылка даёт вашей нейросети руки на вашем компьютере. Вставьте её в Claude, Cursor или другой клиент с MCP и опишите, какой модуль нужен, — нейросеть напишет его, NOAH проверит и запустит.",
     connNeedLogin: "Войдите, чтобы получить свою ссылку MCP.",
-    connLinkTitle: "ВАША ССЫЛКА MCP", connMake: "Создать мою ссылку",
+    connLinkTitle: "ВАША ССЫЛКА MCP", connGuestHint: "Вставьте этот адрес в настройки нейросети — раздел «Коннекторы» или «MCP-серверы», — а не в сообщение чату. При подключении нейросеть один раз откроет вход в NOAH: там создайте аккаунт или войдите.", connMake: "Создать мою ссылку",
     connOnce: "Скопируйте сейчас — она показывается один раз. Этот же ключ вставьте в NOAH → Настройки → Площадка: так NOAH будет забирать ваши модули.",
     connKey: "Ключ для NOAH", connKeyHint: "Тот же ключ без ссылки: его просит Ноа на компьютере в настройках платформы. Он всегда здесь, потерять нечего.", connHave: "Ключи у вас уже есть. Новая ссылка старые не ломает; ненужные ключи удаляются в кабинете автора.",
     connStatus: "NOAH НА ВАШЕМ КОМПЬЮТЕРЕ", connOnline: "На связи — модули забираются за секунды.", connOffline: "Не на связи. Запустите NOAH и вставьте ключ в Настройки → Площадка.", connNever: "Ещё не подключался. Вставьте ключ в NOAH → Настройки → Площадка.",

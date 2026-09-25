@@ -1,9 +1,9 @@
 // Страницы кабинета: вход, аккаунт, кабинет автора, подключение ИИ, студия.
 // Грузятся, только когда их открыли, — главной они не нужны.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=40";
-import { DOCS } from "./i18n.js?v=40";
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=40";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=41";
+import { DOCS } from "./i18n.js?v=41";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=41";
 
 export function renderStudio(page) {
   const tr = t();
@@ -442,6 +442,10 @@ export async function renderConnect(page) {
 
   let top;
   if (!state.user) {
+    // Адрес у всех один и входа не требует: вход нейросеть попросит сама,
+    // когда её подключат. Поэтому гостю он виден сразу.
+    const plain = `${SITE}/mcp`;
+    const copyPlain = h("button", { type: "button", class: "btn btn--small", onclick: () => copy(plain, copyPlain, tr.connCopy) }, tr.connCopy);
     top = h(
       "div",
       { class: "plate plate--accent", vars: { "--accent": "#F2C14E" } },
@@ -449,7 +453,8 @@ export async function renderConnect(page) {
       h(
         "div",
         { class: "step__body" },
-        h("p", { class: "hint" }, tr.connNeedLogin),
+        h("div", { class: "secret-once" }, h("code", {}, plain), copyPlain),
+        h("p", { class: "hint" }, tr.connGuestHint),
         h("div", { class: "hero__cta" }, h("a", { class: "btn btn--gold", href: "#/signup" }, tr.signUp), h("a", { class: "btn", href: "#/login" }, tr.signIn)),
       ),
     );

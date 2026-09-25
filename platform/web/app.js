@@ -1,9 +1,9 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=40";
+import { renderHome, stopHome } from "./home.js?v=41";
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=40";
-import { DOCS } from "./i18n.js?v=40";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=41";
+import { DOCS } from "./i18n.js?v=41";
 
 // Шрифты — после первой отрисовки, чтобы не держать страницу (см. index.html).
 {
@@ -17,10 +17,10 @@ import { DOCS } from "./i18n.js?v=40";
 }
 
 
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=40";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=41";
 
 /** Страницы кабинета — отдельным файлом, по требованию. */
-const account = () => import("./account.js?v=40");
+const account = () => import("./account.js?v=41");
 
 // Страницам кабинета нужны route и renderChrome — функции объявлены ниже,
 // но доступны с начала модуля.
@@ -119,7 +119,8 @@ function moduleCard(module) {
     h(
       "div",
       { class: "card__foot" },
-      h("span", {}, module.builtin ? tr.builtIn : `${number(module.installs)} ${tr.installsWord}`),
+      // «0 установок» у свежего модуля читается как поломка — пишем, что он новый.
+      h("span", {}, module.builtin ? tr.builtIn : module.installs ? `${number(module.installs)} ${tr.installsWord}` : tr.fresh),
       h("strong", {}, `${module.builtin ? tr.open : tr.install} →`),
     ),
   );
@@ -350,7 +351,7 @@ async function route() {
     else if (name === "standard") renderStandard(page);
     // Документация грузится, только когда её открыли: главной она не нужна.
     else if (name === "docs") {
-      const { renderDocs } = await import("./docs.js?v=40");
+      const { renderDocs } = await import("./docs.js?v=41");
       await renderDocs(page, arg, { h, lang: state.lang });
     }
     else if (name === "login" || name === "signup") {

@@ -145,6 +145,7 @@ const STRINGS = {
     "theme.dark": "Тёмная",
     "theme.neon": "Неон",
     "theme.synthwave": "Синтвейв",
+    "theme.noah": "NOAH — как на сайте",
 
     "note.desktop": "Приложение остаётся в трее. Выделение текста с зажатым левым Ctrl открывает объяснение рядом с выделенным словом.",
     "note.mobile": "Выделите текст в любом приложении и выберите «Объяснить» в меню рядом с «Копировать».",
@@ -286,6 +287,7 @@ const STRINGS = {
     "theme.dark": "Dark",
     "theme.neon": "Neon",
     "theme.synthwave": "Synthwave",
+    "theme.noah": "NOAH — like the website",
 
     "note.desktop": "The app stays in the tray. Selecting text with the left Ctrl held opens an explanation next to the word.",
     "note.mobile": "Select text in any app and choose “Explain” in the menu next to “Copy”.",

@@ -10,7 +10,7 @@ const T = {
     lead: "Подключите любую нейросеть и собирайте модули словами. Удачные — в библиотеку или на продажу.",
     primary: "Подключить свой ИИ",
     download: "Скачать NOAH",
-    meta: "бесплатно · Windows 10 / 11 · любая нейросеть",
+    meta: "бесплатно · Windows · macOS · Linux · Android · любая нейросеть",
     states: ["ЖДЁТ", "СЛУШАЕТ", "СОБИРАЕТ", "ГОТОВО"],
     demo: [
       { said: "Сделай модуль, который каждое утро говорит курс евро", tool: "module_format → create_module", answer: "Проверка ✓ 4 из 4. Модуль «Курс евро» работает." },
@@ -72,7 +72,7 @@ const T = {
     lead: "Plug in any AI and build modules in plain words. Share the good ones in the library or sell them.",
     primary: "Connect your AI",
     download: "Download NOAH",
-    meta: "free · Windows 10 / 11 · any AI",
+    meta: "free · Windows · macOS · Linux · Android · any AI",
     states: ["WAITING", "LISTENING", "BUILDING", "DONE"],
     demo: [
       { said: "Build a module that tells me the euro rate every morning", tool: "module_format → create_module", answer: "Check ✓ 4 of 4. The «Euro rate» module is running." },

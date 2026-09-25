@@ -147,6 +147,24 @@ const TOOLS = [
   },
 ];
 
+/** Страница по адресу подключения — для тех, кто открыл его как сайт. */
+const MCP_PAGE = (site) => `<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Адрес подключения NOAH</title>
+<link rel="stylesheet" href="/styles.css">
+<style>body{font-family:system-ui,sans-serif}.mcp a{color:#2b5bc4;text-decoration:underline}.mcp{max-width:640px;margin:8vh auto;padding:28px}.mcp h1{margin:0 0 14px}.mcp code{font-size:15px}.mcp ol{padding-left:20px;line-height:1.6}</style>
+</head><body><main class="mcp plate">
+<h1>Это адрес подключения, а не страница</h1>
+<p><code>${site}/mcp</code> — MCP-сервер NOAH. Его не открывают и не присылают в чат: его вставляют в настройки нейросети, и она получает инструменты NOAH.</p>
+<ol>
+<li><b>Claude</b> (сайт и приложение): Настройки → Коннекторы → Добавить свой коннектор → вставьте адрес.</li>
+<li><b>ChatGPT</b>: Настройки → Коннекторы → Дополнительно → режим разработчика → Создать → вставьте адрес.</li>
+<li><b>Cursor</b>: Settings → MCP → Add new MCP server → тип «streamable http» → вставьте адрес.</li>
+<li>Любая другая нейросеть с поддержкой MCP-серверов по адресу (Streamable HTTP).</li>
+</ol>
+<p>При подключении нейросеть один раз откроет вход в NOAH — войдите или создайте аккаунт. Если в вашей нейросети нет раздела про коннекторы или MCP, подключить NOAH к ней нельзя: чат умеет только читать страницы.</p>
+<p><a href="/#/connect">Подробнее — на странице «Подключить ИИ»</a></p>
+</main></body></html>`;
+
 export function mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody, publicUrl }) {
   // Регламент для раздела документации на сайте — тот же текст, что читает нейросеть.
   route("GET", /^\/api\/docs\/standard$/, () => ({ text: standardText() }));
@@ -490,6 +508,13 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
     // и другие) открывает этот поток первым делом и обрывается на отказе.
     // Держим его молча открытым, чтобы не мешать таким клиентам.
     if (req.method === "GET") {
+      // Адрес открыли как страницу — человек в браузере или нейросеть, которая
+      // «читает сайт» вместо того, чтобы подключить его. Клиент MCP просит
+      // поток событий; всем остальным — объяснение, куда этот адрес вставлять.
+      if (!String(req.headers.accept ?? "").includes("text/event-stream")) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+        return res.end(MCP_PAGE(publicUrl));
+      }
       if (!who()) {
         res.writeHead(401, denied);
         return res.end(JSON.stringify({ error: "Нужен вход: подключите NOAH в нейросети по адресу …/mcp — она сама откроет вход на сайте" }));

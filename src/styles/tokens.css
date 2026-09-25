@@ -340,3 +340,76 @@
   --menu-accent: oklch(0.86 0.09 68);
   --menu-hover: rgba(255, 240, 220, 0.09);
 }
+
+/* ── NOAH ─────────────────────────────────────────────────────────────────────
+   Тема сайта noahlab.ru: белая плита на синем, тёмно-синий текст, золотые
+   кнопки, прямые углы и жёсткая тень. Заголовки — прописными и жирным, как
+   на сайте; шрифты — вшитые в программу, без загрузки из сети. */
+:root[data-theme="noah"] {
+  color-scheme: light;
+
+  --pop-radius: 0px;
+  --menu-radius: 0px;
+  --btn-radius: 0px;
+  --term-style: normal;
+
+  --font-ui: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-term: "Exo 2", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --term-transform: uppercase;
+  --term-weight: 700;
+
+  --bg: #ffffff;
+  --bg-solid: #ffffff;
+  --backdrop: none;
+  --border: #171b26;
+  --shadow: 6px 6px 0 #14306b;
+  --divider: #dddcd6;
+
+  --text: #171b26;
+  --text-body: #2a3040;
+  --text-muted: #5d677e;
+
+  --accent: #2b5bc4;
+  --accent-dim: #2f6bd4;
+  --label: #2b5bc4;
+
+  --error: #d4564a;
+  --error-text: #b23f34;
+
+  --btn-border: #171b26;
+  --btn-bg: #ffffff;
+  --btn-color: #171b26;
+  --btn-hover-bg: #f0efea;
+  --btn-hover-border: #2b5bc4;
+  --btn-hover-color: #2b5bc4;
+
+  --skeleton: #ecebe5;
+  --spin-track: #dddcd6;
+  --spin-head: #2b5bc4;
+  --scroll-thumb: #c9c8c1;
+
+  --simple: #171b26;
+  --example: #555f78;
+  --thread-q: #2b5bc4;
+  --thread-a: #2a3040;
+  --pending: #5d677e;
+  --pending-spin-head: #2b5bc4;
+
+  --input-border: #c9c8c1;
+  --input-bg: #fbfaf7;
+  --input-color: #171b26;
+  --send-color: #2b5bc4;
+
+  --btn-primary-bg: #f2c14e;
+  --btn-primary-fg: #171b26;
+  --btn-primary-hover: #f5cd68;
+}
+
+/* Прямые углы в теме NOAH — у кнопок, полей и карточек во всех окнах, как на
+   сайте. Круглое по смыслу (точки, переключатели, индикатор голоса) не трогаем. */
+:root[data-theme="noah"] :is(button, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea,
+  .button, .card, .today, .question, .concept, .flash, .recall, .focus-card, .focus-mode, .chip, .step, .grade,
+  .map-holder, .verdict, .mod, .task, .pop, .menu) {
+  border-radius: 0;
+}

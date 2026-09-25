@@ -20,6 +20,12 @@ body {
   line-height: var(--line-ui);
 }
 
+/* Прокручивается страница, а не body: у прокручивающегося body, который сам
+   никогда не прокручивается, прилипающие вкладки не прилипают. */
+body {
+  overflow-y: visible;
+}
+
 .ob {
   padding: 14px 36px 40px;
   display: flex;
@@ -75,7 +81,7 @@ body {
 
 .ob__title {
   font-family: var(--font-term);
-  font-style: italic;
+  font-style: var(--term-style, italic);
   font-weight: var(--term-weight);
   text-transform: var(--term-transform);
   font-size: 24px;
@@ -85,7 +91,7 @@ body {
 
 .ob__subtitle {
   font-family: var(--font-term);
-  font-style: italic;
+  font-style: var(--term-style, italic);
   font-weight: var(--term-weight);
   text-transform: var(--term-transform);
   font-size: 20px;
@@ -252,7 +258,7 @@ body {
 .ob__btn--primary {
   align-self: flex-start;
   padding: 11px 22px;
-  border-radius: 999px;
+  border-radius: var(--btn-radius, 999px);
   background: var(--btn-primary-bg);
   color: var(--btn-primary-fg);
   font-weight: 500;
@@ -424,7 +430,7 @@ body {
 
 .ob__model-name {
   font-family: var(--font-term);
-  font-style: italic;
+  font-style: var(--term-style, italic);
   font-weight: var(--term-weight);
   font-size: 17px;
   color: var(--text-body);
@@ -664,7 +670,7 @@ body {
 .ob__chip {
   padding: 3px 9px;
   border: 1px solid var(--divider);
-  border-radius: 999px;
+  border-radius: var(--btn-radius, 999px);
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
@@ -684,6 +690,11 @@ body {
   display: flex;
   gap: 2px;
   border-bottom: 1px solid var(--divider);
+  /* Вкладки всегда на виду: длинные настройки прокручиваются под ними. */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-solid);
   /* Вкладки и их содержимое — одно целое, общий ритм окна их не разводит. */
   margin-bottom: -16px;
 }
@@ -817,8 +828,9 @@ body {
 
 .mod__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   margin-top: auto;
   padding-top: 6px;
 }
@@ -881,4 +893,29 @@ body {
   font-size: 0.85em;
   text-align: center;
   opacity: 0.9;
+}
+
+/* ── Ритм групп ─────────────────────────────────────────────────────────── */
+
+/* Новая группа внутри раздела («Голосовые вопросы» после кнопок голоса)
+   отделена воздухом: иначе её подпись липнет к кнопкам сверху и читается как
+   их часть. То же после строки кнопок, за которой идёт следующее поле. */
+.ob__group,
+.ob__actions + .ob__label,
+.ob__actions + .ob__hint + .ob__label {
+  margin-top: 18px;
+}
+
+/* Низкое окно: шапка ужимается, чтобы вкладки и начало раздела были видны
+   без прокрутки. */
+@media (max-height: 560px) {
+  .ob {
+    gap: 22px;
+  }
+  .ob__hero-title {
+    font-size: 28px;
+  }
+  .ob__hero-lead {
+    display: none;
+  }
 }

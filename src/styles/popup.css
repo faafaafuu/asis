@@ -94,7 +94,7 @@
   flex: 1;
   min-width: 0;
   font-family: var(--font-term);
-  font-style: italic;
+  font-style: var(--term-style, italic);
   font-size: var(--size-term);
   line-height: var(--line-term);
   color: var(--accent);
@@ -317,7 +317,7 @@
 
 .popup__question {
   font-family: var(--font-term);
-  font-style: italic;
+  font-style: var(--term-style, italic);
   font-size: 15px;
   color: var(--thread-q);
 }

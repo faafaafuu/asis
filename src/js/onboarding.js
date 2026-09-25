@@ -61,7 +61,7 @@ const injected = globalThis.__SUFLER_VIEW__;
 /* ── Вид: тема и язык ───────────────────────────────────────────────────── */
 
 /** Темы в порядке меню. Названия переводятся, коды — нет. */
-const THEMES = ["system", "light", "dark", "neon", "synthwave"];
+const THEMES = ["noah", "system", "light", "dark", "neon", "synthwave"];
 
 let view = { theme: injected?.theme ?? "system", language: injected?.language ?? "ru" };
 

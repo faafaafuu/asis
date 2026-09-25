@@ -60,7 +60,7 @@
 
 .menu__glyph {
   font-family: var(--font-term);
-  font-style: italic;
+  font-style: var(--term-style, italic);
   font-size: 15px;
 }
 
