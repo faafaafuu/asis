@@ -363,7 +363,7 @@ fn clipboard_text() -> Option<String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn recognize(_image: &Image) -> Result<String, String> {
+pub(crate) fn recognize(_image: &Image) -> Result<String, String> {
     Err("распознавание текста есть только в Windows".into())
 }
 

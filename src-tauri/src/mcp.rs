@@ -305,7 +305,7 @@ pub(crate) fn environment() -> String {
             None => lines.push(format!("{name}: нет")),
         }
     }
-    lines.push(if crate::instance::running() {
+    lines.push(if noa_running() {
         "Ноа запущена: модуль заработает сразу после проверки.".into()
     } else {
         "Ноа сейчас не запущена: модуль заработает при её запуске.".into()
@@ -320,7 +320,7 @@ pub(crate) fn environment() -> String {
 
 /// Ждёт, пока работающая Ноа запустит модуль, и говорит, чем кончилось.
 fn wait_started(dir: &Path) -> String {
-    if !crate::instance::running() {
+    if !noa_running() {
         return "Ноа сейчас не запущена — модуль заработает при её запуске.".into();
     }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(40);
@@ -518,11 +518,24 @@ fn ask_noa(text: &str) -> Result<String, String> {
     if text.is_empty() {
         return Err("Пустая фраза.".into());
     }
-    if !crate::instance::running() {
+    if !noa_running() {
         return Err("Ноа не запущена — фразу передать некому.".into());
     }
-    crate::instance::request_ask(text);
-    Ok(format!("Передал Ноа: «{text}». Она ответит вслух на компьютере."))
+    #[cfg(target_os = "windows")]
+    {
+        crate::instance::request_ask(text);
+        Ok(format!("Передал Ноа: «{text}». Она ответит вслух на компьютере."))
+    }
+    #[cfg(not(target_os = "windows"))]
+    Err("Передать фразу работающей Ноа пока можно только на Windows.".into())
+}
+
+/// Запущена ли Ноа: на Windows это видно по её именованному мьютексу.
+fn noa_running() -> bool {
+    #[cfg(target_os = "windows")]
+    return crate::instance::running();
+    #[cfg(not(target_os = "windows"))]
+    false
 }
 
 #[cfg(test)]

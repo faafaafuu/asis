@@ -139,6 +139,54 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  linux:
+    name: Linux → .deb, .AppImage
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Окно Tauri — WebKitGTK, значок в трее — AppIndicator, звук — ALSA
+      # (cpal и rodio), распознавание выделения — X11. Без этих заголовков
+      # сборка падает ещё на зависимостях, до нашего кода.
+      - name: Системные библиотеки
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libasound2-dev libssl-dev libxdo-dev libx11-dev libxtst-dev pkg-config
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Сборка .deb и .AppImage
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --bundles deb,appimage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sufler-linux-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
   android:
     name: Android → .apk
     runs-on: ubuntu-22.04
@@ -158,8 +206,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # Без `packages` действие ставит устаревший пакет `tools`, которого в
+      # SDK больше нет, и падает до сборки.
       - name: Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Android NDK
         run: |

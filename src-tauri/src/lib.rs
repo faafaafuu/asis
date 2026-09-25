@@ -31,6 +31,10 @@ mod profile;
 mod watchlist;
 mod telegram;
 mod timers;
+#[cfg(target_os = "windows")]
+mod shots;
+#[cfg(not(target_os = "windows"))]
+#[path = "shots_other.rs"]
 mod shots;
 mod focus;
 mod learning;
