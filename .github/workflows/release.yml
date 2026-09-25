@@ -49,6 +49,12 @@ jobs:
           - label: Windows → .exe
             platform: windows-latest
             args: ""
+          - label: macOS → .dmg
+            platform: macos-latest
+            args: --target aarch64-apple-darwin
+          - label: Linux → .deb, .AppImage
+            platform: ubuntu-22.04
+            args: --bundles deb,appimage
 
     runs-on: ${{ matrix.platform }}
 
@@ -63,6 +69,15 @@ jobs:
 
       - name: Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+
+      # Окно — WebKitGTK, трей — AppIndicator, звук — ALSA, выделение — X11.
+      - name: Системные библиотеки Linux
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf             libasound2-dev libssl-dev libxdo-dev libx11-dev libxtst-dev pkg-config
 
       - name: Кэш сборки Rust
         uses: Swatinem/rust-cache@v2
@@ -124,6 +139,7 @@ jobs:
       # а не что-то подменённое по дороге. Хеш добавляется отдельным шагом, а не
       # в release-notes.mjs: он вычисляется из настоящего файла, а не из текста.
       - name: Хеш установщика
+        if: matrix.platform == 'windows-latest'
         shell: bash
         # NOTES_BODY передан через env, а не подставлен прямо в run через ${{ }}:
         # текст заметок — это CHANGELOG.md, и в нём уже случались обратные кавычки
@@ -149,18 +165,81 @@ jobs:
           NOTES_BODY: ${{ steps.notes.outputs.body }}
           TAG: ${{ github.ref_name }}
 
-# macOS, Android и Linux здесь намеренно отсутствуют.
-#
-# macOS и Android не собрались ни разу за всю историю выпусков: их задания
-# падали в каждом релизе, начиная с 0.1.2, и .dmg с .apk не существовало
-# в природе — при том что описание релиза их обещало. Задания убраны, а не
-# отключены условием: закомментированный код гниёт, а история хранит его
-# лучше файла. Вернём, когда сборка заработает и результат проверят на живой
-# системе.
-#
-# Linux собирался успешно, но его установщик никто не запускал. Выпускать
-# непроверенное — это перекладывать отладку на того, кто просто хотел
-# пользоваться программой.
+  # Android — отдельно от настольных: tauri-action телефон не собирает. Файл
+  # докладывается в тот же релиз, когда его создали настольные сборки.
+  android:
+    name: Android → .apk
+    needs: desktop
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Android NDK
+        run: |
+          sdkmanager --install "ndk;27.0.12077973"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - run: npm run tauri -- android init
+
+      # Плагин выделения подключается к сгенерированному проекту так же, как в
+      # проверочной сборке (dev.yml): строка в settings.gradle и зависимость
+      # приложения.
+      - name: Подключить плагин выделения
+        run: |
+          {
+            echo 'include(":sufler-plugin")'
+            echo 'project(":sufler-plugin").projectDir = file("../../../mobile/android-plugin")'
+          } >> src-tauri/gen/android/settings.gradle
+          sed -i '0,/^dependencies {/s//dependencies {
+    implementation(project(":sufler-plugin"))/' src-tauri/gen/android/app/build.gradle.kts
+
+      - name: Сборка .apk
+        run: npm run tauri -- android build --apk
+        env:
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
+          CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
+          CARGO_TARGET_I686_LINUX_ANDROID_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
+
+      - name: Приложить .apk к релизу
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n1)
+          cp "$apk" "Sufler_${TAG#v}_android.apk"
+          gh release upload "$TAG" "Sufler_${TAG#v}_android.apk" --clobber
+
+# macOS, Linux и Android собираются с 1.12: до того macOS и Android не
+# собирались ни разу, а Linux не выпускался непроверенным. Настольная часть,
+# которой у этих систем нет (снимки экрана, связь с запущенной Ноа, голос на
+# телефоне), честно говорит об этом, а не падает.
 #
 # iOS (.ipa) здесь намеренно нет.
 #

@@ -591,24 +591,63 @@ async function serveStatic(req, res, pathname, versioned) {
 /* ── Скачать NOAH: сразу установщик последнего релиза ───────────────────── */
 
 const RELEASES = "https://github.com/faafaafuu/asis/releases/latest";
-let installer = { url: "", at: 0 };
+/**
+ * Файлы последнего релиза по системам: Windows, macOS, Linux, Android.
+ *
+ * Сайт показывает кнопку только той системы, чей файл в релизе есть, — вести
+ * на несуществующий файл хуже, чем не предлагать систему вовсе.
+ */
+const PLATFORMS = {
+  windows: [/setup\.exe$/i, /\.(exe|msi)$/i],
+  mac: [/\.dmg$/i],
+  linux: [/\.AppImage$/i, /\.deb$/i],
+  android: [/\.apk$/i],
+};
+let release = { files: {}, version: "", at: 0 };
 
-/** Прямая ссылка на установщик из последнего релиза; держится 10 минут. */
-async function latestInstaller() {
-  if (installer.url && Date.now() - installer.at < 10 * 60_000) return installer.url;
+async function latestRelease() {
+  if (release.at && Date.now() - release.at < 10 * 60_000) return release;
   try {
     const response = await fetch("https://api.github.com/repos/faafaafuu/asis/releases/latest", {
       headers: { Accept: "application/vnd.github+json", "User-Agent": "noah-platform" },
       signal: AbortSignal.timeout(8000),
     });
-    const release = await response.json();
-    const asset = (release.assets ?? []).find((a) => /setup\.exe$/i.test(a.name)) ?? (release.assets ?? []).find((a) => /\.(exe|msi)$/i.test(a.name));
-    if (asset) installer = { url: asset.browser_download_url, at: Date.now() };
+    const body = await response.json();
+    const assets = body.assets ?? [];
+    const files = {};
+    for (const [os, patterns] of Object.entries(PLATFORMS)) {
+      for (const pattern of patterns) {
+        const asset = assets.find((a) => pattern.test(a.name) && !/\.sig$/i.test(a.name));
+        if (asset) {
+          files[os] = { url: asset.browser_download_url, name: asset.name, size: asset.size };
+          break;
+        }
+      }
+    }
+    release = { files, version: String(body.tag_name ?? "").replace(/^v/, ""), at: Date.now() };
   } catch (err) {
     console.error("последний релиз не получен:", err.message);
   }
-  return installer.url || RELEASES;
+  return release;
 }
+
+/** Система по браузеру: для кнопки «Скачать» без выбора. */
+function osOf(agent) {
+  if (/android/i.test(agent)) return "android";
+  if (/mac os x|macintosh/i.test(agent) && !/iphone|ipad/i.test(agent)) return "mac";
+  if (/linux|x11/i.test(agent)) return "linux";
+  return "windows";
+}
+
+async function latestInstaller(os) {
+  const { files } = await latestRelease();
+  return files[os]?.url ?? files.windows?.url ?? RELEASES;
+}
+
+route("GET", /^\/api\/downloads$/, async () => {
+  const { files, version } = await latestRelease();
+  return { version, files };
+});
 
 const oauthHandler = mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies });
 const PUBLIC_URL = (process.env.NOAH_PUBLIC_URL ?? `http://127.0.0.1:${PORT}`).replace(/\/$/, "");
@@ -631,7 +670,8 @@ const server = http.createServer(async (req, res) => {
     // Вход нейросети в MCP по OAuth: описание сервера, регистрация, согласие, токены.
     if ((url.pathname.startsWith("/.well-known/") || url.pathname.startsWith("/oauth/")) && (await mcpAuthHandler(req, res, url))) return;
     if (url.pathname === "/download") {
-      res.writeHead(302, { Location: await latestInstaller(), "Cache-Control": "no-store" });
+      const asked = url.searchParams.get("os") ?? osOf(String(req.headers["user-agent"] ?? ""));
+      res.writeHead(302, { Location: await latestInstaller(asked), "Cache-Control": "no-store" });
       return res.end();
     }
     if (url.pathname.startsWith("/auth/") && (await oauthHandler(req, res, url))) return;

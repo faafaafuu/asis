@@ -331,6 +331,24 @@ function startDemo(root, tr, h) {
 
 let running = null;
 
+/** Системы, под которые есть файл в последнем релизе: ряд ссылок под кнопкой. */
+const OS_NAMES = { windows: "Windows", mac: "macOS", linux: "Linux", android: "Android" };
+
+function platformRow(h) {
+  const row = h("div", { class: "platforms mono" });
+  fetch("/api/downloads")
+    .then((response) => response.json())
+    .then(({ files = {}, version = "" }) => {
+      const links = Object.keys(OS_NAMES)
+        .filter((os) => files[os])
+        .map((os) => h("a", { href: `/download?os=${os}`, title: files[os].name }, OS_NAMES[os]));
+      if (!links.length) return;
+      row.replaceChildren(...(version ? [h("span", {}, `v${version}`)] : []), ...links);
+    })
+    .catch(() => {});
+  return row;
+}
+
 export function renderHome(page, { h, icon, lang, stats, modules, number }) {
   running?.stop();
   const tr = T[lang];
@@ -365,6 +383,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
         h("a", { class: "btn btn--gold btn--big", href: "#/connect" }, tr.primary),
         h("a", { class: "btn btn--ghost btn--big", href: RELEASES }, tr.download),
       ),
+      platformRow(h),
       h("p", { class: "hero__meta mono" }, tr.meta),
     ),
     console_,
@@ -512,6 +531,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
       h("a", { class: "btn btn--dark btn--big", href: "#/connect" }, tr.primary),
       h("a", { class: "btn btn--big", href: RELEASES }, tr.download),
     ),
+    platformRow(h),
   );
 
   page.replaceChildren(hero, brains, how, bento, who, code, strip, faq, finale);

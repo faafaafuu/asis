@@ -714,3 +714,24 @@ body.is-home .page {
   white-space: normal;
   line-height: 1.5;
 }
+
+/* Системы под кнопкой «Скачать»: та же версия под Windows, macOS, Linux и
+   Android. Появляются, только если файл для системы в релизе есть. */
+.platforms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: inherit;
+  opacity: 0.8;
+}
+.platforms a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.platforms a:hover {
+  opacity: 1;
+  color: #f2c14e;
+}
