@@ -57,6 +57,8 @@ mod tasks;
 mod update;
 mod selection;
 mod state;
+#[cfg(mobile)]
+mod mobile_shim;
 #[cfg(desktop)]
 mod voice;
 mod watcher;
@@ -166,6 +168,7 @@ pub fn run() {
                 tasks::load(dir.clone());
                 watchlist::load(dir.clone());
                 learning::load(dir.clone());
+                #[cfg(desktop)]
                 voice::stt::load_calibration(dir.clone());
                 usage::load(dir.clone());
                 alarms::load(dir);
@@ -269,14 +272,20 @@ pub fn run() {
             commands::popup_ready,
             commands::pending_open,
             commands::close_popup,
+            #[cfg(desktop)]
             commands::popup_active,
+            #[cfg(desktop)]
             commands::popup_space,
+            #[cfg(desktop)]
             commands::open_order_link,
             commands::food_settings,
             commands::save_food_settings,
+            #[cfg(desktop)]
             commands::food_login,
+            #[cfg(desktop)]
             commands::order_pay,
             commands::settings_section,
+            #[cfg(desktop)]
             commands::popup_taken_over,
             commands::open_tasks,
             commands::close_tasks,
@@ -297,28 +306,39 @@ pub fn run() {
             commands::telegram_settings,
             commands::save_telegram_settings,
             commands::telegram_test,
+            #[cfg(desktop)]
             commands::audio_decoded,
             commands::learn_overview,
             commands::learn_topic,
             commands::learn_read,
             commands::learn_place,
+            #[cfg(desktop)]
             commands::learn_review,
+            #[cfg(desktop)]
             commands::learn_grade,
+            #[cfg(desktop)]
             commands::learn_concepts,
+            #[cfg(desktop)]
             commands::learn_map,
             commands::learn_focus_done,
             commands::brains_list,
+            #[cfg(desktop)]
             commands::esc_went_to_voice,
             commands::brains_use,
+            #[cfg(desktop)]
             commands::learn_focus_bell,
             commands::learn_check,
             commands::learn_self_grade,
             commands::learn_exam,
             commands::learn_submit,
             commands::close_learning,
+            #[cfg(desktop)]
             commands::learn_dictate_start,
+            #[cfg(desktop)]
             commands::learn_dictate_stop,
+            #[cfg(desktop)]
             commands::learn_oral,
+            #[cfg(desktop)]
             commands::learn_discuss,
             commands::learn_ask,
             commands::learn_deep,
@@ -332,6 +352,7 @@ pub fn run() {
             commands::task_edit,
             commands::task_remove,
             commands::task_step,
+            #[cfg(desktop)]
             commands::task_plan,
             commands::task_postpone,
             commands::task_step_remove,
@@ -339,7 +360,9 @@ pub fn run() {
             commands::task_clear_done,
             commands::calendar_settings,
             commands::save_calendar_settings,
+            #[cfg(desktop)]
             commands::calendar_connect,
+            #[cfg(desktop)]
             commands::calendar_forget,
             commands::review_settings,
             commands::save_review_settings,
@@ -388,10 +411,15 @@ pub fn run() {
             commands::plugins_remove,
             #[cfg(desktop)]
             commands::update_check,
+            #[cfg(desktop)]
             commands::update_install,
+            #[cfg(desktop)]
             commands::app_version,
+            #[cfg(desktop)]
             commands::module_window,
+            #[cfg(desktop)]
             commands::module_call,
+            #[cfg(desktop)]
             commands::plugins_secrets,
             #[cfg(desktop)]
             commands::plugins_save_secrets,
@@ -483,6 +511,19 @@ fn begin_turn() {
 #[cfg(desktop)]
 fn end_turn() {
     TURN.with(|turn| turn.set(u64::MAX));
+}
+
+/// На телефоне ход клавишей не отменяют.
+#[cfg(mobile)]
+pub(crate) fn turn_cancelled() -> bool {
+    false
+}
+
+/// На телефоне своего голоса и окна сообщений нет: фраза остаётся в журнале,
+/// а до человека её доносит Telegram, если он подключён.
+#[cfg(mobile)]
+pub(crate) fn announce(_app: &tauri::AppHandle, text: String, _wait: bool) {
+    log::info!("сообщение: «{text}»");
 }
 
 /// Отменён ли ход, который ведёт этот поток.
@@ -2328,7 +2369,6 @@ pub(crate) fn apply_autostart(_app: &tauri::AppHandle) {}
 /// модели прилетало три одинаковых просьбы подряд — три загрузки одного и того
 /// же и три уборки следом. Один заход за раз; если за время работы выбор успел
 /// смениться, заход повторяется уже с новым.
-#[cfg(desktop)]
 static WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(desktop)]

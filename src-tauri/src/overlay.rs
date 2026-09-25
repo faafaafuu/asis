@@ -10,6 +10,8 @@ use tauri::{
     WebviewWindow, WebviewWindowBuilder,
 };
 
+#[cfg(mobile)]
+use crate::mobile_shim::{DesktopBuilder, DesktopWindow};
 use crate::selection::{ScreenRect, Selection};
 use crate::state::AppState;
 
@@ -718,17 +720,14 @@ fn monitor_bounds(window: &WebviewWindow, x: f64, y: f64) -> (f64, f64, f64, f64
 ///
 /// `None` — попапа нет. Время сдвигают и действия человека (навёл мышь, набрал
 /// букву, прокрутил), и работа программы (пришёл ответ, читается вслух).
-#[cfg(desktop)]
 static ALIVE_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 /// Отмечает, что попап не заброшен.
-#[cfg(desktop)]
 pub fn touch_popup() {
     *ALIVE_AT.lock().unwrap_or_else(|err| err.into_inner()) = Some(std::time::Instant::now());
 }
 
 /// Сколько попап стоит без единого события. `None` — попапа нет.
-#[cfg(desktop)]
 pub fn popup_idle() -> Option<std::time::Duration> {
     ALIVE_AT
         .lock()

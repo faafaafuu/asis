@@ -298,10 +298,17 @@ async fn reply_to(
 
 /// Ответ голосом: синтез своим голосом и перекодирование в OGG/Opus — формат
 /// голосовых сообщений Telegram.
+#[cfg(desktop)]
 fn spoken(app: &AppHandle, text: &str) -> Result<Vec<u8>, String> {
     let voice = app.state::<crate::state::AppState>().config().voice.clone();
     let wav = crate::voice::synthesize(app, &voice, text)?;
     crate::overlay::encode_voice(app, &wav)
+}
+
+/// На телефоне своего голоса нет — ответ уходит текстом.
+#[cfg(mobile)]
+fn spoken(_app: &AppHandle, _text: &str) -> Result<Vec<u8>, String> {
+    Err("голосовые ответы — только в настольной версии".into())
 }
 
 /// Файл для отправки: каким методом, в каком поле, что и как назвать.
@@ -428,8 +435,16 @@ async fn heard(app: &AppHandle, token: &str, file: &str) -> Result<String, Strin
         .bytes()
         .await
         .map_err(|err| err.without_url().to_string())?;
-    let wav = crate::overlay::decode_audio(app, &bytes)?;
-    crate::voice::whisper::transcribe(app, wav, "ru", "").await
+    #[cfg(desktop)]
+    {
+        let wav = crate::overlay::decode_audio(app, &bytes)?;
+        crate::voice::whisper::transcribe(app, wav, "ru", "").await
+    }
+    #[cfg(mobile)]
+    {
+        let _ = (app, bytes);
+        Err("голосовые в Telegram разбирает настольная версия Ноа".into())
+    }
 }
 
 /// Отказ Telegram — словами, по которым понятно, что делать.

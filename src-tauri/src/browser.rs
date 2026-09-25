@@ -13,6 +13,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[cfg(mobile)]
+use crate::mobile_shim::DesktopBuilder;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 const LABEL: &str = "search";

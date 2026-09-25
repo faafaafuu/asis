@@ -311,6 +311,7 @@ fn ring(app: &tauri::AppHandle, alarm: Alarm) {
         if !still {
             return;
         }
+        #[cfg(desktop)]
         if !crate::voice::speaking() {
             crate::voice::chime();
         }

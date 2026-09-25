@@ -64,6 +64,7 @@ pub fn start(app: &tauri::AppHandle, at: DateTime<Local>, label: String) {
 /// таймер ставят и тогда, когда отходят от компьютера.
 fn ring(app: &tauri::AppHandle, label: &str) {
     log::info!("таймер сработал: «{label}»");
+    #[cfg(desktop)]
     for _ in 0..3 {
         crate::voice::chime();
         std::thread::sleep(Duration::from_millis(700));

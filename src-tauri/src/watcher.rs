@@ -159,7 +159,7 @@ pub fn spawn(app: &AppHandle) -> Integration {
             escape_was_down = escape;
             if pressed
                 && overlay::is_popup_visible(&app)
-                && !crate::voice::hotkey::esc_went_to_voice(700)
+                && !esc_went_to_voice()
             {
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || overlay::hide_popup(&handle));
@@ -201,4 +201,12 @@ pub fn spawn(app: &AppHandle) -> Integration {
     });
 
     Integration(integration)
+}
+
+/// Этот Esc только что остановил голос — окну его не отдавать.
+fn esc_went_to_voice() -> bool {
+    #[cfg(desktop)]
+    return crate::voice::hotkey::esc_went_to_voice(700);
+    #[cfg(mobile)]
+    false
 }
