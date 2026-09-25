@@ -18,6 +18,10 @@ const PENDING_TTL = 15 * 60_000;
 const ACCESS_DAYS = 30;
 
 const sha = (text) => createHash("sha256").update(text).digest("hex");
+/** Нейросети, чей адрес возврата узнаём: к ним предупреждения на согласии нет. */
+const KNOWN_HOSTS = ["claude.ai", "claude.com", "anthropic.com", "chatgpt.com", "openai.com", "cursor.com", "cursor.sh", "localhost", "127.0.0.1"];
+/** Регистраций клиентов с одного адреса за час — хватит любой нейросети. */
+const REGISTER_PER_HOUR = 20;
 const b64url = (buffer) => buffer.toString("base64url");
 const escape = (text) => String(text ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 
@@ -41,6 +45,7 @@ export function mountMcpAuth({ db, publicUrl, sessionUser }) {
   /** Коды входа и ждущие подтверждения запросы — в памяти: живут минуты. */
   const codes = new Map();
   const pending = new Map();
+  const registered = new Map();
   setInterval(() => {
     const now = Date.now();
     for (const [key, value] of codes) if (now - value.at > CODE_TTL) codes.delete(key);
@@ -135,6 +140,13 @@ export function mountMcpAuth({ db, publicUrl, sessionUser }) {
     }
 
     if (path === "/oauth/register" && req.method === "POST") {
+      const ip = String(req.headers["x-real-ip"] ?? req.socket.remoteAddress ?? "");
+      const recent = (registered.get(ip) ?? []).filter((at) => Date.now() - at < 3600e3);
+      if (recent.length >= REGISTER_PER_HOUR) {
+        oauthError(res, "slow_down", "Слишком много регистраций — попробуйте через час.", 429);
+        return true;
+      }
+      registered.set(ip, [...recent, Date.now()]);
       let body;
       try {
         body = await readBody(req);
@@ -185,13 +197,19 @@ export function mountMcpAuth({ db, publicUrl, sessionUser }) {
         res.end();
         return true;
       }
+      // Куда уйдёт доступ — показываем адресом, а не только названием: название
+      // клиент пишет о себе сам, и «Claude» может назваться кто угодно.
+      const host = new URL(q.redirect_uri).hostname;
+      const known = KNOWN_HOSTS.some((name) => host === name || host.endsWith(`.${name}`));
       const ticket = b64url(randomBytes(18));
       pending.set(ticket, { at: Date.now(), userId: user.id, clientId: client.id, redirect: q.redirect_uri, challenge: q.code_challenge, state: q.state ?? "" });
       page(
         res,
         "Подключить нейросеть",
         `<h1>Подключить ${escape(client.name)} к NOAH?</h1>
-<p>Нейросеть сможет собирать для вас модули и курсы и отправлять их в NOAH. Аккаунт: <strong>${escape(user.name)}</strong>.</p>
+<p>Нейросеть сможет собирать для вас модули и курсы и отправлять их в NOAH — а модули запускаются на вашем компьютере. Аккаунт: <strong>${escape(user.name)}</strong>.</p>
+<p>Доступ получит: <strong>${escape(host)}</strong>.</p>
+${known ? "" : `<p class="warn">Это не Claude, ChatGPT и не программа на вашем компьютере. Разрешайте, только если сами подключали эту нейросеть прямо сейчас.</p>`}
 ${linkedNote(user.id)}
 <form method="post" action="/oauth/authorize" class="row">
 <input type="hidden" name="ticket" value="${ticket}">

@@ -7,7 +7,7 @@
 import http from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, extname, join, normalize } from "node:path";
+import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
@@ -204,6 +204,8 @@ const SECURITY_HEADERS = {
   "X-Frame-Options": "DENY",
   "Content-Security-Policy":
     "default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  // Раз зашли по HTTPS — дальше браузер ходит только так, без шага через http.
+  ...(SECURE ? { "Strict-Transport-Security": "max-age=31536000" } : {}),
 };
 
 class Fail extends Error {
@@ -556,8 +558,15 @@ const TYPES = {
 };
 
 async function serveStatic(req, res, pathname, versioned) {
-  let file = normalize(join(WEB, decodeURIComponent(pathname)));
-  if (!file.startsWith(WEB)) return false;
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return false;
+  }
+  let file = normalize(join(WEB, decoded));
+  // Именно папка сайта с разделителем: иначе соседняя «web-old» прошла бы проверку.
+  if (file !== WEB && !file.startsWith(WEB + sep)) return false;
   try {
     if ((await stat(file)).isDirectory()) file = join(file, "index.html");
   } catch {

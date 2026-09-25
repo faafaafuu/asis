@@ -244,9 +244,21 @@ pub fn lint(manifest: &Manifest, files: &BTreeMap<String, Vec<u8>>) -> Vec<Strin
                     ("https://", "в окне модуля нельзя внешние адреса: данные берутся у инструментов модуля."),
                     ("<style", "своих стилей у окна нет: оформление даёт тема Ноа."),
                     (" style=", "свойство style запрещено: оформление даёт тема Ноа."),
+                    ("<meta", "в окне модуля нельзя <meta>: окно не уводят на другие адреса."),
+                    ("<base", "в окне модуля нельзя <base>."),
+                    ("<object", "в окне модуля нельзя <object>."),
+                    ("<embed", "в окне модуля нельзя <embed>."),
+                    ("javascript:", "в окне модуля нельзя ссылок javascript:."),
                 ] {
                     need(!markup.contains(mark), text);
                 }
+                // Обработчики в разметке (onclick=, onerror=): Ноа их и так не
+                // выполнит — у окон строгая политика скриптов, — но модуль с ними
+                // уже пытается исполнить свой код в окне помощника.
+                let handler = markup
+                    .split(|c: char| c.is_whitespace() || c == '/')
+                    .any(|word| word.starts_with("on") && word[2..].split('=').next().is_some_and(|name| name.len() > 2 && name.chars().all(|c| c.is_ascii_alphabetic())) && word.contains('='));
+                need(!handler, "в окне модуля нельзя обработчиков onclick=, onerror= и подобных: кнопки связываются через data-call.");
                 need(
                     !markup.contains("data-call") || markup.contains("data-out"),
                     "у кнопки с data-call должно быть место для ответа: элемент с data-out.",
