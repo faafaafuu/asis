@@ -4,14 +4,10 @@
 # которой он предназначен. .exe требует Windows SDK, .dmg — инструментов Apple,
 # .deb/.AppImage — Linux. Кросс-сборка официально не поддерживается.
 #
-# Пока здесь только Windows. macOS и Android падали во всех выпусках подряд,
-# начиная с 0.1.2: .dmg и .apk не собрались ни разу, но релиз всё равно выходил
-# и обещал их в описании. Обещать файл, которого нет, — хуже, чем честно его
-# не предлагать. Вернём платформу сюда тогда, когда её сборка заработает
-# и кто-то проверит результат на живой системе.
-#
-# Linux собирался успешно, но ни разу не был проверен в работе, поэтому пока
-# тоже не выпускается. Вернуть его — дописать одну строку в матрицу.
+# Системы: Windows (.exe), macOS (.dmg, один файл для Intel и Apple Silicon),
+# Linux (.AppImage и .deb), Android (.apk). Сайт сам находит файл под систему
+# в последнем релизе, поэтому новая система появляется в меню «Скачать» сразу,
+# как её файл лёг в релиз.
 #
 # Запуск: только пуш тега вида v0.1.0 — и никак иначе.
 # Результат — опубликованный релиз на GitHub, где под каждую ОС лежит готовый
@@ -49,9 +45,10 @@ jobs:
           - label: Windows → .exe
             platform: windows-latest
             args: ""
+          # Один .dmg на оба вида Mac: Intel и Apple Silicon.
           - label: macOS → .dmg
             platform: macos-latest
-            args: --target aarch64-apple-darwin
+            args: --target universal-apple-darwin
           - label: Linux → .deb, .AppImage
             platform: ubuntu-22.04
             args: --bundles deb,appimage
@@ -70,14 +67,15 @@ jobs:
       - name: Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       # Окно — WebKitGTK, трей — AppIndicator, звук — ALSA, выделение — X11.
       - name: Системные библиотеки Linux
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf             libasound2-dev libssl-dev libxdo-dev libx11-dev libxtst-dev pkg-config
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libasound2-dev libssl-dev libxdo-dev libx11-dev libxtst-dev pkg-config
 
       - name: Кэш сборки Rust
         uses: Swatinem/rust-cache@v2
@@ -187,7 +185,7 @@ jobs:
 
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools
+          packages: platform-tools build-tools;34.0.0
 
       - name: Android NDK
         run: |
@@ -215,8 +213,9 @@ jobs:
             echo 'include(":sufler-plugin")'
             echo 'project(":sufler-plugin").projectDir = file("../../../mobile/android-plugin")'
           } >> src-tauri/gen/android/settings.gradle
-          sed -i '0,/^dependencies {/s//dependencies {
-    implementation(project(":sufler-plugin"))/' src-tauri/gen/android/app/build.gradle.kts
+          gradle_app=src-tauri/gen/android/app/build.gradle.kts
+          sed -i '0,/^dependencies {/s//dependencies {\n    implementation(project(":sufler-plugin"))/' "$gradle_app"
+          grep -n 'sufler-plugin' "$gradle_app"
 
       - name: Сборка .apk
         run: npm run tauri -- android build --apk
@@ -226,15 +225,32 @@ jobs:
           CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
           CARGO_TARGET_I686_LINUX_ANDROID_RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384
 
+      # Неподписанный .apk телефон не ставит. Ключ один на все версии: новая
+      # версия ставится поверх старой, только если подписана тем же ключом.
+      # Ключ и пароль — в секретах репозитория, на диск раннера ключ ложится
+      # во временную папку и сразу удаляется.
+      - name: Подписать .apk
+        shell: bash
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          tools="$ANDROID_HOME/build-tools/34.0.0"
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*release*.apk' | head -n1)
+          echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          "$tools/zipalign" -f -p 4 "$apk" "$RUNNER_TEMP/aligned.apk"
+          "$tools/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias sufler --ks-pass env:KS_PASS \
+            --out "Sufler_${TAG#v}_android.apk" "$RUNNER_TEMP/aligned.apk"
+          rm -f "$RUNNER_TEMP/release.jks"
+          "$tools/apksigner" verify "Sufler_${TAG#v}_android.apk"
+
       - name: Приложить .apk к релизу
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-        run: |
-          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n1)
-          cp "$apk" "Sufler_${TAG#v}_android.apk"
-          gh release upload "$TAG" "Sufler_${TAG#v}_android.apk" --clobber
+        run: gh release upload "$TAG" "Sufler_${TAG#v}_android.apk" --clobber
 
 # macOS, Linux и Android собираются с 1.12: до того macOS и Android не
 # собирались ни разу, а Linux не выпускался непроверенным. Настольная часть,
