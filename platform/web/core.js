@@ -3,7 +3,7 @@
 // части сетей соединение замирает после ~16 КБ, и каждый файл держится
 // меньше этого вместе с TLS-рукопожатием.
 
-import { T } from "./i18n.js?v=44";
+import { T } from "./i18n.js?v=45";
 
 /** Функции, которые живут в app.js, а нужны страницам кабинета. */
 export const hooks = { route: () => {}, renderChrome: () => {} };
@@ -193,7 +193,7 @@ export const EXAMPLE_MANIFEST = JSON.stringify(
 const SYSTEMS = [
   ["windows", "Windows", ".exe"],
   ["mac", "macOS", ".dmg"],
-  ["linux", "Linux", ".deb · .AppImage"],
+  ["linux", "Linux", ".AppImage"],
   ["android", "Android", ".apk"],
 ];
 let downloads = null;
