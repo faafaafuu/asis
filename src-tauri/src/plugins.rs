@@ -89,11 +89,19 @@ pub fn status(id: &str) -> String {
         .unwrap_or_else(|| "проверяется…".into())
 }
 
+/// Папка модулей. Спрашивается у системы один раз: папку проверяют каждые три
+/// секунды, а на телефоне каждый такой вопрос — вызов в Java через главный поток.
 fn root(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    if let Some(root) = ROOT.get() {
+        return Ok(root.clone());
+    }
+    let root = app
+        .path()
         .app_data_dir()
         .map(|dir| dir.join("modules"))
-        .map_err(|err| err.to_string())
+        .map_err(|err| err.to_string())?;
+    Ok(ROOT.get_or_init(|| root).clone())
 }
 
 fn module_dir(app: &AppHandle, id: &str) -> Result<PathBuf, String> {

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Дополнение к Info.plist программы на macOS — Tauri сливает его с собственным.
+  Без строки о микрофоне macOS закрывает программу при первом обращении к нему,
+  а без строки о команде другим программам запрет не объяснён человеку.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Ноа слушает вопросы голосом и отзывается на своё имя.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Ноа открывает программы и страницы по вашей просьбе.</string>
+</dict>
+</plist>

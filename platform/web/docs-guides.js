@@ -16,9 +16,9 @@ export const GUIDES = [
 | Система | Файл | Что есть |
 |---|---|---|
 | [Windows 10 и 11](/download?os=windows) | \`.exe\` | всё |
-| [macOS](/download?os=mac) (Intel и Apple Silicon) | \`.dmg\` | всё, кроме снимков экрана; файл не подписан — первый запуск через «Открыть» в меню по правому щелчку |
-| [Linux](/download?os=linux) | \`.AppImage\`, \`.deb\` | всё, кроме снимков экрана |
-| [Android](/download?os=android) | \`.apk\` | объяснения, задачи, обучение, модели; голос и окна поверх экрана — в настольной версии |
+| [macOS](/download?os=mac) (Intel и Apple Silicon) | \`.dmg\` | объяснения, модели, модули, задачи, обучение; голоса и снимков экрана пока нет. Файл без подписи Apple: при первом запуске — «Системные настройки» → «Конфиденциальность и безопасность» → «Всё равно открыть» |
+| [Linux](/download?os=linux) | \`.AppImage\`, \`.deb\` | как на macOS: без голоса и снимков экрана |
+| [Android](/download?os=android) | \`.apk\` | разговор с Ноа голосом и текстом, «Объяснить» в меню выделения, модули (встроенные и по ссылке), задачи, будильники, обучение, Telegram. Позвать — микрофоном на экране, ярлыком «Спросить голосом», плиткой «Ноа» в шторке или жестом помощника |
 
 ## 2. Выберите мозг
 
@@ -49,7 +49,7 @@ export const GUIDES = [
       body: `
 ## 1. Install NOAH
 
-[Download the installer](/download) — the site picks the file for your system — and run it. NOAH lives in the tray; double-click the icon to open settings. Builds: [Windows](/download?os=windows), [macOS](/download?os=mac) (Intel and Apple Silicon, unsigned — open it via right-click → Open the first time), [Linux](/download?os=linux) (.AppImage, .deb), [Android](/download?os=android) (.apk, without the desktop voice and overlay windows).
+[Download the installer](/download) — the site picks the file for your system — and run it. NOAH lives in the tray; double-click the icon to open settings. Builds: [Windows](/download?os=windows), [macOS](/download?os=mac) (Intel and Apple Silicon; not signed by Apple — the first time, allow it in System Settings → Privacy & Security → Open Anyway), [Linux](/download?os=linux) (.AppImage, .deb), [Android](/download?os=android) (.apk: talk to NOAH by voice or text, “Explain” in the text selection menu, modules, tasks, alarms, learning). On macOS and Linux there is no voice yet.
 
 ## 2. Pick a brain
 
