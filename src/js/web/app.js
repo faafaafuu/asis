@@ -585,8 +585,11 @@ window.addEventListener("beforeunload", (event) => {
 ui.buildOpen.addEventListener("click", async () => {
   ui.buildForm.hidden = false;
   ui.courseActions.hidden = true;
-  ui.buildHint.textContent = (await canBuildOnServer())
-    ? "Соберу через мост на сервере: обычно 3–5 минут на тему. Страницу можно закрыть — курс появится после первой темы, остальные дорастут сами."
+  const server = await canBuildOnServer();
+  // Выбор модели — только у Claude через мост: у своей модели он один.
+  ui.qualityField.hidden = !(server && bridgeModel().startsWith("claude"));
+  ui.buildHint.textContent = server
+    ? "Соберу через мост на сервере: 4–6 минут на тему. Страницу можно закрыть — курс появится после первой темы, остальные дорастут сами. Sonnet точнее в фактах — для учёбы это важнее скорости."
     : loadModel()
       ? "Соберу моделью, подключённой в этом браузере: не закрывайте вкладку, пока идёт сборка. Курс появится после первой темы."
       : "Сначала подключите модель — в разделе «Модель».";
@@ -606,7 +609,7 @@ ui.buildForm.addEventListener("submit", async (event) => {
   try {
     if (await canBuildOnServer()) {
       const noa = await openNoa();
-      await noa.startBuild(goal, bridgeModel());
+      await noa.startBuild(goal, bridgeModel(), ui.buildQuality.value);
     } else {
       if (localBuild?.state.status === "running") throw new Error("Уже собирается курс — дождитесь его или остановите.");
       await runLocalBuild(goal);

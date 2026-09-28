@@ -118,6 +118,10 @@ export function mountNoa({ route, db, Fail, readJson }) {
     );
     CREATE INDEX IF NOT EXISTS noa_builds_user ON noa_builds(user_id, created);
   `);
+  // Какой моделью Claude собирать: sonnet точнее, haiku быстрее.
+  if (!db.prepare("SELECT name FROM pragma_table_info('noa_builds') WHERE name = 'quality'").get()) {
+    db.exec("ALTER TABLE noa_builds ADD COLUMN quality TEXT NOT NULL DEFAULT 'sonnet'");
+  }
 
   /**
    * Номер человека — строкой. Число node:sqlite передаёт как дробное, и в
@@ -215,13 +219,19 @@ export function mountNoa({ route, db, Fail, readJson }) {
   /** Урок на тысячи слов модель пишет минуты: большим ответам — до 10 минут. */
   const LONG_ANSWER = 600;
 
-  const bridgeChat = async (model, messages, long = false) => {
+  const bridgeChat = async (model, messages, long = false, quality = "") => {
     const data = await bridge(
       "/v1/chat/completions",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, messages, noa_web: true, ...(long ? { noa_timeout: LONG_ANSWER } : {}) }),
+        body: JSON.stringify({
+          model,
+          messages,
+          noa_web: true,
+          ...(long ? { noa_timeout: LONG_ANSWER } : {}),
+          ...(quality ? { noa_model: quality } : {}),
+        }),
       },
       long ? (LONG_ANSWER + 30) * 1000 : BRIDGE_WAIT,
     );
@@ -260,7 +270,11 @@ export function mountNoa({ route, db, Fail, readJson }) {
     buildCourse({
       goal: job.goal,
       format: courseFormat(),
-      chat: (messages, opts) => bridgeChat(job.model || "claude-code-bridge", messages, Boolean(opts?.long)),
+      chat: (messages, opts) => {
+        const engine = job.model || "claude-code-bridge";
+        // Модель Claude выбирается только у Claude; у Codex, Gemini, Qwen — своя.
+        return bridgeChat(engine, messages, Boolean(opts?.long), engine.startsWith("claude") ? job.quality : "");
+      },
       save: (course) => {
         saveCourse(db, job.user_id, course);
       },
@@ -298,7 +312,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
 
   route("POST", /^\/api\/noa\/builds$/, async ({ req, user: who }) => {
     const user = bridgeUser(who);
-    const { goal, model } = await readJson(req);
+    const { goal, model, quality } = await readJson(req);
     const text = String(goal ?? "").trim();
     if (text.length < 10) throw new Fail(400, "Опишите курс подробнее: о чём он и для чего — хотя бы одним предложением.");
     if (text.length > 3000) throw new Fail(400, "Слишком длинно — хватит пары абзацев.");
@@ -306,9 +320,10 @@ export function mountNoa({ route, db, Fail, readJson }) {
     if (active) throw new Fail(409, `Уже собирается курс${active.title ? ` «${active.title}»` : ""} — дождитесь его или остановите.`);
     const id = randomUUID();
     const engine = BUILD_MODELS.has(model) ? model : "claude-code-bridge";
+    const level = ["haiku", "sonnet", "opus"].includes(quality) ? quality : "sonnet";
     db.prepare(
-      "INSERT INTO noa_builds (id, user_id, goal, model, status, stage, message) VALUES (?, ?, ?, ?, 'running', 'plan', 'Составляю план курса')",
-    ).run(id, user.id, text, engine);
+      "INSERT INTO noa_builds (id, user_id, goal, model, quality, status, stage, message) VALUES (?, ?, ?, ?, ?, 'running', 'plan', 'Составляю план курса')",
+    ).run(id, user.id, text, engine, level);
     runBuild(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(id));
     return { build: buildRow(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(id)) };
   });

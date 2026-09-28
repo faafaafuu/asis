@@ -164,8 +164,8 @@ async function start() {
       return data.builds ?? [];
     },
     /** Собрать курс на сервере через мост. */
-    async startBuild(goal, model) {
-      const { build } = await api("/api/noa/builds", { method: "POST", body: { goal, model } });
+    async startBuild(goal, model, quality) {
+      const { build } = await api("/api/noa/builds", { method: "POST", body: { goal, model, quality } });
       return build;
     },
     async stopBuild(id) {

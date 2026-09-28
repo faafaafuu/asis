@@ -55,6 +55,13 @@
               <span class="field__label">О чём курс и зачем</span>
               <textarea data-el="buildGoal" rows="4" maxlength="3000" placeholder="Например: слаботочные системы для монтажника с нуля — кабели, СКС, видеонаблюдение, домофоны. Чтобы пройти собеседование и сразу работать."></textarea>
             </label>
+            <label class="field" data-el="qualityField" hidden>
+              <span class="field__label">Модель</span>
+              <select data-el="buildQuality">
+                <option value="sonnet">Точнее — Claude Sonnet</option>
+                <option value="haiku">Быстрее — Claude Haiku</option>
+              </select>
+            </label>
             <p class="hint" data-el="buildHint"></p>
             <div class="row">
               <button class="btn btn--primary" type="submit">Собрать</button>
