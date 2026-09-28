@@ -419,7 +419,7 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
 2. В разделе «Обучение» — **Собрать курс**: напишите, о чём курс и зачем. Например: «слаботочные системы для монтажника с нуля — кабели, СКС, видеонаблюдение; чтобы пройти собеседование».
 3. Ноа составит план и будет писать тему за темой: урок, понятия, карточки, задачи, мини-экзамен, в конце — финальный экзамен на стык тем. Каждая тема проходит ту же проверку, что курс от нейросети.
 
-Курс появляется после первой темы — по ней можно учиться сразу, остальные дорастают сами, и в списке, и в открытом окне обучения. С мостом сборка идёт на сервере: 4–6 минут на тему, страницу можно закрыть. Модель — **Sonnet** (точнее) или **Haiku** (быстрее); для учёбы точность важнее. Без моста курс собирает модель, подключённая в браузере, — тогда вкладку закрывать нельзя.
+Курс появляется после первой темы — по ней можно учиться сразу, остальные дорастают сами, и в списке, и в открытом окне обучения. С мостом сборка идёт на сервере: около минуты на тему с **Sonnet**, страницу можно закрыть. **Haiku** бережёт лимит подписки, но медленнее и чаще ошибается в фактах. Без моста курс собирает модель, подключённая в браузере, — тогда вкладку закрывать нельзя.
 
 ## Своей нейросетью
 
@@ -449,7 +449,7 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
       title: "Your own course",
       lead: "The Learning window is empty until you build a course. Build it right in Noa online or with your own AI.",
       body: `
-**In Noa online:** open [Noa online](/app/), sign in, press **Build a course** in Learning and describe what it is about and why. Noa writes the plan and then topic after topic; the course appears after the first topic and the rest arrive by themselves. With the bridge the build runs on the server, 4–6 minutes per topic.
+**In Noa online:** open [Noa online](/app/), sign in, press **Build a course** in Learning and describe what it is about and why. Noa writes the plan and then topic after topic; the course appears after the first topic and the rest arrive by themselves. With the bridge the build runs on the server, about a minute per topic with Sonnet.
 
 **With your own AI:**
 
