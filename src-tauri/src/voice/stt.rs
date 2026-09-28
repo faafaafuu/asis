@@ -110,10 +110,12 @@ impl Listening {
         let base = match self {
             Listening::Talk => SILENCE_LEVEL,
             // Обращение произносят внятно и в сторону компьютера, но микрофоны
-            // бывают тихие: на здешнем речь идёт по трети шкалы, и порог в
-            // девять сотых съедал половину зовов. Пять — это вдвое выше порога
-            // разговора и всё ещё ниже любой внятной речи.
-            Listening::Wake => 0.05,
+            // бывают тихие. Порог в девять сотых съедал половину зовов, пять —
+            // почти все в микрофон телефона (WO Mic): шум там 0.002, а имя
+            // доходит на 0.03–0.05, и Ноа отзывалась с десятой попытки. Порог
+            // здесь только отсекает совсем тихое; шум комнаты отсекает
+            // `over_noise`, а случайные звуки — то, что в них нет имени.
+            Listening::Wake => 0.025,
         };
         base * sensitivity()
     }
@@ -185,6 +187,67 @@ static MUTED_UNTIL: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 /// на медленные устройства вроде bluetooth-колонок, где задержка больше.
 const DEAF_AFTER_SPEECH_MS: u64 = 700;
 
+/// Микрофон, который отдавал мёртвую тишину, и когда это заметили.
+///
+/// Настоящий микрофон никогда не пишет ровные нули: даже в тихой комнате в нём
+/// есть шум. Нули пишут виртуальные микрофоны — WO Mic, DroidCam, — когда
+/// телефон к ним не подключён, и микрофоны с выключателем. Выбранный в
+/// настройках WO Mic так и держал Ноа глухой часами: имя не доходило вовсе,
+/// хотя основной микрофон системы был рядом и работал.
+static DEAD: Mutex<Vec<(String, std::time::Instant)>> = Mutex::new(Vec::new());
+
+/// Сколько ровных нулей подряд считаем признаком неподключённого микрофона.
+const DEAD_AFTER_MS: u64 = 8_000;
+
+/// Сколько не возвращаться к молчавшему микрофону. Потом пробуем снова: телефон
+/// могли подключить.
+const DEAD_FOR: std::time::Duration = std::time::Duration::from_secs(600);
+
+fn is_dead(name: &str) -> bool {
+    DEAD.lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .iter()
+        .any(|(dead, at)| dead == name && at.elapsed() < DEAD_FOR)
+}
+
+/// С какого устройства писать на самом деле.
+///
+/// Выбранное, если оно не молчало недавно. Иначе — основное системы, а если
+/// молчит и оно, — первое из остальных, что не молчало. Молчат все — пишем
+/// с выбранного: вдруг телефон как раз подключили.
+fn usable(preferred: &str) -> String {
+    let named = |name: &str| if name.is_empty() { default_name() } else { name.to_string() };
+    if !is_dead(&named(preferred)) {
+        return preferred.to_string();
+    }
+    if !is_dead(&default_name()) {
+        return String::new();
+    }
+    devices()
+        .into_iter()
+        .find(|name| !is_dead(name))
+        .unwrap_or_else(|| preferred.to_string())
+}
+
+fn default_name() -> String {
+    cpal::default_host()
+        .default_input_device()
+        .and_then(|device| device.name().ok())
+        .unwrap_or_default()
+}
+
+fn mark_dead(device: &str) {
+    let name = if device.is_empty() { default_name() } else { device.to_string() };
+    log::warn!("микрофон «{name}» пишет ровную тишину — похоже, он не подключён; ищу другой");
+    let mut dead = DEAD.lock().unwrap_or_else(|err| err.into_inner());
+    dead.retain(|(other, at)| other != &name && at.elapsed() < DEAD_FOR);
+    dead.push((name, std::time::Instant::now()));
+}
+
+fn all_zero(samples: &[f32]) -> bool {
+    samples.iter().all(|sample| *sample == 0.0)
+}
+
 /// Поток, владеющий микрофоном. Создаётся при первом обращении.
 fn commands() -> Option<&'static Sender<Command>> {
     COMMANDS
@@ -207,11 +270,18 @@ fn commands() -> Option<&'static Sender<Command>> {
 fn mic_loop(rx: Receiver<Command>) {
     let mut active: Option<(cpal::Stream, std::sync::Arc<Mutex<Vec<f32>>>, u32)> = None;
     let mut talk: Option<Segmenter> = None;
+    // С какого устройства пишем сейчас (пусто — основное) и сколько отсчётов
+    // подряд оно отдало ровными нулями.
+    let mut current = String::new();
+    let mut zeros = 0usize;
 
     loop {
         match rx.recv_timeout(std::time::Duration::from_millis(50)) {
             Ok(Command::Start(preferred)) => {
-                active = open(&preferred);
+                current = usable(&preferred);
+                remember_device(&current);
+                zeros = 0;
+                active = open(&current);
             }
             Ok(Command::Stop(reply)) => {
                 let recording = match active.take() {
@@ -223,6 +293,11 @@ fn mic_loop(rx: Receiver<Command>) {
                         drop(stream);
                         let samples =
                             std::mem::take(&mut *buffer.lock().unwrap_or_else(|e| e.into_inner()));
+                        // Секунда и больше ровных нулей по клавише — микрофон
+                        // не подключён; следующая запись пойдёт с основного.
+                        if samples.len() >= rate as usize && all_zero(&samples) {
+                            mark_dead(&current);
+                        }
                         Recording {
                             samples,
                             sample_rate: rate,
@@ -233,7 +308,10 @@ fn mic_loop(rx: Receiver<Command>) {
                 let _ = reply.send(recording);
             }
             Ok(Command::StartTalk(preferred, mode, sender)) => {
-                active = open(&preferred);
+                current = usable(&preferred);
+                remember_device(&current);
+                zeros = 0;
+                active = open(&current);
                 talk = active
                     .as_ref()
                     .map(|(_, _, rate)| Segmenter::new(*rate, mode, sender));
@@ -243,10 +321,34 @@ fn mic_loop(rx: Receiver<Command>) {
                 talk = None;
             }
             Err(RecvTimeoutError::Timeout) => {
+                let mut silent = None;
                 if let (Some((_, buffer, rate)), Some(segmenter)) = (&active, &mut talk) {
                     let chunk =
                         std::mem::take(&mut *buffer.lock().unwrap_or_else(|e| e.into_inner()));
+                    if !chunk.is_empty() {
+                        zeros = if all_zero(&chunk) { zeros + chunk.len() } else { 0 };
+                        if ms(zeros, *rate) >= DEAD_AFTER_MS {
+                            silent = Some((segmenter.mode, segmenter.sender.clone()));
+                        }
+                    }
                     segmenter.feed(&chunk, *rate);
+                }
+                // Микрофон молчит нулями — продолжаем слушать с другого, не
+                // прерывая ожидания имени и разговора. Другого нет — остаёмся.
+                if let Some((mode, sender)) = silent {
+                    mark_dead(&current);
+                    zeros = 0;
+                    let next = usable(&current);
+                    if next == current {
+                        continue;
+                    }
+                    log::info!("слушаю микрофон «{}»", if next.is_empty() { default_name() } else { next.clone() });
+                    current = next;
+                    remember_device(&current);
+                    active = open(&current);
+                    talk = active
+                        .as_ref()
+                        .map(|(_, _, rate)| Segmenter::new(*rate, mode, sender));
                 }
             }
             Err(RecvTimeoutError::Disconnected) => break,
@@ -293,6 +395,8 @@ pub fn devices() -> Vec<String> {
 pub fn resolved_input(preferred: &str) -> String {
     use cpal::traits::{DeviceTrait, HostTrait};
 
+    let preferred = usable(preferred);
+    let preferred = preferred.as_str();
     let host = cpal::default_host();
     let device = if preferred.trim().is_empty() {
         host.default_input_device()
@@ -821,6 +925,18 @@ fn wav(samples: &[f32], rate: u32) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn silent_device_is_skipped() {
+        mark_dead("Микрофон (WO Mic Device)");
+        assert!(is_dead("Микрофон (WO Mic Device)"));
+        assert!(!is_dead("Микрофон (Realtek USB Audio)"));
+        assert_ne!(usable("Микрофон (WO Mic Device)"), "Микрофон (WO Mic Device)".to_string());
+        assert_eq!(usable("Микрофон (Realtek USB Audio)"), "Микрофон (Realtek USB Audio)");
+        assert!(all_zero(&[0.0; 480]));
+        assert!(!all_zero(&[0.0, 0.0001, 0.0]));
+        DEAD.lock().unwrap().clear();
+    }
 
     #[test]
     fn resampling_halves_the_count_when_the_rate_halves() {
