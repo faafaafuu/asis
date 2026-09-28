@@ -699,6 +699,11 @@ mountNoa({ route, db, Fail, readJson });
 const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY, publicUrl: PUBLIC_URL });
 
 const server = http.createServer(async (req, res) => {
+  // Перед сайтом может стоять CDN: всё, что сервер не разрешил кэшировать
+  // явно, не кэшируется. Иначе перенаправление после входа — с cookie
+  // сессии — CDN мог бы отдать следующему человеку. Статика задаёт своё
+  // правило в writeHead, и оно заменяет это.
+  res.setHeader("Cache-Control", "no-store");
   const url = new URL(req.url, "http://local");
   // Заголовку прокси верим, только если запрос пришёл от него самого.
   const peer = String(req.socket.remoteAddress ?? "");
