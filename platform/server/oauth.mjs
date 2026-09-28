@@ -256,10 +256,22 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
 
   /* ── Telegram: через бота площадки ─────────────────────────────────────── */
 
-  route("POST", /^\/api\/auth\/telegram\/start$/, ({ res }) => {
+  /**
+   * Куда вернуть после входа: только свои страницы — Ноа онлайн или раздел
+   * сайта. Чужой адрес сюда не попадёт: ссылка из бота не должна уводить
+   * человека с сайта.
+   */
+  const safeNext = (value) => {
+    const next = String(value ?? "");
+    if (next === "/app/" || /^\/#\/[\w\-/?=&%.]{0,150}$/.test(next)) return next;
+    return "/#/connect";
+  };
+
+  route("POST", /^\/api\/auth\/telegram\/start$/, async ({ req, res }) => {
     if (!tgBot.token || !tgBot.name) throw new Fail(404, "Вход через Telegram не настроен.");
+    const { next } = await readJson(req).catch(() => ({}));
     const code = b64url(randomBytes(12)).replace(/[^A-Za-z0-9]/g, "").slice(0, 16);
-    tgCodes.set(code, { at: Date.now(), user: null });
+    tgCodes.set(code, { at: Date.now(), user: null, next: safeNext(next) });
     res.setHeader("Set-Cookie", `noah_tg=${code}; Path=/; HttpOnly; SameSite=Lax; Max-Age=300`);
     return { link: `https://t.me/${tgBot.name}?start=${code}` };
   });
@@ -269,9 +281,10 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     const entry = code && tgCodes.get(code);
     if (!entry || Date.now() - entry.at > TG_TTL) throw new Fail(410, "Ссылка устарела — нажмите «Войти через Telegram» ещё раз.");
     if (!entry.user) return { done: false };
-    tgCodes.delete(code);
+    // Запись остаётся до конца срока: по ней же войдёт и ссылка из бота —
+    // её часто открывают в другой вкладке или во встроенном браузере Telegram.
     res.setHeader("Set-Cookie", [signIn(req, "telegram", entry.user), "noah_tg=; Path=/; Max-Age=0"]);
-    return { done: true };
+    return { done: true, next: entry.next };
   });
 
   if (tgBot.token && tgBot.name) {
@@ -293,8 +306,10 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
           if (entry && Date.now() - entry.at < TG_TTL) {
             const from = message.from;
             entry.user = { subject: String(from.id), email: "", name: from.username || [from.first_name, from.last_name].filter(Boolean).join(" ") };
-            reply = "Готово — вход выполнен.";
-            markup = { inline_keyboard: [[{ text: "🌐 NOAH", url: PUBLIC_URL }]] };
+            reply = "Готово — вход выполнен. Вернитесь на сайт кнопкой ниже.";
+            // Кнопка — одноразовый вход: откроется в любом браузере, хоть во
+            // встроенном в Telegram, и сразу вернёт туда, откуда пришли.
+            markup = { inline_keyboard: [[{ text: "🌐 Вернуться в NOAH", url: `${PUBLIC_URL}/auth/telegram/finish?code=${match[1]}` }]] };
           }
           await fetch(`https://api.telegram.org/bot${tgBot.token}/sendMessage`, {
             method: "POST",
@@ -316,7 +331,24 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     for (const [key, value] of tgCodes) if (now - value.at > TG_TTL) tgCodes.delete(key);
   }, 60_000).unref();
 
+  /** Вход по кнопке из бота: код одноразовый и живёт пять минут. */
+  const telegramFinish = (req, res, url) => {
+    const code = String(url.searchParams.get("code") ?? "");
+    const entry = /^[A-Za-z0-9]{8,32}$/.test(code) && tgCodes.get(code);
+    if (!entry?.user || Date.now() - entry.at > TG_TTL || entry.finished) {
+      res.writeHead(302, { Location: `/#/login?error=${encodeURIComponent("Ссылка входа устарела — нажмите «Войти через Telegram» ещё раз.")}` });
+      return res.end();
+    }
+    entry.finished = true;
+    res.writeHead(302, { Location: entry.next, "Set-Cookie": [signIn(req, "telegram", entry.user), "noah_tg=; Path=/; Max-Age=0"], "Cache-Control": "no-store" });
+    res.end();
+  };
+
   return async function oauth(req, res, url) {
+    if (url.pathname === "/auth/telegram/finish" && req.method === "GET") {
+      telegramFinish(req, res, url);
+      return true;
+    }
     const match = /^\/auth\/(google|github|x|yandex|vk)(\/callback)?$/.exec(url.pathname);
     if (!match || req.method !== "GET") return false;
     if (match[2]) await finish(req, res, url, match[1]);

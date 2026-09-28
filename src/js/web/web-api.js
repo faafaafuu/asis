@@ -11,6 +11,7 @@
 import { openNoa } from "./noa-store.js";
 import { dictionaryClient } from "./ai-web.js";
 import { WebHost } from "../web-host.js";
+import { speak, listen, canListen, stopSpeaking } from "./voice.js";
 
 const listeners = new Map();
 
@@ -18,46 +19,12 @@ function emit(event, payload) {
   for (const handler of listeners.get(event) ?? []) handler({ event, payload });
 }
 
-/* ── Голос браузера ─────────────────────────────────────────────────────── */
+/* ── Голос ──────────────────────────────────────────────────────────────── */
 
 const Recognition = globalThis.SpeechRecognition ?? globalThis.webkitSpeechRecognition;
 
-/** Текст для чтения вслух: без разметки и кода. */
-const plain = (text) =>
-  String(text)
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/[`*_#>]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-function speak(text) {
-  return new Promise((resolve) => {
-    if (!globalThis.speechSynthesis) return resolve();
-    const phrase = new SpeechSynthesisUtterance(plain(text));
-    phrase.lang = "ru-RU";
-    const voice = speechSynthesis.getVoices().find((v) => v.lang?.startsWith("ru"));
-    if (voice) phrase.voice = voice;
-    phrase.onend = phrase.onerror = () => resolve();
-    speechSynthesis.cancel();
-    speechSynthesis.speak(phrase);
-  });
-}
-
-/** Одна фраза с микрофона. Пусто — не расслышал. */
-function hearOnce() {
-  return new Promise((resolve, reject) => {
-    if (!Recognition) return reject(new Error("Голос в этом браузере не работает — откройте Ноа в Chrome или Edge."));
-    const ear = new Recognition();
-    ear.lang = "ru-RU";
-    ear.interimResults = false;
-    let said = "";
-    ear.onresult = (event) => (said = event.results[0]?.[0]?.transcript ?? "");
-    ear.onerror = (event) =>
-      event.error === "not-allowed" ? reject(new Error("Браузер не дал микрофон — разрешите его в адресной строке.")) : resolve("");
-    ear.onend = () => resolve(said.trim());
-    ear.start();
-  });
-}
+/** «Спасибо», «хватит» — закончить разговор. Слова целиком, без : он не видит кириллицу. */
+const BYE = /(^|[^\p{L}])(спасибо|хватит|стоп|пока|закончим)([^\p{L}]|$)/iu;
 
 /** Диктовка ответа: запись идёт, пока не нажали «Готово». */
 let dictation = null;
@@ -95,20 +62,20 @@ async function dictateStop() {
 let talking = false;
 
 async function discussByVoice(learning, target) {
-  if (!Recognition) throw new Error("Голос в этом браузере не работает — спросите текстом или откройте Ноа в Chrome.");
+  if (!canListen) throw new Error("Голос в этом браузере не работает — спросите текстом или откройте Ноа в Chrome.");
   if (talking) return;
   talking = true;
   try {
     await speak("Слушаю. Что разобрать?");
-    for (let quiet = 0; talking && quiet < 2; ) {
-      const said = await hearOnce();
+    for (let quiet = 0; talking && quiet < 3; ) {
+      const said = await listen();
       if (!said) {
         quiet++;
         continue;
       }
       quiet = 0;
-      if (/\b(спасибо|хватит|стоп|пока)\b/i.test(said)) {
-        await speak("Хорошо.");
+      if (BYE.test(said) && said.split(/\s+/).length <= 4) {
+        await speak("Хорошо, закончили.");
         break;
       }
       const reply = await learning.ask(target, said).catch((err) => `Не получилось ответить: ${err.message}`);
@@ -164,12 +131,12 @@ function oralPanel(onStop) {
 let oral = false;
 
 async function oralExam(learning, courseId, topicId) {
-  if (!Recognition) throw new Error("Устный зачёт в этом браузере не работает — откройте Ноа в Chrome или Edge.");
+  if (!canListen) throw new Error("Устный зачёт в этом браузере не работает — откройте Ноа в Chrome или Edge.");
   if (oral) return;
   oral = true;
   const panel = oralPanel(() => {
     oral = false;
-    globalThis.speechSynthesis?.cancel();
+    stopSpeaking();
   });
   try {
     let text = learning.oralStart(courseId, topicId);
@@ -180,10 +147,10 @@ async function oralExam(learning, courseId, topicId) {
       await speak(text);
       if (done || !oral) break;
       panel.state("слушаю…");
-      const said = await hearOnce();
+      const said = await listen({ onHeard: (text) => panel.state(`слышу: ${text.slice(-60)}`) });
       if (!oral) break;
       if (!said) {
-        if (++quiet >= 2) {
+        if (++quiet >= 3) {
           text = learning.oralStop() ?? "Закончили.";
           done = true;
           continue;
@@ -295,7 +262,7 @@ async function run(cmd, args = {}) {
       speak(args.text ?? "");
       return null;
     case "learn_oral":
-      if (!Recognition) throw new Error("Устный зачёт в этом браузере не работает — откройте Ноа в Chrome или Edge.");
+      if (!canListen) throw new Error("Устный зачёт в этом браузере не работает — откройте Ноа в Chrome или Edge.");
       oralExam(l, args.course, args.topic ?? null);
       return null;
     case "close_learning":

@@ -5,6 +5,8 @@
 // другом устройстве: курсы — в том числе собранные его нейросетью по MCP — и
 // прогресс. Курс проверяется тем же кодом, что и в браузере (learn-core.js).
 
+import { spawn } from "node:child_process";
+
 import { validate, advice, normalizeCourse } from "../../src/js/web/learn-core.js";
 
 /** Предел курса и прогресса: больше не бывает у настоящих, а место не резиновое. */
@@ -28,6 +30,31 @@ const BRIDGE_USERS = new Set(
 );
 /** Мост отвечает до трёх минут (своё время ожидания у него 180 с). */
 const BRIDGE_WAIT = 200_000;
+
+/**
+ * Голос Ноа — тот же Silero, что в программе (assets/silero_server.py), на
+ * этом сервере: служба noah-voice, только 127.0.0.1. Отдаётся MP3: WAV весит
+ * сотню килобайт на секунду речи, для телефона и медленной сети это много.
+ */
+const VOICE_URL = (process.env.NOAH_VOICE_URL ?? "http://127.0.0.1:8644").replace(/\/$/, "");
+const VOICES = new Set(["xenia", "baya", "kseniya", "aidar", "eugene"]);
+/** Сколько фраз в час одному человеку: голос считает процессор сервера. */
+const VOICE_PER_HOUR = 600;
+const MAX_PHRASE = 1500;
+const spoke = new Map();
+
+/** WAV → MP3 через ffmpeg. */
+function toMp3(wav) {
+  return new Promise((resolve, reject) => {
+    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "48k", "-f", "mp3", "pipe:1"]);
+    const out = [];
+    ff.stdout.on("data", (chunk) => out.push(chunk));
+    ff.on("error", reject);
+    ff.on("close", (code) => (code === 0 ? resolve(Buffer.concat(out)) : reject(new Error(`ffmpeg: ${code}`))));
+    ff.stdin.on("error", () => {});
+    ff.stdin.end(wav);
+  });
+}
 
 export function mountNoa({ route, db, Fail, readJson }) {
   db.exec(`
@@ -110,6 +137,38 @@ export function mountNoa({ route, db, Fail, readJson }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: String(model ?? ""), messages, noa_web: true }),
     });
+  });
+
+  route("POST", /^\/api\/noa\/tts$/, async ({ req, res, user: who }) => {
+    const user = need(who);
+    const { text, voice, rate } = await readJson(req);
+    const phrase = String(text ?? "").trim().slice(0, MAX_PHRASE);
+    if (!phrase) throw new Fail(400, "Нечего читать.");
+    const hour = Date.now() - 3_600_000;
+    const recent = (spoke.get(user.id) ?? []).filter((at) => at > hour);
+    if (recent.length >= VOICE_PER_HOUR) throw new Fail(429, "Голоса на этот час хватит — дальше читаю голосом браузера.");
+    spoke.set(user.id, [...recent, Date.now()]);
+    let wav;
+    try {
+      const response = await fetch(`${VOICE_URL}/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: phrase, speaker: VOICES.has(voice) ? voice : "xenia", rate: Math.min(Math.max(Number(rate) || 1.1, 0.6), 2) }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      wav = Buffer.from(await response.arrayBuffer());
+    } catch {
+      throw new Fail(503, "Голос сейчас недоступен.");
+    }
+    const mp3 = await toMp3(wav).catch(() => null);
+    res.writeHead(200, {
+      "Content-Type": mp3 ? "audio/mpeg" : "audio/wav",
+      "Content-Length": (mp3 ?? wav).length,
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    res.end(mp3 ?? wav);
   });
 
   route("GET", /^\/api\/noa\/progress$/, ({ user: who }) => {

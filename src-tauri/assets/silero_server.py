@@ -22,7 +22,9 @@ from xml.sax.saxutils import escape
 import torch
 
 MODEL_PATH, PORT = sys.argv[1], int(sys.argv[2])
-IDLE_SECONDS = 600
+# Третий параметр — сколько ждать без запросов; 0 — не уходить вовсе. Так
+# сервер работает на сайте, где его держит служба, а не программа.
+IDLE_SECONDS = int(sys.argv[3]) if len(sys.argv) > 3 else 600
 SAMPLE_RATE = 48000
 SPEAKERS = {"aidar", "baya", "kseniya", "xenia", "eugene"}
 
@@ -167,7 +169,7 @@ class Handler(BaseHTTPRequestHandler):
 def watch_idle(server):
     while True:
         time.sleep(15)
-        if time.monotonic() - last_used > IDLE_SECONDS:
+        if IDLE_SECONDS and time.monotonic() - last_used > IDLE_SECONDS:
             server.shutdown()
             return
 

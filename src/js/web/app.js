@@ -7,6 +7,7 @@
 import { PROVIDERS, loadModel, saveModel, listModels, chat, bridgeAvailable } from "./ai-web.js";
 import { openNoa } from "./noa-store.js";
 import { mountDictionary } from "./web-api.js";
+import { speak as sayAloud, stopSpeaking, listen, canListen } from "./voice.js";
 
 const ui = {};
 for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] = node;
@@ -250,13 +251,7 @@ function paintThread() {
 paintThread();
 
 function speak(text) {
-  if (!ui.speakAnswers.checked || !globalThis.speechSynthesis) return;
-  const phrase = new SpeechSynthesisUtterance(text.replace(/```[\s\S]*?```/g, " ").replace(/[`*_#>]/g, ""));
-  phrase.lang = "ru-RU";
-  const voice = speechSynthesis.getVoices().find((v) => v.lang?.startsWith("ru"));
-  if (voice) phrase.voice = voice;
-  speechSynthesis.cancel();
-  speechSynthesis.speak(phrase);
+  if (ui.speakAnswers.checked) sayAloud(text);
 }
 
 try {
@@ -270,7 +265,7 @@ ui.speakAnswers.addEventListener("change", () => {
   } catch {
     /* не запомнится — не беда */
   }
-  if (!ui.speakAnswers.checked) globalThis.speechSynthesis?.cancel();
+  if (!ui.speakAnswers.checked) stopSpeaking();
 });
 
 async function send(text) {
@@ -322,23 +317,25 @@ ui.clear.addEventListener("click", () => {
   paintThread();
 });
 
-const Recognition = globalThis.SpeechRecognition ?? globalThis.webkitSpeechRecognition;
-if (!Recognition) ui.mic.hidden = true;
-ui.mic.addEventListener("click", () => {
-  const ear = new Recognition();
-  ear.lang = "ru-RU";
-  ear.interimResults = false;
+if (!canListen) ui.mic.hidden = true;
+ui.mic.addEventListener("click", async () => {
+  if (ui.mic.disabled) return;
+  stopSpeaking();
   ui.mic.disabled = true;
   ui.mic.textContent = "Слушаю…";
-  ear.onresult = (event) => send(event.results[0]?.[0]?.transcript ?? "");
-  ear.onerror = (event) => {
-    if (event.error === "not-allowed") line("error", "Браузер не дал микрофон — разрешите его в адресной строке.");
-  };
-  ear.onend = () => {
+  try {
+    const said = await listen({ onHeard: (text) => (ui.input.value = text) });
+    if (said) {
+      // Спросили голосом — отвечаем голосом.
+      ui.speakAnswers.checked = true;
+      await send(said);
+    }
+  } catch (err) {
+    line("error", err.message);
+  } finally {
     ui.mic.disabled = false;
     ui.mic.textContent = "🎙 Голосом";
-  };
-  ear.start();
+  }
 });
 
 /* ── Обучение ──────────────────────────────────────────────────────────── */

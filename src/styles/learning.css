@@ -1200,3 +1200,44 @@ button {
     overflow-x: auto;
   }
 }
+
+/* Несколько курсов — переключатель над обзором. */
+.course-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+
+.course-switch:empty {
+  display: none;
+}
+
+.course-switch__label {
+  margin-right: 4px;
+  font-size: var(--size-label);
+  color: var(--text-muted);
+}
+
+.course-switch__item {
+  max-width: 260px;
+  padding: 5px 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border: 1px solid var(--btn-border);
+  border-radius: var(--btn-radius, 999px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.course-switch__item:hover {
+  color: var(--text);
+}
+
+.course-switch__item[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}

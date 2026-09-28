@@ -725,6 +725,8 @@ const server = http.createServer(async (req, res) => {
         const match = r.pattern.exec(url.pathname);
         if (!match || r.method !== req.method) continue;
         const body = await r.handler({ req, res, url, match, ip, user: sessionUser(req), tokenUser: tokenUser(req) });
+        // Обработчик ответил сам — например, звуком, а не JSON.
+        if (res.headersSent) return;
         return send(res, 200, body);
       }
       throw new Fail(404, "Нет такого адреса.");

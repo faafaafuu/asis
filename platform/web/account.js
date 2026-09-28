@@ -1,9 +1,9 @@
 // Страницы кабинета: вход, аккаунт, кабинет автора, подключение ИИ, студия.
 // Грузятся, только когда их открыли, — главной они не нужны.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=48";
-import { DOCS } from "./i18n.js?v=48";
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=48";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=49";
+import { DOCS } from "./i18n.js?v=49";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=49";
 
 export function renderStudio(page) {
   const tr = t();
@@ -527,16 +527,38 @@ export async function renderConnect(page) {
 export async function telegramLogin(error, back = "#/connect") {
   const tr = t();
   const tab = window.open("about:blank", "_blank");
+  // Куда вернуться: в Ноа онлайн, если вход начат оттуда, иначе — на тот же раздел.
+  let next = `/${back}`;
   try {
-    const { link } = await api("/api/auth/telegram/start", { method: "POST" });
+    next = sessionStorage.getItem("noah_next") === "/app/" ? "/app/" : next;
+  } catch {
+    /* без sessionStorage — на раздел сайта */
+  }
+  let waking = null;
+  try {
+    const { link } = await api("/api/auth/telegram/start", { method: "POST", body: { next } });
     if (tab) tab.location.href = link;
     else location.href = link;
     toast(tr.tgWait);
+    // Пока человек в Telegram, браузер усыпляет таймеры вкладки. Вернулся —
+    // проверяем сразу, а не через заснувшие три секунды.
+    let wake = () => {};
+    waking = () => wake();
+    document.addEventListener("visibilitychange", waking);
+    window.addEventListener("focus", waking);
     for (let i = 0; i < 100; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await new Promise((resolve) => {
+        wake = resolve;
+        setTimeout(resolve, 3000);
+      });
       const status = await api("/api/auth/telegram/status");
       if (status.done) {
+        tab?.close();
         state.user = (await api("/api/me")).user;
+        if ((status.next ?? next) === "/app/") {
+          location.href = "/app/";
+          return;
+        }
         if (location.hash === back) hooks.route();
         else location.hash = back;
         return;
@@ -546,6 +568,10 @@ export async function telegramLogin(error, back = "#/connect") {
     tab?.close();
     error.textContent = err.message;
     error.hidden = false;
+  } finally {
+    if (waking) {
+      document.removeEventListener("visibilitychange", waking);
+      window.removeEventListener("focus", waking);
+    }
   }
 }
-

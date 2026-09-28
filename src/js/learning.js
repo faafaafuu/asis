@@ -189,6 +189,35 @@ function page(title, lead = "") {
   return node;
 }
 
+/**
+ * Курсов несколько — строка переключения над обзором. Курсы собирает
+ * нейросеть по разным темам (сети, электрика, английский), и до этой строки
+ * окно показывало только первый: до остальных было не добраться.
+ */
+function courseSwitch() {
+  const row = el("div", "course-switch");
+  if (courses.length < 2) return row;
+  row.append(el("span", "course-switch__label", "Ваши курсы"));
+  for (const other of courses) {
+    const chip = el("button", "course-switch__item", other.title);
+    chip.type = "button";
+    chip.setAttribute("aria-pressed", String(other.id === course.id));
+    chip.title = `${other.title} — пройдено ${other.percent}%`;
+    chip.addEventListener("click", () => {
+      if (busy || other.id === course.id) return;
+      course = other;
+      try {
+        localStorage.setItem("noa.lastCourse", other.id);
+      } catch {
+        /* не запомнится — откроется первый */
+      }
+      renderHome();
+    });
+    row.append(chip);
+  }
+  return row;
+}
+
 function renderHome() {
   view = { kind: "home", topic: null, step: "lesson" };
   review = null;
@@ -214,6 +243,7 @@ function renderHome() {
     return;
   }
   const root = page(course.title, course.description);
+  root.prepend(courseSwitch());
   root.append(renderToday());
   const done = course.topics.filter((t) => t.status === "done").length;
   const mistakes = course.topics.reduce((sum, t) => sum + t.mistakes, 0);
@@ -1884,11 +1914,21 @@ setInterval(tickFocus, 1000);
 /* ── Данные ────────────────────────────────────────────────────────────── */
 
 
+/** Курс, выбранный в прошлый раз. Ссылка с ?course= важнее. */
+function lastCourse() {
+  if (new URLSearchParams(location.search).get("course")) return null;
+  try {
+    return localStorage.getItem("noa.lastCourse");
+  } catch {
+    return null;
+  }
+}
+
 async function refreshOverview() {
   if (!api) return;
   try {
     courses = (await api.invoke("learn_overview")) ?? [];
-    course = courses.find((c) => c.id === course?.id) ?? courses[0] ?? null;
+    course = courses.find((c) => c.id === course?.id) ?? courses.find((c) => c.id === lastCourse()) ?? courses[0] ?? null;
   } catch {
     /* окно покажет прежнее */
   }
