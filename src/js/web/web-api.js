@@ -11,7 +11,7 @@
 import { openNoa } from "./noa-store.js";
 import { dictionaryClient } from "./ai-web.js";
 import { WebHost } from "../web-host.js";
-import { speak, listen, canListen, stopSpeaking } from "./voice.js";
+import { speak, listen, canListen, stopSpeaking, dictate } from "./voice.js";
 
 const listeners = new Map();
 
@@ -21,7 +21,6 @@ function emit(event, payload) {
 
 /* ── Голос ──────────────────────────────────────────────────────────────── */
 
-const Recognition = globalThis.SpeechRecognition ?? globalThis.webkitSpeechRecognition;
 
 /** «Спасибо», «хватит» — закончить разговор. Слова целиком, без : он не видит кириллицу. */
 const BYE = /(^|[^\p{L}])(спасибо|хватит|стоп|пока|закончим)([^\p{L}]|$)/iu;
@@ -29,31 +28,16 @@ const BYE = /(^|[^\p{L}])(спасибо|хватит|стоп|пока|зако
 /** Диктовка ответа: запись идёт, пока не нажали «Готово». */
 let dictation = null;
 
-function dictateStart() {
-  if (!Recognition) throw new Error("Диктовка в этом браузере не работает — откройте Ноа в Chrome или Edge.");
-  const ear = new Recognition();
-  ear.lang = "ru-RU";
-  ear.continuous = true;
-  ear.interimResults = false;
-  const parts = [];
-  const done = new Promise((resolve) => (ear.onend = resolve));
-  ear.onresult = (event) => {
-    for (let at = event.resultIndex; at < event.results.length; at++) {
-      if (event.results[at].isFinal) parts.push(event.results[at][0].transcript);
-    }
-  };
-  ear.onerror = () => {};
-  ear.start();
-  dictation = { ear, parts, done };
+async function dictateStart() {
+  if (dictation) return;
+  dictation = await dictate();
 }
 
 async function dictateStop() {
   if (!dictation) throw new Error("Запись не шла.");
-  const { ear, parts, done } = dictation;
+  const current = dictation;
   dictation = null;
-  ear.stop();
-  await done;
-  const text = parts.join(" ").trim();
+  const text = await current.stop();
   if (!text) throw new Error("Ничего не расслышал — попробуйте ещё раз.");
   return text;
 }
@@ -62,7 +46,7 @@ async function dictateStop() {
 let talking = false;
 
 async function discussByVoice(learning, target) {
-  if (!canListen) throw new Error("Голос в этом браузере не работает — спросите текстом или откройте Ноа в Chrome.");
+  if (!canListen) throw new Error("Голос в этом браузере не работает — спросите текстом.");
   if (talking) return;
   talking = true;
   try {
@@ -131,7 +115,7 @@ function oralPanel(onStop) {
 let oral = false;
 
 async function oralExam(learning, courseId, topicId) {
-  if (!canListen) throw new Error("Устный зачёт в этом браузере не работает — откройте Ноа в Chrome или Edge.");
+  if (!canListen) throw new Error("Устный зачёт в этом браузере не работает — сдайте экзамен письменно.");
   if (oral) return;
   oral = true;
   const panel = oralPanel(() => {
@@ -262,7 +246,7 @@ async function run(cmd, args = {}) {
       speak(args.text ?? "");
       return null;
     case "learn_oral":
-      if (!canListen) throw new Error("Устный зачёт в этом браузере не работает — откройте Ноа в Chrome или Edge.");
+      if (!canListen) throw new Error("Устный зачёт в этом браузере не работает — сдайте экзамен письменно.");
       oralExam(l, args.course, args.topic ?? null);
       return null;
     case "close_learning":

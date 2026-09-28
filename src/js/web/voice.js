@@ -2,24 +2,40 @@
 // не перебивая саму себя.
 //
 // Говорит — голосом Silero с сервера сайта (/api/noa/tts), для вошедших; нет
-// входа или сервер занят — голосом браузера. Слушает — распознаванием
-// браузера (Chrome, Edge).
+// входа или сервер занят — голосом браузера.
+//
+// Слушает двумя способами. Chrome и Edge распознают речь сами — быстро и без
+// нагрузки на сервер. Safari (и любой браузер на iPhone) и Firefox — нет или
+// ненадёжно: там страница сама записывает фразу — начало и конец по громкости,
+// как в программе, — и распознаёт её сервер Ноа (/api/noa/stt).
 //
 // Главное здесь — порядок. Микрофон открывается только когда Ноа договорила и
 // прошло ещё 0.7 с: звук доигрывает из буфера, и без запаса браузер записывал
-// конец её же фразы, принимал его за ответ и отвечал сам себе. То же правило,
-// что DEAF_AFTER_SPEECH_MS в программе.
+// конец её же фразы, принимал его за ответ и отвечал сам себе.
 
 const Recognition = globalThis.SpeechRecognition ?? globalThis.webkitSpeechRecognition;
+const ua = globalThis.navigator?.userAgent ?? "";
+/** Safari и всё на iPhone/iPad (там любой браузер — это Safari внутри). */
+const webkitOnly = /iPhone|iPad|iPod/.test(ua) || (/Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|Android/.test(ua));
+const canRecord = Boolean(globalThis.navigator?.mediaDevices?.getUserMedia && globalThis.MediaRecorder);
+/**
+ * Распознаёт ли браузер сам. Safari умеет, но капризно: на iPhone нужна
+ * включённая Siri, и держать микрофон непрерывно он не любит. Поэтому в
+ * Safari своё распознавание пробуется первым, по одной фразе, а откажет —
+ * дальше пишем и распознаём на сервере.
+ */
+let native = Boolean(Recognition);
 
-export const canListen = Boolean(Recognition);
+export const canListen = Boolean(Recognition) || canRecord;
 
 /** Сколько глухоты после собственной речи. */
 const DEAF_AFTER_SPEECH_MS = 700;
 /** Сколько ждать, пока человек начнёт говорить. */
 const WAIT_FOR_SPEECH_MS = 12_000;
 /** Пауза, после которой фраза считается сказанной. */
-const END_OF_PHRASE_MS = 1_400;
+const END_OF_PHRASE_MS = 1_300;
+/** Дольше одной фразы не пишем. */
+const MAX_PHRASE_MS = 30_000;
 
 const read = (key, fallback) => {
   try {
@@ -28,6 +44,40 @@ const read = (key, fallback) => {
     return fallback;
   }
 };
+
+/* ── Звук: один элемент на страницу ───────────────────────────────────────
+   iPhone играет звук только из элемента, который однажды запустили касанием.
+   Ответ приходит с сервера через секунду после касания — к тому времени
+   разрешение уже истекло. Поэтому первое же касание страницы «будит»
+   единственный элемент тишиной, и дальше все фразы играют через него. */
+
+const SILENCE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+const player = typeof Audio === "function" ? new Audio() : null;
+let audioContext = null;
+
+function unlock() {
+  if (player && !player.dataset?.awake) {
+    player.src = SILENCE;
+    player.play().then(() => player.pause()).catch(() => {});
+    if (player.dataset) player.dataset.awake = "1";
+  }
+  try {
+    audioContext ??= new (globalThis.AudioContext ?? globalThis.webkitAudioContext)();
+    audioContext.resume?.();
+  } catch {
+    audioContext = null;
+  }
+  // Голос браузера на iPhone тоже просыпается только от касания.
+  if (globalThis.speechSynthesis && !unlock.spoke) {
+    unlock.spoke = true;
+    const hush = new SpeechSynthesisUtterance(" ");
+    hush.volume = 0;
+    speechSynthesis.speak(hush);
+  }
+}
+for (const event of ["pointerdown", "touchend", "keydown"]) {
+  globalThis.addEventListener?.(event, unlock, { capture: true, passive: true });
+}
 
 /** Текст для чтения вслух: без разметки, кода и ссылок. */
 export function speakable(text) {
@@ -55,7 +105,7 @@ function pieces(text, limit = 320) {
 }
 
 let generation = 0;
-let playing = null;
+let playingNow = false;
 let serverVoice = true;
 /** Что Ноа сказала последним — чтобы не принять это за ответ человека. */
 let lastSaid = "";
@@ -80,24 +130,26 @@ async function fetchVoice(text) {
 
 function playUrl(url, id) {
   return new Promise((resolve) => {
-    const audio = new Audio(url);
-    playing = audio;
+    const audio = player ?? new Audio();
+    let over = false;
     const done = () => {
+      if (over) return;
+      over = true;
+      clearInterval(check);
       URL.revokeObjectURL(url);
-      if (playing === audio) playing = null;
+      playingNow = false;
       resolve();
     };
+    playingNow = true;
     audio.onended = done;
     audio.onerror = done;
+    audio.src = url;
     audio.play().catch(done);
-    // Остановили — промис не должен висеть.
     const check = setInterval(() => {
       if (id !== generation) {
-        clearInterval(check);
         audio.pause();
         done();
       }
-      if (audio.ended) clearInterval(check);
     }, 150);
   });
 }
@@ -123,7 +175,7 @@ function browserSpeak(text, id) {
   });
 }
 
-/** Сказать вслух. Отдаёт промис, который исполнится, когда Ноа договорит. */
+/** Сказать вслух. Промис исполнится, когда Ноа договорит. */
 export async function speak(text) {
   const clean = speakable(text);
   stopSpeaking();
@@ -146,12 +198,12 @@ export async function speak(text) {
 
 export function stopSpeaking() {
   generation++;
-  playing?.pause();
-  playing = null;
+  player?.pause();
+  playingNow = false;
   globalThis.speechSynthesis?.cancel();
 }
 
-export const speaking = () => Boolean(playing) || Boolean(globalThis.speechSynthesis?.speaking);
+export const speaking = () => playingNow || Boolean(globalThis.speechSynthesis?.speaking);
 
 /** Похоже ли услышанное на то, что Ноа сама только что сказала. */
 function isEcho(heard) {
@@ -162,20 +214,16 @@ function isEcho(heard) {
   return got.filter((w) => said.has(w)).length / got.length >= 0.7;
 }
 
-/**
- * Одна реплика человека. Ждёт начала речи до 12 с, конец — по паузе 1.4 с.
- * Пусто — никто ничего не сказал. `onHeard` — промежуточный текст для экрана.
- */
-export function listen({ onHeard } = {}) {
+/* ── Распознавание браузером (Chrome, Edge) ──────────────────────────────── */
+
+function listenNative({ onHeard } = {}) {
   return new Promise((resolve, reject) => {
-    if (!Recognition) return reject(new Error("Голос в этом браузере не работает — откройте Ноа в Chrome или Edge."));
     const started = Date.now();
-    let finals = [];
+    const finals = [];
     let interim = "";
     let lastVoice = 0;
     let ear = null;
     let finished = false;
-    let silence = 0;
 
     const finish = (error) => {
       if (finished) return;
@@ -194,7 +242,8 @@ export function listen({ onHeard } = {}) {
     const open = () => {
       ear = new Recognition();
       ear.lang = "ru-RU";
-      ear.continuous = true;
+      // Safari с непрерывным режимом то молчит, то обрывает — ему по фразе.
+      ear.continuous = !webkitOnly;
       ear.interimResults = true;
       ear.onresult = (event) => {
         interim = "";
@@ -207,7 +256,11 @@ export function listen({ onHeard } = {}) {
         onHeard?.([...finals, interim].join(" ").trim());
       };
       ear.onerror = (event) => {
-        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        // Safari без Siri отвечает service-not-allowed: переходим на запись.
+        if (event.error === "service-not-allowed" && canRecord) {
+          native = false;
+          finish(new Error(FALLBACK));
+        } else if (event.error === "not-allowed" || event.error === "service-not-allowed") {
           finish(new Error("Браузер не дал микрофон — разрешите его в адресной строке."));
         }
       };
@@ -223,11 +276,172 @@ export function listen({ onHeard } = {}) {
       }
     };
 
-    silence = setInterval(() => {
+    const silence = setInterval(() => {
       const now = Date.now();
       if (lastVoice && now - lastVoice > END_OF_PHRASE_MS) finish();
       else if (!lastVoice && now - started > WAIT_FOR_SPEECH_MS) finish();
     }, 200);
     open();
   });
+}
+
+/* ── Запись и распознавание сервером (Safari, iPhone, Firefox) ───────────── */
+
+async function openMic() {
+  try {
+    // Эхоподавление убирает из записи голос Ноа из колонок.
+    return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (err) {
+    throw new Error(
+      err?.name === "NotAllowedError" ? "Браузер не дал микрофон — разрешите его в настройках сайта." : "Микрофон не открылся.",
+    );
+  }
+}
+
+function recorderFor(stream) {
+  const type = ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus", "audio/webm"].find((t) => MediaRecorder.isTypeSupported?.(t));
+  return new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+}
+
+async function recognize(blob) {
+  const response = await fetch("/api/noa/stt", {
+    method: "POST",
+    headers: { "Content-Type": blob.type || "application/octet-stream" },
+    credentials: "same-origin",
+    body: blob,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (response.status === 401) throw new Error("В этом браузере речь распознаёт сервер Ноа — войдите на сайт.");
+  if (!response.ok) throw new Error(data.error ?? "Не получилось распознать.");
+  return String(data.text ?? "").trim();
+}
+
+/** Громкость микрофона по кадрам: для начала и конца фразы. */
+function levelMeter(stream) {
+  const context = audioContext ?? new (globalThis.AudioContext ?? globalThis.webkitAudioContext)();
+  audioContext = context;
+  context.resume?.();
+  const source = context.createMediaStreamSource(stream);
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+  const frame = new Float32Array(analyser.fftSize);
+  return {
+    level() {
+      analyser.getFloatTimeDomainData(frame);
+      let sum = 0;
+      for (const sample of frame) sum += sample * sample;
+      return Math.sqrt(sum / frame.length);
+    },
+    close: () => source.disconnect(),
+  };
+}
+
+async function listenRecorded({ onHeard } = {}) {
+  const stream = await openMic();
+  const meter = levelMeter(stream);
+  const recorder = recorderFor(stream);
+  const chunks = [];
+  recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);
+  const stopped = new Promise((resolve) => (recorder.onstop = resolve));
+  recorder.start(250);
+
+  // Порог — от шума комнаты, как в программе: речь заметно громче тишины.
+  const started = Date.now();
+  let noise = 0.01;
+  let speechAt = 0;
+  let lastVoice = 0;
+  await new Promise((resolve) => {
+    const tick = setInterval(() => {
+      const now = Date.now();
+      const rms = meter.level();
+      const threshold = Math.max(noise * 3.5, 0.015);
+      if (rms > threshold) {
+        speechAt ||= now;
+        lastVoice = now;
+        onHeard?.("…");
+      } else if (!speechAt) {
+        noise = noise * 0.95 + rms * 0.05;
+      }
+      const done =
+        (speechAt && now - lastVoice > END_OF_PHRASE_MS) ||
+        (!speechAt && now - started > WAIT_FOR_SPEECH_MS) ||
+        now - started > MAX_PHRASE_MS;
+      if (done) {
+        clearInterval(tick);
+        resolve();
+      }
+    }, 60);
+  });
+  recorder.stop();
+  await stopped;
+  meter.close();
+  for (const track of stream.getTracks()) track.stop();
+  // Громче шума так и не стало — никто не говорил, сервер не трогаем.
+  if (!speechAt || lastVoice - speechAt < 300) return "";
+  onHeard?.("распознаю…");
+  const text = await recognize(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+  return isEcho(text) ? "" : text;
+}
+
+/**
+ * Одна реплика человека. Ждёт начала речи до 12 с, конец — по паузе 1.3 с.
+ * Пусто — никто ничего не сказал. `onHeard` — промежуточное для экрана.
+ */
+const FALLBACK = "переход на запись";
+
+export async function listen(opts = {}) {
+  if (native) {
+    try {
+      return await listenNative(opts);
+    } catch (err) {
+      if (err.message !== FALLBACK) throw err;
+    }
+  }
+  if (canRecord) return listenRecorded(opts);
+  throw new Error("Голос в этом браузере не работает — напишите текстом.");
+}
+
+/**
+ * Диктовка ответа: пишет, пока не вызовут `stop()`, и отдаёт текст.
+ * Для кнопки «Надиктовать» в окне обучения.
+ */
+export async function dictate() {
+  if (native) {
+    const ear = new Recognition();
+    ear.lang = "ru-RU";
+    ear.continuous = true;
+    ear.interimResults = false;
+    const parts = [];
+    const done = new Promise((resolve) => (ear.onend = resolve));
+    ear.onresult = (event) => {
+      for (let at = event.resultIndex; at < event.results.length; at++) {
+        if (event.results[at].isFinal) parts.push(event.results[at][0].transcript);
+      }
+    };
+    ear.onerror = () => {};
+    ear.start();
+    return {
+      async stop() {
+        ear.stop();
+        await done;
+        return parts.join(" ").trim();
+      },
+    };
+  }
+  if (!canRecord) throw new Error("Диктовка в этом браузере не работает — напишите текстом.");
+  const stream = await openMic();
+  const recorder = recorderFor(stream);
+  const chunks = [];
+  recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);
+  const stopped = new Promise((resolve) => (recorder.onstop = resolve));
+  recorder.start(250);
+  return {
+    async stop() {
+      recorder.stop();
+      await stopped;
+      for (const track of stream.getTracks()) track.stop();
+      return recognize(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+    },
+  };
 }

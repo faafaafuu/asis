@@ -43,6 +43,23 @@ const VOICE_PER_HOUR = 600;
 const MAX_PHRASE = 1500;
 const spoke = new Map();
 
+/** Распознавание речи для браузеров, которые не распознают сами (Safari, Firefox). */
+const STT_URL = (process.env.NOAH_STT_URL ?? "http://127.0.0.1:8645").replace(/\/$/, "");
+const MAX_RECORDING = 4 * 1024 * 1024;
+const heard = new Map();
+
+/** Тело запроса как есть — запись голоса, не JSON. */
+async function readRaw(req, limit, Fail) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw new Fail(413, "Запись слишком длинная.");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
 /** WAV → MP3 через ffmpeg. */
 function toMp3(wav) {
   return new Promise((resolve, reject) => {
@@ -169,6 +186,25 @@ export function mountNoa({ route, db, Fail, readJson }) {
       "X-Content-Type-Options": "nosniff",
     });
     res.end(mp3 ?? wav);
+  });
+
+  route("POST", /^\/api\/noa\/stt$/, async ({ req, user: who }) => {
+    const user = need(who);
+    const hour = Date.now() - 3_600_000;
+    const recent = (heard.get(user.id) ?? []).filter((at) => at > hour);
+    if (recent.length >= VOICE_PER_HOUR) throw new Fail(429, "Распознавания на этот час хватит — напишите текстом.");
+    heard.set(user.id, [...recent, Date.now()]);
+    const audio = await readRaw(req, MAX_RECORDING, Fail);
+    if (audio.length < 1000) return { text: "" };
+    let response;
+    try {
+      response = await fetch(`${STT_URL}/stt`, { method: "POST", body: audio, signal: AbortSignal.timeout(60_000) });
+    } catch {
+      throw new Fail(503, "Распознавание сейчас недоступно — напишите текстом.");
+    }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Fail(422, data.error ?? "Запись не разобралась.");
+    return { text: String(data.text ?? "") };
   });
 
   route("GET", /^\/api\/noa\/progress$/, ({ user: who }) => {

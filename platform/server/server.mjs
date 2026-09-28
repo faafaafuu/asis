@@ -210,7 +210,7 @@ function throttled(ip) {
  * Всё остальное — как у сайта.
  */
 const APP_CSP =
-  "default-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; " +
+  "default-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; media-src 'self' blob: data:; " +
   "connect-src 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 const SECURITY_HEADERS = {
