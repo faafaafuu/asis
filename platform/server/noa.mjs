@@ -28,37 +28,42 @@ export function mountNoa({ route, db, Fail, readJson }) {
     );
   `);
 
+  /**
+   * Номер человека — строкой. Число node:sqlite передаёт как дробное, и в
+   * текстовой колонке оно ложится «2.0»: совпадало бы только пока везде
+   * передают число, а не строку.
+   */
   const need = (user) => {
     if (!user) throw new Fail(401, "Нужно войти.");
-    return user;
+    return { ...user, id: String(user.id) };
   };
 
-  route("GET", /^\/api\/noa\/courses$/, ({ user }) => {
-    need(user);
+  route("GET", /^\/api\/noa\/courses$/, ({ user: who }) => {
+    const user = need(who);
     const rows = db.prepare("SELECT body FROM noa_courses WHERE user_id = ? ORDER BY updated DESC").all(user.id);
     return { courses: rows.map((row) => JSON.parse(row.body)) };
   });
 
-  route("POST", /^\/api\/noa\/courses$/, async ({ req, user }) => {
-    need(user);
+  route("POST", /^\/api\/noa\/courses$/, async ({ req, user: who }) => {
+    const user = need(who);
     const { course } = await readJson(req, MAX_COURSE + 1000);
     return { report: saveCourse(db, user.id, course) };
   });
 
-  route("DELETE", /^\/api\/noa\/courses\/([A-Za-z0-9_-]{1,64})$/, ({ user, match }) => {
-    need(user);
+  route("DELETE", /^\/api\/noa\/courses\/([A-Za-z0-9_-]{1,64})$/, ({ user: who, match }) => {
+    const user = need(who);
     db.prepare("DELETE FROM noa_courses WHERE user_id = ? AND course_id = ?").run(user.id, match[1]);
     return { ok: true };
   });
 
-  route("GET", /^\/api\/noa\/progress$/, ({ user }) => {
-    need(user);
+  route("GET", /^\/api\/noa\/progress$/, ({ user: who }) => {
+    const user = need(who);
     const row = db.prepare("SELECT body, saved_at FROM noa_progress WHERE user_id = ?").get(user.id);
     return row ? { data: JSON.parse(row.body), savedAt: row.saved_at } : { data: null, savedAt: 0 };
   });
 
-  route("PUT", /^\/api\/noa\/progress$/, async ({ req, user }) => {
-    need(user);
+  route("PUT", /^\/api\/noa\/progress$/, async ({ req, user: who }) => {
+    const user = need(who);
     const { data, savedAt } = await readJson(req, MAX_PROGRESS + 1000);
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Fail(400, "Прогресс — объект.");
     const body = JSON.stringify(data);
@@ -76,7 +81,8 @@ export function mountNoa({ route, db, Fail, readJson }) {
  * человек на сайте, и нейросеть, собравшая курс по MCP. Ошибка — исключение
  * со списком того, что исправить.
  */
-export function saveCourse(db, userId, raw) {
+export function saveCourse(db, owner, raw) {
+  const userId = String(owner);
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("course — объект курса по course_format.");
   const body = JSON.stringify(raw);
   if (body.length > MAX_COURSE) throw new Error("Курс слишком большой — не больше 2 МБ.");
@@ -98,7 +104,8 @@ export function saveCourse(db, userId, raw) {
 }
 
 /** Тема в курс аккаунта: добавить или заменить тему с тем же id. */
-export function saveTopic(db, userId, courseId, topic) {
+export function saveTopic(db, owner, courseId, topic) {
+  const userId = String(owner);
   const row = db.prepare("SELECT body FROM noa_courses WHERE user_id = ? AND course_id = ?").get(userId, courseId);
   if (!row) return null;
   const course = JSON.parse(row.body);
