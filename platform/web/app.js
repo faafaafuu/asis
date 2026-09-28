@@ -1,9 +1,9 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=47";
+import { renderHome, stopHome } from "./home.js?v=48";
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=47";
-import { DOCS } from "./i18n.js?v=47";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=48";
+import { DOCS } from "./i18n.js?v=48";
 
 // Шрифты — после первой отрисовки, чтобы не держать страницу (см. index.html).
 {
@@ -17,10 +17,10 @@ import { DOCS } from "./i18n.js?v=47";
 }
 
 
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=47";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=48";
 
 /** Страницы кабинета — отдельным файлом, по требованию. */
-const account = () => import("./account.js?v=47");
+const account = () => import("./account.js?v=48");
 
 // Страницам кабинета нужны route и renderChrome — функции объявлены ниже,
 // но доступны с начала модуля.
@@ -43,7 +43,7 @@ function renderChrome(route) {
   const count = state.stats ? String(state.stats.modules) : "";
   const moduleLink = state.lastModule ? `module/${state.lastModule}` : "library";
   const groups = [
-    [tr.navDiscover, [["home", tr.navHome, "", "#F2C14E", ""], ["library", tr.navLibrary, count, "#2B5BC4"], ["module", tr.navModule, "", "#D4564A", moduleLink]]],
+    [tr.navDiscover, [["home", tr.navHome, "", "#F2C14E", ""], ["noa", tr.navNoa, "", "#7FB069", "/app/", tr.navNoaShort], ["library", tr.navLibrary, count, "#2B5BC4"], ["module", tr.navModule, "", "#D4564A", moduleLink]]],
     [tr.navBuild, [["connect", tr.navConnect, "MCP", "#F2C14E"], ["studio", tr.navStudio, "", "#D4564A"], ["standard", tr.navStandard, "5", "#7FB069"], ["docs", tr.navDocsFull, "", "#2B5BC4", undefined, tr.navDocs]]],
     [tr.navAccount, [["seller", tr.navSeller, "$0", "#D4564A"]]],
   ];
@@ -56,7 +56,7 @@ function renderChrome(route) {
         items.map(([id, text, badge, dot, target, short]) =>
           h(
             "a",
-            { class: "nav__item", "data-id": id, href: `#/${target ?? id}`, "aria-current": route === id ? "page" : null, vars: { "--dot": dot } },
+            { class: "nav__item", "data-id": id, href: target?.startsWith("/") ? target : `#/${target ?? id}`, "aria-current": route === id ? "page" : null, vars: { "--dot": dot } },
             h("span", { class: "nav__dot" }),
             h("span", { class: "navicon" }, icon(NAV_ICON[id])),
             // Полное имя в сайдбаре; в нижнем меню телефона под тем же пунктом —
@@ -352,7 +352,7 @@ async function route() {
     else if (name === "standard") renderStandard(page);
     // Документация грузится, только когда её открыли: главной она не нужна.
     else if (name === "docs") {
-      const { renderDocs } = await import("./docs.js?v=47");
+      const { renderDocs } = await import("./docs.js?v=48");
       await renderDocs(page, arg, { h, lang: state.lang });
     }
     else if (name === "login" || name === "signup") {

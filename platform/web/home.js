@@ -10,6 +10,7 @@ const T = {
     lead: "Подключите любую нейросеть и собирайте модули словами. Удачные — в библиотеку или на продажу.",
     primary: "Подключить свой ИИ",
     download: "Скачать NOAH",
+    webNoa: "Или откройте Ноа прямо в браузере — без установки →",
     meta: "бесплатно · Windows · macOS · Linux · Android · любая нейросеть",
     states: ["ЖДЁТ", "СЛУШАЕТ", "СОБИРАЕТ", "ГОТОВО"],
     demo: [
@@ -72,6 +73,7 @@ const T = {
     lead: "Plug in any AI and build modules in plain words. Share the good ones in the library or sell them.",
     primary: "Connect your AI",
     download: "Download NOAH",
+    webNoa: "Or open Noa right in the browser — no install →",
     meta: "free · Windows · macOS · Linux · Android · any AI",
     states: ["WAITING", "LISTENING", "BUILDING", "DONE"],
     demo: [
@@ -365,6 +367,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
         h("a", { class: "btn btn--gold btn--big", href: "#/connect" }, tr.primary),
         h("a", { class: "btn btn--ghost btn--big", href: RELEASES }, tr.download),
       ),
+      h("a", { class: "hero__web", href: "/app/" }, tr.webNoa),
       h("p", { class: "hero__meta mono" }, tr.meta),
     ),
     console_,

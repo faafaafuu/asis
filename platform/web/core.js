@@ -3,7 +3,7 @@
 // части сетей соединение замирает после ~16 КБ, и каждый файл держится
 // меньше этого вместе с TLS-рукопожатием.
 
-import { T } from "./i18n.js?v=47";
+import { T } from "./i18n.js?v=48";
 
 /** Функции, которые живут в app.js, а нужны страницам кабинета. */
 export const hooks = { route: () => {}, renderChrome: () => {} };
@@ -15,7 +15,7 @@ export const ACCENTS = [
   { accent: "#5F8C4C", fg: "#FFFFFF" },
 ];
 export const ICONS = { memory: "memory", files: "files", fetch: "browser", browser: "browser", docs: "notes", thinking: "code" };
-export const NAV_ICON = { connect: "memory", home: "home", library: "notes", module: "browser", studio: "code", standard: "legal", seller: "chart", docs: "files" };
+export const NAV_ICON = { noa: "chat", connect: "memory", home: "home", library: "notes", module: "browser", studio: "code", standard: "legal", seller: "chart", docs: "files" };
 export const CATEGORY_ICON = { work: "notes", home: "home", finance: "chart", dev: "code", health: "memory", media: "browser", other: "files" };
 
 /* ── Состояние ───────────────────────────────────────────────────────────── */

@@ -844,10 +844,118 @@ export function createLearning({ courses, store, ai = null, name = "Ноа", clo
     "- Без вступлений, похвалы вопросу и предложений помочь ещё. В конце можно одним коротким вопросом проверить, понятно ли.\n" +
     "Отвечай по-русски.";
 
+  /* ── Устный зачёт — learning.rs, start_quiz и quiz_answer ── */
+
+  let quiz = null;
+
+  const spoken = (q) => {
+    if (q.kind !== "choice") return q.q;
+    const names = ["первый", "второй", "третий", "четвёртый", "пятый"];
+    const options = q.options.slice(0, names.length).map((option, at) => `${names[at]}: ${option}`).join("; ");
+    return `${q.q} Варианты — ${options}.`;
+  };
+
+  /** Следующий вопрос: сперва ошибки, затем случайный из экзаменов и задач. */
+  const nextQuestion = (c, topicId, after) => {
+    const own = progress(c.id);
+    const topics = c.topics.filter((t) => !topicId || t.id === topicId);
+    const mistakes = topics
+      .flatMap((t) => own.topics[t.id]?.mistakes ?? [])
+      .filter((id) => question(c, id) && id !== after);
+    if (mistakes.length) return question(c, mistakes[0])[0];
+    const pool = topics.flatMap((t) => [...t.exam, ...t.tasks]).filter((q) => q.id !== after);
+    return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+  };
+
+  /** Прогресс словами — learning.rs, summary. */
+  const summary = (c) => {
+    const view = card(c);
+    const memory = view.mastery;
+    const remembered = memory.total ? ` Уверенно держится ${memory.mature} из ${memory.total} понятий; повторить сегодня — ${memory.due}.` : "";
+    const done = view.topics.filter((t) => t.status === "done").length;
+    const mistakes = view.topics.reduce((sum, t) => sum + t.mistakes, 0);
+    const pending = view.topics.find((t) => t.status !== "done");
+    const next = pending
+      ? ` Дальше — «${pending.title}».`
+      : view.finalBest !== null && view.finalBest >= FINAL_PASS
+        ? " Финальный экзамен сдан."
+        : " Остался финальный экзамен.";
+    const weak = mistakes ? ` Ошибок на повторение: ${mistakes}.` : "";
+    return `${c.title}: пройдено ${view.percent}%, тем сдано ${done} из ${view.topics.length}.${remembered}${next}${weak}`;
+  };
+
+  const oralStop = () => {
+    if (!quiz) return null;
+    const { course: id, asked, right } = quiz;
+    quiz = null;
+    return asked ? `Закончили: верно ${right} из ${asked}. ${summary(course(id))}` : "Закончили опрос.";
+  };
+
   return {
     courses: all,
     validate,
     advice,
+
+    /** Начать устный зачёт: первая фраза Ноа — с вопросом. */
+    oralStart(courseId, topicId) {
+      const c = course(courseId);
+      const topic = topicId ? topicOf(c, topicId) : null;
+      const q = nextQuestion(c, topic?.id ?? null, null);
+      if (!q) return "Вопросов по этой теме нет.";
+      quiz = { course: c.id, topic: topic?.id ?? null, question: q.id, asked: 0, right: 0 };
+      const intro = topic
+        ? `Устный зачёт по теме «${topic.title}». Скажите «хватит», чтобы закончить. `
+        : `Устный зачёт по курсу «${c.title}». Скажите «хватит», чтобы закончить. `;
+      return intro + spoken(q);
+    },
+
+    oralActive: () => Boolean(quiz),
+    oralStop,
+
+    /** Ответ голосом. Отдаёт, что сказать; `done` — зачёт кончился. */
+    async oralAnswer(said) {
+      if (!quiz) return { text: "Зачёт не начат.", done: true };
+      const c = course(quiz.course);
+      const found = question(c, quiz.question);
+      if (!found) return { text: oralStop() ?? "Закончили.", done: true };
+      const q = found[0];
+      const text = lower(said);
+      const words = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+      const STOP = ["хватит", "стоп", "закончим", "заканчиваем", "достаточно", "устал"];
+      if (words.length <= 4 && words.some((w) => STOP.includes(w))) return { text: oralStop(), done: true };
+
+      let reply;
+      let correct = false;
+      if (text.includes("не знаю") || text.includes("пропус") || text.includes("дальше")) {
+        const answer = (q.kind === "choice" ? (q.answer !== null ? q.options[q.answer] : "") : q.reference).trimEnd();
+        this.selfGrade(c.id, q.id, false);
+        reply = `Правильный ответ: ${answer}${/[.!?]$/.test(answer) ? "" : "."}`;
+      } else {
+        const verdict = await this.check(c.id, q.id, said);
+        if (verdict.score === null) reply = `Не смог проверить. Эталон: ${verdict.reference}`;
+        else if (q.kind === "choice") {
+          const why = q.explain ? ` ${q.explain}` : "";
+          reply = verdict.score >= RIGHT ? `Верно.${why}` : `${verdict.feedback}${why}`;
+        } else {
+          reply =
+            verdict.score >= RIGHT
+              ? `Засчитано, ${verdict.score} из 100. ${verdict.feedback}`
+              : `${verdict.score} из 100. ${verdict.feedback} Эталон: ${verdict.reference}`;
+        }
+        correct = verdict.right;
+      }
+      quiz.asked += 1;
+      if (correct) quiz.right += 1;
+      const next = nextQuestion(c, quiz.topic, q.id);
+      if (!next) {
+        const end = oralStop();
+        return { text: `${reply} Вопросы кончились. ${end}`, done: true };
+      }
+      quiz.question = next.id;
+      return { text: `${reply} Следующий вопрос: ${spoken(next)}`, done: false };
+    },
+
+    summary: (courseId) => summary(course(courseId)),
 
     overview: () => all().map(card),
 

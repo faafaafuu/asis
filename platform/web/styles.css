@@ -1784,7 +1784,10 @@ textarea:focus,
     overflow-wrap: anywhere;
   }
 
-  .nav__item[href="#/standard"] {
+  /* В нижнем меню телефона — то, чем пользуются с телефона: Ноа онлайн
+     вместо студии и стандарта, которые нужны за компьютером. */
+  .nav__item[href="#/standard"],
+  .nav__item[href="#/studio"] {
     display: none;
   }
 

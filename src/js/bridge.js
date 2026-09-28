@@ -31,6 +31,13 @@ let web = null;
 function webNoa() {
   if (web) return web;
   document.documentElement.classList.add("is-web");
+  // Тема — сразу, до первого кадра: иначе окно секунду стоит в чужой теме,
+  // пока грузятся курсы.
+  try {
+    document.documentElement.dataset.theme = localStorage.getItem("noa.theme") || "noah";
+  } catch {
+    document.documentElement.dataset.theme = "noah";
+  }
   const loaded = import("./web/web-api.js");
   loaded.then((module) => module.mountDictionary()).catch(() => {});
   web = {

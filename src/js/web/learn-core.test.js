@@ -192,3 +192,28 @@ test("обсуждение помнит историю одного раздел
   await learning.ask({ ...target, section: 2 }, "а тут?");
   assert.equal(seen[2], 2, "другой раздел — новый разговор");
 });
+
+test("устный зачёт: ответ голосом, «не знаю» и «хватит» с итогом", async () => {
+  const { learning } = setup();
+  const first = learning.oralStart("net", "basics");
+  assert.match(first, /^Устный зачёт по теме «Основы»/);
+  assert.ok(learning.oralActive());
+  const skipped = await learning.oralAnswer("не знаю");
+  assert.match(skipped.text, /^Правильный ответ: /);
+  assert.equal(skipped.done, false);
+  const stopped = await learning.oralAnswer("хватит");
+  assert.equal(stopped.done, true);
+  assert.match(stopped.text, /^Закончили: верно 0 из 1\. Сети: пройдено/);
+  assert.equal(learning.oralActive(), false);
+});
+
+test("устный зачёт: вариант называют словом — «второй»", async () => {
+  const { learning } = setup();
+  learning.oralStart("net", "basics");
+  // Первым спрашивается ошибка, если она есть: делаем ошибкой задачу с ответом «порт».
+  await learning.check("net", "t1", 0);
+  learning.oralStop();
+  learning.oralStart("net", "basics");
+  const reply = await learning.oralAnswer("второй");
+  assert.match(reply.text, /^Верно\. Порт — квартира\./);
+});

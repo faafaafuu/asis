@@ -1,6 +1,6 @@
 // Тексты интерфейса площадки: английский и русский.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=47";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=48";
 
 export const T = {
   en: {
@@ -9,7 +9,7 @@ export const T = {
     signIn: "Sign in", signUp: "Create account", signOut: "Sign out", myModules: "My modules", apiKeys: "Platform keys",
     privacy: "Privacy", terms: "Terms",
     navDiscover: "DISCOVER", navBuild: "BUILD", navAccount: "EARN",
-    navHome: "Home", navLibrary: "Library", navModule: "Module", langLabel: "LANGUAGE", navStudio: "Studio", navStandard: "Standard", navDocs: "Docs", navDocsFull: "Docs", navNoa: "Noa online", navSeller: "Seller",
+    navHome: "Home", navLibrary: "Library", navModule: "Module", langLabel: "LANGUAGE", navStudio: "Studio", navStandard: "Standard", navDocs: "Docs", navDocsFull: "Docs", navNoa: "Noa online", navNoaShort: "Noa", webNoa: "Or open Noa right in the browser — no install →", navSeller: "Seller",
     menu: ["My modules", "Platform keys", "Account settings"],
     libKicker: "MARKETPLACE", libTitle: "Module library",
     sortPopular: "Popular", sortNew: "New", sortFree: "Free",
@@ -108,7 +108,7 @@ export const T = {
     signIn: "Войти", signUp: "Создать аккаунт", signOut: "Выйти", myModules: "Мои модули", apiKeys: "Ключи площадки",
     privacy: "Конфиденциальность", terms: "Соглашение",
     navDiscover: "НАЙТИ", navBuild: "СОБРАТЬ", navAccount: "ЗАРАБОТОК",
-    navHome: "Главная", navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navDocs: "Справка", navDocsFull: "Документация", navNoa: "Ноа онлайн", navSeller: "Кабинет",
+    navHome: "Главная", navLibrary: "Библиотека", navModule: "Модуль", langLabel: "ЯЗЫК", navStudio: "Студия", navStandard: "Стандарт", navDocs: "Справка", navDocsFull: "Документация", navNoa: "Ноа онлайн", navNoaShort: "Ноа", webNoa: "Или откройте Ноа прямо в браузере — без установки →", navSeller: "Кабинет",
     menu: ["Мои модули", "Ключи площадки", "Настройки аккаунта"],
     libKicker: "МАРКЕТПЛЕЙС", libTitle: "Библиотека модулей",
     sortPopular: "Популярные", sortNew: "Новые", sortFree: "Бесплатные",

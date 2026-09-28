@@ -120,6 +120,93 @@ async function discussByVoice(learning, target) {
   }
 }
 
+/* ── Устный зачёт ───────────────────────────────────────────────────────── */
+
+/**
+ * Панель зачёта в углу страницы: что спросила Ноа, что она услышала и кнопка
+ * «Закончить». Голос уходит из виду, и без неё непонятно, расслышала ли Ноа
+ * ответ и идёт ли зачёт вообще.
+ */
+function oralPanel(onStop) {
+  document.querySelector(".oral")?.remove();
+  const panel = document.createElement("section");
+  panel.className = "oral";
+  panel.setAttribute("aria-live", "polite");
+  const head = document.createElement("div");
+  head.className = "oral__head";
+  const title = document.createElement("strong");
+  title.textContent = "Устный зачёт";
+  const state = document.createElement("span");
+  state.className = "oral__state";
+  const stop = document.createElement("button");
+  stop.type = "button";
+  stop.className = "button button--quiet";
+  stop.textContent = "Закончить";
+  stop.addEventListener("click", onStop);
+  head.append(title, state, stop);
+  const log = document.createElement("div");
+  log.className = "oral__log";
+  panel.append(head, log);
+  document.body.append(panel);
+  return {
+    say(who, text) {
+      const line = document.createElement("p");
+      line.className = `oral__line oral__line--${who}`;
+      line.textContent = text;
+      log.append(line);
+      log.scrollTop = log.scrollHeight;
+    },
+    state: (text) => (state.textContent = text),
+    close: () => setTimeout(() => panel.remove(), 8000),
+  };
+}
+
+let oral = false;
+
+async function oralExam(learning, courseId, topicId) {
+  if (!Recognition) throw new Error("Устный зачёт в этом браузере не работает — откройте Ноа в Chrome или Edge.");
+  if (oral) return;
+  oral = true;
+  const panel = oralPanel(() => {
+    oral = false;
+    globalThis.speechSynthesis?.cancel();
+  });
+  try {
+    let text = learning.oralStart(courseId, topicId);
+    let done = !learning.oralActive();
+    for (let quiet = 0; oral; ) {
+      panel.say("noa", text);
+      panel.state("говорит");
+      await speak(text);
+      if (done || !oral) break;
+      panel.state("слушаю…");
+      const said = await hearOnce();
+      if (!oral) break;
+      if (!said) {
+        if (++quiet >= 2) {
+          text = learning.oralStop() ?? "Закончили.";
+          done = true;
+          continue;
+        }
+        text = "Не расслышала. Повторите ответ или скажите «не знаю».";
+        continue;
+      }
+      quiet = 0;
+      panel.say("me", said);
+      panel.state("проверяю…");
+      ({ text, done } = await learning.oralAnswer(said));
+    }
+  } catch (err) {
+    panel.say("error", err.message);
+  } finally {
+    if (learning.oralActive()) learning.oralStop();
+    oral = false;
+    panel.state("закончен");
+    panel.close();
+    emit("learn:changed", {});
+  }
+}
+
 /* ── Словарь ────────────────────────────────────────────────────────────── */
 
 function addStyle(href) {
@@ -208,7 +295,9 @@ async function run(cmd, args = {}) {
       speak(args.text ?? "");
       return null;
     case "learn_oral":
-      throw new Error("Устный зачёт пока только в программе Ноа — здесь сдайте экзамен письменно.");
+      if (!Recognition) throw new Error("Устный зачёт в этом браузере не работает — откройте Ноа в Chrome или Edge.");
+      oralExam(l, args.course, args.topic ?? null);
+      return null;
     case "close_learning":
       location.href = "./";
       return null;

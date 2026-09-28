@@ -759,3 +759,19 @@ body.is-home .page {
   margin-top: 0;
   align-self: start;
 }
+
+/* Вход в Ноа онлайн — под кнопками: без установки, в том числе с телефона. */
+.hero__web {
+  align-self: flex-start;
+  margin-top: 14px;
+  padding: 6px 0;
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.hero__web:hover {
+  color: #f2c14e;
+}

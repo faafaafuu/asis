@@ -1062,3 +1062,141 @@ button {
 .is-web [data-el="minimize"] {
   display: none;
 }
+
+/* Устный зачёт в браузере: ход зачёта в углу, поверх страницы. */
+.oral {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(60vh, 460px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-solid);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.oral__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.oral__state {
+  margin-right: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.oral__log {
+  overflow-y: auto;
+  padding: 8px 12px 12px;
+}
+
+.oral__line {
+  margin: 6px 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.oral__line--me {
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+}
+
+.oral__line--error {
+  color: var(--error-text);
+}
+
+/* ── Узкий экран: телефон и сайт с телефона ────────────────────────────────
+   Колонка тем в 250 px съедала экран телефона целиком, уроку оставалась
+   полоска. Здесь темы — полоса сверху, её листают пальцем вбок; урок — на
+   всю ширину, кнопки переносятся, а не уезжают за край. */
+@media (max-width: 760px) {
+  .head {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 12px 12px 10px 14px;
+  }
+
+  .head__course {
+    order: 5;
+    flex-basis: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12.5px;
+  }
+
+  .bar {
+    width: 70px;
+  }
+
+  .layout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .side {
+    flex: none;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 6px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--divider);
+    scrollbar-width: none;
+  }
+
+  .topics {
+    flex: none;
+    display: flex;
+    gap: 6px;
+    overflow: visible;
+  }
+
+  .side__home,
+  .side__final,
+  .topic {
+    flex: none;
+    width: 168px;
+    margin: 0;
+    border-color: var(--divider);
+  }
+
+  .side__home,
+  .side__final {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .main {
+    flex: 1 1 auto;
+    padding: 16px 14px 32px;
+  }
+
+  .page__title {
+    font-size: 22px;
+  }
+
+  .steps {
+    flex-wrap: wrap;
+  }
+
+  .grades,
+  .focus-modes {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .main pre {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
