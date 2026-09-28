@@ -34,6 +34,33 @@ const DATA = process.env.NOAH_DATA ?? join(HERE, "..", "data");
 const SEED = process.env.NOAH_SEED ?? join(HERE, "..", "..", "modules", "index.json");
 const BUILTIN = process.env.NOAH_BUILTIN ?? join(HERE, "..", "..", "modules", "builtin.json");
 const SECURE = process.env.NOAH_SECURE === "1";
+/**
+ * Зеркала сайта — те же страницы под другим именем, например m.noahlab.ru
+ * через российский CDN: с мобильного интернета в РФ зарубежный сервер под
+ * своим именем режется, а через CDN открывается. Cookie входа — на весь
+ * домен, чтобы вход на одном имени действовал и на другом.
+ */
+const COOKIE_DOMAIN = (process.env.NOAH_COOKIE_DOMAIN ?? "").trim();
+const MIRRORS = new Set(
+  String(process.env.NOAH_MIRRORS ?? "")
+    .split(",")
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean),
+);
+const cookieDomain = COOKIE_DOMAIN ? `; Domain=${COOKIE_DOMAIN}` : "";
+
+/** С какого зеркала пришёл человек: `https://m.…` или пусто — с основного адреса. */
+function mirrorOrigin(req) {
+  for (const header of [req.headers.origin, req.headers.referer]) {
+    try {
+      const url = new URL(String(header ?? ""));
+      if (MIRRORS.has(url.host.toLowerCase())) return `https://${url.host.toLowerCase()}`;
+    } catch {
+      /* нет заголовка или он кривой */
+    }
+  }
+  return "";
+}
 const SESSION_DAYS = 30;
 const MAX_BODY = 8 * 1024 * 1024;
 
@@ -152,7 +179,7 @@ function cookies(req) {
 }
 
 function sessionCookie(value, maxAge) {
-  return [`noah_session=${value}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${maxAge}`, SECURE ? "Secure" : ""]
+  return [`noah_session=${value}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${maxAge}`, COOKIE_DOMAIN ? `Domain=${COOKIE_DOMAIN}` : "", SECURE ? "Secure" : ""]
     .filter(Boolean)
     .join("; ");
 }
@@ -289,7 +316,8 @@ function sameOrigin(req) {
   const origin = req.headers.origin;
   if (!origin) return true;
   try {
-    return new URL(origin).host === req.headers.host;
+    const host = new URL(origin).host.toLowerCase();
+    return host === req.headers.host || MIRRORS.has(host);
   } catch {
     return false;
   }
@@ -353,7 +381,8 @@ route("POST", /^\/api\/auth\/login$/, async ({ req, res, ip }) => {
 route("POST", /^\/api\/auth\/logout$/, ({ req, res }) => {
   const token = cookies(req).noah_session;
   if (token) db.prepare("DELETE FROM sessions WHERE hash = ?").run(sha(token));
-  res.setHeader("Set-Cookie", sessionCookie("", 0));
+  // Прежняя cookie — без домена: её тоже стираем, иначе выход не выходит.
+  res.setHeader("Set-Cookie", [sessionCookie("", 0), "noah_session=; Path=/; Max-Age=0"]);
   return { ok: true };
 });
 
@@ -385,7 +414,8 @@ route("DELETE", /^\/api\/account$/, async ({ req, res, user, ip }) => {
   if (hasPassword && !(await checkPassword(String(password ?? ""), row.pass))) throw new Fail(403, "Пароль не подходит.");
   db.prepare("DELETE FROM modules WHERE owner_id = ?").run(user.id);
   db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
-  res.setHeader("Set-Cookie", sessionCookie("", 0));
+  // Прежняя cookie — без домена: её тоже стираем, иначе выход не выходит.
+  res.setHeader("Set-Cookie", [sessionCookie("", 0), "noah_session=; Path=/; Max-Age=0"]);
   return { ok: true };
 });
 
@@ -692,7 +722,7 @@ route("GET", /^\/api\/downloads$/, async () => {
   return { version, files };
 });
 
-const oauthHandler = mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies });
+const oauthHandler = mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies, cookieDomain, mirrorOrigin });
 const PUBLIC_URL = (process.env.NOAH_PUBLIC_URL ?? `http://127.0.0.1:${PORT}`).replace(/\/$/, "");
 const mcpAuthHandler = mountMcpAuth({ db, publicUrl: PUBLIC_URL, sessionUser });
 mountNoa({ route, db, Fail, readJson });

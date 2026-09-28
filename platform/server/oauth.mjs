@@ -106,7 +106,7 @@ async function postForm(url, body, headers = {}) {
   return data;
 }
 
-export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies }) {
+export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies, cookieDomain = "", mirrorOrigin = () => "" }) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS identities (
       provider TEXT NOT NULL,
@@ -189,12 +189,13 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
 
   /* ── OAuth: уход к провайдеру и возвращение ────────────────────────────── */
 
-  const start = (res, key) => {
+  const start = (req, res, key) => {
     const p = PROVIDERS[key];
     if (!p?.id || !p.secret) throw new Fail(404, "Этот способ входа не настроен.");
     const state = b64url(randomBytes(24));
     const verifier = b64url(randomBytes(48));
-    states.set(state, { key, verifier, at: Date.now() });
+    // Провайдер вернёт на основной адрес — оттуда отправим обратно на зеркало.
+    states.set(state, { key, verifier, at: Date.now(), back: mirrorOrigin(req) });
     const params = new URLSearchParams({
       response_type: "code",
       client_id: p.id,
@@ -208,7 +209,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     }
     res.writeHead(302, {
       Location: `${p.authorize}?${params}`,
-      "Set-Cookie": `noah_oauth=${state}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600`,
+      "Set-Cookie": `noah_oauth=${state}; Path=/auth; HttpOnly; SameSite=Lax; Max-Age=600${cookieDomain}`,
     });
     res.end();
   };
@@ -219,7 +220,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     const saved = states.get(state);
     states.delete(state);
     const back = (message) => {
-      res.writeHead(302, { Location: `/#/login?error=${encodeURIComponent(message)}` });
+      res.writeHead(302, { Location: `${saved?.back ?? ""}/#/login?error=${encodeURIComponent(message)}` });
       res.end();
     };
     if (!p || !saved || saved.key !== key || Date.now() - saved.at > STATE_TTL || cookies(req).noah_oauth !== state) {
@@ -246,7 +247,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
       if (!profile.subject) throw new Error("провайдер не прислал профиль");
       const linking = Boolean(sessionUser(req));
       const cookie = signIn(req, key, profile, !p.untrustedEmail);
-      res.writeHead(302, { Location: linking ? "/#/account" : "/#/connect", "Set-Cookie": cookie });
+      res.writeHead(302, { Location: `${saved.back ?? ""}${linking ? "/#/account" : "/#/connect"}`, "Set-Cookie": cookie });
       res.end();
     } catch (err) {
       console.error(`вход через ${key}:`, err.message);
@@ -271,8 +272,8 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     if (!tgBot.token || !tgBot.name) throw new Fail(404, "Вход через Telegram не настроен.");
     const { next } = await readJson(req).catch(() => ({}));
     const code = b64url(randomBytes(12)).replace(/[^A-Za-z0-9]/g, "").slice(0, 16);
-    tgCodes.set(code, { at: Date.now(), user: null, next: safeNext(next) });
-    res.setHeader("Set-Cookie", `noah_tg=${code}; Path=/; HttpOnly; SameSite=Lax; Max-Age=300`);
+    tgCodes.set(code, { at: Date.now(), user: null, next: safeNext(next), base: mirrorOrigin(req) || PUBLIC_URL });
+    res.setHeader("Set-Cookie", `noah_tg=${code}; Path=/; HttpOnly; SameSite=Lax; Max-Age=300${cookieDomain}`);
     return { link: `https://t.me/${tgBot.name}?start=${code}` };
   });
 
@@ -283,7 +284,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     if (!entry.user) return { done: false };
     // Запись остаётся до конца срока: по ней же войдёт и ссылка из бота —
     // её часто открывают в другой вкладке или во встроенном браузере Telegram.
-    res.setHeader("Set-Cookie", [signIn(req, "telegram", entry.user), "noah_tg=; Path=/; Max-Age=0"]);
+    res.setHeader("Set-Cookie", [signIn(req, "telegram", entry.user), `noah_tg=; Path=/; Max-Age=0${cookieDomain}`]);
     return { done: true, next: entry.next };
   });
 
@@ -309,7 +310,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
             reply = "Готово — вход выполнен. Вернитесь на сайт кнопкой ниже.";
             // Кнопка — одноразовый вход: откроется в любом браузере, хоть во
             // встроенном в Telegram, и сразу вернёт туда, откуда пришли.
-            markup = { inline_keyboard: [[{ text: "🌐 Вернуться в NOAH", url: `${PUBLIC_URL}/auth/telegram/finish?code=${match[1]}` }]] };
+            markup = { inline_keyboard: [[{ text: "🌐 Вернуться в NOAH", url: `${entry.base ?? PUBLIC_URL}/auth/telegram/finish?code=${match[1]}` }]] };
           }
           await fetch(`https://api.telegram.org/bot${tgBot.token}/sendMessage`, {
             method: "POST",
@@ -340,7 +341,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
       return res.end();
     }
     entry.finished = true;
-    res.writeHead(302, { Location: entry.next, "Set-Cookie": [signIn(req, "telegram", entry.user), "noah_tg=; Path=/; Max-Age=0"], "Cache-Control": "no-store" });
+    res.writeHead(302, { Location: entry.next, "Set-Cookie": [signIn(req, "telegram", entry.user), `noah_tg=; Path=/; Max-Age=0${cookieDomain}`], "Cache-Control": "no-store" });
     res.end();
   };
 
@@ -352,7 +353,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     const match = /^\/auth\/(google|github|x|yandex|vk)(\/callback)?$/.exec(url.pathname);
     if (!match || req.method !== "GET") return false;
     if (match[2]) await finish(req, res, url, match[1]);
-    else start(res, match[1]);
+    else start(req, res, match[1]);
     return true;
   };
 }
