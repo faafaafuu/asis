@@ -165,3 +165,30 @@ test("плохие вопросы переспрашиваются отдель�
   assert.equal(conceptCalls, 2, "по разу на тему");
   assert.equal(questionCalls, 4, "по два раза на тему: первый ответ без экзамена");
 });
+
+test("урок следующей темы пишется, пока составляются вопросы текущей", async () => {
+  const log = [];
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const chat = async (messages) => {
+    const system = messages[0].content;
+    const about = messages[1].content.includes("Разъёмы") ? 2 : 1;
+    if (system.includes("Сейчас нужен только план")) {
+      return JSON.stringify({ id: "net", title: "Сеть", description: "…", topics: [{ id: "a", title: "Кабели", summary: "…" }, { id: "b", title: "Разъёмы", summary: "…" }] });
+    }
+    if (system.includes("пишешь урок")) {
+      log.push(`урок ${about} начат`);
+      await pause(20);
+      return lesson("x");
+    }
+    if (system.includes("понятия и карточки")) return JSON.stringify({ concepts: concepts("c"), cards: [] });
+    if (system.includes("задачи и мини-экзамен")) {
+      log.push(`вопросы ${about} начаты`);
+      await pause(60);
+      log.push(`вопросы ${about} готовы`);
+      return JSON.stringify({ tasks: [{ kind: "open", q: "Зачем?", points: ["затем"], reference: "Затем." }], exam: [{ kind: "open", q: "Как?", points: ["так"], reference: "Так." }] });
+    }
+    return JSON.stringify({ final: [] });
+  };
+  await buildCourse({ goal: "x", format: FORMAT, chat, save: () => {} });
+  assert.ok(log.indexOf("урок 2 начат") < log.indexOf("вопросы 1 готовы"), log.join(" → "));
+});

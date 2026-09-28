@@ -404,17 +404,11 @@ export async function buildCourse({ goal, format, chat, save, progress = () => {
   const knownConcepts = () =>
     built.flatMap((t) => list(t.concepts).map((c) => ({ key: `${t.id}/${c.id}`, term: c.term, definition: c.definition })));
 
-  for (const [at, planTopic] of plan.topics.entries()) {
-    if (built.some((t) => t.id === planTopic.id) || failed.includes(planTopic.title)) continue;
-    const step = `${at + 1} из ${total}`;
-    const earlier = knownConcepts();
-    const known = new Set(earlier.map((c) => c.key));
-
-    // Урок.
+  /** Урок темы: две попытки, годится — не короче 1500 знаков и от трёх разделов. */
+  const writeLesson = async (planTopic, earlier) => {
     let lesson = "";
     for (let attempt = 0; attempt < 2; attempt++) {
       check();
-      progress({ stage: "lesson", done: built.length, total, title: plan.title, courseId: plan.id, message: `Пишу урок «${planTopic.title}» (${step})` });
       const text = cleanLesson(
         await ask(
           [
@@ -424,12 +418,39 @@ export async function buildCourse({ goal, format, chat, save, progress = () => {
           { maxTokens: 8000, long: true },
         ),
       );
-      if (sectionCount(text) >= 3 && chars(text) >= 1500) {
-        lesson = text;
-        break;
-      }
+      if (sectionCount(text) >= 3 && chars(text) >= 1500) return text;
       if (sectionCount(text) >= 3 && chars(text) > chars(lesson)) lesson = text;
     }
+    return lesson;
+  };
+
+  const pending = plan.topics.filter((t) => !built.some((b) => b.id === t.id) && !failed.includes(t.title));
+  /**
+   * Урок следующей темы пишется, пока составляются понятия и вопросы
+   * текущей: так тема выходит примерно за четыре минуты вместо шести с
+   * половиной. Урок опирается на план и понятия уже готовых тем.
+   */
+  let ahead = null;
+  const startLesson = (planTopic) => {
+    const promise = writeLesson(planTopic, knownConcepts()).catch((err) => (err instanceof Stopped ? Promise.reject(err) : ""));
+    // Отказ дождётся своей очереди — а до тех пор не считается «необработанным».
+    promise.catch(() => {});
+    return { id: planTopic.id, promise };
+  };
+
+  for (const [index, planTopic] of pending.entries()) {
+    const at = plan.topics.indexOf(planTopic);
+    const step = `${at + 1} из ${total}`;
+    const earlier = knownConcepts();
+    const known = new Set(earlier.map((c) => c.key));
+
+    // Урок — уже начатый заранее или сейчас.
+    check();
+    progress({ stage: "lesson", done: built.length, total, title: plan.title, courseId: plan.id, message: `Пишу урок «${planTopic.title}» (${step})` });
+    const current = ahead?.id === planTopic.id ? ahead : startLesson(planTopic);
+    const next = pending[index + 1];
+    const lesson = await current.promise;
+    ahead = next ? startLesson(next) : null;
     if (!lesson) {
       failed.push(planTopic.title);
       continue;
