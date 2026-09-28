@@ -1,9 +1,9 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=49";
+import { renderHome, stopHome } from "./home.js?v=50";
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=49";
-import { DOCS } from "./i18n.js?v=49";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=50";
+import { DOCS } from "./i18n.js?v=50";
 
 // Шрифты — после первой отрисовки, чтобы не держать страницу (см. index.html).
 {
@@ -17,10 +17,10 @@ import { DOCS } from "./i18n.js?v=49";
 }
 
 
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=49";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=50";
 
 /** Страницы кабинета — отдельным файлом, по требованию. */
-const account = () => import("./account.js?v=49");
+const account = () => import("./account.js?v=50");
 
 // Страницам кабинета нужны route и renderChrome — функции объявлены ниже,
 // но доступны с начала модуля.
@@ -352,7 +352,7 @@ async function route() {
     else if (name === "standard") renderStandard(page);
     // Документация грузится, только когда её открыли: главной она не нужна.
     else if (name === "docs") {
-      const { renderDocs } = await import("./docs.js?v=49");
+      const { renderDocs } = await import("./docs.js?v=50");
       await renderDocs(page, arg, { h, lang: state.lang });
     }
     else if (name === "login" || name === "signup") {
@@ -441,8 +441,28 @@ window.addEventListener("hashchange", route);
   ]);
   // Главной и документации аккаунт не нужен — они рисуются, не дожидаясь его.
   const view = location.hash.replace(/^#\/?/, "").split(/[/?]/)[0] || "home";
+  // Способы входа почти не меняются: прошлый список рисует страницу входа
+  // сразу, а не после двух запросов. По медленной мобильной сети они шли по
+  // нескольку секунд, и вход выглядел пустым синим полем.
+  let known = null;
+  try {
+    known = JSON.parse(localStorage.getItem("noah_providers") ?? "null");
+  } catch {
+    known = null;
+  }
   if (view === "home" || view === "docs") route();
+  else if ((view === "login" || view === "signup") && Array.isArray(known)) {
+    state.providers = known;
+    route();
+  } else {
+    $("page").replaceChildren(h("div", { class: "loading mono" }, state.lang === "ru" ? "Загружаю…" : "Loading…"));
+  }
   [state.user, state.providers] = await ready;
+  try {
+    localStorage.setItem("noah_providers", JSON.stringify(state.providers ?? []));
+  } catch {
+    /* не запомнится — в следующий раз подождём */
+  }
   if (view === "home" || view === "docs") renderChrome(view);
   else route();
 })();

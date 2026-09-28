@@ -1241,3 +1241,17 @@ button {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* Ноа в браузере без модели: плашка вверху со ссылкой на подключение. */
+.model-missing {
+  padding: 10px 16px;
+  background: #fbf2dc;
+  color: #171b26;
+  font-size: 14px;
+  border-bottom: 1px solid #e8d9b0;
+}
+
+.model-missing a {
+  font-weight: 700;
+  color: #2b5bc4;
+}

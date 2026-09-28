@@ -1,6 +1,6 @@
 // Тексты интерфейса площадки: английский и русский.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=49";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=50";
 
 export const T = {
   en: {

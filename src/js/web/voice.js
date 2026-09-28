@@ -18,6 +18,8 @@ const ua = globalThis.navigator?.userAgent ?? "";
 /** Safari и всё на iPhone/iPad (там любой браузер — это Safari внутри). */
 const webkitOnly = /iPhone|iPad|iPod/.test(ua) || (/Safari\//.test(ua) && !/Chrome|Chromium|CriOS|Edg|OPR|Android/.test(ua));
 const canRecord = Boolean(globalThis.navigator?.mediaDevices?.getUserMedia && globalThis.MediaRecorder);
+/** Телефон: непрерывное распознавание там работает плохо — слушаем по фразе. */
+const phone = /Android|iPhone|iPad|iPod/.test(ua);
 /**
  * Распознаёт ли браузер сам. Safari умеет, но капризно: на iPhone нужна
  * включённая Siri, и держать микрофон непрерывно он не любит. Поэтому в
@@ -216,8 +218,11 @@ function isEcho(heard) {
 
 /* ── Распознавание браузером (Chrome, Edge) ──────────────────────────────── */
 
-function listenNative({ onHeard } = {}) {
+function listenNative({ onHeard, signal } = {}) {
   return new Promise((resolve, reject) => {
+    // На телефоне и в Safari — по одной фразе: непрерывный режим там то
+    // молчит, то повторяет сказанное, то обрывается на первой паузе.
+    const continuous = !(webkitOnly || phone);
     const started = Date.now();
     const finals = [];
     let interim = "";
@@ -242,8 +247,7 @@ function listenNative({ onHeard } = {}) {
     const open = () => {
       ear = new Recognition();
       ear.lang = "ru-RU";
-      // Safari с непрерывным режимом то молчит, то обрывает — ему по фразе.
-      ear.continuous = !webkitOnly;
+      ear.continuous = continuous;
       ear.interimResults = true;
       ear.onresult = (event) => {
         interim = "";
@@ -267,7 +271,10 @@ function listenNative({ onHeard } = {}) {
       // Chrome сам закрывает распознавание на паузе — открываем снова, пока
       // человек не договорил и не вышло время ожидания.
       ear.onend = () => {
-        if (!finished) setTimeout(() => !finished && open(), 120);
+        if (finished) return;
+        // По фразе: распознавание само закончило её — значит, договорили.
+        if (!continuous && (finals.length || interim)) return finish();
+        setTimeout(() => !finished && open(), 120);
       };
       try {
         ear.start();
@@ -278,7 +285,8 @@ function listenNative({ onHeard } = {}) {
 
     const silence = setInterval(() => {
       const now = Date.now();
-      if (lastVoice && now - lastVoice > END_OF_PHRASE_MS) finish();
+      if (signal?.aborted) finish();
+      else if (lastVoice && now - lastVoice > END_OF_PHRASE_MS) finish();
       else if (!lastVoice && now - started > WAIT_FOR_SPEECH_MS) finish();
     }, 200);
     open();
@@ -337,7 +345,7 @@ function levelMeter(stream) {
   };
 }
 
-async function listenRecorded({ onHeard } = {}) {
+async function listenRecorded({ onHeard, signal } = {}) {
   const stream = await openMic();
   const meter = levelMeter(stream);
   const recorder = recorderFor(stream);
@@ -364,6 +372,7 @@ async function listenRecorded({ onHeard } = {}) {
         noise = noise * 0.95 + rms * 0.05;
       }
       const done =
+        signal?.aborted ||
         (speechAt && now - lastVoice > END_OF_PHRASE_MS) ||
         (!speechAt && now - started > WAIT_FOR_SPEECH_MS) ||
         now - started > MAX_PHRASE_MS;
@@ -378,7 +387,7 @@ async function listenRecorded({ onHeard } = {}) {
   meter.close();
   for (const track of stream.getTracks()) track.stop();
   // Громче шума так и не стало — никто не говорил, сервер не трогаем.
-  if (!speechAt || lastVoice - speechAt < 300) return "";
+  if (signal?.aborted || !speechAt || lastVoice - speechAt < 300) return "";
   onHeard?.("распознаю…");
   const text = await recognize(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
   return isEcho(text) ? "" : text;

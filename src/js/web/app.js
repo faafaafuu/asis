@@ -7,7 +7,8 @@
 import { PROVIDERS, loadModel, saveModel, listModels, chat, bridgeAvailable } from "./ai-web.js";
 import { openNoa } from "./noa-store.js";
 import { mountDictionary } from "./web-api.js";
-import { speak as sayAloud, stopSpeaking, listen, canListen } from "./voice.js";
+import { speak as sayAloud, stopSpeaking, canListen } from "./voice.js";
+import { startTalk, orbIcon } from "./talk.js";
 
 const ui = {};
 for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] = node;
@@ -22,6 +23,44 @@ const theme = (() => {
 if (theme) document.documentElement.dataset.theme = theme;
 
 mountDictionary();
+
+/* ── Вход ──────────────────────────────────────────────────────────────── */
+
+/** Кто вошёл — сразу, не дожидаясь курсов: шапка не должна висеть «Войти». */
+let signedIn = null;
+
+async function checkUser() {
+  try {
+    const response = await fetch("/api/me", { credentials: "same-origin", cache: "no-store" });
+    const { user } = await response.json();
+    return user ?? null;
+  } catch {
+    return undefined;
+  }
+}
+
+function paintUser(user) {
+  if (user === undefined) return;
+  ui.me.dataset.state = user ? "in" : "out";
+  ui.me.textContent = user ? user.name || user.email || "Кабинет" : "Войти";
+  ui.me.href = user ? "/#/account" : "/#/login?next=%2Fapp%2F";
+}
+
+checkUser().then((user) => {
+  signedIn = user ?? null;
+  paintUser(user);
+});
+
+// Вернулись на вкладку (после входа в другой вкладке или из Telegram) или
+// браузер показал страницу из своего снимка — сверяем вход. Поменялся —
+// перечитываем страницу: курсы, прогресс и голос зависят от входа.
+async function recheckUser() {
+  const user = await checkUser();
+  if (user === undefined) return;
+  if ((user?.id ?? null) !== (signedIn?.id ?? null)) location.reload();
+}
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && recheckUser());
+window.addEventListener("pageshow", (event) => event.persisted && recheckUser());
 
 /* ── Мелочи ────────────────────────────────────────────────────────────── */
 
@@ -102,7 +141,10 @@ for (const [kind, provider] of Object.entries(PROVIDERS)) {
   ui.provider.append(option);
 }
 // Мост — только тем, кого пускает сервер: в списке он первый, раз он есть.
-bridgeAvailable().then((ok) => {
+// Гостю мост не положен — и незачем спрашивать сервер.
+checkUser()
+  .then((user) => (user ? bridgeAvailable() : false))
+  .then((ok) => {
   if (!ok) return;
   const option = el("option", "", PROVIDERS.bridge.title);
   option.value = "bridge";
@@ -114,9 +156,15 @@ bridgeAvailable().then((ok) => {
     ui.model.value = current.model;
     refreshModels();
   } else if (!current) {
+    // Модели в этом браузере ещё нет, а мост есть — подключаем сразу: у
+    // владельца на новом устройстве Ноа должна отвечать без настройки.
+    const bridge = { kind: "bridge", base: "", key: "", model: "claude-code-bridge" };
+    saveModel(bridge);
     ui.provider.value = "bridge";
     ui.base.value = "";
+    ui.model.value = bridge.model;
     paintProvider();
+    paintStatus();
     refreshModels();
   }
 });
@@ -241,7 +289,7 @@ function line(who, text) {
 function paintThread() {
   ui.log.replaceChildren();
   if (!thread.length) {
-    line("hello", "Привет! Я Ноа. Спросите что угодно или откройте курс справа — разберём урок вместе.");
+    line("hello", "Привет! Я Ноа. Нажмите «Поговорить голосом» или напишите вопрос. Курсы — в разделе «Обучение».");
   }
   for (const item of thread) {
     line("me", item.q);
@@ -268,32 +316,43 @@ ui.speakAnswers.addEventListener("change", () => {
   if (!ui.speakAnswers.checked) stopSpeaking();
 });
 
-async function send(text) {
-  const said = text.trim();
-  if (!said || ui.send.disabled) return;
+/**
+ * Вопрос модели от имени разговора: реплики — в ленту, ответ — в историю.
+ * Общий для текста и голоса: сказанное голосом видно в той же ленте.
+ */
+async function askModel(said) {
   const model = loadModel();
-  if (!model) {
-    line("error", "Сначала подключите модель — справа, в разделе «Модель».");
-    ui.provider.focus();
-    return;
-  }
-  ui.input.value = "";
+  if (!model) throw new Error("Сначала подключите модель — в разделе «Модель».");
   if (!thread.length) ui.log.replaceChildren();
   line("me", said);
   const wait = line("wait", "Ноа думает…");
-  ui.send.disabled = true;
   const messages = [{ role: "system", content: PERSONA }];
   for (const item of thread) messages.push({ role: "user", content: item.q }, { role: "assistant", content: item.a });
   messages.push({ role: "user", content: said });
   try {
     const reply = await chat(model, messages, { maxTokens: 1500 });
-    wait.remove();
     line("noa", reply);
     thread = [...thread, { q: said, a: reply }].slice(-DEPTH);
     sessionStorage.setItem(CHAT, JSON.stringify(thread));
-    speak(reply);
-  } catch (err) {
+    return reply;
+  } finally {
     wait.remove();
+  }
+}
+
+async function send(text) {
+  const said = text.trim();
+  if (!said || ui.send.disabled) return;
+  if (!loadModel()) {
+    line("error", "Сначала подключите модель — в разделе «Модель».");
+    ui.provider.focus();
+    return;
+  }
+  ui.input.value = "";
+  ui.send.disabled = true;
+  try {
+    speak(await askModel(said));
+  } catch (err) {
     line("error", err.message);
   } finally {
     ui.send.disabled = false;
@@ -317,24 +376,22 @@ ui.clear.addEventListener("click", () => {
   paintThread();
 });
 
+// «Поговорить» — разговор голосом без рук, а не диктовка одной фразы:
+// диктовка и так есть на клавиатуре телефона.
 if (!canListen) ui.mic.hidden = true;
-ui.mic.addEventListener("click", async () => {
-  if (ui.mic.disabled) return;
+ui.mic.prepend(orbIcon());
+ui.mic.classList.toggle("is-off", !canListen);
+ui.mic.addEventListener("click", () => {
+  if (!loadModel()) {
+    line("error", "Сначала подключите модель — в разделе «Модель».");
+    ui.provider.focus();
+    return;
+  }
   stopSpeaking();
-  ui.mic.disabled = true;
-  ui.mic.textContent = "Слушаю…";
   try {
-    const said = await listen({ onHeard: (text) => (ui.input.value = text) });
-    if (said) {
-      // Спросили голосом — отвечаем голосом.
-      ui.speakAnswers.checked = true;
-      await send(said);
-    }
+    startTalk({ title: "Разговор с Ноа", greeting: "Говорите — я слушаю.", reply: askModel });
   } catch (err) {
     line("error", err.message);
-  } finally {
-    ui.mic.disabled = false;
-    ui.mic.textContent = "🎙 Голосом";
   }
 });
 
@@ -348,10 +405,7 @@ async function paintCourses() {
     note(ui.courseNote, `Курсы не загрузились: ${err.message}`, "error");
     return;
   }
-  if (noa.user) {
-    ui.me.textContent = noa.user.name || noa.user.email || "Кабинет";
-    ui.me.href = "/#/account";
-  }
+  paintUser(noa.user);
   ui.loginHint.hidden = Boolean(noa.user);
   const cards = noa.learning.overview();
   if (!cards.length) {

@@ -2413,3 +2413,23 @@ a.dlmenu__item:focus-visible {
   color: var(--ink-3);
   text-align: right;
 }
+
+/* Пока идут данные страницы — надпись, а не пустое поле. */
+.loading {
+  padding: 48px 0;
+  text-align: center;
+  color: #e6edf7;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 560px) {
+  .doc__table table {
+    font-size: 13px;
+  }
+
+  .doc__table th,
+  .doc__table td {
+    padding: 6px 6px;
+  }
+}
