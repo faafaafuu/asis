@@ -1,9 +1,9 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=50";
+import { renderHome, stopHome } from "./home.js?v=51";
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=50";
-import { DOCS } from "./i18n.js?v=50";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=51";
+import { DOCS } from "./i18n.js?v=51";
 
 // Шрифты — после первой отрисовки, чтобы не держать страницу (см. index.html).
 {
@@ -17,10 +17,10 @@ import { DOCS } from "./i18n.js?v=50";
 }
 
 
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=50";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=51";
 
 /** Страницы кабинета — отдельным файлом, по требованию. */
-const account = () => import("./account.js?v=50");
+const account = () => import("./account.js?v=51");
 
 // Страницам кабинета нужны route и renderChrome — функции объявлены ниже,
 // но доступны с начала модуля.
@@ -352,7 +352,7 @@ async function route() {
     else if (name === "standard") renderStandard(page);
     // Документация грузится, только когда её открыли: главной она не нужна.
     else if (name === "docs") {
-      const { renderDocs } = await import("./docs.js?v=50");
+      const { renderDocs } = await import("./docs.js?v=51");
       await renderDocs(page, arg, { h, lang: state.lang });
     }
     else if (name === "login" || name === "signup") {

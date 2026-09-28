@@ -411,11 +411,21 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
     section: "howto",
     ru: {
       title: "Свой курс обучения",
-      lead: "Окно «Обучение» пустое, пока вы не соберёте курс. Собирает его ваша нейросеть.",
+      lead: "Окно «Обучение» пустое, пока вы не соберёте курс. Собрать его можно прямо в Ноа онлайн или своей нейросетью.",
       body: `
+## В Ноа онлайн — одной кнопкой
+
+1. Откройте [Ноа онлайн](/app/) и войдите на сайт.
+2. В разделе «Обучение» — **Собрать курс**: напишите, о чём курс и зачем. Например: «слаботочные системы для монтажника с нуля — кабели, СКС, видеонаблюдение; чтобы пройти собеседование».
+3. Ноа составит план и будет писать тему за темой: урок, понятия, карточки, задачи, мини-экзамен, в конце — финальный экзамен на стык тем. Каждая тема проходит ту же проверку, что курс от нейросети.
+
+Курс появляется после первой темы — по ней можно учиться сразу, остальные дорастают сами, и в списке, и в открытом окне обучения. С мостом сборка идёт на сервере: 4–6 минут на тему, страницу можно закрыть. Модель — **Sonnet** (точнее) или **Haiku** (быстрее); для учёбы точность важнее. Без моста курс собирает модель, подключённая в браузере, — тогда вкладку закрывать нельзя.
+
+## Своей нейросетью
+
 1. [Подключите нейросеть](#/docs/connect-ai) к NOAH — по ссылке с сайта или локально.
 2. Попросите: «Собери мне курс NOAH по английскому для путешествий: пять тем». Можно дать свои материалы — конспекты, описание вакансии, программу экзамена.
-3. Нейросеть прочитает формат (\`course_format\`) и отправит курс (\`create_course\`), большой — по теме (\`add_topic\`). NOAH проверит его, вернёт отчёт с замечаниями и покажет курс в окне «Обучение».
+3. Нейросеть прочитает формат (\`course_format\`) и отправит курс (\`create_course\`), большой — по теме (\`add_topic\`). NOAH проверит его, вернёт отчёт с замечаниями и покажет курс в окне «Обучение» — и в Ноа онлайн, по мере того как темы приходят.
 
 ## Как устроена тема
 
@@ -437,8 +447,12 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
     },
     en: {
       title: "Your own course",
-      lead: "The Learning window is empty until you build a course. Your AI builds it.",
+      lead: "The Learning window is empty until you build a course. Build it right in Noa online or with your own AI.",
       body: `
+**In Noa online:** open [Noa online](/app/), sign in, press **Build a course** in Learning and describe what it is about and why. Noa writes the plan and then topic after topic; the course appears after the first topic and the rest arrive by themselves. With the bridge the build runs on the server, 4–6 minutes per topic.
+
+**With your own AI:**
+
 1. [Connect your AI](#/docs/connect-ai) to NOAH.
 2. Ask: “Build me a NOAH course on travel English: five topics, each with a lesson, tasks and a quiz”.
 3. The AI reads the format (\`course_format\`) and sends the course (\`create_course\`), a large one topic by topic (\`add_topic\`). NOAH checks it and shows it in the Learning window.
