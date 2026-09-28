@@ -7,6 +7,7 @@
 
 import { createLearning, validate, normalizeCourse } from "./learn-core.js";
 import { chat, loadModel } from "./ai-web.js";
+import { request } from "./net.js";
 
 const COURSES = "noa.courses";
 const PROGRESS = "noa.learning";
@@ -27,11 +28,15 @@ const write = (key, value) => {
 };
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
+  // Чтение повторяем при сбое сети; запись — нет: повтор POST мог бы
+  // сделать дело дважды.
+  const reading = (options.method ?? "GET") === "GET";
+  const response = await request(path, {
     method: options.method ?? "GET",
     headers: options.body ? { "Content-Type": "application/json" } : {},
     body: options.body ? JSON.stringify(options.body) : undefined,
-    credentials: "same-origin",
+    timeout: path.startsWith("/api/noa/courses") && !path.endsWith("/version") ? 45_000 : 15_000,
+    retries: reading ? 2 : 0,
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error ?? `Ошибка ${response.status}`);
@@ -53,12 +58,31 @@ async function start() {
   let account = [];
   /** Версия курсов в аккаунте: по ней видно, что курс добавили или дописали. */
   let version = "";
+  /**
+   * Курсы аккаунта лежат и в этом браузере — вместе с версией. При заходе
+   * сверяется только версия; совпала — курсы берутся отсюда. Иначе каждый
+   * заход тянул бы сотни килобайт, а по мобильной сети это секунды.
+   */
+  const CACHE = user ? `noa.account.${user.id}` : "";
   const loadAccount = async () => {
     const data = await api("/api/noa/courses");
     account = data.courses ?? [];
     version = data.version ?? "";
+    write(CACHE, { version, courses: account });
   };
-  if (user) await loadAccount().catch(() => {});
+  if (user) {
+    const cached = read(CACHE, null);
+    const now = await api("/api/noa/courses/version").then((r) => r.version).catch(() => null);
+    if (cached?.version && cached.version === now) {
+      account = cached.courses ?? [];
+      version = cached.version;
+    } else {
+      await loadAccount().catch(() => {
+        // Сеть подвела — лучше вчерашние курсы, чем пустой список.
+        account = cached?.courses ?? [];
+      });
+    }
+  }
 
   // Прогресс: свой и из аккаунта — берём тот, что сохранён позже.
   const saved = read(PROGRESS, { data: {}, savedAt: 0 });

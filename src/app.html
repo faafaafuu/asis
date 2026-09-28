@@ -112,6 +112,45 @@
             <p class="note" data-el="modelNote" hidden></p>
           </form>
         </section>
+        <section class="plate prefs" aria-label="Вид и голос">
+          <div class="plate__head">
+            <h2 class="plate__title">Вид и голос</h2>
+          </div>
+          <label class="field">
+            <span class="field__label">Тема</span>
+            <select data-el="theme">
+              <option value="noah">NOAH — как на сайте</option>
+              <option value="system">Как в системе</option>
+              <option value="light">Светлая</option>
+              <option value="dark">Тёмная</option>
+              <option value="neon">Неон</option>
+              <option value="synthwave">Синтвейв</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field__label">Голос Ноа</span>
+            <select data-el="voice">
+              <option value="xenia">Ксения — живой</option>
+              <option value="baya">Байя — мягкий</option>
+              <option value="kseniya">Ксения-2 — ровный</option>
+              <option value="aidar">Айдар — мужской</option>
+              <option value="eugene">Евгений — мужской</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field__label">Скорость речи</span>
+            <select data-el="rate">
+              <option value="0.7">Медленнее</option>
+              <option value="1">Обычная</option>
+              <option value="1.2">Быстрее</option>
+              <option value="1.6">Быстро</option>
+            </select>
+          </label>
+          <div class="row">
+            <button class="btn" type="button" data-el="voiceTry">Послушать</button>
+          </div>
+          <p class="hint">Голос Ноа — тот же, что в программе, — звучит, когда вы вошли на сайт; без входа говорит голос браузера. Тема действует и в окне обучения.</p>
+        </section>
       </aside>
     </main>
 

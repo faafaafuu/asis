@@ -10,6 +10,7 @@
 //   ollama     — модель на своём компьютере, без ключа.
 
 import { AiError } from "../ai-client.js";
+import { request } from "./net.js";
 
 const KEY = "noa.model";
 
@@ -25,7 +26,7 @@ export const PROVIDERS = {
 /** Пускает ли сервер этого человека к мосту. */
 export async function bridgeAvailable() {
   try {
-    const response = await fetch("/api/noa/bridge/models", { credentials: "same-origin" });
+    const response = await request("/api/noa/bridge/models", { timeout: 10_000, retries: 1 });
     return response.ok;
   } catch {
     return false;

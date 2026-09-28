@@ -2,9 +2,124 @@
    белые плиты с тенью, квадратные углы. Цвета — из темы NOAH (tokens.css). */
 
 :root {
+  /* Своё у страницы, поверх токенов темы: поле под плитами, шапка и мягкие
+     подложки. Значения по умолчанию — тема NOAH, как у сайта. */
   --ground: #2f6bd4;
   --chrome: #14306b;
+  --chrome-muted: #bcc6dc;
+  --chrome-line: #27509e;
   --hair: #dddcd6;
+  --field: #fff;
+  --soft: #f0efea;
+  --mine: #fbf2dc;
+  --track: #ecebe5;
+  --ok-bg: #eaf0e6;
+  --ok: #3f6b30;
+  --ok-line: #b9ccb0;
+  --bad-bg: #f8e9e6;
+  --bad-line: #e7b7b0;
+  --gold: #f2c14e;
+  --gold-hover: #f6d27a;
+  --gold-ink: #171b26;
+}
+
+/* Тёмная — и «как в системе», пока система тёмная. */
+:root[data-theme="dark"],
+:root[data-theme="system"] {
+  --ground: #110e0c;
+  --chrome: #1b1815;
+  --chrome-muted: #a3a3ab;
+  --chrome-line: rgba(255, 240, 220, 0.16);
+  --field: #231f1b;
+  --soft: rgba(255, 240, 220, 0.06);
+  --mine: rgba(255, 240, 220, 0.1);
+  --track: rgba(255, 240, 220, 0.12);
+  --ok-bg: rgba(143, 214, 168, 0.12);
+  --ok: #9fdcb4;
+  --ok-line: rgba(143, 214, 168, 0.3);
+  --bad-bg: rgba(240, 140, 120, 0.12);
+  --bad-line: rgba(240, 140, 120, 0.3);
+  --gold: oklch(0.86 0.09 68);
+  --gold-hover: oklch(0.9 0.08 68);
+  --gold-ink: #1b1815;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --ground: #ece7dd;
+    --chrome: #221f1b;
+    --chrome-muted: #b9b2a6;
+    --chrome-line: #4a443c;
+    --field: #fff;
+    --soft: rgba(60, 45, 25, 0.05);
+    --mine: #f6ecd6;
+    --track: rgba(60, 45, 25, 0.1);
+    --ok-bg: #e7efe2;
+    --ok: #3f6b30;
+    --ok-line: #b9ccb0;
+    --bad-bg: #f6e6e2;
+    --bad-line: #e2b3aa;
+    --gold: oklch(0.48 0.11 48);
+    --gold-hover: oklch(0.52 0.11 48);
+    --gold-ink: #fff;
+  }
+}
+
+:root[data-theme="light"] {
+  --ground: #ece7dd;
+  --chrome: #221f1b;
+  --chrome-muted: #b9b2a6;
+  --chrome-line: #4a443c;
+  --field: #fff;
+  --soft: rgba(60, 45, 25, 0.05);
+  --mine: #f6ecd6;
+  --track: rgba(60, 45, 25, 0.1);
+  --ok-bg: #e7efe2;
+  --ok: #3f6b30;
+  --ok-line: #b9ccb0;
+  --bad-bg: #f6e6e2;
+  --bad-line: #e2b3aa;
+  --gold: oklch(0.48 0.11 48);
+  --gold-hover: oklch(0.52 0.11 48);
+  --gold-ink: #fff;
+}
+
+:root[data-theme="neon"] {
+  --ground: #04060a;
+  --chrome: #070a0f;
+  --chrome-muted: #6f9aa3;
+  --chrome-line: rgba(0, 240, 255, 0.35);
+  --field: #0b1119;
+  --soft: rgba(0, 240, 255, 0.06);
+  --mine: rgba(0, 240, 255, 0.12);
+  --track: rgba(0, 240, 255, 0.15);
+  --ok-bg: rgba(0, 255, 170, 0.1);
+  --ok: #7dfcc6;
+  --ok-line: rgba(0, 255, 170, 0.35);
+  --bad-bg: rgba(255, 80, 120, 0.12);
+  --bad-line: rgba(255, 80, 120, 0.35);
+  --gold: oklch(0.85 0.16 195);
+  --gold-hover: oklch(0.9 0.14 195);
+  --gold-ink: #041015;
+}
+
+:root[data-theme="synthwave"] {
+  --ground: #0d0514;
+  --chrome: #150a1e;
+  --chrome-muted: #a8809e;
+  --chrome-line: rgba(255, 70, 180, 0.35);
+  --field: #1d0f28;
+  --soft: rgba(255, 70, 180, 0.07);
+  --mine: rgba(255, 70, 180, 0.14);
+  --track: rgba(255, 70, 180, 0.16);
+  --ok-bg: rgba(120, 255, 200, 0.1);
+  --ok: #9ff5d0;
+  --ok-line: rgba(120, 255, 200, 0.3);
+  --bad-bg: rgba(255, 90, 90, 0.12);
+  --bad-line: rgba(255, 90, 90, 0.35);
+  --gold: oklch(0.72 0.24 350);
+  --gold-hover: oklch(0.78 0.22 350);
+  --gold-ink: #fff;
 }
 
 * {
@@ -58,7 +173,7 @@ a {
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #bcc6dc;
+  color: var(--chrome-muted);
 }
 
 .bar__nav {
@@ -77,12 +192,12 @@ a {
 }
 
 .bar__nav a:hover {
-  border-color: #27509e;
+  border-color: var(--chrome-line);
 }
 
 .bar__me {
-  background: #f2c14e;
-  color: var(--text) !important;
+  background: var(--gold);
+  color: var(--gold-ink) !important;
 }
 
 /* ── Раскладка ─────────────────────────────────────────────────────────── */
@@ -170,14 +285,14 @@ a {
 }
 
 .btn--primary {
-  background: #f2c14e;
-  border-color: var(--text);
-  color: var(--text);
+  background: var(--gold);
+  border-color: var(--gold);
+  color: var(--gold-ink);
 }
 
 .btn--primary:hover {
-  color: var(--text);
-  background: #f6d27a;
+  color: var(--gold-ink);
+  background: var(--gold-hover);
 }
 
 .btn--quiet {
@@ -214,7 +329,7 @@ textarea {
   width: 100%;
   padding: 9px 10px;
   border: 1px solid var(--divider);
-  background: #fff;
+  background: var(--field);
   color: var(--text);
   font: inherit;
   font-size: 14px;
@@ -263,16 +378,16 @@ kbd {
   padding: 8px 10px;
   font-size: 13px;
   white-space: pre-line;
-  background: #f0efea;
+  background: var(--soft);
 }
 
 .note--ok {
-  background: #eaf0e6;
-  color: #3f6b30;
+  background: var(--ok-bg);
+  color: var(--ok);
 }
 
 .note--error {
-  background: #f8e9e6;
+  background: var(--bad-bg);
   color: var(--error-text);
 }
 
@@ -281,7 +396,7 @@ kbd {
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 700;
-  background: #f0efea;
+  background: var(--soft);
   color: var(--text-muted);
   max-width: 100%;
   overflow: hidden;
@@ -290,8 +405,8 @@ kbd {
 }
 
 .status--on {
-  background: #eaf0e6;
-  color: #3f6b30;
+  background: var(--ok-bg);
+  color: var(--ok);
 }
 
 .more {
@@ -307,7 +422,7 @@ kbd {
 .more code,
 .msg code {
   padding: 1px 5px;
-  background: #f0efea;
+  background: var(--soft);
   font-family: var(--font-mono);
   font-size: 12.5px;
   overflow-wrap: anywhere;
@@ -364,7 +479,7 @@ kbd {
 
 .msg--me {
   align-self: flex-end;
-  background: #fbf2dc;
+  background: var(--mine);
   border-color: var(--text);
   white-space: pre-wrap;
 }
@@ -372,7 +487,7 @@ kbd {
 .msg--noa,
 .msg--hello {
   align-self: flex-start;
-  background: #fff;
+  background: var(--field);
 }
 
 .msg--hello {
@@ -388,9 +503,9 @@ kbd {
 .msg--error {
   align-self: stretch;
   max-width: none;
-  background: #f8e9e6;
+  background: var(--bad-bg);
   color: var(--error-text);
-  border-color: #e7b7b0;
+  border-color: var(--bad-line);
 }
 
 .chat__form {
@@ -455,7 +570,7 @@ kbd {
 
 .bar-line {
   height: 6px;
-  background: #ecebe5;
+  background: var(--track);
 }
 
 .bar-line span {
@@ -579,21 +694,21 @@ kbd {
 .build {
   padding: 12px 14px;
   border: 1px solid var(--text);
-  background: #fbf2dc;
+  background: var(--mine);
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
 .build--done {
-  background: #eaf0e6;
-  border-color: #b9ccb0;
+  background: var(--ok-bg);
+  border-color: var(--ok-line);
 }
 
 .build--failed,
 .build--stopped {
-  background: #f8e9e6;
-  border-color: #e7b7b0;
+  background: var(--bad-bg);
+  border-color: var(--bad-line);
 }
 
 .build__head {
@@ -646,10 +761,22 @@ kbd {
 }
 
 form.build {
-  background: #fff;
+  background: var(--field);
   border-style: dashed;
 }
 
 .course--building {
   border-style: dashed;
+}
+
+
+/* ── Вид и голос ──────────────────────────────────────────────────────── */
+
+.prefs .field:last-of-type {
+  margin-bottom: 12px;
+}
+
+.bar__me[data-state="offline"] {
+  background: var(--bad-bg);
+  color: var(--text) !important;
 }

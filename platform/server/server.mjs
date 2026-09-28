@@ -638,20 +638,32 @@ async function serveStatic(req, res, pathname, versioned) {
   }
   try {
     const type = TYPES[extname(file)] ?? "application/octet-stream";
+    const info = await stat(file);
+    // Файлы с версией в адресе (?v=) не меняются — их браузер берёт из кэша.
+    // Остальное сверяется каждый раз, чтобы правки были видны сразу.
+    const cacheControl = versioned
+      ? "public, max-age=31536000, immutable"
+      : [".svg", ".png", ".webp", ".ico", ".woff2", ".woff", ".ttf"].includes(extname(file))
+        ? "public, max-age=86400"
+        : "no-cache";
+    // Сверка — по отпечатку файла: не изменился — «304», без тела. Раньше
+    // каждый заход заново тянул все скрипты и стили, и по мобильной сети
+    // Ноа онлайн открывалась по нескольку секунд.
+    const etag = `W/"${info.size.toString(16)}-${Math.trunc(info.mtimeMs).toString(16)}"`;
+    if (req.headers["if-none-match"] === etag) {
+      res.writeHead(304, { ...headers, ETag: etag, "Cache-Control": cacheControl });
+      res.end();
+      return true;
+    }
     const raw = await readFile(file);
-    const key = `${file}:${(await stat(file)).mtimeMs}`;
+    const key = `${file}:${info.mtimeMs}`;
     const out = /^(text|application\/(json|manifest)|image\/svg)/.test(type) ? packed(req, raw, key) : { body: raw, headers: {} };
     res.writeHead(200, {
       ...headers,
       "Content-Type": type,
       "Content-Length": out.body.length,
-      // Файлы с версией в адресе (?v=) не меняются — их браузер берёт из кэша.
-      // Остальное сверяется каждый раз, чтобы правки были видны сразу.
-      "Cache-Control": versioned
-        ? "public, max-age=31536000, immutable"
-        : [".svg", ".png", ".webp", ".ico"].includes(extname(file))
-          ? "public, max-age=86400"
-          : "no-cache",
+      ETag: etag,
+      "Cache-Control": cacheControl,
       ...out.headers,
     });
     res.end(req.method === "HEAD" ? undefined : out.body);

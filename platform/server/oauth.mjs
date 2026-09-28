@@ -189,17 +189,29 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
 
   /* ── OAuth: уход к провайдеру и возвращение ────────────────────────────── */
 
+  /**
+   * Куда провайдер вернёт после входа. Обычно — на основной адрес. Вход,
+   * начатый на зеркале (m.noahlab.ru), — на зеркало, если провайдер это
+   * позволяет (адрес внесён в его настройки: NOAH_OAUTH_MIRROR=google,…).
+   * С мобильного интернета в РФ основной адрес режется: возврат от Google
+   * доходил до сервера, а его ответ до телефона — нет, и вход висел белой
+   * страницей.
+   */
+  const MIRROR_CALLBACK = new Set(env("NOAH_OAUTH_MIRROR").split(",").map((k) => k.trim()).filter(Boolean));
+  const callbackFor = (key, back) => (back && MIRROR_CALLBACK.has(key) ? `${back}/auth/${key}/callback` : `${PUBLIC_URL}/auth/${key}/callback`);
+
   const start = (req, res, key) => {
     const p = PROVIDERS[key];
     if (!p?.id || !p.secret) throw new Fail(404, "Этот способ входа не настроен.");
     const state = b64url(randomBytes(24));
     const verifier = b64url(randomBytes(48));
-    // Провайдер вернёт на основной адрес — оттуда отправим обратно на зеркало.
-    states.set(state, { key, verifier, at: Date.now(), back: mirrorOrigin(req) });
+    const back = mirrorOrigin(req);
+    const redirect = callbackFor(key, back);
+    states.set(state, { key, verifier, at: Date.now(), back, redirect });
     const params = new URLSearchParams({
       response_type: "code",
       client_id: p.id,
-      redirect_uri: `${PUBLIC_URL}/auth/${key}/callback`,
+      redirect_uri: redirect,
       scope: p.scope,
       state,
     });
@@ -231,7 +243,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
       const body = new URLSearchParams({
         grant_type: "authorization_code",
         code: url.searchParams.get("code") ?? "",
-        redirect_uri: `${PUBLIC_URL}/auth/${key}/callback`,
+        redirect_uri: saved.redirect ?? `${PUBLIC_URL}/auth/${key}/callback`,
         client_id: p.id,
       });
       const headers = {};

@@ -6,6 +6,7 @@
 
 import { PROVIDERS, loadModel, saveModel, listModels, chat, bridgeAvailable } from "./ai-web.js";
 import { openNoa } from "./noa-store.js";
+import { request } from "./net.js";
 import { mountDictionary } from "./web-api.js";
 import { speak as sayAloud, stopSpeaking, canListen } from "./voice.js";
 import { startTalk, orbIcon } from "./talk.js";
@@ -32,7 +33,7 @@ let signedIn = null;
 
 async function checkUser() {
   try {
-    const response = await fetch("/api/me", { credentials: "same-origin", cache: "no-store" });
+    const response = await request("/api/me", { cache: "no-store", timeout: 8000, retries: 2 });
     const { user } = await response.json();
     return user ?? null;
   } catch {
@@ -41,7 +42,13 @@ async function checkUser() {
 }
 
 function paintUser(user) {
-  if (user === undefined) return;
+  if (user === undefined) {
+    // Сеть подвела: так и сказать и спросить ещё раз — а не висеть «Войти».
+    ui.me.dataset.state = "offline";
+    ui.me.textContent = "Нет связи";
+    setTimeout(() => checkUser().then(paintUser), 5000);
+    return;
+  }
   ui.me.dataset.state = user ? "in" : "out";
   ui.me.textContent = user ? user.name || user.email || "Кабинет" : "Войти";
   ui.me.href = user ? "/#/account" : "/#/login?next=%2Fapp%2F";
@@ -257,6 +264,37 @@ ui.forget.addEventListener("click", () => {
   paintStatus();
   note(ui.modelNote, "Модель забыта в этом браузере.");
 });
+
+/* ── Вид и голос ───────────────────────────────────────────────────────── */
+
+/** Настройки этого браузера: тема, голос и скорость — как в программе. */
+const pref = (key, fallback) => {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+const setPref = (key, value) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* не запомнится — действует до перезагрузки */
+  }
+};
+
+ui.theme.value = pref("noa.theme", "noah");
+ui.voice.value = pref("noa.voice", "xenia");
+ui.rate.value = pref("noa.rate", "1.2");
+if (!ui.rate.value) ui.rate.value = "1.2";
+
+ui.theme.addEventListener("change", () => {
+  setPref("noa.theme", ui.theme.value);
+  document.documentElement.dataset.theme = ui.theme.value;
+});
+ui.voice.addEventListener("change", () => setPref("noa.voice", ui.voice.value));
+ui.rate.addEventListener("change", () => setPref("noa.rate", ui.rate.value));
+ui.voiceTry.addEventListener("click", () => sayAloud("Привет! Я Ноа. Так звучит мой голос."));
 
 /* ── Разговор ──────────────────────────────────────────────────────────── */
 

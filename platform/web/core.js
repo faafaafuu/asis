@@ -3,7 +3,7 @@
 // части сетей соединение замирает после ~16 КБ, и каждый файл держится
 // меньше этого вместе с TLS-рукопожатием.
 
-import { T } from "./i18n.js?v=52";
+import { T } from "./i18n.js?v=53";
 
 /** Функции, которые живут в app.js, а нужны страницам кабинета. */
 export const hooks = { route: () => {}, renderChrome: () => {} };
@@ -105,13 +105,34 @@ export function toast(text) {
   toast.timer = setTimeout(() => (node.hidden = true), 3200);
 }
 
-export async function api(path, { method = "GET", body } = {}) {
-  const response = await fetch(path, {
-    method,
-    credentials: "same-origin",
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
+/**
+ * Запрос к сайту с пределом ожидания. По мобильной сети соединение иногда
+ * замирает: без предела страница ждала ответа вечно и выглядела пустой или
+ * «невошедшей». Зависшее чтение обрывается и повторяется; запись не
+ * повторяется — повтор мог бы сделать дело дважды.
+ */
+export async function api(path, { method = "GET", body, timeout = 15_000 } = {}) {
+  const reading = method === "GET";
+  let response;
+  for (let attempt = 0; ; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      response = await fetch(path, {
+        method,
+        credentials: "same-origin",
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      break;
+    } catch (err) {
+      if (!reading || attempt >= 2) throw new Error(state.lang === "ru" ? "Нет связи с сервером — попробуйте ещё раз." : "No connection — try again.");
+      await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || t().error);
   return data;

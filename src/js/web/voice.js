@@ -13,6 +13,8 @@
 // прошло ещё 0.7 с: звук доигрывает из буфера, и без запаса браузер записывал
 // конец её же фразы, принимал его за ответ и отвечал сам себе.
 
+import { request } from "./net.js";
+
 const Recognition = globalThis.SpeechRecognition ?? globalThis.webkitSpeechRecognition;
 const ua = globalThis.navigator?.userAgent ?? "";
 /** Safari и всё на iPhone/iPad (там любой браузер — это Safari внутри). */
@@ -115,7 +117,9 @@ let lastSaid = "";
 async function fetchVoice(text) {
   if (!serverVoice) return null;
   try {
-    const response = await fetch("/api/noa/tts", {
+    const response = await request("/api/noa/tts", {
+      timeout: 25_000,
+      retries: 0,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
@@ -312,7 +316,9 @@ function recorderFor(stream) {
 }
 
 async function recognize(blob) {
-  const response = await fetch("/api/noa/stt", {
+  const response = await request("/api/noa/stt", {
+    timeout: 45_000,
+    retries: 0,
     method: "POST",
     headers: { "Content-Type": blob.type || "application/octet-stream" },
     credentials: "same-origin",
