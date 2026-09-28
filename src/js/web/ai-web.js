@@ -17,7 +17,20 @@ export const PROVIDERS = {
   openrouter: { title: "OpenRouter", base: "https://openrouter.ai/api/v1", needsKey: true, keyHint: "sk-or-…" },
   openai: { title: "Свой адрес (OpenAI-совместимый)", base: "", needsKey: false, keyHint: "ключ, если нужен" },
   ollama: { title: "Ollama на этом компьютере", base: "http://localhost:11434/v1", needsKey: false, keyHint: "" },
+  // Мост к подпискам владельца (Claude Code, Codex, Gemini, Qwen) на сервере
+  // сайта. Ключа нет: пускает вход на сайт, и только владельца.
+  bridge: { title: "Мост (мои подписки)", base: "/api/noa/bridge", needsKey: false, keyHint: "", ownerOnly: true },
 };
+
+/** Пускает ли сервер этого человека к мосту. */
+export async function bridgeAvailable() {
+  try {
+    const response = await fetch("/api/noa/bridge/models", { credentials: "same-origin" });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
 
 export function loadModel() {
   try {
@@ -50,6 +63,8 @@ function headers(model) {
 /** Текст ошибки провайдера по-человечески: что сделать, а не код ответа. */
 function explainFailure(model, status, body) {
   const said = body?.error?.message ?? body?.message ?? "";
+  if (model.kind === "bridge" && (status === 401 || status === 403)) return said || "Мост доступен только владельцу — войдите на сайт своим аккаунтом.";
+  if (model.kind === "bridge" && status === 502) return `Мост: ${said || "сбой"}. Если это «вход истёк» — войдите в Claude Code на сервере заново.`;
   if (status === 401 || status === 403) return "Ключ не подошёл — проверьте его в настройках модели.";
   if (status === 402) return "На счёте провайдера закончились деньги — пополните или выберите бесплатную модель.";
   if (status === 404) return `Модель «${model.model}» не найдена у провайдера — выберите другую.`;
@@ -71,6 +86,8 @@ export async function chat(model, messages, { json = false, maxTokens = 700, sig
   const base = baseOf(model);
   if (!base) throw new AiError("Не указан адрес модели.", { kind: "config" });
   const body = { model: model.model, messages, temperature: 0.2, max_tokens: maxTokens };
+  // Мост зовёт программу подписки на сервере: холодный старт и ответ — до трёх минут.
+  if (model.kind === "bridge") timeoutMs = Math.max(timeoutMs, 200_000);
   if (json) body.response_format = { type: "json_object" };
 
   const timeout = new AbortController();
@@ -85,12 +102,15 @@ export async function chat(model, messages, { json = false, maxTokens = 700, sig
         headers: headers(model),
         body: JSON.stringify(body),
         signal: timeout.signal,
+        credentials: "same-origin",
       });
     } catch (err) {
       if (signal?.aborted) throw new AiError("Запрос отменён", { kind: "abort" });
       if (timeout.signal.aborted) throw new AiError("Модель не успела ответить.", { kind: "timeout" });
       throw new AiError(
-        model.kind === "ollama"
+        model.kind === "bridge"
+          ? "Мост не отвечает — попробуйте ещё раз через минуту."
+          : model.kind === "ollama"
           ? "Ollama не отвечает. Запустите её и разрешите сайту к ней обращаться — как, написано в настройках модели."
           : "Не достучаться до провайдера — проверьте адрес и интернет.",
         { kind: "backend" },
@@ -123,12 +143,13 @@ export async function chat(model, messages, { json = false, maxTokens = 700, sig
 export async function listModels(model) {
   const base = baseOf(model);
   if (!base) return [];
-  const response = await fetch(`${base}/models`, { headers: headers(model) });
+  const response = await fetch(`${base}/models`, { headers: headers(model), credentials: "same-origin" });
   if (!response.ok) throw new AiError(explainFailure(model, response.status, null), { kind: "http", status: response.status });
   const data = await response.json();
-  const items = (data?.data ?? []).map((m) => ({
+  // У моста у каждой модели есть близнец «:free» — в списке он лишний.
+  const items = (data?.data ?? []).filter((m) => model.kind !== "bridge" || !String(m.id).endsWith(":free")).map((m) => ({
     id: String(m.id),
-    free: model.kind === "ollama" || String(m.id).endsWith(":free") || (m.pricing && Number(m.pricing.prompt) === 0 && Number(m.pricing.completion) === 0),
+    free: model.kind === "ollama" || model.kind === "bridge" || String(m.id).endsWith(":free") || (m.pricing && Number(m.pricing.prompt) === 0 && Number(m.pricing.completion) === 0),
   }));
   // Бесплатные — вверху: с них удобно начать.
   return items.sort((a, b) => Number(b.free) - Number(a.free) || a.id.localeCompare(b.id));

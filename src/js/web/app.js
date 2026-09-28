@@ -4,7 +4,7 @@
 // прямо со страницы (ai-web.js), курсы и прогресс — noa-store.js. Сайт
 // видит только курсы и прогресс вошедшего человека, но не его ключ.
 
-import { PROVIDERS, loadModel, saveModel, listModels, chat } from "./ai-web.js";
+import { PROVIDERS, loadModel, saveModel, listModels, chat, bridgeAvailable } from "./ai-web.js";
 import { openNoa } from "./noa-store.js";
 import { mountDictionary } from "./web-api.js";
 
@@ -88,15 +88,37 @@ const HINTS = {
     "Ключ бесплатно: openrouter.ai → Keys. Модели с пометкой «free» ничего не стоят. Ключ хранится только в этом браузере.",
   openai:
     "Любой адрес с /chat/completions: OpenAI (https://api.openai.com/v1), Groq, DeepSeek, Gemini, LM Studio. Ключ хранится только в этом браузере.",
+  bridge:
+    "Ваши подписки через мост на сервере: claude-code — Claude, codex — ChatGPT, gemini, qwen. Ключ не нужен — пускает вход на сайт. Первый ответ может идти до минуты.",
   ollama:
     "Модель на вашем компьютере, без ключа. Один раз разрешите сайту обращаться к Ollama: в Windows — команда setx OLLAMA_ORIGINS \"https://noahlab.ru\" и перезапуск Ollama.",
 };
 
 for (const [kind, provider] of Object.entries(PROVIDERS)) {
+  if (provider.ownerOnly) continue;
   const option = el("option", "", provider.title);
   option.value = kind;
   ui.provider.append(option);
 }
+// Мост — только тем, кого пускает сервер: в списке он первый, раз он есть.
+bridgeAvailable().then((ok) => {
+  if (!ok) return;
+  const option = el("option", "", PROVIDERS.bridge.title);
+  option.value = "bridge";
+  ui.provider.prepend(option);
+  const current = loadModel();
+  if (current?.kind === "bridge") {
+    ui.provider.value = "bridge";
+    paintProvider();
+    ui.model.value = current.model;
+    refreshModels();
+  } else if (!current) {
+    ui.provider.value = "bridge";
+    ui.base.value = "";
+    paintProvider();
+    refreshModels();
+  }
+});
 
 function formModel() {
   return { kind: ui.provider.value, base: ui.base.value.trim(), key: ui.key.value.trim(), model: ui.model.value.trim() };
@@ -105,8 +127,8 @@ function formModel() {
 function paintProvider() {
   const kind = ui.provider.value;
   const provider = PROVIDERS[kind];
-  ui.baseField.hidden = kind === "openrouter";
-  ui.keyField.hidden = kind === "ollama";
+  ui.baseField.hidden = kind === "openrouter" || kind === "bridge";
+  ui.keyField.hidden = kind === "ollama" || kind === "bridge";
   if (kind === "ollama" && !ui.base.value) ui.base.value = provider.base;
   ui.key.placeholder = provider.keyHint;
   ui.providerHint.textContent = HINTS[kind];
@@ -143,7 +165,8 @@ function refreshModels() {
 }
 
 const saved = loadModel();
-ui.provider.value = saved?.kind ?? "openrouter";
+// Моста в списке ещё нет — он появится, когда сервер скажет, что пускает.
+ui.provider.value = saved?.kind === "bridge" ? "openrouter" : (saved?.kind ?? "openrouter");
 ui.base.value = saved?.base ?? "";
 ui.key.value = saved?.key ?? "";
 ui.model.value = saved?.model ?? "";
@@ -164,7 +187,7 @@ ui.modelForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const draft = formModel();
   if (PROVIDERS[draft.kind].needsKey && !draft.key) return note(ui.modelNote, "Впишите ключ.", "error");
-  if (draft.kind !== "openrouter" && !draft.base) return note(ui.modelNote, "Впишите адрес.", "error");
+  if (draft.kind !== "openrouter" && draft.kind !== "bridge" && !draft.base) return note(ui.modelNote, "Впишите адрес.", "error");
   if (!draft.model) return note(ui.modelNote, "Выберите модель.", "error");
   note(ui.modelNote, "Проверяю…");
   try {

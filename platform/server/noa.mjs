@@ -12,6 +12,23 @@ const MAX_COURSE = 2_000_000;
 const MAX_PROGRESS = 1_000_000;
 const MAX_COURSES = 50;
 
+/**
+ * Мост к подпискам (Claude Code, Codex, Gemini, Qwen) живёт на этом же сервере
+ * и доступен только владельцу: он платит за подписки. Кому можно — номера
+ * аккаунтов в NOAH_BRIDGE_USERS; токен моста — из его же файла настроек,
+ * который служба сайта подключает к себе (EnvironmentFile).
+ */
+const BRIDGE_URL = (process.env.NOAH_BRIDGE_URL ?? "http://127.0.0.1:8791").replace(/\/$/, "");
+const BRIDGE_TOKEN = process.env.NOA_BRIDGE_TOKEN ?? "";
+const BRIDGE_USERS = new Set(
+  String(process.env.NOAH_BRIDGE_USERS ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean),
+);
+/** Мост отвечает до трёх минут (своё время ожидания у него 180 с). */
+const BRIDGE_WAIT = 200_000;
+
 export function mountNoa({ route, db, Fail, readJson }) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS noa_courses (
@@ -54,6 +71,45 @@ export function mountNoa({ route, db, Fail, readJson }) {
     const user = need(who);
     db.prepare("DELETE FROM noa_courses WHERE user_id = ? AND course_id = ?").run(user.id, match[1]);
     return { ok: true };
+  });
+
+  const bridgeUser = (who) => {
+    const user = need(who);
+    if (!BRIDGE_TOKEN || !BRIDGE_USERS.has(user.id)) throw new Fail(403, "Мост доступен только владельцу.");
+    return user;
+  };
+
+  const bridge = async (path, init = {}) => {
+    let response;
+    try {
+      response = await fetch(`${BRIDGE_URL}${path}`, {
+        ...init,
+        headers: { ...(init.headers ?? {}), Authorization: `Bearer ${BRIDGE_TOKEN}` },
+        signal: AbortSignal.timeout(BRIDGE_WAIT),
+      });
+    } catch {
+      throw new Fail(502, "Мост не отвечает — служба noa-bridge на сервере остановлена или занята.");
+    }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Fail(response.status, data.error ?? `Мост ответил ошибкой ${response.status}.`);
+    return data;
+  };
+
+  route("GET", /^\/api\/noa\/bridge\/models$/, ({ user }) => {
+    bridgeUser(user);
+    return bridge("/v1/models");
+  });
+
+  route("POST", /^\/api\/noa\/bridge\/chat\/completions$/, async ({ req, user }) => {
+    bridgeUser(user);
+    const { model, messages } = await readJson(req);
+    if (!Array.isArray(messages) || !messages.length) throw new Fail(400, "Нет сообщений.");
+    // noa_web — мост ответит разово, не трогая сессию Ноа на компьютере.
+    return bridge("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: String(model ?? ""), messages, noa_web: true }),
+    });
   });
 
   route("GET", /^\/api\/noa\/progress$/, ({ user: who }) => {
