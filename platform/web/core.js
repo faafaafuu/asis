@@ -4,6 +4,8 @@
 // меньше этого вместе с TLS-рукопожатием.
 
 import { T } from "./i18n.js?v=54";
+// Запись с зеркала, где CDN пропускает только чтение, — общая с Ноа онлайн.
+import { siteFetch } from "/app/js/web/tunnel.js";
 
 /** Функции, которые живут в app.js, а нужны страницам кабинета. */
 export const hooks = { route: () => {}, renderChrome: () => {} };
@@ -118,7 +120,7 @@ export async function api(path, { method = "GET", body, timeout = 15_000 } = {})
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
-      response = await fetch(path, {
+      response = await siteFetch(path, {
         method,
         credentials: "same-origin",
         headers: body ? { "Content-Type": "application/json" } : {},

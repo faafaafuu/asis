@@ -11,6 +11,7 @@
 
 import { AiError } from "../ai-client.js";
 import { request } from "./net.js";
+import { siteFetch } from "./tunnel.js";
 
 const KEY = "noa.model";
 
@@ -98,7 +99,7 @@ export async function chat(model, messages, { json = false, maxTokens = 700, sig
   try {
     let response;
     try {
-      response = await fetch(`${base}/chat/completions`, {
+      response = await siteFetch(`${base}/chat/completions`, {
         method: "POST",
         headers: headers(model),
         body: JSON.stringify(body),

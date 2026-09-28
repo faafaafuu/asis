@@ -6,6 +6,8 @@
 // «висит как неавторизованная». Поэтому у каждого запроса есть предел
 // ожидания, зависший обрывается (освобождая соединение) и повторяется.
 
+import { siteFetch } from "./tunnel.js";
+
 export class NetError extends Error {}
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -24,7 +26,7 @@ export async function request(url, { timeout = 12_000, retries = 1, ...init } = 
     const relay = () => controller.abort();
     outer?.addEventListener("abort", relay);
     try {
-      return await fetch(url, { credentials: "same-origin", ...init, signal: controller.signal });
+      return await siteFetch(url, { credentials: "same-origin", ...init, signal: controller.signal });
     } catch (err) {
       if (outer?.aborted) throw err;
       last = err;

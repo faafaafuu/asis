@@ -5,6 +5,9 @@
 // каждого пользователя перед установкой.
 
 import http from "node:http";
+import net from "node:net";
+import tls from "node:tls";
+import { Duplex } from "node:stream";
 import { readFile, stat } from "node:fs/promises";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, extname, join, normalize, sep } from "node:path";
@@ -19,6 +22,7 @@ import { mountRemote } from "./remote.mjs";
 import { mountOAuth } from "./oauth.mjs";
 import { mountMcpAuth } from "./mcpauth.mjs";
 import { mountNoa } from "./noa.mjs";
+import { tunnel } from "./tunnel.mjs";
 
 const scrypt = promisify(scryptCb);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -48,6 +52,30 @@ const MIRRORS = new Set(
     .filter(Boolean),
 );
 const cookieDomain = COOKIE_DOMAIN ? `; Domain=${COOKIE_DOMAIN}` : "";
+
+/** Подходит ли общий домен cookie к адресу запроса (по IP — нет). */
+function cookieFits(req) {
+  const host = String(req.headers.host ?? "").toLowerCase().replace(/:\d+$/, "");
+  return host === COOKIE_DOMAIN || host.endsWith(`.${COOKIE_DOMAIN}`);
+}
+
+/**
+ * Убирает Domain из cookie ответа. Браузер отбрасывает cookie с чужим
+ * доменом, и по IP вход не держался бы.
+ */
+function dropCookieDomain(res) {
+  const strip = (value) => (Array.isArray(value) ? value.map(strip) : typeof value === "string" ? value.replace(/;\s*Domain=[^;]*/i, "") : value);
+  const setHeader = res.setHeader.bind(res);
+  res.setHeader = (name, value) => setHeader(name, String(name).toLowerCase() === "set-cookie" ? strip(value) : value);
+  const writeHead = res.writeHead.bind(res);
+  res.writeHead = (status, ...rest) => {
+    const headers = rest.at(-1);
+    if (headers && typeof headers === "object" && !Array.isArray(headers)) {
+      for (const name of Object.keys(headers)) if (name.toLowerCase() === "set-cookie") headers[name] = strip(headers[name]);
+    }
+    return writeHead(status, ...rest);
+  };
+}
 
 /** С какого зеркала пришёл человек: `https://m.…` или пусто — с основного адреса. */
 function mirrorOrigin(req) {
@@ -757,12 +785,13 @@ const mcpAuthHandler = mountMcpAuth({ db, publicUrl: PUBLIC_URL, sessionUser });
 mountNoa({ route, db, Fail, readJson });
 const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY, publicUrl: PUBLIC_URL });
 
-const server = http.createServer(async (req, res) => {
+async function handle(req, res) {
   // Перед сайтом может стоять CDN: всё, что сервер не разрешил кэшировать
   // явно, не кэшируется. Иначе перенаправление после входа — с cookie
   // сессии — CDN мог бы отдать следующему человеку. Статика задаёт своё
   // правило в writeHead, и оно заменяет это.
   res.setHeader("Cache-Control", "no-store");
+  if (COOKIE_DOMAIN && !cookieFits(req)) dropCookieDomain(res);
   const url = new URL(req.url, "http://local");
   // Заголовку прокси верим, только если запрос пришёл от него самого.
   const peer = String(req.socket.remoteAddress ?? "");
@@ -783,6 +812,9 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
     if (url.pathname.startsWith("/auth/") && (await oauthHandler(req, res, url))) return;
+    if (url.pathname.startsWith("/api/tunnel/") && req.method === "GET") {
+      return await tunnel({ req, res, url, cookies, handle, Fail, maxBody: MAX_BODY });
+    }
     if (url.pathname.startsWith("/api/")) {
       if (req.method !== "GET" && !sameOrigin(req)) throw new Fail(403, "Чужой источник запроса.");
       for (const r of routes) {
@@ -803,8 +835,81 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent) send(res, status, { error: status === 500 ? "Ошибка сервера." : err.message });
     else res.end();
   }
+}
+
+/*
+ * Вход по IP. Из мобильного интернета РФ сайт по домену не открывается, а по
+ * голому IP — открывается. Чтобы по IP работали вход, микрофон и cookie,
+ * нужен HTTPS, а порт один: сервер по первому байту соединения понимает,
+ * TLS это или HTTP, и отдаёт его нужному обработчику. Сертификат на IP
+ * выпускается на 6 дней и продлевается сам — сервер перечитывает его раз в час.
+ */
+const TLS_CERT = process.env.NOAH_TLS_CERT ?? "";
+const TLS_KEY = process.env.NOAH_TLS_KEY ?? "";
+
+function tlsContext() {
+  return tls.createSecureContext({ cert: readFileSync(TLS_CERT), key: readFileSync(TLS_KEY) });
+}
+
+let secureContext = null;
+if (TLS_CERT && TLS_KEY) {
+  try {
+    secureContext = tlsContext();
+    setInterval(() => {
+      try {
+        secureContext = tlsContext();
+      } catch (err) {
+        console.error("Сертификат не перечитался:", err.message);
+      }
+    }, 3600e3).unref();
+  } catch (err) {
+    console.error("HTTPS выключен — сертификат не читается:", err.message);
+  }
+}
+
+const plain = http.createServer(handle);
+
+/**
+ * TLS поверх уже начатого соединения. Первый байт прочитан, чтобы узнать
+ * протокол, и TLS-обработчику Node его уже не увидеть: он читает сокет
+ * напрямую. Поэтому соединение идёт через промежуточный поток, куда
+ * прочитанное возвращено, а адрес клиента переносится на TLS-сокет.
+ */
+function secured(socket, first) {
+  const relay = new Duplex({
+    read: () => socket.resume(),
+    write: (chunk, encoding, done) => socket.write(chunk, encoding, done),
+    final: (done) => {
+      socket.end();
+      done();
+    },
+    destroy: (err, done) => {
+      socket.destroy();
+      done(err);
+    },
+  });
+  relay.push(first);
+  socket.on("data", (chunk) => relay.push(chunk) || socket.pause());
+  socket.on("end", () => relay.push(null));
+  socket.on("close", () => relay.destroy());
+  const tlsSocket = new tls.TLSSocket(relay, { isServer: true, secureContext, ALPNProtocols: ["http/1.1"] });
+  Object.defineProperty(tlsSocket, "remoteAddress", { value: socket.remoteAddress });
+  tlsSocket.on("error", () => tlsSocket.destroy());
+  return tlsSocket;
+}
+
+const server = net.createServer((socket) => {
+  socket.on("error", () => socket.destroy());
+  socket.once("data", (first) => {
+    socket.pause();
+    // 0x16 — начало TLS-рукопожатия.
+    if (secureContext && first[0] === 0x16) return plain.emit("connection", secured(socket, first));
+    socket.unshift(first);
+    plain.emit("connection", socket);
+    socket.resume();
+  });
 });
 
 setInterval(() => db.prepare("DELETE FROM sessions WHERE expires < ?").run(new Date().toISOString()), 3600e3).unref();
 
-server.listen(PORT, HOST, () => console.log(`NOAH platform on http://${HOST}:${PORT}`));
+server.listen(PORT, HOST, () => console.log(`NOAH platform on ${HOST}:${PORT}${secureContext ? " (HTTP и HTTPS)" : ""}`));
