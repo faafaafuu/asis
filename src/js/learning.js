@@ -244,6 +244,15 @@ function renderHome() {
   }
   const root = page(course.title, course.description);
   root.prepend(courseSwitch());
+  if (course.building) {
+    root.append(
+      el(
+        "p",
+        "note",
+        `Курс ещё собирается: готово ${course.building.done} из ${course.building.total} тем. Новые темы появятся сами — учиться можно уже сейчас.`,
+      ),
+    );
+  }
   root.append(renderToday());
   const done = course.topics.filter((t) => t.status === "done").length;
   const mistakes = course.topics.reduce((sum, t) => sum + t.mistakes, 0);
@@ -690,6 +699,15 @@ function talkPanel(target) {
   talk = { panel, line };
   return panel;
 }
+
+// Курс дописывается — сборкой или нейросетью по MCP: новые темы появляются
+// сами. Посреди экзамена и ответа окно не трогаем.
+api?.listen("learn:changed", async () => {
+  if (busy || exam) return;
+  await refreshOverview();
+  renderSide();
+  if (view.kind === "home") renderHome();
+});
 
 // Сказанное голосом в обсуждении — в ту же ленту, что и напечатанное.
 api?.listen("learn:talk", (event) => {

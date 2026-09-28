@@ -132,6 +132,29 @@ async function ensureModel(user) {
   document.body.prepend(bar);
 }
 
+/* ── Курс дорастает ─────────────────────────────────────────────────────
+   Курс дописывает сборка или нейросеть по MCP — окно сверяется с аккаунтом
+   само и говорит окну обучения обновиться: чаще, пока курс собирается. */
+
+let pollTimer = 0;
+
+function schedulePoll(noa, building) {
+  clearTimeout(pollTimer);
+  if (!noa.user) return;
+  pollTimer = setTimeout(async () => {
+    if (document.visibilityState === "visible" && (await noa.refresh())) emit("learn:changed", {});
+    else schedulePoll(noa, building);
+  }, building ? 8000 : 30_000);
+}
+
+// Без входа курсы лежат в браузере: сборка в другой вкладке дописала тему —
+// браузер скажет об этом событием storage.
+addEventListener("storage", async (event) => {
+  if (event.key !== "noa.courses") return;
+  const noa = await openNoa();
+  if (await noa.refresh()) emit("learn:changed", {});
+});
+
 /** Курс, открытый по ссылке `?course=`, — первым: окно берёт первый. */
 const wanted = new URLSearchParams(location.search).get("course");
 
@@ -145,6 +168,7 @@ async function run(cmd, args = {}) {
     case "learn_overview": {
       await noa.refresh();
       const all = l.overview();
+      schedulePoll(noa, all.some((c) => c.building));
       const at = all.findIndex((c) => c.id === wanted);
       if (at > 0) all.unshift(...all.splice(at, 1));
       return all;

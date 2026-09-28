@@ -562,3 +562,94 @@ kbd {
     font-size: 13px;
   }
 }
+
+/* ── Сборка курса ─────────────────────────────────────────────────────── */
+
+.builds {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.builds:empty {
+  display: none;
+}
+
+.build {
+  padding: 12px 14px;
+  border: 1px solid var(--text);
+  background: #fbf2dc;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.build--done {
+  background: #eaf0e6;
+  border-color: #b9ccb0;
+}
+
+.build--failed,
+.build--stopped {
+  background: #f8e9e6;
+  border-color: #e7b7b0;
+}
+
+.build__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.build__title {
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.build__status {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.build--running .build__status::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: build-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes build-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.build__message {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-body);
+}
+
+.build {
+  margin: 0;
+}
+
+form.build {
+  background: #fff;
+  border-style: dashed;
+}
+
+.course--building {
+  border-style: dashed;
+}

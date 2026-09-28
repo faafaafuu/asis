@@ -48,15 +48,29 @@
           <div class="plate__head">
             <h2 class="plate__title">Обучение</h2>
           </div>
+          <div class="builds" data-el="builds"></div>
           <div class="courses" data-el="courses"></div>
-          <div class="row">
-            <button class="btn" type="button" data-el="addCourse">Добавить курс из файла</button>
+          <form class="build" data-el="buildForm" hidden>
+            <label class="field">
+              <span class="field__label">О чём курс и зачем</span>
+              <textarea data-el="buildGoal" rows="4" maxlength="3000" placeholder="Например: слаботочные системы для монтажника с нуля — кабели, СКС, видеонаблюдение, домофоны. Чтобы пройти собеседование и сразу работать."></textarea>
+            </label>
+            <p class="hint" data-el="buildHint"></p>
+            <div class="row">
+              <button class="btn btn--primary" type="submit">Собрать</button>
+              <button class="btn btn--quiet" type="button" data-el="buildCancel">Отмена</button>
+            </div>
+          </form>
+          <div class="row" data-el="courseActions">
+            <button class="btn btn--primary" type="button" data-el="buildOpen">Собрать курс</button>
+            <button class="btn" type="button" data-el="addCourse">Из файла</button>
             <input data-el="courseFile" type="file" accept=".json,application/json" hidden />
           </div>
           <p class="note" data-el="courseNote" hidden></p>
           <details class="more">
-            <summary>Откуда берутся курсы</summary>
-            <p>Курс собирает ваша нейросеть. Подключите к ней адрес <code>https://noahlab.ru/mcp</code> и попросите: «собери курс по сетям для собеседования». Если вы вошли на сайт, курс появится здесь сам. Готовый файл курса <code>.json</code> можно добавить кнопкой выше.</p>
+            <summary>Как собираются курсы</summary>
+            <p>«Собрать курс» — напишите, о чём курс и для чего, и Ноа соберёт его сама: план, уроки, понятия, задачи и экзамены. Курс появится после первой темы, остальные дорастут сами — учиться можно сразу.</p>
+            <p>Ещё курс может собрать ваша нейросеть: подключите к ней адрес <code>https://noahlab.ru/mcp</code> и попросите «собери курс по сетям для собеседования» — он тоже появится здесь сам, по мере того как она его дописывает.</p>
           </details>
           <p class="hint" data-el="loginHint" hidden>Войдите на сайт — тогда курсы из нейросети и прогресс будут и здесь, и на других устройствах.</p>
         </section>

@@ -7,7 +7,21 @@
 
 import { spawn } from "node:child_process";
 
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
+
 import { validate, advice, normalizeCourse } from "../../src/js/web/learn-core.js";
+import { buildCourse, Stopped } from "../../src/js/web/course-builder.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+/** Методика курса — та же, что отдаёт нейросети MCP (course_format). */
+const FORMAT_PATH = process.env.NOAH_COURSE_FORMAT ?? join(HERE, "..", "..", "src-tauri", "src", "course_format.md");
+const courseFormat = () => (existsSync(FORMAT_PATH) ? readFileSync(FORMAT_PATH, "utf8").replace(/\r\n/g, "\n") : "");
+
+/** Какими движками моста можно собирать курс. */
+const BUILD_MODELS = new Set(["claude-code-bridge", "codex-bridge", "gemini-bridge", "qwen-bridge"]);
 
 /** Предел курса и прогресса: больше не бывает у настоящих, а место не резиновое. */
 const MAX_COURSE = 2_000_000;
@@ -87,6 +101,22 @@ export function mountNoa({ route, db, Fail, readJson }) {
       body TEXT NOT NULL,
       saved_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS noa_builds (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      goal TEXT NOT NULL,
+      model TEXT NOT NULL DEFAULT '',
+      course_id TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL,
+      stage TEXT NOT NULL DEFAULT '',
+      done INTEGER NOT NULL DEFAULT 0,
+      total INTEGER NOT NULL DEFAULT 0,
+      message TEXT NOT NULL DEFAULT '',
+      created TEXT NOT NULL DEFAULT (datetime('now')),
+      updated TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS noa_builds_user ON noa_builds(user_id, created);
   `);
 
   /**
@@ -99,11 +129,30 @@ export function mountNoa({ route, db, Fail, readJson }) {
     return { ...user, id: String(user.id) };
   };
 
+  /**
+   * Версия курсов человека: меняется, когда курс добавили, дописали или
+   * убрали. Страница спрашивает её часто, а весь список — только когда она
+   * сменилась: курсы весят сотни килобайт.
+   */
+  const coursesVersion = (userId) => {
+    const row = db.prepare("SELECT COUNT(*) AS n, COALESCE(MAX(updated), '') AS at FROM noa_courses WHERE user_id = ?").get(userId);
+    const building = db.prepare("SELECT COUNT(*) AS n FROM noa_builds WHERE user_id = ? AND status = 'running'").get(userId).n;
+    return `${row.n}:${row.at}:${building}`;
+  };
+
   route("GET", /^\/api\/noa\/courses$/, ({ user: who }) => {
     const user = need(who);
     const rows = db.prepare("SELECT body FROM noa_courses WHERE user_id = ? ORDER BY updated DESC").all(user.id);
-    return { courses: rows.map((row) => JSON.parse(row.body)) };
+    return { courses: rows.map((row) => JSON.parse(row.body)), version: coursesVersion(user.id) };
   });
+
+  route("GET", /^\/api\/noa\/courses\/version$/, ({ user: who }) => {
+    const user = need(who);
+    return { version: coursesVersion(user.id) };
+  });
+
+  // Методика курса — для сборки в браузере моделью человека.
+  route("GET", /^\/api\/noa\/course-format$/, () => ({ text: courseFormat() }));
 
   route("POST", /^\/api\/noa\/courses$/, async ({ req, user: who }) => {
     const user = need(who);
@@ -123,13 +172,13 @@ export function mountNoa({ route, db, Fail, readJson }) {
     return user;
   };
 
-  const bridge = async (path, init = {}) => {
+  const bridge = async (path, init = {}, wait = BRIDGE_WAIT) => {
     let response;
     try {
       response = await fetch(`${BRIDGE_URL}${path}`, {
         ...init,
         headers: { ...(init.headers ?? {}), Authorization: `Bearer ${BRIDGE_TOKEN}` },
-        signal: AbortSignal.timeout(BRIDGE_WAIT),
+        signal: AbortSignal.timeout(wait),
       });
     } catch {
       throw new Fail(502, "Мост не отвечает — служба noa-bridge на сервере остановлена или занята.");
@@ -154,6 +203,130 @@ export function mountNoa({ route, db, Fail, readJson }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: String(model ?? ""), messages, noa_web: true }),
     });
+  });
+
+  /* ── Сборка курса на сервере — через мост ─────────────────────────────
+     Идёт, даже если страницу закрыли: человек написал тему, ушёл, вернулся —
+     курс уже дорастает. Переживает и перезапуск сервера: недособранный курс
+     лежит в аккаунте вместе с планом, и сборка продолжается с него. */
+
+  const running = new Map();
+
+  /** Урок на тысячи слов модель пишет минуты: большим ответам — до 10 минут. */
+  const LONG_ANSWER = 600;
+
+  const bridgeChat = async (model, messages, long = false) => {
+    const data = await bridge(
+      "/v1/chat/completions",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages, noa_web: true, ...(long ? { noa_timeout: LONG_ANSWER } : {}) }),
+      },
+      long ? (LONG_ANSWER + 30) * 1000 : BRIDGE_WAIT,
+    );
+    const text = data?.choices?.[0]?.message?.content;
+    if (typeof text !== "string" || !text.trim()) throw new Error("Мост прислал пустой ответ.");
+    return text;
+  };
+
+  const buildRow = (row) => ({
+    id: row.id,
+    status: row.status,
+    stage: row.stage,
+    done: row.done,
+    total: row.total,
+    title: row.title,
+    courseId: row.course_id,
+    message: row.message,
+    goal: row.goal,
+    updated: row.updated,
+  });
+
+  const updateBuild = (id, fields) => {
+    const sets = Object.keys(fields).map((key) => `${key} = ?`);
+    db.prepare(`UPDATE noa_builds SET ${sets.join(", ")}, updated = datetime('now') WHERE id = ?`).run(...Object.values(fields), id);
+  };
+
+  const runBuild = (job) => {
+    if (running.has(job.id)) return;
+    const control = { stop: false };
+    running.set(job.id, control);
+    const saved = job.course_id
+      ? db.prepare("SELECT body FROM noa_courses WHERE user_id = ? AND course_id = ?").get(job.user_id, job.course_id)
+      : null;
+    const resume = saved ? JSON.parse(saved.body) : null;
+    const taken = new Set(db.prepare("SELECT course_id FROM noa_courses WHERE user_id = ?").all(job.user_id).map((row) => row.course_id));
+    buildCourse({
+      goal: job.goal,
+      format: courseFormat(),
+      chat: (messages, opts) => bridgeChat(job.model || "claude-code-bridge", messages, Boolean(opts?.long)),
+      save: (course) => {
+        saveCourse(db, job.user_id, course);
+      },
+      progress: (p) =>
+        updateBuild(job.id, {
+          stage: p.stage,
+          done: p.done,
+          total: p.total,
+          message: p.message,
+          ...(p.title ? { title: p.title } : {}),
+          ...(p.courseId ? { course_id: p.courseId } : {}),
+        }),
+      stopped: () => control.stop,
+      resume: resume?.building ? resume : null,
+      taken,
+    })
+      .then(() => updateBuild(job.id, { status: "done", stage: "done" }))
+      .catch((err) => {
+        const halted = err instanceof Stopped;
+        if (!halted) console.error("сборка курса:", err?.message ?? err);
+        updateBuild(job.id, {
+          status: halted ? "stopped" : "failed",
+          message: halted ? "Сборка остановлена — готовые темы остались." : String(err?.message ?? err),
+        });
+      })
+      .finally(() => running.delete(job.id));
+  };
+
+  // Сервер перезапустили посреди сборки — продолжаем с того, что сохранено.
+  if (BRIDGE_TOKEN) {
+    for (const job of db.prepare("SELECT * FROM noa_builds WHERE status = 'running'").all()) runBuild(job);
+  } else {
+    db.prepare("UPDATE noa_builds SET status = 'failed', message = 'Мост не настроен.' WHERE status = 'running'").run();
+  }
+
+  route("POST", /^\/api\/noa\/builds$/, async ({ req, user: who }) => {
+    const user = bridgeUser(who);
+    const { goal, model } = await readJson(req);
+    const text = String(goal ?? "").trim();
+    if (text.length < 10) throw new Fail(400, "Опишите курс подробнее: о чём он и для чего — хотя бы одним предложением.");
+    if (text.length > 3000) throw new Fail(400, "Слишком длинно — хватит пары абзацев.");
+    const active = db.prepare("SELECT title FROM noa_builds WHERE user_id = ? AND status = 'running'").get(user.id);
+    if (active) throw new Fail(409, `Уже собирается курс${active.title ? ` «${active.title}»` : ""} — дождитесь его или остановите.`);
+    const id = randomUUID();
+    const engine = BUILD_MODELS.has(model) ? model : "claude-code-bridge";
+    db.prepare(
+      "INSERT INTO noa_builds (id, user_id, goal, model, status, stage, message) VALUES (?, ?, ?, ?, 'running', 'plan', 'Составляю план курса')",
+    ).run(id, user.id, text, engine);
+    runBuild(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(id));
+    return { build: buildRow(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(id)) };
+  });
+
+  route("GET", /^\/api\/noa\/builds$/, ({ user: who }) => {
+    const user = need(who);
+    const rows = db.prepare("SELECT * FROM noa_builds WHERE user_id = ? ORDER BY created DESC LIMIT 5").all(user.id);
+    return { builds: rows.map(buildRow), version: coursesVersion(user.id) };
+  });
+
+  route("POST", /^\/api\/noa\/builds\/([0-9a-f-]{36})\/stop$/, ({ user: who, match }) => {
+    const user = need(who);
+    const row = db.prepare("SELECT * FROM noa_builds WHERE id = ? AND user_id = ?").get(match[1], user.id);
+    if (!row) throw new Fail(404, "Такой сборки нет.");
+    const control = running.get(row.id);
+    if (control) control.stop = true;
+    else if (row.status === "running") updateBuild(row.id, { status: "stopped", message: "Сборка остановлена." });
+    return { ok: true };
   });
 
   route("POST", /^\/api\/noa\/tts$/, async ({ req, res, user: who }) => {

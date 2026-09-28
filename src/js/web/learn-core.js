@@ -75,6 +75,16 @@ function normalizeTopic(t) {
   };
 }
 
+/**
+ * Курс ещё собирается: сколько тем готово из скольких. Сборка сохраняет курс
+ * после каждой темы, и человек учится по готовым, пока пишутся остальные.
+ */
+function normalizeBuilding(b) {
+  if (!b || typeof b !== "object") return null;
+  const total = Math.max(Number.parseInt(b.total, 10) || 0, 0);
+  return { total, done: Math.min(Math.max(Number.parseInt(b.done, 10) || 0, 0), total), failed: list(b.failed).map(String) };
+}
+
 /** Курс в полном виде: пропущенные поля — пустыми, как `#[serde(default)]`. */
 export function normalizeCourse(c) {
   return {
@@ -84,6 +94,7 @@ export function normalizeCourse(c) {
     description: str(c?.description),
     final: list(c?.final).map(normalizeQuestion),
     topics: list(c?.topics).map(normalizeTopic),
+    building: normalizeBuilding(c?.building),
   };
 }
 
@@ -657,6 +668,7 @@ export function createLearning({ courses, store, ai = null, name = "Ноа", clo
       topics,
       topicPass: TOPIC_PASS,
       finalPass: FINAL_PASS,
+      building: c.building,
       mastery: mastery(c),
       focus: focusStats(p.days, p.sessions),
     };

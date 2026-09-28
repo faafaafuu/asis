@@ -51,7 +51,14 @@ async function start() {
 
   let local = read(COURSES, []);
   let account = [];
-  if (user) account = await api("/api/noa/courses").then((r) => r.courses ?? []).catch(() => []);
+  /** Версия курсов в аккаунте: по ней видно, что курс добавили или дописали. */
+  let version = "";
+  const loadAccount = async () => {
+    const data = await api("/api/noa/courses");
+    account = data.courses ?? [];
+    version = data.version ?? "";
+  };
+  if (user) await loadAccount().catch(() => {});
 
   // Прогресс: свой и из аккаунта — берём тот, что сохранён позже.
   const saved = read(PROGRESS, { data: {}, savedAt: 0 });
@@ -109,7 +116,7 @@ async function start() {
       if (problems.length) throw new Error(`Курс не принят:\n- ${problems.join("\n- ")}`);
       if (user) {
         await api("/api/noa/courses", { method: "POST", body: { course: raw } });
-        account = await api("/api/noa/courses").then((r) => r.courses ?? []);
+        await loadAccount();
       } else {
         local = [...local.filter((c) => c.id !== course.id), raw];
         write(COURSES, local);
@@ -127,8 +134,57 @@ async function start() {
       write(COURSES, local);
     },
     /** Перечитать курсы аккаунта: нейросеть могла собрать новый. */
+    /**
+     * Перечитать курсы аккаунта, если они поменялись: нейросеть по MCP или
+     * сборка дописали тему. Отдаёт true, если что-то новое пришло. Сначала
+     * спрашивается только версия — список весит сотни килобайт.
+     */
     async refresh() {
-      if (user) account = await api("/api/noa/courses").then((r) => r.courses ?? []).catch(() => account);
+      if (!user) {
+        // Гость: курсы в этом браузере — их могла дописать сборка в другой вкладке.
+        const now = read(COURSES, []);
+        const mark = (all) => all.map((c) => `${c.id}:${c.topics?.length ?? 0}:${c.building?.done ?? "-"}`).join("|");
+        if (mark(now) === mark(local)) return false;
+        local = now;
+        return true;
+      }
+      try {
+        const { version: now } = await api("/api/noa/courses/version");
+        if (now === version) return false;
+        await loadAccount();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    /** Сборки курсов на сервере — последние пять. */
+    async builds() {
+      if (!user) return [];
+      const data = await api("/api/noa/builds").catch(() => ({ builds: [] }));
+      return data.builds ?? [];
+    },
+    /** Собрать курс на сервере через мост. */
+    async startBuild(goal, model) {
+      const { build } = await api("/api/noa/builds", { method: "POST", body: { goal, model } });
+      return build;
+    },
+    async stopBuild(id) {
+      await api(`/api/noa/builds/${encodeURIComponent(id)}/stop`, { method: "POST", body: {} });
+    },
+    /** Методика курса — для сборки в этом браузере. */
+    async courseFormat() {
+      const { text } = await api("/api/noa/course-format");
+      return text ?? "";
+    },
+    /** Сохранить недособранный курс как есть — для сборки в этом браузере. */
+    async saveBuilding(raw) {
+      if (user) {
+        await api("/api/noa/courses", { method: "POST", body: { course: raw } });
+        await loadAccount();
+      } else {
+        local = [...local.filter((c) => c.id !== raw.id), raw];
+        write(COURSES, local);
+      }
     },
   };
 }

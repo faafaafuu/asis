@@ -9,6 +9,7 @@ import { openNoa } from "./noa-store.js";
 import { mountDictionary } from "./web-api.js";
 import { speak as sayAloud, stopSpeaking, canListen } from "./voice.js";
 import { startTalk, orbIcon } from "./talk.js";
+import { buildCourse, Stopped } from "./course-builder.js";
 
 const ui = {};
 for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] = node;
@@ -409,7 +410,7 @@ async function paintCourses() {
   ui.loginHint.hidden = Boolean(noa.user);
   const cards = noa.learning.overview();
   if (!cards.length) {
-    ui.courses.replaceChildren(el("p", "empty", "Курсов пока нет. Добавьте файл курса или попросите свою нейросеть собрать курс — как, написано ниже."));
+    ui.courses.replaceChildren(el("p", "empty", "Курсов пока нет. Нажмите «Собрать курс» — напишите, о чём он, и Ноа соберёт его сама."));
     return;
   }
   ui.courses.replaceChildren(
@@ -424,7 +425,9 @@ async function paintCourses() {
       fill.style.width = `${course.percent}%`;
       bar.append(fill);
       const due = course.mastery.due ? ` · повторить: ${course.mastery.due}` : "";
-      const meta = el("p", "course__meta", `Тем: ${course.topics.length}${due}`);
+      const growing = course.building ? ` · собирается: готово ${course.building.done} из ${course.building.total}` : "";
+      const meta = el("p", "course__meta", `Тем: ${course.topics.length}${due}${growing}`);
+      if (course.building) item.classList.add("course--building");
       const actions = el("div", "row");
       const open = el("a", "btn btn--primary", course.percent ? "Продолжить" : "Начать");
       open.href = title.href;
@@ -457,4 +460,189 @@ ui.courseFile.addEventListener("change", async () => {
   }
 });
 
+/* ── Сборка курса ─────────────────────────────────────────────────────────
+   С мостом курс собирается на сервере: можно закрыть страницу, вернуться —
+   сборка идёт. Без моста — моделью человека прямо в этой вкладке, и её
+   нельзя закрывать. В обоих случаях курс появляется после первой темы, а
+   остальные дорастают на глазах: список сверяется с аккаунтом сам. */
+
+/** Сборки на сервере (последние) и сборка в этой вкладке. */
+let serverBuilds = [];
+let localBuild = null;
+let bridgeOk = null;
+
+async function canBuildOnServer() {
+  const noa = await openNoa();
+  if (!noa.user) return false;
+  bridgeOk ??= await bridgeAvailable();
+  return bridgeOk;
+}
+
+/** Движок моста для сборки: выбранный, если выбран мост, иначе Claude. */
+function bridgeModel() {
+  const model = loadModel();
+  return model?.kind === "bridge" && model.model ? model.model.replace(/:free$/, "") : "claude-code-bridge";
+}
+
+function buildCard({ title, message, status, done, total, courseId, onStop }) {
+  const card = el("article", `build build--${status}`);
+  const head = el("div", "build__head");
+  head.append(el("strong", "build__title", title || "Новый курс"), el("span", "build__status", STATUS[status] ?? status));
+  card.append(head);
+  if (total) {
+    const bar = el("div", "bar-line");
+    const fill = el("span");
+    fill.style.width = `${Math.round((done / total) * 100)}%`;
+    bar.append(fill);
+    card.append(bar);
+  }
+  card.append(el("p", "build__message", message || ""));
+  const actions = el("div", "row");
+  if (status === "running" && onStop) {
+    const stop = el("button", "btn btn--quiet", "Остановить");
+    stop.addEventListener("click", onStop);
+    actions.append(stop);
+  }
+  if (courseId && done > 0) {
+    const open = el("a", "btn", status === "running" ? "Учиться по готовым темам" : "Открыть курс");
+    open.href = `./learning.html?course=${encodeURIComponent(courseId)}`;
+    actions.append(open);
+  }
+  if (actions.childNodes.length) card.append(actions);
+  return card;
+}
+
+const STATUS = { running: "собирается", done: "готово", failed: "не вышло", stopped: "остановлена" };
+
+function paintBuilds() {
+  const fresh = Date.now() - 60 * 60 * 1000;
+  const shown = serverBuilds.filter((b) => b.status === "running" || Date.parse(`${String(b.updated).replace(" ", "T")}Z`) > fresh).slice(0, 2);
+  const cards = shown.map((b) =>
+    buildCard({
+      ...b,
+      onStop: async () => {
+        const noa = await openNoa();
+        await noa.stopBuild(b.id).catch((err) => note(ui.courseNote, err.message, "error"));
+        tick();
+      },
+    }),
+  );
+  if (localBuild) {
+    cards.unshift(
+      buildCard({
+        ...localBuild.state,
+        onStop: () => {
+          localBuild.stop = true;
+        },
+      }),
+    );
+  }
+  ui.builds.replaceChildren(...cards);
+}
+
+async function runLocalBuild(goal) {
+  const model = loadModel();
+  if (!model) throw new Error("Сначала подключите модель — в разделе «Модель».");
+  const noa = await openNoa();
+  const format = await noa.courseFormat();
+  const control = { stop: false, state: { status: "running", message: "Составляю план курса", done: 0, total: 0, title: "", courseId: "" } };
+  localBuild = control;
+  paintBuilds();
+  buildCourse({
+    goal,
+    format,
+    chat: (messages, opts) => chat(model, messages, { maxTokens: opts?.maxTokens ?? 4000, json: opts?.json, timeoutMs: opts?.long ? 600_000 : 120_000 }),
+    save: async (course) => {
+      await noa.saveBuilding(course);
+      paintCourses();
+    },
+    progress: (p) => {
+      Object.assign(control.state, { message: p.message, done: p.done, total: p.total, title: p.title ?? control.state.title, courseId: p.courseId ?? control.state.courseId });
+      paintBuilds();
+    },
+    stopped: () => control.stop,
+    taken: new Set(noa.courses().map((c) => c.id)),
+  })
+    .then(() => (control.state.status = "done"))
+    .catch((err) => {
+      control.state.status = err instanceof Stopped ? "stopped" : "failed";
+      control.state.message = err instanceof Stopped ? "Сборка остановлена — готовые темы остались." : err.message;
+    })
+    .finally(() => {
+      paintBuilds();
+      paintCourses();
+    });
+}
+
+// Сборка в этой вкладке — закрыть её значит прервать сборку.
+window.addEventListener("beforeunload", (event) => {
+  if (localBuild?.state.status === "running") {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+
+ui.buildOpen.addEventListener("click", async () => {
+  ui.buildForm.hidden = false;
+  ui.courseActions.hidden = true;
+  ui.buildHint.textContent = (await canBuildOnServer())
+    ? "Соберу через мост на сервере: обычно 3–5 минут на тему. Страницу можно закрыть — курс появится после первой темы, остальные дорастут сами."
+    : loadModel()
+      ? "Соберу моделью, подключённой в этом браузере: не закрывайте вкладку, пока идёт сборка. Курс появится после первой темы."
+      : "Сначала подключите модель — в разделе «Модель».";
+  ui.buildGoal.focus();
+});
+
+ui.buildCancel.addEventListener("click", () => {
+  ui.buildForm.hidden = true;
+  ui.courseActions.hidden = false;
+});
+
+ui.buildForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const goal = ui.buildGoal.value.trim();
+  if (goal.length < 10) return note(ui.courseNote, "Опишите курс подробнее: о чём он и для чего — хотя бы одним предложением.", "error");
+  note(ui.courseNote, "");
+  try {
+    if (await canBuildOnServer()) {
+      const noa = await openNoa();
+      await noa.startBuild(goal, bridgeModel());
+    } else {
+      if (localBuild?.state.status === "running") throw new Error("Уже собирается курс — дождитесь его или остановите.");
+      await runLocalBuild(goal);
+    }
+    ui.buildGoal.value = "";
+    ui.buildForm.hidden = true;
+    ui.courseActions.hidden = false;
+    tick();
+  } catch (err) {
+    note(ui.courseNote, err.message, "error");
+  }
+});
+
+/* ── Живой список курсов ─────────────────────────────────────────────────
+   Курс дописывает сборка или нейросеть по MCP — страница сверяется с
+   аккаунтом сама: часто, пока идёт сборка, и раз в полминуты в остальное
+   время. Сверка — по версии курсов, весь список качается, только когда
+   она сменилась. */
+
+let tickTimer = 0;
+
+async function tick() {
+  clearTimeout(tickTimer);
+  const noa = await openNoa().catch(() => null);
+  if (!noa?.user) return;
+  const [builds, changed] = await Promise.all([noa.builds(), noa.refresh()]);
+  serverBuilds = builds;
+  paintBuilds();
+  if (changed) paintCourses();
+  const active = builds.some((b) => b.status === "running");
+  if (document.visibilityState === "visible") tickTimer = setTimeout(tick, active ? 4000 : 30_000);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") tick();
+});
+
 paintCourses();
+tick();
