@@ -530,8 +530,25 @@ function issueMcpKey(userId) {
 
 route("GET", /^\/api\/my\/mcp$/, ({ user }) => {
   if (!user) throw new Fail(401, "Войдите.");
-  const row = db.prepare("SELECT key FROM mcp_links WHERE user_id = ?").get(user.id);
-  return { key: row?.key ?? issueMcpKey(user.id) };
+  const row = db.prepare("SELECT key, token_id FROM mcp_links WHERE user_id = ?").get(user.id);
+  const key = row?.key ?? issueMcpKey(user.id);
+  // Заходила ли нейросеть: по ссылке с ключом и по входу (OAuth). Без этого
+  // коннектор со старой ссылкой молча получал отказ, и никто не видел.
+  const linkUsed = row ? db.prepare("SELECT used FROM tokens WHERE id = ?").get(row.token_id)?.used ?? null : null;
+  let clients = [];
+  try {
+    clients = db
+      .prepare(
+        `SELECT COALESCE(c.name, 'нейросеть') AS name, MAX(t.used) AS used FROM mcp_refresh r
+         LEFT JOIN mcp_clients c ON c.id = r.client_id
+         LEFT JOIN tokens t ON t.id = r.token_id
+         WHERE r.user_id = ? GROUP BY r.client_id ORDER BY used DESC`,
+      )
+      .all(user.id);
+  } catch {
+    clients = [];
+  }
+  return { key, linkUsed, clients };
 });
 
 route("POST", /^\/api\/my\/mcp\/rotate$/, ({ user }) => {

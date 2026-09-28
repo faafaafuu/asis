@@ -1,9 +1,9 @@
 // Страницы кабинета: вход, аккаунт, кабинет автора, подключение ИИ, студия.
 // Грузятся, только когда их открыли, — главной они не нужны.
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=53";
-import { DOCS } from "./i18n.js?v=53";
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=53";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=54";
+import { DOCS } from "./i18n.js?v=54";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=54";
 
 export function renderStudio(page) {
   const tr = t();
@@ -459,7 +459,13 @@ export async function renderConnect(page) {
       ),
     );
   } else {
-    const [{ key }, device] = await Promise.all([api("/api/my/mcp"), api("/api/my/device")]);
+    const [{ key, linkUsed, clients = [] }, device] = await Promise.all([api("/api/my/mcp"), api("/api/my/device")]);
+    // Подключена ли нейросеть на самом деле — по отметкам её заходов.
+    const seen = [
+      ...clients.filter((c) => c.used).map((c) => tr.connClientSeen(c.name, when(c.used))),
+      ...(linkUsed ? [tr.connLinkSeen(when(linkUsed))] : []),
+    ];
+    const aiStatus = h("p", { class: `conn-status ${seen.length ? "conn-status--ok" : "conn-status--none"}` }, seen.length ? seen.join(" · ") : tr.connAiNever);
     // Ссылка одна на аккаунт и видна всегда: вставили её в нейросеть однажды —
     // и больше не трогаете. Меняется только по кнопке, прежняя тогда перестаёт работать.
     const result = h("div", { class: "step__body" });
@@ -489,6 +495,7 @@ export async function renderConnect(page) {
       const plain = `${SITE}/mcp`;
       const copyPlain = h("button", { type: "button", class: "btn btn--small", onclick: () => copy(plain, copyPlain, tr.connCopy) }, tr.connCopy);
       result.replaceChildren(
+        aiStatus,
         h("div", { class: "secret-once" }, h("code", {}, plain), copyPlain),
         h("p", { class: "hint" }, tr.connPlainHint(state.user.name)),
         h("div", { class: "step__head" }, tr.connKeyLink),

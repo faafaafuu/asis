@@ -2433,3 +2433,21 @@ a.dlmenu__item:focus-visible {
     padding: 6px 6px;
   }
 }
+
+/* Подключена ли нейросеть — по отметкам её заходов. */
+.conn-status {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.conn-status--ok {
+  background: #eaf0e6;
+  color: #3f6b30;
+}
+
+.conn-status--none {
+  background: #fbf2dc;
+  color: #6b5413;
+}
