@@ -1,9 +1,9 @@
 // NOAH — площадка модулей. Одна страница, маршруты в адресе после «#».
 
-import { renderHome, stopHome } from "./home.js?v=46";
+import { renderHome, stopHome } from "./home.js?v=47";
 
-import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=46";
-import { DOCS } from "./i18n.js?v=46";
+import { RELEASES, SITE, REPO, STANDARD_DOC } from "./links.js?v=47";
+import { DOCS } from "./i18n.js?v=47";
 
 // Шрифты — после первой отрисовки, чтобы не держать страницу (см. index.html).
 {
@@ -17,10 +17,10 @@ import { DOCS } from "./i18n.js?v=46";
 }
 
 
-import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=46";
+import { $, ACCENTS, CATEGORY_ICON, EXAMPLE_MANIFEST, ICONS, NAV_ICON, api, codeBlock, copy, h, highlight, hooks, icon, iconFor, number, pageHead, paletteFor, pickLang, state, t, tile, toast, when } from "./core.js?v=47";
 
 /** Страницы кабинета — отдельным файлом, по требованию. */
-const account = () => import("./account.js?v=46");
+const account = () => import("./account.js?v=47");
 
 // Страницам кабинета нужны route и renderChrome — функции объявлены ниже,
 // но доступны с начала модуля.
@@ -297,7 +297,8 @@ function resumeAfterLogin() {
   const query = new URLSearchParams(location.hash.split("?")[1] ?? "");
   const next = query.get("next");
   try {
-    if (next && next.startsWith("/oauth/authorize?")) sessionStorage.setItem("noah_next", next);
+    // Вернуть можно только на свои страницы: вход нейросети и Ноа онлайн.
+    if (next && (next.startsWith("/oauth/authorize?") || next === "/app/")) sessionStorage.setItem("noah_next", next);
     const saved = sessionStorage.getItem("noah_next");
     if (saved && state.user) {
       sessionStorage.removeItem("noah_next");
@@ -351,7 +352,7 @@ async function route() {
     else if (name === "standard") renderStandard(page);
     // Документация грузится, только когда её открыли: главной она не нужна.
     else if (name === "docs") {
-      const { renderDocs } = await import("./docs.js?v=46");
+      const { renderDocs } = await import("./docs.js?v=47");
       await renderDocs(page, arg, { h, lang: state.lang });
     }
     else if (name === "login" || name === "signup") {
