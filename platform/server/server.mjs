@@ -18,10 +18,16 @@ import { CATEGORIES, FORMAT, lint, validId } from "./standard.mjs";
 import { mountRemote } from "./remote.mjs";
 import { mountOAuth } from "./oauth.mjs";
 import { mountMcpAuth } from "./mcpauth.mjs";
+import { mountNoa } from "./noa.mjs";
 
 const scrypt = promisify(scryptCb);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB = normalize(join(HERE, "..", "web"));
+// Ноа в браузере — те же окна, что в программе: они лежат в src/ репозитория
+// и раздаются по адресу /app/.
+const APP = normalize(join(HERE, "..", "..", "src"));
+/** Что из src/ можно отдавать: страницы Ноа онлайн, их скрипты, стили, шрифты. */
+const APP_FILES = /^\/(app\.html|learning\.html|(js|styles|assets)\/[\w./-]+)$/;
 const PORT = Number(process.env.NOAH_PORT ?? 8795);
 const HOST = process.env.NOAH_HOST ?? "0.0.0.0";
 const DATA = process.env.NOAH_DATA ?? join(HERE, "..", "data");
@@ -197,6 +203,15 @@ function throttled(ip) {
 }
 
 /* ── Ответы ─────────────────────────────────────────────────────────────── */
+
+/**
+ * Для Ноа онлайн: модель человек подключает сам, и страница ходит к ней
+ * напрямую — к любому провайдеру по HTTPS или к Ollama на своём компьютере.
+ * Всё остальное — как у сайта.
+ */
+const APP_CSP =
+  "default-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; " +
+  "connect-src 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
@@ -555,6 +570,9 @@ const TYPES = {
   ".ico": "image/x-icon",
   ".json": "application/json; charset=utf-8",
   ".webmanifest": "application/manifest+json; charset=utf-8",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+  ".ttf": "font/ttf",
 };
 
 async function serveStatic(req, res, pathname, versioned) {
@@ -564,13 +582,29 @@ async function serveStatic(req, res, pathname, versioned) {
   } catch {
     return false;
   }
-  let file = normalize(join(WEB, decoded));
-  // Именно папка сайта с разделителем: иначе соседняя «web-old» прошла бы проверку.
-  if (file !== WEB && !file.startsWith(WEB + sep)) return false;
-  try {
-    if ((await stat(file)).isDirectory()) file = join(file, "index.html");
-  } catch {
-    file = join(WEB, "index.html");
+  let headers = SECURITY_HEADERS;
+  let file;
+  if (decoded === "/app" || decoded.startsWith("/app/")) {
+    // Ноа онлайн: только перечисленное, без подстановки главной сайта.
+    const inner = decoded === "/app" || decoded === "/app/" ? "/app.html" : decoded.slice(4);
+    if (!APP_FILES.test(inner) || inner.includes("..")) return false;
+    headers = { ...SECURITY_HEADERS, "Content-Security-Policy": APP_CSP };
+    file = normalize(join(APP, inner));
+    if (!file.startsWith(APP + sep)) return false;
+    try {
+      if (!(await stat(file)).isFile()) return false;
+    } catch {
+      return false;
+    }
+  } else {
+    file = normalize(join(WEB, decoded));
+    // Именно папка сайта с разделителем: иначе соседняя «web-old» прошла бы проверку.
+    if (file !== WEB && !file.startsWith(WEB + sep)) return false;
+    try {
+      if ((await stat(file)).isDirectory()) file = join(file, "index.html");
+    } catch {
+      file = join(WEB, "index.html");
+    }
   }
   try {
     const type = TYPES[extname(file)] ?? "application/octet-stream";
@@ -578,7 +612,7 @@ async function serveStatic(req, res, pathname, versioned) {
     const key = `${file}:${(await stat(file)).mtimeMs}`;
     const out = /^(text|application\/(json|manifest)|image\/svg)/.test(type) ? packed(req, raw, key) : { body: raw, headers: {} };
     res.writeHead(200, {
-      ...SECURITY_HEADERS,
+      ...headers,
       "Content-Type": type,
       "Content-Length": out.body.length,
       // Файлы с версией в адресе (?v=) не меняются — их браузер берёт из кэша.
@@ -661,6 +695,7 @@ route("GET", /^\/api\/downloads$/, async () => {
 const oauthHandler = mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies });
 const PUBLIC_URL = (process.env.NOAH_PUBLIC_URL ?? `http://127.0.0.1:${PORT}`).replace(/\/$/, "");
 const mcpAuthHandler = mountMcpAuth({ db, publicUrl: PUBLIC_URL, sessionUser });
+mountNoa({ route, db, Fail, readJson });
 const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY, publicUrl: PUBLIC_URL });
 
 const server = http.createServer(async (req, res) => {

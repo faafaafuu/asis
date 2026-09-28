@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ru" data-theme="noah">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/assets/noah-mark.svg" type="image/svg+xml" />
+    <title>Ноа онлайн — NOAH</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/app.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <a class="bar__brand" href="/">NOAH</a>
+      <span class="bar__title">Ноа онлайн</span>
+      <nav class="bar__nav">
+        <a href="/#/docs">Справка</a>
+        <a href="/#/library">Модули</a>
+        <a class="bar__me" data-el="me" href="/#/login?next=%2Fapp%2F">Войти</a>
+      </nav>
+    </header>
+
+    <main class="page">
+      <section class="plate chat" aria-label="Разговор с Ноа">
+        <div class="plate__head">
+          <h1 class="plate__title">Разговор</h1>
+          <label class="toggle"><input type="checkbox" data-el="speakAnswers" /> Читать ответы вслух</label>
+        </div>
+        <div class="chat__log" data-el="log" aria-live="polite"></div>
+        <form class="chat__form" data-el="form">
+          <textarea data-el="input" rows="2" placeholder="Спросите Ноа о чём угодно. Enter — отправить, Shift+Enter — новая строка."></textarea>
+          <div class="chat__actions">
+            <button class="btn btn--primary" type="submit" data-el="send">Отправить</button>
+            <button class="btn" type="button" data-el="mic" title="Сказать голосом">🎙 Голосом</button>
+            <button class="btn btn--quiet" type="button" data-el="clear">Новый разговор</button>
+          </div>
+        </form>
+        <p class="hint">Непонятное слово в ответе или уроке — выделите его с зажатым <kbd>Ctrl</kbd>, и Ноа объяснит. На телефоне — выделите и нажмите «Объяснить».</p>
+      </section>
+
+      <aside class="side">
+        <section class="plate" aria-label="Модель">
+          <div class="plate__head">
+            <h2 class="plate__title">Модель</h2>
+            <span class="status" data-el="modelStatus">не подключена</span>
+          </div>
+          <form class="model" data-el="modelForm">
+            <label class="field">
+              <span class="field__label">Откуда</span>
+              <select data-el="provider"></select>
+            </label>
+            <label class="field" data-el="baseField">
+              <span class="field__label">Адрес</span>
+              <input data-el="base" type="url" placeholder="https://api.example.com/v1" spellcheck="false" />
+            </label>
+            <label class="field" data-el="keyField">
+              <span class="field__label">Ключ</span>
+              <input data-el="key" type="password" autocomplete="off" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span class="field__label">Модель</span>
+              <input data-el="model" list="models" spellcheck="false" placeholder="начните вводить или выберите" />
+              <datalist id="models" data-el="models"></datalist>
+            </label>
+            <p class="hint" data-el="providerHint"></p>
+            <div class="row">
+              <button class="btn btn--primary" type="submit">Сохранить и проверить</button>
+              <button class="btn btn--quiet" type="button" data-el="forget">Забыть</button>
+            </div>
+            <p class="note" data-el="modelNote" hidden></p>
+          </form>
+        </section>
+
+        <section class="plate" aria-label="Обучение">
+          <div class="plate__head">
+            <h2 class="plate__title">Обучение</h2>
+          </div>
+          <div class="courses" data-el="courses"></div>
+          <div class="row">
+            <button class="btn" type="button" data-el="addCourse">Добавить курс из файла</button>
+            <input data-el="courseFile" type="file" accept=".json,application/json" hidden />
+          </div>
+          <p class="note" data-el="courseNote" hidden></p>
+          <details class="more">
+            <summary>Откуда берутся курсы</summary>
+            <p>Курс собирает ваша нейросеть. Подключите к ней адрес <code>https://noahlab.ru/mcp</code> и попросите: «собери курс по сетям для собеседования». Если вы вошли на сайт, курс появится здесь сам. Готовый файл курса <code>.json</code> можно добавить кнопкой выше.</p>
+          </details>
+          <p class="hint" data-el="loginHint" hidden>Войдите на сайт — тогда курсы из нейросети и прогресс будут и здесь, и на других устройствах.</p>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="./js/web/app.js"></script>
+  </body>
+</html>

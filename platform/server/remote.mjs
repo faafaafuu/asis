@@ -12,6 +12,7 @@
 // Курс забирается кусками по несколько килобайт: с части каналов длинный
 // TCP-ответ до зарубежного сервера обрывается на первых десятках килобайт.
 
+import { saveCourse, saveTopic } from "./noa.mjs";
 import { randomUUID } from "node:crypto";
 import { authChallenge } from "./mcpauth.mjs";
 import { existsSync, readFileSync } from "node:fs";
@@ -51,14 +52,16 @@ const REMOTE_NOTES = `
 const COURSE_NOTES = `
 ## Если ты подключён к NOAH по ссылке
 
-- \`create_course\` отправляет курс на компьютер пользователя: NOAH проверяет его и
-  показывает в окне «Обучение». Ответ — отчёт проверки: ошибки исправь и отправь курс
+- \`create_course\` сохраняет курс в аккаунт пользователя — он сразу открывается в Ноа
+  онлайн (noahlab.ru/app), — и отправляет его на компьютер, в окно «Обучение» NOAH.
+  Ответ — отчёт проверки: ошибки исправь и отправь курс
   снова, «Что улучшить» — доработай, если пользователь не против.
 - Большой курс удобнее собирать по частям: \`create_course\` с первыми темами, затем
   \`add_topic\` на каждую следующую. Тема с тем же id заменяется.
 - \`list_courses\` — какие курсы уже есть у пользователя, \`course_status\` — последний
   отчёт, если ответ не успел прийти.
-- NOAH не на связи — курс сохранится и будет проверен, когда NOAH появится.
+- NOAH на компьютере не на связи — в Ноа онлайн курс уже есть, а на компьютер попадёт,
+  когда NOAH появится.
 `;
 
 function courseFormatText() {
@@ -82,8 +85,8 @@ const INSTRUCTIONS =
   "в отчёте ошибки — исправь и отправь снова. Не говори, что модуль готов, до успешного отчёта. " +
   "Прошедший модуль можно опубликовать в библиотеке (publish_module) — с согласия пользователя. " +
   "Ещё здесь собирают курсы обучения по любой теме: course_format — прочитай формат и методику " +
-  "целиком, затем create_course (и add_topic для следующих тем); NOAH проверит курс и покажет его " +
-  "в окне «Обучение». Не говори, что курс готов, до успешного отчёта.";
+  "целиком, затем create_course (и add_topic для следующих тем); курс появится в Ноа онлайн " +
+  "(noahlab.ru/app) и в окне «Обучение» NOAH. Не говори, что курс готов, до успешного отчёта.";
 
 const TOOLS = [
   { name: "module_format", description: "Регламент модуля NOAH с примерами. Вызови перед create_module.", inputSchema: { type: "object", properties: {} } },
@@ -113,7 +116,7 @@ const TOOLS = [
   { name: "course_format", description: "Формат и методика курса обучения NOAH с примерами. Вызови перед create_course.", inputSchema: { type: "object", properties: {} } },
   {
     name: "create_course",
-    description: "Создать или заменить курс обучения на компьютере пользователя. NOAH проверит его и покажет в окне «Обучение». Ответ — отчёт проверки.",
+    description: "Создать или заменить курс обучения пользователя: он появится в Ноа онлайн (noahlab.ru/app) и в окне «Обучение» NOAH на компьютере. Ответ — отчёт проверки.",
     inputSchema: { type: "object", properties: { course: { type: "object", description: "Курс в формате из course_format" } }, required: ["course"] },
   },
   {
@@ -332,6 +335,10 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
     }
     return `NOAH ещё принимает курс «${courseId}». Вызови course_status("${courseId}") через минуту.`;
   };
+  /** Итог для нейросети: что с курсом в Ноа онлайн и что с программой. */
+  const withWeb = (web, desktop) => (web ? `${web}
+
+Программа NOAH на компьютере: ${desktop}` : desktop);
   const courseId = (value) => {
     const id = String(value ?? "").trim();
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) throw new Error("id курса — латиница, цифры, дефис или подчёркивание.");
@@ -343,18 +350,24 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
 
     course_format: () => courseFormatText(),
 
-    create_course: (user, args) => {
+    // Курс сразу ложится в аккаунт — его открывает Ноа онлайн (noahlab.ru/app),
+    // — и уходит в очередь программы на компьютере. Проверка одна и та же,
+    // поэтому непринятый здесь курс не принят бы и программой.
+    create_course: async (user, args) => {
       const course = args.course;
       if (!course || typeof course !== "object" || Array.isArray(course)) throw new Error("course — объект курса по course_format.");
       if (!Array.isArray(course.topics) || !course.topics.length) throw new Error("В курсе нет тем (topics). Сначала прочитай course_format.");
-      return courseJob(user, courseId(course.id), "course", course);
+      const id = courseId(course.id);
+      const web = saveCourse(db, user.id, course);
+      return withWeb(web, await courseJob(user, id, "course", course));
     },
 
-    add_topic: (user, args) => {
+    add_topic: async (user, args) => {
       const topic = args.topic;
       if (!topic || typeof topic !== "object" || Array.isArray(topic)) throw new Error("topic — объект темы по course_format.");
       const id = courseId(args.course);
-      return courseJob(user, id, "topic", { course: id, topic });
+      const web = saveTopic(db, user.id, id, topic);
+      return withWeb(web, await courseJob(user, id, "topic", { course: id, topic }));
     },
 
     list_courses: (user) => {

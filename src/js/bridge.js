@@ -2,14 +2,42 @@
 // глобального объекта (`withGlobalTauri: true` в tauri.conf.json), а не из npm-пакета:
 // одна зависимость меньше, и окно попапа грузится без единого сетевого запроса.
 
-/** @returns {{invoke: Function, listen: Function} | null} null — значит мы в обычном браузере. */
+/**
+ * @returns {{invoke: Function, listen: Function} | null} null — обычный браузер
+ * без Ноа: демо-страница или окно, открытое файлом.
+ */
 export function tauri() {
   const api = globalThis.__TAURI__;
-  if (!api?.core?.invoke) return null;
-  return {
-    invoke: (cmd, args) => api.core.invoke(cmd, args),
-    listen: (event, handler) => api.event.listen(event, handler),
+  if (api?.core?.invoke) {
+    return {
+      invoke: (cmd, args) => api.core.invoke(cmd, args),
+      listen: (event, handler) => api.event.listen(event, handler),
+    };
+  }
+  return isWebNoa() ? webNoa() : null;
+}
+
+/**
+ * Ноа на сайте: те же окна лежат по адресу /app/, а команды выполняет
+ * браузер (web/web-api.js) вместо Rust.
+ */
+export function isWebNoa() {
+  return /\/app(\/|$)/.test(globalThis.location?.pathname ?? "");
+}
+
+let web = null;
+
+/** Команды в браузере. Модуль грузится при первом обращении, а вид — сразу. */
+function webNoa() {
+  if (web) return web;
+  document.documentElement.classList.add("is-web");
+  const loaded = import("./web/web-api.js");
+  loaded.then((module) => module.mountDictionary()).catch(() => {});
+  web = {
+    invoke: (cmd, args) => loaded.then((module) => module.webApi.invoke(cmd, args)),
+    listen: (event, handler) => loaded.then((module) => module.webApi.listen(event, handler)),
   };
+  return web;
 }
 
 /**

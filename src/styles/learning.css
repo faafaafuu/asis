@@ -1056,3 +1056,9 @@ button {
 .talk__actions {
   margin-top: 8px;
 }
+
+/* Ноа в браузере: окно — вкладка, сворачивать нечего. Закрыть — вернуться
+   на главную Ноа онлайн. */
+.is-web [data-el="minimize"] {
+  display: none;
+}

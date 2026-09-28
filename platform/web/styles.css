@@ -2326,6 +2326,12 @@ body.is-home .foot {
   border-color: var(--chrome-3);
 }
 
+/* Ноа онлайн — первая в шапке: это вход в саму Ноа, а не в справку о ней. */
+.top__noa {
+  margin-left: auto;
+  border-color: var(--chrome-3);
+}
+
 /* На телефоне документация — в нижнем меню («Справка»), в шапке ей нет места. */
 @media (max-width: 900px) {
   .top__docs {
