@@ -36,7 +36,7 @@
   </head>
   <body>
     <header class="bar">
-      <a class="bar__brand" href="/">NOAH</a>
+      <a class="bar__brand" href="/"><span class="bar__logo" aria-hidden="true"><img src="./assets/noah-mark.svg" alt="" /></span>NOAH</a>
       <span class="bar__title">Ноа онлайн</span>
       <nav class="bar__nav">
         <a href="/#/docs">Справка</a>
@@ -45,8 +45,8 @@
       </nav>
     </header>
 
-    <main class="page">
-      <section class="plate chat" aria-label="Разговор с Ноа">
+    <main class="page" data-el="page" data-show="chat">
+      <section class="plate chat" data-section="chat" aria-label="Разговор с Ноа">
         <div class="plate__head">
           <h1 class="plate__title">Разговор</h1>
           <label class="toggle"><input type="checkbox" data-el="speakAnswers" /> Читать ответы вслух</label>
@@ -69,7 +69,7 @@
       </section>
 
       <aside class="side">
-        <section class="plate" aria-label="Обучение">
+        <section class="plate" data-section="learning" aria-label="Обучение">
           <div class="plate__head">
             <h2 class="plate__title">Обучение</h2>
           </div>
@@ -106,7 +106,7 @@
           </details>
           <p class="hint" data-el="loginHint" hidden>Войдите на сайт — тогда курсы из нейросети и прогресс будут и здесь, и на других устройствах.</p>
         </section>
-        <section class="plate" aria-label="Модель">
+        <section class="plate" data-section="model" aria-label="Модель">
           <div class="plate__head">
             <h2 class="plate__title">Модель</h2>
             <span class="status" data-el="modelStatus">не подключена</span>
@@ -137,7 +137,7 @@
             <p class="note" data-el="modelNote" hidden></p>
           </form>
         </section>
-        <section class="plate prefs" aria-label="Вид и голос">
+        <section class="plate prefs" data-section="prefs" aria-label="Вид и голос">
           <div class="plate__head">
             <h2 class="plate__title">Вид и голос</h2>
           </div>
@@ -178,6 +178,11 @@
         </section>
       </aside>
     </main>
+
+    <!-- На телефоне — один раздел за раз и навигация внизу (дизайн-система,
+         Ноа онлайн на телефоне). На компьютере разделы стоят рядом, и
+         навигация не нужна. Кнопки собирает app.js. -->
+    <nav class="tabbar" data-el="tabbar" aria-label="Разделы"></nav>
 
     <script type="module" src="./js/web/app.js"></script>
   </body>

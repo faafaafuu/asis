@@ -7,6 +7,7 @@
 import { PROVIDERS, baseError, loadModel, saveModel, listModels, chat, bridgeAvailable } from "./ai-web.js";
 import { openNoa } from "./noa-store.js";
 import { checkUser, remembered, whoIsIn } from "./early.js";
+import { icon, mountIcons } from "../icons.js";
 import { mountDictionary } from "./web-api.js";
 import { speak as sayAloud, stopSpeaking, canListen } from "./voice.js";
 import { startTalk, orbIcon } from "./talk.js";
@@ -14,6 +15,54 @@ import { buildCourse, Stopped } from "./course-builder.js";
 
 const ui = {};
 for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] = node;
+
+/* ── Разделы на телефоне ───────────────────────────────────────────────── */
+
+// На узком экране — один раздел за раз и навигация внизу; на широком все
+// разделы стоят рядом, а навигация скрыта стилями. Выбор запоминается.
+const SECTIONS = [
+  ["chat", "chat", "Разговор"],
+  ["learning", "learn", "Обучение"],
+  ["model", "cpu", "Модель"],
+  ["prefs", "settings", "Вид и голос"],
+];
+mountIcons();
+// На телефоне подсказка в поле — коротко: длинная не помещается в строку.
+if (matchMedia("(max-width: 720px)").matches) ui.input.placeholder = "Спросите Ноа…";
+function showSection(name) {
+  ui.page.dataset.show = name;
+  for (const button of ui.tabbar.children) {
+    if (button.dataset.go === name) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  }
+  try {
+    localStorage.setItem("noa.section", name);
+  } catch {
+    /* не запомнится — не беда */
+  }
+}
+ui.tabbar.replaceChildren(
+  ...SECTIONS.map(([name, glyph, label]) => {
+    const button = el("button", "tabbar__item");
+    button.dataset.go = name;
+    button.append(icon(glyph, 24), el("span", "", label));
+    button.addEventListener("click", () => {
+      showSection(name);
+      scrollTo({ top: 0 });
+    });
+    return button;
+  }),
+);
+showSection(
+  (() => {
+    try {
+      const saved = localStorage.getItem("noa.section");
+      return SECTIONS.some(([name]) => name === saved) ? saved : "chat";
+    } catch {
+      return "chat";
+    }
+  })(),
+);
 
 mountDictionary();
 

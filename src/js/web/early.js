@@ -24,7 +24,8 @@ const write = (key, value) => {
   }
 };
 
-const theme = read("noa.theme");
+// ?theme=dark в адресе — показать страницу в теме, не запоминая её.
+const theme = new URLSearchParams(location.search).get("theme") || read("noa.theme");
 if (theme) document.documentElement.dataset.theme = theme;
 
 /** Кто входил в этом браузере в прошлый раз: `{ id, name }` или `null`. */
