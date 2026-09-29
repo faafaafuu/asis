@@ -106,7 +106,7 @@ pub fn power(action: Power) -> String {
 fn schedule(flag: &str) -> Result<(), String> {
     run_hidden(
         "shutdown",
-        &[flag, "/t", SHUTDOWN_DELAY_SECS, "/c", "Суфлёр: по голосовой команде"],
+        &[flag, "/t", SHUTDOWN_DELAY_SECS, "/c", "NOAH: по голосовой команде"],
     )
     .map(|_| ())
 }

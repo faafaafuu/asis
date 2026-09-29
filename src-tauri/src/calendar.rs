@@ -289,9 +289,9 @@ fn wait_for_code(listener: std::net::TcpListener) -> Result<String, String> {
         let refused = query_value(&target, "error");
 
         let page = if found.is_some() {
-            "Готово. Можно закрыть эту вкладку и вернуться в Суфлёр."
+            "Готово. Можно закрыть эту вкладку и вернуться в NOAH."
         } else {
-            "Доступ не выдан. Вернитесь в Суфлёр и попробуйте ещё раз."
+            "Доступ не выдан. Вернитесь в NOAH и попробуйте ещё раз."
         };
         let _ = write!(
             stream,

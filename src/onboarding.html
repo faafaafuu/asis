@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="ru" data-theme="system">
+<html lang="ru" data-theme="system" data-scale="window">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- Пустая иконка: без неё окно само просит /favicon.ico, файла нет, и в журнал
          каждый раз падает «asset not found» — шум, который мешает читать настоящие ошибки. -->
     <link rel="icon" href="data:," />
-    <title>Суфлёр</title>
+    <title>NOAH — Настройка и проверка</title>
     <link rel="stylesheet" href="./styles/fonts.css" />
     <link rel="stylesheet" href="./styles/tokens.css" />
     <!-- Стили попапа нужны здесь ради телефона: там объяснение показывается
@@ -24,24 +24,15 @@
     </div>
 
     <main class="ob">
-      <!-- Шапка: имя программы и вход в настройки вида. Кнопок окна здесь нет —
-           рамку рисует система, свои были бы вторым комплектом поверх её. -->
-      <header class="ob__bar">
-        <span class="ob__brand" data-i18n="app.name">Суфлёр</span>
-
-        <div class="ob__view">
-          <button class="ob__view-btn" type="button" data-el="viewBtn" aria-expanded="false">
-            <span data-i18n="view.title">Вид</span>
-            <span class="ob__chevron" aria-hidden="true"></span>
-          </button>
-
-          <div class="ob__menu" data-el="viewMenu" hidden>
-            <span class="ob__menu-label" data-i18n="view.theme">Тема</span>
-            <div class="ob__menu-group" data-el="themeList"></div>
-            <span class="ob__menu-label" data-i18n="view.language">Язык</span>
-            <div class="ob__menu-group" data-el="langList"></div>
-          </div>
-        </div>
+      <!-- Заголовок окна: рамку окно рисует само (дизайн-система NOAH). За
+           полосу окно двигают, кнопки — свернуть и закрыть. На телефоне
+           рамки нет вовсе, и полоса скрыта. -->
+      <header class="titlebar" data-el="titlebar">
+        <span class="titlebar__logo" aria-hidden="true"><img src="./assets/noah-mark.svg" alt="" /></span>
+        <span class="titlebar__brand" data-i18n="app.name">NOAH</span>
+        <span class="titlebar__name">Настройка и проверка</span>
+        <button class="titlebar__btn" type="button" data-el="winMin" title="Свернуть" aria-label="Свернуть окно"></button>
+        <button class="titlebar__btn titlebar__btn--close" type="button" data-el="winClose" title="Закрыть" aria-label="Закрыть окно"></button>
       </header>
 
       <!-- Главное: кто такой Ноа и в каком он состоянии. -->
@@ -158,7 +149,7 @@
       </div>
 
       <div class="ob__pane" data-pane="settings" hidden>
-      <section class="ob__block">
+      <section class="ob__block" id="model">
         <h2 class="ob__subtitle" data-i18n="source.title">Мозг Ноа</h2>
         <p class="ob__lead" data-i18n="source.lead">
           Модель, которая понимает команды и отвечает.
@@ -363,7 +354,17 @@
            Это не починка поломки, а то, как программа вообще должна жить:
            включил компьютер — она уже ждёт выделения. На телефоне понятия
            «запуск при входе в систему» нет, поэтому блок скрыт (см. onboarding.js). -->
+      <!-- Вид: тема — образцами, язык — переключателем. Раньше жили в меню
+           «Вид» в шапке, которую заменил заголовок окна. -->
+      <section class="ob__block" id="view">
+        <h2 class="ob__subtitle" data-i18n="view.title">Вид</h2>
+        <div class="swatches" data-el="themeList" role="radiogroup" aria-label="Тема"></div>
+        <span class="ob__label" data-i18n="view.language">Язык</span>
+        <div class="segmented" data-el="langList" role="radiogroup" aria-label="Язык"></div>
+      </section>
+
       <section class="ob__block" data-el="startupBlock">
+        <h2 class="ob__subtitle">Запуск</h2>
         <label class="ob__check">
           <input type="checkbox" data-el="launchAtLogin" />
           <span class="ob__check-text">
@@ -430,9 +431,14 @@
 
       </div>
 
-      <div class="ob__pane" data-pane="help" hidden>
+      <div class="ob__pane" data-pane="help" data-sub="update" hidden>
+      <div class="segmented subtabs" role="tablist" aria-label="Помощь">
+        <button class="segmented__item" type="button" role="tab" data-sub="update" aria-selected="true">Обновление</button>
+        <button class="segmented__item" type="button" role="tab" data-sub="keys" aria-selected="false">Горячие клавиши</button>
+        <button class="segmented__item" type="button" role="tab" data-sub="log" aria-selected="false">Журнал</button>
+      </div>
       <!-- Шпаргалка: чем и как управлять помощником. Имя подставляет onboarding.js. -->
-      <section class="ob__block cheat">
+      <section class="ob__block cheat" data-subpane="keys">
         <h2 class="ob__subtitle">Управление</h2>
         <div class="cheat__grid">
           <div class="cheat__col">
@@ -464,7 +470,7 @@
         <p class="ob__hint cheat__foot" data-keep>Все команды и настройка — в документации: <a href="https://noahlab.ru/#/docs/voice-commands" target="_blank" rel="noopener">noahlab.ru/docs</a>.</p>
       </section>
 
-      <details class="ob__more" data-el="advanced" open>
+      <details class="ob__more" data-el="advanced" data-subpane="log" open>
         <summary class="ob__more-head">
           <span class="ob__chevron ob__chevron--right" aria-hidden="true"></span>
           <span data-i18n="advanced.title">Если что-то не работает</span>
@@ -512,7 +518,7 @@
       <!-- Обновление живёт в «Помощи», а не в настройках: это не то, что
            настраивают, а то, куда заходят изредка — посмотреть, что стоит, и
            поставить новое. Рядом с журналом и шпаргалкой ему самое место. -->
-      <section class="ob__block" data-el="updateBlock">
+      <section class="ob__block" data-el="updateBlock" data-subpane="update">
         <h2 class="ob__subtitle">Обновление</h2>
         <p class="ob__hint" data-keep data-el="updateStatus">Версия …</p>
         <div class="ob__actions">
@@ -523,7 +529,7 @@
 
       <!-- Текст подставляется по системе: на телефоне нет ни трея, ни левого
            Ctrl, и обещать их там — врать. -->
-      <p class="ob__note" data-el="note" data-i18n="note.desktop">
+      <p class="ob__note" data-el="note" data-subpane="log" data-i18n="note.desktop">
         Приложение остаётся в трее. Выделение текста с зажатым левым Ctrl открывает
         объяснение рядом с выделенным словом.
       </p>

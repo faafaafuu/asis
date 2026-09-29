@@ -353,7 +353,7 @@ unsafe fn write_clipboard_text(text: &str) {
 }
 
 /// Заголовок окна ответа Ноа — см. `overlay::ensure_popup_window`.
-const POPUP_TITLE: &str = "Суфлёр";
+use crate::overlay::POPUP_TITLE;
 
 /// Отпустили ли мышь над окном ответа Ноа.
 ///

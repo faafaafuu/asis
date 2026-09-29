@@ -11,7 +11,7 @@ for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] =
 const REFRESH_MS = 10_000;
 let onTop = false;
 
-applyTheme(globalThis.__SUFLER_VIEW__?.theme ?? "neon");
+applyTheme(globalThis.__SUFLER_VIEW__?.theme ?? "system");
 
 /** 1234 → «1.2k», 2 500 000 → «2.5m». */
 function tokens(n) {
@@ -58,7 +58,7 @@ function render(s) {
     `${label} — ${count(tally).toLocaleString("ru-RU")} токенов${s.cloud ? `, ${money(tally.cost)}` : ""}`;
   const lines = [
     `${s.service}: ${s.model || "модель не выбрана"}`,
-    period("всего через Суфлёр", s.total),
+    period("всего через NOAH", s.total),
     period("за месяц", s.month),
     period("сегодня", s.today),
   ];

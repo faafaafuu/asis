@@ -1,36 +1,52 @@
-/* Окно настройки. Свёрстано по `Settings Window.dc.html` из макета.
-   Цвета и шрифты берутся токенами: одна и та же вёрстка обслуживает
-   четыре темы, включая неоновые с другой парой шрифтов и острыми углами.
+/* Главное окно «Настройка и проверка» — дизайн-система NOAH, опорный экран B.
+   Окно рисует свою рамку: заголовок 40 px, вкладки 44 px, разделы с
+   подписями, поля и кнопки 36 px, переключатели 36×20. Все цвета и радиусы —
+   токены темы (tokens.css), поэтому вёрстка одна на шесть тем.
 
-   Правило вертикальных отступов одно: расстояния задаёт gap контейнера.
-   Личных margin у элементов нет — когда их было три вида сразу, они
-   складывались и разъезжались. */
+   Вертикальные расстояния задаёт gap контейнера, личных margin нет. */
 
 html,
 body {
   margin: 0;
   padding: 0;
-  /* Содержимое длиннее окна на невысоких экранах — иначе нижние разделы
-     просто нельзя достать. */
-  overflow-y: auto;
   background: var(--bg-solid);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: var(--size-ui);
-  line-height: var(--line-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
 }
 
-/* Прокручивается страница, а не body: у прокручивающегося body, который сам
-   никогда не прокручивается, прилипающие вкладки не прилипают. */
-body {
-  overflow-y: visible;
+html {
+  overflow-y: auto;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.icon {
+  flex: none;
+  stroke-width: 2.25;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:is(button, a, summary, [role="tab"]):focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--focus-offset);
 }
 
 .ob {
-  padding: 14px 36px 40px;
   display: flex;
   flex-direction: column;
-  gap: 34px;
+  min-height: 100vh;
 }
 
 .ob p,
@@ -39,357 +55,840 @@ body {
   margin: 0;
 }
 
-/* Пустой элемент всё равно участвует в gap и оставляет за собой дыру.
-   Строка состояния пуста почти всегда — она заполняется только после
-   «Сохранить» или «Проверить». */
 .ob p:empty {
   display: none;
 }
 
-[hidden] {
-  display: none !important;
+/* Круг «Ноа» с подзаголовком из старой шапки не нарисован в дизайне:
+   состояние теперь видно по вкладкам и разделам. Разметка остаётся — её
+   заполняет onboarding.js. */
+.ob__hero {
+  display: none;
 }
 
-/* ── Шапка ──────────────────────────────────────────────────────────────── */
+/* ── Заголовок окна ──────────────────────────────────────────────────── */
 
-.ob__bar {
+.titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: var(--titlebar-h);
+  flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  /* Своя строка отступа: шапка липнет к верхнему краю окна, а не участвует
-     в общем ритме разделов. */
-  margin-bottom: -14px;
+  gap: 8px;
+  padding-left: 12px;
+  background: var(--bg-solid);
+  border-bottom: 1px solid var(--divider);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
 }
 
-.ob__brand {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+.titlebar__logo {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  background: var(--logo-tile);
+  border-radius: min(var(--btn-radius), 4px);
+}
+
+.titlebar__logo img {
+  width: 15px;
+  height: 14px;
+  filter: brightness(0) invert(0.95);
+}
+
+.titlebar__brand {
+  font-family: "Exo 2", var(--font-term);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.titlebar__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* ── Блок раздела ───────────────────────────────────────────────────────── */
+.titlebar__btn {
+  width: 44px;
+  height: var(--titlebar-h);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
 
-/* Внутри раздела интервалы плотнее, чем между разделами: подпись, поле и
-   пояснение — одна мысль, а не три. */
+.titlebar__btn:hover {
+  background: var(--btn-hover-bg);
+  color: var(--text);
+}
+
+.titlebar__btn--close:hover {
+  background: var(--error);
+  color: #fff;
+}
+
+/* Края окна — невидимые полоски: окно без рамки тянут за них. */
+.grip {
+  position: fixed;
+  z-index: 40;
+}
+.grip--n,
+.grip--s {
+  left: 8px;
+  right: 8px;
+  height: 5px;
+  cursor: ns-resize;
+}
+.grip--n {
+  top: 0;
+}
+.grip--s {
+  bottom: 0;
+}
+.grip--e,
+.grip--w {
+  top: 8px;
+  bottom: 8px;
+  width: 5px;
+  cursor: ew-resize;
+}
+.grip--e {
+  right: 0;
+}
+.grip--w {
+  left: 0;
+}
+.grip--ne,
+.grip--nw,
+.grip--se,
+.grip--sw {
+  width: 10px;
+  height: 10px;
+}
+.grip--ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+.grip--nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+.grip--se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+.grip--sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+/* ── Вкладки ─────────────────────────────────────────────────────────── */
+
+.ob__tabs {
+  position: sticky;
+  top: var(--titlebar-h);
+  z-index: 10;
+  flex: none;
+  display: flex;
+  gap: 4px;
+  padding: 0 12px;
+  background: var(--bg-solid);
+  border-bottom: 1px solid var(--divider);
+}
+
+.ob__tab {
+  position: relative;
+  height: 44px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+
+.ob__tab:hover {
+  color: var(--text);
+}
+
+.ob__tab[aria-selected="true"] {
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* Есть новое в «Помощи» — жёлтая точка у подписи. */
+.ob__tab--alert::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.ob__pane {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 20px 32px;
+}
+
+/* ── Раздел ──────────────────────────────────────────────────────────── */
+
 .ob__block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--divider);
+}
+
+.ob__pane > .ob__block:last-child,
+.ob__block:has(+ .ob__actions) {
+  border-bottom: 0;
+}
+
+/* Сообщение о доступе — сверху, отдельной плашкой: оно видно, только когда
+   что-то не так, и тогда главное в окне. */
+.ob > .ob__block[data-el="status"] {
+  margin: 12px 20px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--warn-line);
+  background: var(--warn-bg);
+  border-radius: var(--card-radius);
+}
+
+/* Группы полей внутри раздела — тем же шагом, что и сам раздел. */
+[data-el="modelFields"],
+[data-el="voiceFields"],
+[data-el="voiceFields"] > div,
+[data-el="azureFields"],
+[data-el="advancedModel"] {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
+.ob__label + .ob__underline,
+.ob__label + .ob__select {
+  margin-top: -4px;
+}
+
 .ob__title {
-  font-family: var(--font-term);
-  font-style: var(--term-style, italic);
-  font-weight: var(--term-weight);
-  text-transform: var(--term-transform);
-  font-size: 24px;
-  line-height: 1.15;
+  font-size: var(--fs-h3);
+  line-height: var(--lh-h3);
+  font-weight: 600;
   color: var(--text);
 }
 
+/* Подпись раздела: моно, прописные, 0.12em — как «МОДЕЛЬ», «ГОЛОС И СЛУХ». */
 .ob__subtitle {
-  font-family: var(--font-term);
-  font-style: var(--term-style, italic);
-  font-weight: var(--term-weight);
-  text-transform: var(--term-transform);
-  font-size: 20px;
-  line-height: 1.2;
-  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--label);
 }
 
 .ob__lead {
-  font-size: 14px;
-  line-height: 1.6;
-  font-weight: 300;
-  color: var(--text-muted);
-  max-width: 40em;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-body);
 }
 
-.ob__hint {
-  font-size: 12.5px;
-  line-height: 1.6;
-  font-weight: 300;
-  color: var(--text-muted);
-}
-
-/* Пояснение под «?»: заголовок и кнопка в одну строку. */
-.ob__tip-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.ob__tip {
-  flex: none;
-  width: 17px;
-  height: 17px;
-  padding: 0;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  background: none;
-  font: 10.5px/1 var(--font-mono);
-  font-style: normal;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--text-muted);
-  opacity: 0.55;
-  cursor: pointer;
-}
-
-.ob__tip:hover,
-.ob__tip[aria-expanded="true"] {
-  color: var(--accent);
-  opacity: 1;
-}
-
-.ob__tip-body[hidden] {
-  display: none !important;
-}
-
-.ob__note {
-  font-size: 12.5px;
-  line-height: 1.6;
-  font-weight: 300;
+.ob__hint,
+.ob__status {
+  font-size: var(--fs-small);
+  line-height: var(--lh-small);
   color: var(--text-muted);
 }
 
 .ob__label {
-  font-family: var(--font-mono);
-  font-size: var(--size-label);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--label);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-body);
+}
+
+.ob__group {
+  margin-top: 8px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .ob__row {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
-/* ── Поля: подчёркивание вместо рамки ───────────────────────────────────── */
+.ob__note {
+  font-size: var(--fs-small);
+  line-height: var(--lh-small);
+  color: var(--text-muted);
+  padding-top: 12px;
+}
+
+.ob__tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ob__tip {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--divider);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ob__tip[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ── Поля ────────────────────────────────────────────────────────────── */
 
 .ob__underline {
   width: 100%;
-  padding: 4px 2px 11px;
-  border: none;
-  border-bottom: 1px solid var(--input-border);
-  background: transparent;
-  color: var(--text);
+  height: var(--ctl-h);
+  padding: 0 12px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--field-radius);
+  background: var(--input-bg);
+  color: var(--input-color);
   font: inherit;
-  font-size: 15px;
+  font-size: 14px;
   outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out);
 }
 
 .ob__underline::placeholder {
   color: var(--text-muted);
 }
 
-.ob__underline:hover {
-  border-bottom-color: var(--accent-dim);
-}
-
 .ob__underline:focus {
-  border-bottom-color: var(--accent);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }
 
-/* Раскрытый список рисует система, и наши цвета до него не доходят: фон он
-   берёт светлый, а цвет текста наследует от поля. Красим сами, непрозрачным. */
+.ob__underline:disabled {
+  background: var(--disabled-bg);
+  color: var(--disabled-fg);
+  border-color: var(--disabled-border);
+}
+
 .ob__underline option {
-  background-color: var(--bg-solid);
+  background: var(--bg-solid);
   color: var(--text);
 }
 
 .ob__select {
   position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .ob__select select {
   appearance: none;
-  padding-right: 30px;
+  -webkit-appearance: none;
+  padding-right: 36px;
   cursor: pointer;
 }
 
-/* Уголок из двух линий: системную стрелку не подвинуть и не покрасить. */
 .ob__chevron {
-  width: 7px;
-  height: 7px;
-  border-right: 1.5px solid var(--text-muted);
-  border-bottom: 1.5px solid var(--text-muted);
-  transform: rotate(45deg);
-  /* Повёрнутый уголок кажется съехавшим вниз — приподнимаем. */
-  margin-top: -3px;
+  width: 8px;
+  height: 8px;
   flex: none;
+  border-right: 1.75px solid currentColor;
+  border-bottom: 1.75px solid currentColor;
+  transform: rotate(45deg) translate(-2px, -2px);
+  color: var(--text-muted);
 }
 
 .ob__select .ob__chevron {
   position: absolute;
-  right: 6px;
-  top: 50%;
+  right: 16px;
+  bottom: calc(var(--ctl-h) / 2 - 2px);
   pointer-events: none;
 }
 
 .ob__chevron--right {
   transform: rotate(-45deg);
-  margin-top: 0;
-  transition: transform 0.15s ease;
+  transition: transform var(--dur-base) var(--ease-out);
 }
 
-/* ── Кнопки ─────────────────────────────────────────────────────────────── */
+/* Скорость речи — ползунок в цвет темы. */
+.ob__range {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+/* ── Кнопки ──────────────────────────────────────────────────────────── */
 
 .ob__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 20px;
+  gap: 8px;
+  padding-top: 14px;
+}
+
+.ob__block .ob__actions {
+  padding-top: 0;
 }
 
 .ob__btn {
-  font: inherit;
-  font-size: 13.5px;
+  height: var(--ctl-h);
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--btn-border);
+  border-radius: var(--btn-radius);
+  background: var(--btn-bg);
+  color: var(--btn-color);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
-  border: none;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    translate var(--dur-press) var(--ease-out),
+    box-shadow var(--dur-press) var(--ease-out);
 }
 
-/* Главное действие — заливка акцентом, форма таблетки. */
+.ob__btn:hover {
+  background: var(--btn-hover-bg);
+  border-color: var(--btn-hover-border);
+  color: var(--btn-hover-color);
+}
+
+.ob__btn:active {
+  background: var(--btn-press-bg);
+}
+
+.ob__btn:disabled {
+  background: var(--disabled-bg);
+  border-color: var(--disabled-border);
+  color: var(--disabled-fg);
+  box-shadow: none;
+  cursor: default;
+}
+
 .ob__btn--primary {
-  align-self: flex-start;
-  padding: 11px 22px;
-  border-radius: var(--btn-radius, 999px);
   background: var(--btn-primary-bg);
+  border-color: var(--btn-border);
   color: var(--btn-primary-fg);
-  font-weight: 500;
+  box-shadow: var(--btn-shadow);
 }
 
 .ob__btn--primary:hover {
   background: var(--btn-primary-hover);
+  border-color: var(--btn-border);
+  color: var(--btn-primary-fg);
 }
 
-/* Второстепенное — просто текст: рядом с таблеткой вторая рамка спорила бы
-   с ней за внимание. */
-.ob__btn--quiet {
-  padding: 11px 4px;
-  background: none;
-  color: var(--text-muted);
+/* В NOAH главная кнопка при нажатии съезжает в свою тень. */
+.ob__btn--primary:active {
+  background: var(--btn-primary-press);
+  translate: var(--press-shift);
+  box-shadow: none;
 }
 
-.ob__btn--quiet:hover {
-  color: var(--text);
-}
-
-/* Ссылка внутри блока: не действие, а переход к подробностям. */
 .ob__link {
   align-self: flex-start;
   padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--accent-dim);
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
-  white-space: nowrap;
 }
 
 .ob__link:hover {
-  color: var(--accent);
-}
-
-/* ── Меню вида: тема и язык ─────────────────────────────────────────────── */
-
-.ob__view {
-  position: relative;
-}
-
-.ob__view-btn {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 2px;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.ob__view-btn:hover {
   color: var(--text);
 }
 
-.ob__menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  z-index: 20;
-  min-width: 190px;
+/* ── Переключатели: 36×20, всегда круглые ────────────────────────────── */
+
+.ob__check {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px;
-  border-radius: var(--pop-radius);
-  border: 1px solid var(--border);
-  background: var(--bg-solid);
-  box-shadow: var(--shadow);
+  flex-direction: row-reverse;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
 }
 
-.ob__menu-label {
-  font-family: var(--font-mono);
-  font-size: var(--size-label);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--label);
+.ob__check input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  border-radius: 10px;
+  background: var(--track);
+  border: 1px solid var(--input-border);
+  cursor: pointer;
+  transition: background var(--dur-base) var(--ease-out);
 }
 
-.ob__menu-group {
+.ob__check input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition:
+    translate var(--dur-base) var(--ease-out),
+    background var(--dur-base) var(--ease-out);
+}
+
+.ob__check input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.ob__check input:checked::after {
+  translate: 16px 0;
+  background: #fff;
+}
+
+.ob__check input:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--focus-offset);
+}
+
+.ob__check-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-
-/* Разделитель между темой и языком делает пауза, а не линия: список короткий,
-   линия в нём выглядела бы тяжелее самих пунктов. */
-.ob__menu-group + .ob__menu-label {
-  margin-top: 6px;
-}
-
-.ob__menu-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 8px;
-  border: none;
-  border-radius: 6px;
-  background: none;
-  font: inherit;
-  font-size: 13px;
-  color: var(--text-body);
-  cursor: pointer;
-  text-align: left;
-}
-
-.ob__menu-item:hover {
-  background: var(--btn-hover-bg);
+  font-size: 14px;
+  line-height: 20px;
   color: var(--text);
 }
 
-.ob__menu-item[aria-checked="true"] {
+.ob__check-text .ob__hint {
+  font-size: var(--fs-small);
+}
+
+/* ── Вид: образцы тем и сегменты ─────────────────────────────────────── */
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.swatch__tile {
+  height: 36px;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  padding: 5px;
+  background: var(--bg-solid);
+  border: 1px solid var(--border);
+}
+
+.swatch__tile i {
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+}
+
+.swatch__tile i + i {
+  background: var(--label);
+}
+
+.swatch[aria-checked="true"] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.swatch[aria-checked="true"] .swatch__tile {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.segmented {
+  display: flex;
+  border: 1px solid var(--btn-border);
+  border-radius: var(--btn-radius);
+  overflow: hidden;
+}
+
+.segmented__item {
+  flex: 1;
+  height: var(--ctl-h);
+  padding: 0 10px;
+  border: 0;
+  border-right: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--btn-color);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.segmented__item:last-child {
+  border-right: 0;
+}
+
+.segmented__item:hover {
+  background: var(--btn-hover-bg);
+}
+
+.segmented__item[aria-checked="true"],
+.segmented__item[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--bg-solid);
+  font-weight: 600;
+}
+
+/* ── Модули ──────────────────────────────────────────────────────────── */
+
+.ob__pane[data-pane="modules"] {
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.ob__modules {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--divider);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+}
+
+.ob__modules:empty {
+  display: none;
+}
+
+.mod {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 2px;
+  padding: 12px;
+  background: var(--bg-solid);
+  border-bottom: 1px solid var(--divider);
+}
+
+.ob__modules > .mod:last-child {
+  border-bottom: 0;
+}
+
+.mod__head {
+  display: contents;
+}
+
+.mod__icon {
+  grid-row: span 4;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  background: var(--soft);
+  border: 1px solid var(--divider);
+  border-radius: min(var(--card-radius), 8px);
+  font-size: 18px;
+}
+
+.mod__title {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text);
+}
+
+.mod__about,
+.mod__status,
+.mod__voice,
+.mod__hint {
+  grid-column: 2;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--text-muted);
+}
+
+.mod__status {
+  color: var(--ok);
+}
+
+.mod__voice {
+  font-style: italic;
+}
+
+.mod__actions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.mod__actions:empty {
+  display: none;
+}
+
+.ob__btn.mod__btn {
+  height: var(--ctl-h-sm);
+  padding: 0 12px;
+  font-size: 12.5px;
+}
+
+.mod__keys {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+/* «Свой модуль» — пустое состояние: зачем экран и одно действие. */
+.mod--add {
+  border: 1px dashed var(--divider);
+  border-radius: var(--card-radius);
+}
+
+.mod--add .mod__icon {
   color: var(--accent);
 }
 
-/* Точка вместо галочки: тот же маркер, что отмечает выбранную модель. */
-.ob__menu-item[aria-checked="true"]::after {
-  content: "";
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  flex: none;
+.mod-panel {
+  border: 1px solid var(--divider);
+  border-radius: var(--card-radius);
+  padding: 14px;
 }
+
+/* ── Помощь: подвкладки, шпаргалка ───────────────────────────────────── */
+
+.subtabs {
+  margin-top: 16px;
+}
+
+[data-pane="help"]:not([data-sub="update"]) [data-subpane="update"],
+[data-pane="help"]:not([data-sub="keys"]) [data-subpane="keys"],
+[data-pane="help"]:not([data-sub="log"]) [data-subpane="log"] {
+  display: none !important;
+}
+
+.cheat__grid {
+  display: grid;
+  gap: 18px;
+}
+
+.cheat__col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cheat__list {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) 1fr;
+  margin: 0;
+}
+
+.cheat__list dt,
+.cheat__list dd {
+  margin: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--divider);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.cheat__list dt {
+  font-weight: 600;
+  color: var(--text);
+  padding-right: 12px;
+}
+
+.cheat__list dd {
+  color: var(--text-body);
+}
+
+.cheat kbd {
+  display: inline-block;
+  min-width: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--text);
+  border-radius: min(var(--btn-radius), 4px);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 18px;
+  text-align: center;
+  background: var(--bg-solid);
+}
+
+.cheat__foot a {
+  color: var(--accent);
+}
+
+/* ── Перенесено без изменений: части окна, которых нет в дизайне ─────── */
 
 /* ── Список моделей ─────────────────────────────────────────────────────── */
 
@@ -561,31 +1060,6 @@ body {
   color: var(--error-text);
 }
 
-.ob__check {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  cursor: pointer;
-}
-
-.ob__check input {
-  margin-top: 3px;
-  width: 14px;
-  height: 14px;
-  accent-color: var(--accent-dim);
-  cursor: pointer;
-  flex: none;
-}
-
-.ob__check-text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  font-size: 13.5px;
-  line-height: 1.5;
-  font-weight: 300;
-  color: var(--text-body);
-}
 
 /* ── Объяснение поверх настроек (только телефон) ────────────────────────── */
 
@@ -629,322 +1103,6 @@ body {
   color: var(--error-text);
 }
 
-/* ── Главная: Ноа и модули ──────────────────────────────────────────────── */
-
-.ob__hero {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ob__hero-title {
-  font-family: var(--font-term);
-  font-weight: var(--term-weight);
-  text-transform: var(--term-transform);
-  font-size: 38px;
-  line-height: 1;
-  letter-spacing: 0.04em;
-  color: var(--accent);
-}
-
-:root[data-theme="neon"] .ob__hero-title,
-:root[data-theme="synthwave"] .ob__hero-title {
-  text-shadow:
-    0 0 10px color-mix(in srgb, var(--accent) 70%, transparent),
-    0 0 32px color-mix(in srgb, var(--accent-dim) 45%, transparent);
-}
-
-.ob__hero-lead {
-  max-width: 34em;
-  font-size: 13.5px;
-  line-height: 1.55;
-  color: var(--text-muted);
-}
-
-.ob__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ob__chip {
-  padding: 3px 9px;
-  border: 1px solid var(--divider);
-  border-radius: var(--btn-radius, 999px);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.ob__chip--on {
-  color: var(--text-body);
-  border-color: var(--border);
-}
-
-.ob__chip--on::before {
-  content: "● ";
-  color: var(--accent);
-}
-
-.ob__tabs {
-  display: flex;
-  gap: 2px;
-  border-bottom: 1px solid var(--divider);
-  /* Вкладки всегда на виду: длинные настройки прокручиваются под ними. */
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: var(--bg-solid);
-  /* Вкладки и их содержимое — одно целое, общий ритм окна их не разводит. */
-  margin-bottom: -16px;
-}
-
-.ob__tab {
-  padding: 9px 14px 8px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.ob__tab:hover {
-  color: var(--text);
-}
-
-.ob__tab[aria-selected="true"] {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-.ob__tab--alert::after {
-  content: " ●";
-  color: var(--error);
-}
-
-.ob__pane {
-  display: flex;
-  flex-direction: column;
-  gap: 34px;
-}
-
-.ob__pane[data-pane="modules"] {
-  gap: 12px;
-}
-
-.ob__modules {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 12px;
-}
-
-.mod {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px 14px 12px;
-  border: 1px solid var(--divider);
-  border-radius: var(--pop-radius);
-  background: color-mix(in srgb, var(--accent) 4%, transparent);
-  transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
-}
-
-.mod:hover {
-  border-color: var(--border);
-  box-shadow: var(--shadow);
-}
-
-.mod__head {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.mod__icon {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--border);
-  border-radius: var(--menu-radius);
-  font-size: 13px;
-  color: var(--accent);
-}
-
-.mod__title {
-  font-family: var(--font-term);
-  font-weight: var(--term-weight);
-  text-transform: var(--term-transform);
-  font-size: 18px;
-  line-height: 1.1;
-  color: var(--text);
-}
-
-.mod__about {
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--text-muted);
-}
-
-.mod__status {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--label);
-}
-
-.mod__voice {
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text-body);
-  opacity: 0.8;
-}
-
-.mod__keys {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.mod__keys .mod__btn {
-  align-self: flex-start;
-  margin-top: 4px;
-}
-
-.mod__hint {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--text-muted);
-}
-
-.mod__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  margin-top: auto;
-  padding-top: 6px;
-}
-
-.mod__actions:empty {
-  display: none;
-}
-
-.ob__btn.mod__btn {
-  padding: 7px 16px;
-  font-size: 12.5px;
-}
-
-.ob__btn--quiet.mod__btn {
-  padding: 7px 4px;
-}
-
-.mod--add {
-  border-style: dashed;
-  background: none;
-}
-
-.mod--add .mod__icon {
-  border-style: dashed;
-}
-
-
-/* ── Шпаргалка по управлению (вкладка «Помощь») ─────────────────────────── */
-
-.cheat__grid {
-  display: grid;
-  gap: 22px;
-}
-
-.cheat__list {
-  display: grid;
-  grid-template-columns: minmax(0, 42%) minmax(0, 1fr);
-  gap: 8px 14px;
-  margin: 8px 0 0;
-  align-items: baseline;
-}
-
-.cheat__list dt {
-  font-weight: 600;
-}
-
-/* Сочетание клавиш не рвётся на строки: колонка клавиш шириной в самое
-   длинное сочетание, описание — в остальном месте. В узком окне описание
-   уходит под клавиши. */
-.cheat__list--keys {
-  grid-template-columns: max-content minmax(0, 1fr);
-}
-
-.cheat__list--keys dt {
-  white-space: nowrap;
-}
-
-@media (max-width: 520px) {
-  .cheat__list--keys {
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 2px;
-  }
-
-  .cheat__list--keys dd {
-    margin-bottom: 8px;
-  }
-}
-
-.cheat__foot {
-  margin-top: 16px;
-}
-
-.cheat__list dd {
-  margin: 0;
-  opacity: 0.8;
-}
-
-.cheat kbd {
-  display: inline-block;
-  min-width: 1.6em;
-  padding: 1px 6px;
-  border: 1px solid currentColor;
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  font: inherit;
-  font-size: 0.85em;
-  text-align: center;
-  opacity: 0.9;
-}
-
-/* ── Ритм групп ─────────────────────────────────────────────────────────── */
-
-/* Новая группа внутри раздела («Голосовые вопросы» после кнопок голоса)
-   отделена воздухом: иначе её подпись липнет к кнопкам сверху и читается как
-   их часть. То же после строки кнопок, за которой идёт следующее поле. */
-.ob__group,
-.ob__actions + .ob__label,
-.ob__actions + .ob__hint + .ob__label {
-  margin-top: 18px;
-}
-
-/* Низкое окно: шапка ужимается, чтобы вкладки и начало раздела были видны
-   без прокрутки. */
-@media (max-height: 560px) {
-  .ob {
-    gap: 22px;
-  }
-  .ob__hero-title {
-    font-size: 28px;
-  }
-  .ob__hero-lead {
-    display: none;
-  }
-}
 
 /* ── Телефон ────────────────────────────────────────────────────────────── */
 
@@ -1146,4 +1304,14 @@ html.has-keyboard .phone__row {
 
 html.is-phone .ob__pane:not(.phone) {
   padding-bottom: 28px;
+}
+
+/* На телефоне рамки нет: ни заголовка окна, ни краёв для растягивания. */
+html.is-phone .titlebar,
+html.is-phone .grip {
+  display: none;
+}
+
+html.is-phone {
+  --titlebar-h: 0px;
 }

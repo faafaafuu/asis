@@ -75,7 +75,7 @@ pub fn ensure_popup_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         // Тема до первого кадра: попап появляется мгновенно поверх чужого окна,
         // и вспышка чужой темы здесь заметнее, чем где-либо ещё.
         .initialization_script(&theme_script(app))
-        .title("Суфлёр")
+        .title(POPUP_TITLE)
         .inner_size(400.0, 160.0)
         .decorations(false)
         .transparent(true)
@@ -172,7 +172,10 @@ pub const HUD_LABEL: &str = "hud";
 
 /// Заголовок этого окна. По нему хук отличает индикатор от остальных наших
 /// окон: у окна настройки и попапа пробел отбирать нельзя, у индикатора можно.
-pub const HUD_TITLE: &str = "Суфлёр — голос";
+pub const HUD_TITLE: &str = "NOAH — голос";
+
+/// Заголовок окна объяснения. По нему окно узнаёт selection/windows.rs.
+pub const POPUP_TITLE: &str = "NOAH";
 
 /// Состояние, в котором индикатор сейчас находится.
 ///
@@ -902,7 +905,7 @@ pub fn show_tasks(app: &AppHandle) -> tauri::Result<()> {
         WebviewWindowBuilder::new(app, TASKS_LABEL, WebviewUrl::App("tasks.html".into()))
             // Тема — до первого кадра, как и у остальных окон.
             .initialization_script(&theme_script(app))
-            .title("Суфлёр — задачи")
+            .title("NOAH — Задачи")
             .inner_size(400.0, 560.0)
             .min_inner_size(320.0, 320.0)
             .resizable(true)
@@ -960,7 +963,7 @@ pub fn show_order(app: &AppHandle) -> tauri::Result<()> {
     let window =
         WebviewWindowBuilder::new(app, ORDER_LABEL, WebviewUrl::App("order.html".into()))
             .initialization_script(&theme_script(app))
-            .title("Суфлёр — заказ")
+            .title("NOAH — Заказ")
             .inner_size(400.0, 520.0)
             .min_inner_size(320.0, 300.0)
             .resizable(true)
@@ -991,7 +994,7 @@ pub fn show_learning(app: &AppHandle) -> tauri::Result<()> {
     // Посреди экрана и крупнее прочих окон: здесь читают уроки и пишут ответы.
     WebviewWindowBuilder::new(app, LEARN_LABEL, WebviewUrl::App("learning.html".into()))
         .initialization_script(theme_script(app))
-        .title("Суфлёр — обучение")
+        .title("NOAH — Обучение")
         .inner_size(1000.0, 700.0)
         .min_inner_size(720.0, 480.0)
         .resizable(true)
@@ -1028,7 +1031,7 @@ pub fn show_watchlist(app: &AppHandle) -> tauri::Result<()> {
     let window =
         WebviewWindowBuilder::new(app, WATCH_LABEL, WebviewUrl::App("watchlist.html".into()))
             .initialization_script(&theme_script(app))
-            .title("Суфлёр — активы")
+            .title("NOAH — Активы")
             .inner_size(640.0, 460.0)
             .min_inner_size(480.0, 280.0)
             .resizable(true)
@@ -1071,7 +1074,7 @@ pub fn show_module(app: &AppHandle, manifest: &crate::module_kit::Manifest) -> t
         WebviewUrl::App(format!("module.html?id={}", manifest.id).into()),
     )
     .initialization_script(&theme_script(app))
-    .title(format!("Суфлёр — {title}"))
+    .title(format!("NOAH — {title}"))
     .inner_size(width, height)
     .min_inner_size(320.0, 240.0)
     .resizable(true)
@@ -1098,7 +1101,7 @@ pub fn show_usage_widget(app: &AppHandle) -> tauri::Result<()> {
     let widget = app.state::<AppState>().config().widget.clone();
     let window = WebviewWindowBuilder::new(app, USAGE_LABEL, WebviewUrl::App("usage.html".into()))
         .initialization_script(&theme_script(app))
-        .title("Суфлёр — расход")
+        .title("NOAH — Расход")
         .inner_size(USAGE_WIDTH, USAGE_HEIGHT)
         .resizable(false)
         .decorations(false)
@@ -1286,7 +1289,7 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
         return Ok(());
     }
 
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         ONBOARDING_LABEL,
         WebviewUrl::App("onboarding.html".into()),
@@ -1297,14 +1300,19 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
     // запросом к Rust уже после загрузки — и на секунду показывало чужую.
     // Здесь скрипт выполняется в момент создания документа, до первого кадра.
     .initialization_script(&theme_script(app))
-    .title("Суфлёр — настройка и проверка")
+    .title("NOAH — Настройка и проверка")
     .inner_size(560.0, 720.0)
     // Окно выросло: кроме разрешений в нём теперь живая проверка перехвата и выбор
     // источника объяснений. На ноутбуке с невысоким экраном фиксированная высота
     // обрезала бы нижнюю половину, поэтому размер отдан пользователю.
     .resizable(true)
-    .min_inner_size(460.0, 420.0)
-    .build()?;
+    .min_inner_size(460.0, 420.0);
+    // Рамку рисует само окно: заголовок NOAH со своими «Свернуть» и «Закрыть»
+    // (дизайн-система, главное окно). Двигают за заголовок, тянут за края.
+    // На телефоне рамки нет и так, а метода нет вовсе.
+    #[cfg(desktop)]
+    let builder = builder.decorations(false);
+    let window = builder.build()?;
 
     window.set_position(LogicalPosition::new(120.0, 120.0))?;
     bring_forward(&window);

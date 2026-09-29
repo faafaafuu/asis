@@ -1,6 +1,7 @@
 // Окно «доступ и настройка»: показывает, чего именно не хватает системной интеграции.
 
-import { tauri, applyTheme } from "./bridge.js";
+import { tauri, appWindow, applyTheme } from "./bridge.js";
+import { icon, mountIcons } from "./icons.js";
 import { PopupView } from "./popup-view.js";
 import { TauriProvider, DEFAULT_ERROR_TEXT } from "./ai-client.js";
 import { attachMobileEntry } from "./mobile-entry.js";
@@ -82,16 +83,27 @@ function applyLanguage(code) {
 }
 
 function renderViewMenu() {
-  const group = (list, current, onPick) => {
+  const group = (list, current, onPick, className) => {
     const box = document.createElement("div");
     for (const item of list) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "ob__menu-item";
-      button.textContent = item.label;
-      button.setAttribute("role", "menuitemradio");
+      button.className = className;
+      button.setAttribute("role", "radio");
       button.setAttribute("aria-checked", String(item.code === current));
       button.addEventListener("click", () => onPick(item.code));
+      // Тема — образцом: плитка в цветах самой темы и подпись под ней.
+      if (item.swatch) {
+        const tile = document.createElement("span");
+        tile.className = "swatch__tile";
+        tile.dataset.theme = item.code;
+        tile.append(document.createElement("i"), document.createElement("i"));
+        const label = document.createElement("span");
+        label.textContent = item.label;
+        button.append(tile, label);
+      } else {
+        button.textContent = item.label;
+      }
       box.append(button);
     }
     return box.children;
@@ -99,13 +111,14 @@ function renderViewMenu() {
 
   ui.themeList.replaceChildren(
     ...group(
-      THEMES.map((code) => ({ code, label: t(`theme.${code}`) })),
+      THEMES.map((code) => ({ code, label: t(`theme.${code}`), swatch: true })),
       view.theme,
       (code) => saveView({ ...view, theme: code }),
+      "swatch",
     ),
   );
   ui.langList.replaceChildren(
-    ...group(LANGUAGES, view.language, (code) => saveView({ ...view, language: code })),
+    ...group(LANGUAGES, view.language, (code) => saveView({ ...view, language: code }), "segmented__item"),
   );
 }
 
@@ -139,27 +152,54 @@ async function loadView() {
   }
 }
 
-ui.viewBtn.addEventListener("click", (event) => {
-  event.stopPropagation();
-  const open = ui.viewMenu.hidden;
-  ui.viewMenu.hidden = !open;
-  ui.viewBtn.setAttribute("aria-expanded", String(open));
+/* ── Заголовок окна ────────────────────────────────────────────────────── */
+
+// Рамку окно рисует само: двигают за заголовок, тянут за края, кнопки —
+// свернуть и закрыть. На телефоне заголовка нет (см. CSS), рамки там нет вовсе.
+mountIcons();
+ui.winMin.append(icon("minimize"));
+ui.winClose.append(icon("close"));
+const win = appWindow();
+ui.winMin.addEventListener("click", () => win?.minimize());
+ui.winClose.addEventListener("click", () => win?.close());
+ui.titlebar.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0 || event.target.closest("button")) return;
+  event.preventDefault();
+  win?.startDragging();
+});
+ui.titlebar.addEventListener("dblclick", (event) => {
+  if (event.target.closest("button")) return;
+  win?.toggleMaximize?.();
 });
 
-// Щелчок мимо меню закрывает его: отдельной кнопки «закрыть» у выпадающего
-// списка быть не должно, а оставлять его висеть — значит спорить с привычкой.
-document.addEventListener("click", (event) => {
-  if (ui.viewMenu.hidden || ui.viewMenu.contains(event.target)) return;
-  ui.viewMenu.hidden = true;
-  ui.viewBtn.setAttribute("aria-expanded", "false");
-});
-
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !ui.viewMenu.hidden) {
-    ui.viewMenu.hidden = true;
-    ui.viewBtn.setAttribute("aria-expanded", "false");
+const EDGES = { n: "North", s: "South", e: "East", w: "West", ne: "NorthEast", nw: "NorthWest", se: "SouthEast", sw: "SouthWest" };
+if (win) {
+  for (const edge of Object.keys(EDGES)) {
+    const grip = document.createElement("span");
+    grip.className = `grip grip--${edge}`;
+    grip.dataset.edge = edge;
+    grip.setAttribute("aria-hidden", "true");
+    grip.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      win.startResizeDragging(EDGES[edge]);
+    });
+    document.body.append(grip);
   }
-});
+}
+
+/* ── Помощь: обновление, клавиши, журнал ───────────────────────────────── */
+
+const helpPane = document.querySelector('[data-pane="help"]');
+function showSub(name) {
+  helpPane.dataset.sub = name;
+  for (const button of helpPane.querySelectorAll("[data-sub]")) {
+    if (button.tagName === "BUTTON") button.setAttribute("aria-selected", String(button.dataset.sub === name));
+  }
+}
+for (const button of helpPane.querySelectorAll("button[data-sub]")) {
+  button.addEventListener("click", () => showSub(button.dataset.sub));
+}
 
 /**
  * Телефон это или компьютер — приходит из Rust, где известно на этапе сборки.
@@ -1943,3 +1983,16 @@ ui.updateInstall?.addEventListener("click", async () => {
     ui.updateCheck.disabled = false;
   }
 });
+
+// Окно открыто в браузере для разработки (npm run dev): тема, вкладка и
+// раздел «Помощи» — из адреса, ?theme=noah&tab=settings&sub=keys.
+if (!api) {
+  const query = new URLSearchParams(location.search);
+  if (query.get("theme")) {
+    view = { ...view, theme: query.get("theme") };
+    applyTheme(view.theme);
+    renderViewMenu();
+  }
+  if (query.get("tab")) showTab(query.get("tab"));
+  if (query.get("sub")) showSub(query.get("sub"));
+}

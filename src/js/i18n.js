@@ -19,7 +19,7 @@ export const LANGUAGES = [
 
 const STRINGS = {
   ru: {
-    "app.name": "Суфлёр",
+    "app.name": "NOAH",
 
     "source.title": "Мозг Ноа",
     "source.lead": "Модель, которая понимает команды и отвечает. Своя — на этом компьютере, без ключей и интернета; облачная — по ключу, быстрее и умнее.",
@@ -161,7 +161,7 @@ const STRINGS = {
   },
 
   en: {
-    "app.name": "Sufler",
+    "app.name": "NOAH",
 
     "source.title": "Noa's brain",
     "source.lead": "The model that understands commands and answers. Local — on this computer, no keys or internet; cloud — with a key, faster and smarter.",

@@ -82,7 +82,7 @@ pub async fn google(app: &AppHandle, query: &str) -> Result<String, String> {
             let _ = old.destroy();
         }
         let built = WebviewWindowBuilder::new(&handle, LABEL, WebviewUrl::External(url))
-            .title("Суфлёр — поиск")
+            .title("NOAH — Поиск")
             .inner_size(1200.0, 900.0)
             .visible(false)
             .focused(false)

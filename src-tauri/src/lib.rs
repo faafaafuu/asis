@@ -2954,7 +2954,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let widget_item = widget.clone();
 
     let mut tray = TrayIconBuilder::with_id("sufler-tray")
-        .tooltip("Суфлёр")
+        .tooltip("NOAH")
         .menu(&menu);
 
     // Без явной иконки значок в трее получается пустым — то есть на Windows его

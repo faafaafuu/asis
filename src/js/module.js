@@ -76,7 +76,7 @@ async function open() {
   }
   try {
     const module = await api.invoke("module_window", { id });
-    document.title = `Суфлёр — ${module.title}`;
+    document.title = `NOAH — ${module.title}`;
     ui.title.textContent = module.title;
     ui.icon.textContent = module.icon ?? "";
     // Разметка модуля вставляется как разметка: скрипты в ней не исполняются,
