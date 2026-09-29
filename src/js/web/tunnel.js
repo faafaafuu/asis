@@ -5,6 +5,10 @@
 // GET: тело — кусками в адресе, затем команда «выполнить», и сервер
 // проводит её через обычные маршруты (platform/server/tunnel.mjs). С
 // основного адреса всё идёт обычным fetch.
+//
+// Долгая работа (вопрос к мосту, распознавание речи) идёт на сервере в
+// фоне: CDN ждёт ответа около десяти секунд, и ответ забирается несколькими
+// короткими запросами.
 
 /** Байт тела на один запрос: в base64 это ~4 КБ адреса — в пределах CDN. */
 const PART = 3000;
@@ -74,5 +78,34 @@ export async function siteFetch(url, init = {}) {
     }
     go.n = String(parts.length);
   }
-  return fetch(`/api/tunnel/go?${new URLSearchParams(go)}`, common);
+  return settle(await fetch(`/api/tunnel/go?${new URLSearchParams(go)}`, common), { k, id }, common);
+}
+
+/** Ответ «ещё работаю» — наш, а не обработчика, который сам ответил 202. */
+async function isPending(response) {
+  if (response.status !== 202) return false;
+  if (response.headers.get("X-Noah-Pending") === "1") return true;
+  // CDN мог не пропустить заголовок — тогда по телу.
+  const body = await response.clone().json().catch(() => null);
+  return body?.tunnel === "pending";
+}
+
+/**
+ * Дожидается ответа долгой работы. Сервер держит каждый запрос до семи
+ * секунд (дольше CDN не ждёт) и отвечает «ещё работаю»; тогда спрашиваем
+ * снова. Сбой сети посреди ожидания работу не губит — она идёт на сервере, —
+ * поэтому спрашиваем ещё, пока не отменили снаружи.
+ */
+async function settle(response, { k, id }, common) {
+  let failures = 0;
+  while (await isPending(response)) {
+    try {
+      response = await fetch(`/api/tunnel/wait?${new URLSearchParams({ k, id })}`, common);
+      failures = 0;
+    } catch (err) {
+      if (common.signal?.aborted || ++failures > 5) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * failures));
+    }
+  }
+  return response;
 }

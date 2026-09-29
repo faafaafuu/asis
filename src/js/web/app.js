@@ -4,9 +4,9 @@
 // прямо со страницы (ai-web.js), курсы и прогресс — noa-store.js. Сайт
 // видит только курсы и прогресс вошедшего человека, но не его ключ.
 
-import { PROVIDERS, loadModel, saveModel, listModels, chat, bridgeAvailable } from "./ai-web.js";
+import { PROVIDERS, baseError, loadModel, saveModel, listModels, chat, bridgeAvailable } from "./ai-web.js";
 import { openNoa } from "./noa-store.js";
-import { request } from "./net.js";
+import { checkUser, remembered, whoIsIn } from "./early.js";
 import { mountDictionary } from "./web-api.js";
 import { speak as sayAloud, stopSpeaking, canListen } from "./voice.js";
 import { startTalk, orbIcon } from "./talk.js";
@@ -15,48 +15,17 @@ import { buildCourse, Stopped } from "./course-builder.js";
 const ui = {};
 for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] = node;
 
-const theme = (() => {
-  try {
-    return localStorage.getItem("noa.theme");
-  } catch {
-    return null;
-  }
-})();
-if (theme) document.documentElement.dataset.theme = theme;
-
 mountDictionary();
 
 /* ── Вход ──────────────────────────────────────────────────────────────── */
 
-/** Кто вошёл — сразу, не дожидаясь курсов: шапка не должна висеть «Войти». */
+/** Кто вошёл — по первому ответу сервера (early.js спросил его раньше всех). */
 let signedIn = null;
 
-async function checkUser() {
-  try {
-    const response = await request("/api/me", { cache: "no-store", timeout: 8000, retries: 2 });
-    const { user } = await response.json();
-    return user ?? null;
-  } catch {
-    return undefined;
-  }
-}
-
-function paintUser(user) {
-  if (user === undefined) {
-    // Сеть подвела: так и сказать и спросить ещё раз — а не висеть «Войти».
-    ui.me.dataset.state = "offline";
-    ui.me.textContent = "Нет связи";
-    setTimeout(() => checkUser().then(paintUser), 5000);
-    return;
-  }
-  ui.me.dataset.state = user ? "in" : "out";
-  ui.me.textContent = user ? user.name || user.email || "Кабинет" : "Войти";
-  ui.me.href = user ? "/#/account" : "/#/login?next=%2Fapp%2F";
-}
-
-checkUser().then((user) => {
-  signedIn = user ?? null;
-  paintUser(user);
+whoIsIn().then((user) => {
+  // Сеть подвела — считаем, что вошёл тот же, кто и в прошлый раз: курсы
+  // покажутся из памяти браузера, а вернётся связь — сверим.
+  signedIn = user === undefined ? remembered : user;
 });
 
 // Вернулись на вкладку (после входа в другой вкладке или из Telegram) или
@@ -150,7 +119,7 @@ for (const [kind, provider] of Object.entries(PROVIDERS)) {
 }
 // Мост — только тем, кого пускает сервер: в списке он первый, раз он есть.
 // Гостю мост не положен — и незачем спрашивать сервер.
-checkUser()
+whoIsIn()
   .then((user) => (user ? bridgeAvailable() : false))
   .then((ok) => {
   if (!ok) return;
@@ -244,7 +213,8 @@ ui.modelForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const draft = formModel();
   if (PROVIDERS[draft.kind].needsKey && !draft.key) return note(ui.modelNote, "Впишите ключ.", "error");
-  if (draft.kind !== "openrouter" && draft.kind !== "bridge" && !draft.base) return note(ui.modelNote, "Впишите адрес.", "error");
+  const wrongBase = baseError(draft);
+  if (wrongBase) return note(ui.modelNote, wrongBase, "error");
   if (!draft.model) return note(ui.modelNote, "Выберите модель.", "error");
   note(ui.modelNote, "Проверяю…");
   try {
@@ -444,7 +414,6 @@ async function paintCourses() {
     note(ui.courseNote, `Курсы не загрузились: ${err.message}`, "error");
     return;
   }
-  paintUser(noa.user);
   ui.loginHint.hidden = Boolean(noa.user);
   const cards = noa.learning.overview();
   if (!cards.length) {

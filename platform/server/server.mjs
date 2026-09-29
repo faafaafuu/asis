@@ -9,7 +9,7 @@ import net from "node:net";
 import tls from "node:tls";
 import { Duplex } from "node:stream";
 import { readFile, stat } from "node:fs/promises";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
@@ -305,7 +305,11 @@ function packed(req, body, key) {
       encoding === "br"
         ? brotliCompressSync(body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: key ? 11 : 5 } })
         : gzipSync(body, { level: 9 });
-    if (cacheKey) packCache.set(cacheKey, out);
+    if (cacheKey) {
+      // Старые версии файлов после выкладки больше не спросят — не копим их.
+      if (packCache.size >= 400) packCache.delete(packCache.keys().next().value);
+      packCache.set(cacheKey, out);
+    }
   }
   return { body: out, headers: { "Content-Encoding": encoding, Vary: "Accept-Encoding" } };
 }
@@ -650,6 +654,36 @@ const TYPES = {
   ".ttf": "font/ttf",
 };
 
+/**
+ * Метка версии сайта — отпечаток всех его файлов.
+ *
+ * Файлы сайта подключаются с меткой (`core.js?v=54`) и кэшируются браузером на
+ * год. Метку поднимали руками и забывали: правка лежала на сервере, а
+ * вернувшийся человек неделями видел старое. Теперь сервер сам подставляет
+ * вместо любого `?v=<число>` отпечаток: изменился хоть один файл — у всех
+ * ссылок новая метка. Пересчитывается не чаще раза в пять секунд: файлы
+ * обновляются копированием, без перезапуска.
+ */
+const siteStamp = (() => {
+  let value = "";
+  let at = 0;
+  return () => {
+    if (value && Date.now() - at < 5000) return value;
+    const hash = createHash("sha1");
+    for (const entry of readdirSync(WEB, { recursive: true, withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const path = join(entry.parentPath ?? entry.path, entry.name);
+      const info = statSync(path);
+      hash.update(`${path}:${info.size}:${info.mtimeMs};`);
+    }
+    value = hash.digest("hex").slice(0, 10);
+    at = Date.now();
+    return value;
+  };
+})();
+
+const STAMPED = new Set([".html", ".js", ".css", ".webmanifest"]);
+
 async function serveStatic(req, res, pathname, versioned) {
   let decoded;
   try {
@@ -694,14 +728,16 @@ async function serveStatic(req, res, pathname, versioned) {
     // Сверка — по отпечатку файла: не изменился — «304», без тела. Раньше
     // каждый заход заново тянул все скрипты и стили, и по мобильной сети
     // Ноа онлайн открывалась по нескольку секунд.
-    const etag = `W/"${info.size.toString(16)}-${Math.trunc(info.mtimeMs).toString(16)}"`;
+    const stamp = file.startsWith(WEB + sep) && STAMPED.has(extname(file)) ? siteStamp() : "";
+    const etag = `W/"${info.size.toString(16)}-${Math.trunc(info.mtimeMs).toString(16)}${stamp && `-${stamp}`}"`;
     if (req.headers["if-none-match"] === etag) {
       res.writeHead(304, { ...headers, ETag: etag, "Cache-Control": cacheControl });
       res.end();
       return true;
     }
-    const raw = await readFile(file);
-    const key = `${file}:${info.mtimeMs}`;
+    let raw = await readFile(file);
+    if (stamp) raw = Buffer.from(raw.toString("utf8").replace(/\?v=\d+/g, `?v=${stamp}`));
+    const key = `${file}:${info.mtimeMs}:${stamp}`;
     const out = /^(text|application\/(json|manifest)|image\/svg)/.test(type) ? packed(req, raw, key) : { body: raw, headers: {} };
     res.writeHead(200, {
       ...headers,

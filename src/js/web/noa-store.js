@@ -8,6 +8,7 @@
 import { createLearning, validate, normalizeCourse } from "./learn-core.js";
 import { chat, loadModel } from "./ai-web.js";
 import { request } from "./net.js";
+import { remembered, whoIsIn } from "./early.js";
 
 const COURSES = "noa.courses";
 const PROGRESS = "noa.learning";
@@ -52,7 +53,11 @@ export function openNoa() {
 }
 
 async function start() {
-  const user = await api("/api/me").then((r) => r.user ?? null).catch(() => null);
+  // Кто вошёл — общий ответ страницы. Сеть подвела — тот, кто входил в
+  // прошлый раз: его курсы есть в памяти браузера. Раньше сбой сети молча
+  // делал человека гостем, и курсы аккаунта не появлялись вовсе.
+  const answer = await whoIsIn();
+  const user = answer === undefined ? remembered : answer;
 
   let local = read(COURSES, []);
   let account = [];
@@ -88,28 +93,54 @@ async function start() {
   const saved = read(PROGRESS, { data: {}, savedAt: 0 });
   let data = saved.data ?? {};
   let savedAt = saved.savedAt ?? 0;
+  /** До какого сохранения прогресс уже лежит в аккаунте. */
+  let pushedAt = saved.pushedAt ?? 0;
+  let remoteAt = 0;
   if (user) {
     const remote = await api("/api/noa/progress").catch(() => null);
-    if (remote?.data && (remote.savedAt ?? 0) > savedAt) {
+    remoteAt = remote?.savedAt ?? 0;
+    if (remote?.data && remoteAt > savedAt) {
       data = remote.data;
-      savedAt = remote.savedAt;
+      savedAt = remoteAt;
+      pushedAt = remoteAt;
     }
   }
 
+  // В аккаунт — не на каждый щелчок, а пачкой через пару секунд. Связь
+  // подвела — прогресс уже лежит в браузере, отправка повторяется с паузой,
+  // побольше с каждым разом, и сразу, как только сеть вернулась. Раньше
+  // неудача глоталась молча, и на другом устройстве прогресс был старым.
   let pushTimer = 0;
+  let retryIn = 0;
+  const push = (delay = 2000) => {
+    if (!user) return;
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(async () => {
+      const sending = savedAt;
+      try {
+        await api("/api/noa/progress", { method: "PUT", body: { data: store.data, savedAt: sending } });
+        pushedAt = Math.max(pushedAt, sending);
+        write(PROGRESS, { data: store.data, savedAt, pushedAt });
+        retryIn = 0;
+      } catch {
+        retryIn = Math.min((retryIn || 5000) * 2, 120_000);
+        push(retryIn);
+      }
+    }, delay);
+  };
+  const unsent = () => Boolean(user) && savedAt > pushedAt;
+  globalThis.addEventListener?.("online", () => unsent() && push(0));
+
   const store = {
     data,
     save() {
       savedAt = Date.now();
-      write(PROGRESS, { data: store.data, savedAt });
-      if (!user) return;
-      // В аккаунт — не на каждый щелчок, а пачкой через пару секунд.
-      clearTimeout(pushTimer);
-      pushTimer = setTimeout(() => {
-        api("/api/noa/progress", { method: "PUT", body: { data: store.data, savedAt } }).catch(() => {});
-      }, 2000);
+      write(PROGRESS, { data: store.data, savedAt, pushedAt });
+      push();
     },
   };
+  // Прошлый раз не всё дошло до аккаунта — дослать.
+  if (unsent() && savedAt > remoteAt) push(0);
 
   const courses = () => {
     // Курс из аккаунта важнее своей копии с тем же id: его обновляет нейросеть.

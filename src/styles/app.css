@@ -599,7 +599,8 @@ kbd {
   color: #fff;
 }
 
-.bar__me[data-state="unknown"] {
+.bar__me[data-state="unknown"],
+.bar__me[data-state="guess"] {
   opacity: 0.6;
 }
 

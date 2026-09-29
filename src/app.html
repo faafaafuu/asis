@@ -5,6 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" href="/assets/noah-mark.svg" type="image/svg+xml" />
     <title>Ноа онлайн — NOAH</title>
+    <!-- Тема и «кто вошёл» — раньше всего: early.js ни от чего не зависит. -->
+    <script type="module" async src="./js/web/early.js"></script>
+    <!-- Все модули страницы — разом, а не цепочкой: по мобильной сети каждое
+         звено цепочки — это ещё одно соединение и секунды ожидания.
+         Список сверяет scripts/app-preload.test.mjs. -->
+    <link rel="modulepreload" href="./js/web/app.js" />
+    <link rel="modulepreload" href="./js/web/early.js" />
+    <link rel="modulepreload" href="./js/web/net.js" />
+    <link rel="modulepreload" href="./js/web/tunnel.js" />
+    <link rel="modulepreload" href="./js/web/ai-web.js" />
+    <link rel="modulepreload" href="./js/ai-client.js" />
+    <link rel="modulepreload" href="./js/web/noa-store.js" />
+    <link rel="modulepreload" href="./js/web/learn-core.js" />
+    <link rel="modulepreload" href="./js/web/web-api.js" />
+    <link rel="modulepreload" href="./js/web-host.js" />
+    <link rel="modulepreload" href="./js/popup-view.js" />
+    <link rel="modulepreload" href="./js/menu-view.js" />
+    <link rel="modulepreload" href="./js/position.js" />
+    <link rel="modulepreload" href="./js/term.js" />
+    <link rel="modulepreload" href="./js/web/voice.js" />
+    <link rel="modulepreload" href="./js/web/talk.js" />
+    <link rel="modulepreload" href="./js/orb.js" />
+    <link rel="modulepreload" href="./js/web/course-builder.js" />
     <link rel="stylesheet" href="./styles/fonts.css" />
     <link rel="stylesheet" href="./styles/tokens.css" />
     <link rel="stylesheet" href="./styles/app.css" />

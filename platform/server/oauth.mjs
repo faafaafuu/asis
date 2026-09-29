@@ -120,12 +120,27 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
   const states = new Map();
   const tgCodes = new Map();
   const tgBot = { token: env("NOAH_TG_BOT_TOKEN"), name: env("NOAH_TG_BOT_NAME").replace(/^@/, "") };
-  const enabled = () => [
-    ...Object.entries(PROVIDERS)
-      .filter(([, p]) => p.id && p.secret)
-      .map(([key, p]) => ({ id: key, title: p.title })),
-    ...(tgBot.token && tgBot.name ? [{ id: "telegram", title: "Telegram" }] : []),
-  ];
+  const MIRROR_CALLBACK = new Set(env("NOAH_OAUTH_MIRROR").split(",").map((k) => k.trim()).filter(Boolean));
+  const PUBLIC_HOST = new URL(PUBLIC_URL).host.toLowerCase();
+  /**
+   * Способы входа, которые сработают на этом адресе. Возврат от Google и
+   * других провайдеров зарегистрирован на основной адрес (и на зеркало — для
+   * тех, что в NOAH_OAUTH_MIRROR). Открыли сайт по IP или с зеркала без
+   * такого возврата — вход закончился бы на основном адресе, в другом
+   * «браузере» cookie, а с мобильного интернета — белой страницей. Такие
+   * кнопки там не показываем; Telegram возвращает туда, откуда пришли.
+   */
+  const enabled = (req) => {
+    const host = String(req?.headers.host ?? "").toLowerCase();
+    const home = !req || host === PUBLIC_HOST || host === `www.${PUBLIC_HOST}`;
+    const mirror = !home && host.endsWith(`.${PUBLIC_HOST}`);
+    return [
+      ...Object.entries(PROVIDERS)
+        .filter(([key, p]) => p.id && p.secret && (home || (mirror && MIRROR_CALLBACK.has(key))))
+        .map(([key, p]) => ({ id: key, title: p.title })),
+      ...(tgBot.token && tgBot.name ? [{ id: "telegram", title: "Telegram" }] : []),
+    ];
+  };
 
   /** Имя автора из имени профиля: латиница, цифры, точка, дефис; свободное. */
   const freeName = (raw) => {
@@ -161,7 +176,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     return openSession(userId);
   };
 
-  route("GET", /^\/api\/auth\/providers$/, () => ({ providers: enabled() }));
+  route("GET", /^\/api\/auth\/providers$/, ({ req }) => ({ providers: enabled(req) }));
 
   /* ── Способы входа в кабинете ──────────────────────────────────────────── */
 
@@ -197,7 +212,6 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
    * доходил до сервера, а его ответ до телефона — нет, и вход висел белой
    * страницей.
    */
-  const MIRROR_CALLBACK = new Set(env("NOAH_OAUTH_MIRROR").split(",").map((k) => k.trim()).filter(Boolean));
   const callbackFor = (key, back) => (back && MIRROR_CALLBACK.has(key) ? `${back}/auth/${key}/callback` : `${PUBLIC_URL}/auth/${key}/callback`);
 
   const start = (req, res, key) => {

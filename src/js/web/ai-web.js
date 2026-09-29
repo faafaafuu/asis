@@ -51,6 +51,18 @@ export function saveModel(model) {
 
 const baseOf = (model) => (model.base || PROVIDERS[model.kind]?.base || "").replace(/\/+$/, "");
 
+/**
+ * Что не так с адресом модели, если он вписан руками. В поле попадала почта —
+ * и страница стучалась на свой же сайт по адресу «/app/почта/models».
+ */
+export function baseError(model) {
+  if (!model || model.kind === "openrouter" || model.kind === "bridge") return "";
+  const base = String(model.base || PROVIDERS[model.kind]?.base || "").trim();
+  if (!base) return "Впишите адрес модели.";
+  if (!/^https?:\/\/[^\s/@]+(\/\S*)?$/i.test(base)) return "Адрес модели — ссылка вида https://api.example.com/v1 или http://localhost:11434/v1, а не почта и не имя.";
+  return "";
+}
+
 function headers(model) {
   const out = { "Content-Type": "application/json" };
   if (model.key) out.Authorization = `Bearer ${model.key}`;
@@ -87,6 +99,8 @@ export async function chat(model, messages, { json = false, maxTokens = 700, sig
   if (!model?.model) throw new AiError("Модель не выбрана — выберите её в настройках.", { kind: "config" });
   const base = baseOf(model);
   if (!base) throw new AiError("Не указан адрес модели.", { kind: "config" });
+  const wrongBase = baseError(model);
+  if (wrongBase) throw new AiError(wrongBase, { kind: "config" });
   const body = { model: model.model, messages, temperature: 0.2, max_tokens: maxTokens };
   // Мост зовёт программу подписки на сервере: холодный старт и ответ — до трёх минут.
   if (model.kind === "bridge") timeoutMs = Math.max(timeoutMs, 200_000);
@@ -144,7 +158,7 @@ export async function chat(model, messages, { json = false, maxTokens = 700, sig
 /** Какие модели есть у провайдера — для списка в настройках. */
 export async function listModels(model) {
   const base = baseOf(model);
-  if (!base) return [];
+  if (!base || baseError(model)) return [];
   const response = await fetch(`${base}/models`, { headers: headers(model), credentials: "same-origin" });
   if (!response.ok) throw new AiError(explainFailure(model, response.status, null), { kind: "http", status: response.status });
   const data = await response.json();
