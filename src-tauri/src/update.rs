@@ -41,6 +41,10 @@ struct Ready {
 
 static READY: std::sync::Mutex<Option<Ready>> = std::sync::Mutex::new(None);
 
+/// О какой версии уже сказали, что сама она не встанет. Проверка идёт каждые
+/// несколько часов, а сказать об этом стоит один раз.
+static TOLD: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
 /// Через сколько после запуска смотреть в первый раз.
 ///
 /// Не сразу: первые секунды заняты тем, ради чего программу и запускали, —
@@ -122,6 +126,12 @@ async fn fetch(update: tauri_plugin_updater::Update) -> Result<(), String> {
 /// Ставит скачанное и перезапускается. На Windows установщик запускается без
 /// окна, программа выходит, а он после установки поднимает новую версию сам.
 fn apply(app: &AppHandle, ready: Ready) -> Result<(), String> {
+    if let Some(dir) = guarded_folder(app) {
+        return Err(format!(
+            "программа стоит в папке {}, а её охраняет Windows (контролируемый доступ к папкам): установщик не сможет заменить файлы. Поставьте NOAH заново в папку, которую установщик предлагает сам, — настройки и модули останутся",
+            dir.display()
+        ));
+    }
     log::info!("обновление {}: ставлю и перезапускаюсь", ready.update.version);
     ready.update.install(&ready.bytes).map_err(|err| format!("не удалось поставить: {err}"))?;
     app.restart()
@@ -153,7 +163,12 @@ pub fn watch(app: &AppHandle) {
                             version: update.version.clone(),
                             notes: update.body.clone().unwrap_or_default(),
                         });
-                        if let Err(err) = fetch(update).await {
+                        let version = update.version.clone();
+                        if let Some(dir) = guarded_folder(&app) {
+                            // Скачивать незачем: установщик не заменит файлы, а
+                            // программу перед этим закроет — и она пропадёт из трея.
+                            tell_once(&app, &version, &format!("программа стоит в папке {}, а её охраняет Windows", dir.display()));
+                        } else if let Err(err) = fetch(update).await {
                             log::warn!("обновление: {err}");
                         }
                     }
@@ -180,8 +195,10 @@ async fn wait_and_apply(app: &AppHandle) {
         let Some(ready) = READY.lock().unwrap_or_else(|err| err.into_inner()).take() else {
             continue;
         };
+        let version = ready.update.version.clone();
         if let Err(err) = apply(app, ready) {
             log::warn!("обновление: {err}");
+            tell_once(app, &version, &err);
         }
     }
 }
@@ -192,6 +209,38 @@ fn quiet(app: &AppHandle) -> bool {
     use tauri::Manager;
     let window_open = app.webview_windows().values().any(|window| window.is_visible().unwrap_or(false));
     !window_open && !crate::voice::speaking() && !crate::voice::hotkey::recording() && away() >= AWAY
+}
+
+/// Папка пользователя, внутри которой стоит программа, если её охраняет
+/// Windows. Контролируемый доступ к папкам не даёт незнакомым программам
+/// менять «Документы», «Рабочий стол», «Изображения», «Видео» и «Музыку» —
+/// установщик обновления туда не запишет.
+fn guarded_folder(app: &AppHandle) -> Option<std::path::PathBuf> {
+    use tauri::Manager;
+    let exe = std::env::current_exe().ok()?.to_string_lossy().to_lowercase();
+    let path = app.path();
+    [path.document_dir(), path.desktop_dir(), path.picture_dir(), path.video_dir(), path.audio_dir()]
+        .into_iter()
+        .flatten()
+        .find(|dir| {
+            let dir = dir.to_string_lossy().to_lowercase();
+            !dir.is_empty() && exe.starts_with(&format!("{}\\", dir.trim_end_matches('\\')))
+        })
+}
+
+/// Говорит, что версия сама не встала, — один раз на версию.
+fn tell_once(app: &AppHandle, version: &str, why: &str) {
+    {
+        let mut told = TOLD.lock().unwrap_or_else(|err| err.into_inner());
+        if *told == version {
+            return;
+        }
+        *told = version.to_string();
+    }
+    let text = format!("Вышла версия {version}, но сама она не встала: {why}. Скачать установщик — noahlab.ru/download.");
+    if let Err(err) = crate::overlay::show_for_reminder(app, text) {
+        log::warn!("не удалось сказать про обновление: {err}");
+    }
 }
 
 /// Сколько к компьютеру не прикасались — ни мышью, ни клавиатурой.
