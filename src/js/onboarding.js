@@ -1104,7 +1104,7 @@ function presetFor(settings) {
   // Своя Ollama — по хосту, а не по строке целиком: в настройках прежних версий
   // записан localhost, сейчас пишется 127.0.0.1, и это один и тот же сервер.
   // Без этого у всех, кто обновился, источник показывался бы как «другой сервис».
-  if (/^https?:\/\/(localhost|127\.0\.0\.1):11434/.test(settings.endpoint || "")) return "ollama";
+  if (/^https?:\/\/(localhost|127\.0\.0\.1):11434\b/.test(settings.endpoint || "")) return "ollama";
   const found = Object.entries(PRESETS).find(([, p]) => p.endpoint && p.endpoint === settings.endpoint);
   return found ? found[0] : "custom";
 }
