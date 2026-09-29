@@ -2502,14 +2502,25 @@ fn listen_for_voice_keys(_app: &tauri::AppHandle) {}
 /// Сверяется при каждом запуске, а не только при изменении галочки: запись могла
 /// исчезнуть помимо программы — переустановка, чистильщик автозагрузки, перенос
 /// на другую машину. Молча не работать в таком случае хуже всего.
+///
+/// Включённая запись всё равно переписывается: в ней путь к программе, а
+/// программу могли поставить в другую папку. Тогда запись вела бы в старую
+/// копию, и при входе в систему запускалась бы она — старой версии.
 #[cfg(desktop)]
 pub(crate) fn apply_autostart(app: &tauri::AppHandle) {
     use tauri_plugin_autostart::ManagerExt;
 
     let wanted = app.state::<AppState>().config().startup.launch_at_login;
     let manager = app.autolaunch();
+    let enabled = manager.is_enabled().unwrap_or(false);
 
-    if manager.is_enabled().unwrap_or(false) == wanted {
+    if wanted && enabled {
+        if let Err(err) = manager.enable() {
+            log::warn!("не удалось обновить путь в автозапуске: {err}");
+        }
+        return;
+    }
+    if enabled == wanted {
         return;
     }
 
