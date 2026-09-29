@@ -1,410 +1,781 @@
-/* Дизайн-токены. Все значения взяты/§11 и `AI Popup.dc.html` как есть.
-   Ничего не «улучшено» и не округлено: попап должен совпадать с референсом попиксельно.
+/* Дизайн-токены NOAH — все темы одним файлом.
+   СОБРАНО из src/styles/noah/ скриптом scripts/build-tokens.mjs — руками не править:
+   меняйте файлы в noah/ и пересоберите. Тема — атрибут data-theme на <html>:
+   noah | system | light | dark | neon | synthwave; шкала — data-scale. */
 
-   Тема выбирается атрибутом на <html>:
-   data-theme="dark" | "light" | "neon" | "synthwave" | "system".
-   "system" отдаёт решение prefers-color-scheme (нужно на мобильных и в вебе);
-   на десктопе тему проставляет Rust по системной настройке, чтобы не было
-   мигания при первом кадре. */
+/* NOAH · core.css — общие токены, одинаковые во всех темах. Подключается первым.
+   <html data-theme="noah|system|light|dark|neon|synthwave" data-scale="window|window-l|site|phone" data-motion="on|off">
+   Сетка — 4 px. Шкала шрифтов переключается атрибутом data-scale у корня поверхности. */
+:root{
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-8:32px;--sp-10:40px;--sp-12:48px;--sp-16:64px;
+  --pop-pad:16px;--pop-width:400px;--pop-width-expanded:480px;--pop-min-height:160px;--pop-body-max-height:340px;
+  --pop-gap:12px;--screen-inset:12px;--shadow-inset:48px;--menu-width:216px;
+  --ctl-h:36px;--ctl-h-sm:28px;--icon-btn:28px;--tap:44px;--titlebar-h:40px;--tabbar-h:40px;--appbar-h:56px;--bottomnav-h:64px;
+  --size-ui:14px;--line-ui:1.4;--size-term:19px;--line-term:1.15;--size-secondary:13px;--size-example:13.5px;--size-label:10px;--ls-label:.12em;
+  --fs-label:10px;--lh-label:12px;--fs-small:12px;--lh-small:16px;--fs-secondary:13px;--lh-secondary:18px;
+  --fs-body:14px;--lh-body:20px;--fs-read:14px;--lh-read:20px;--fs-h3:15px;--lh-h3:20px;--fs-h2:17px;--lh-h2:24px;
+  --fs-h1:19px;--lh-h1:24px;--fs-display:24px;--lh-display:28px;--fs-code:12.5px;--lh-code:20px;
+  --dur-press:90ms;--dur-fast:130ms;--dur-base:200ms;--dur-slow:320ms;
+  --ease-out:cubic-bezier(.2,.7,.2,1);--ease-inout:cubic-bezier(.4,0,.2,1);--ease-in:cubic-bezier(.4,0,1,1);
+  --pop-in:.13s;--menu-in:.12s;--spin:.7s;--skeleton-cycle:1.2s;--caret-blink:1s;--ring-breath:2.4s;
+  --z-pop:60;--z-menu:70;--z-toast:80;--z-dialog:90;
+  --focus-width:2px;--focus-offset:2px;--press-shift:0 1px;
+  --logo-tile:#b5342e;--logo-mark:#f4efe6;
+  --menu-bg:rgba(27,24,21,.94);--menu-backdrop:blur(18px) saturate(150%);--menu-border:rgba(255,240,220,.1);
+  --menu-shadow:0 1px 2px rgba(0,0,0,.3),0 10px 26px -8px rgba(28,20,10,.55);--menu-divider:rgba(255,240,220,.12);
+  --menu-text:#f2ece1;--menu-accent:oklch(.86 .09 68);--menu-hover:rgba(255,240,220,.09);
+}
+[data-scale="window"]{--fs-label:10px;--lh-label:12px;--fs-small:12px;--lh-small:16px;--fs-secondary:13px;--lh-secondary:18px;--fs-body:14px;--lh-body:20px;--fs-read:14px;--lh-read:20px;--fs-h3:15px;--lh-h3:20px;--fs-h2:17px;--lh-h2:24px;--fs-h1:19px;--lh-h1:24px;--fs-display:24px;--lh-display:28px;--fs-code:12.5px;--lh-code:20px;--ctl-h:36px;--icon-btn:28px}
+[data-scale="window-l"]{--fs-label:10px;--lh-label:12px;--fs-small:12px;--lh-small:16px;--fs-secondary:13px;--lh-secondary:18px;--fs-body:14px;--lh-body:20px;--lh-code:20px;--ctl-h:36px;--icon-btn:28px;--fs-read:16px;--lh-read:24px;--fs-h3:16px;--lh-h3:24px;--fs-h2:19px;--lh-h2:24px;--fs-h1:24px;--lh-h1:28px;--fs-display:32px;--lh-display:36px;--fs-code:13px}
+[data-scale="site"]{--fs-label:11px;--lh-label:16px;--fs-small:13px;--lh-small:20px;--fs-secondary:14px;--lh-secondary:20px;--fs-body:16px;--lh-body:24px;--fs-read:17px;--lh-read:28px;--fs-h3:18px;--lh-h3:24px;--fs-h2:24px;--lh-h2:28px;--fs-h1:32px;--lh-h1:36px;--fs-display:clamp(32px,4vw,48px);--lh-display:1.08;--fs-code:13px}
+[data-scale="phone"]{--fs-label:11px;--lh-label:16px;--fs-small:13px;--lh-small:18px;--fs-secondary:14px;--lh-secondary:20px;--fs-body:16px;--lh-body:24px;--fs-read:16px;--lh-read:24px;--fs-h3:16px;--lh-h3:24px;--fs-h2:18px;--lh-h2:24px;--fs-h1:22px;--lh-h1:28px;--fs-display:28px;--lh-display:32px;--fs-code:13px;--ctl-h:44px;--icon-btn:44px}
+@media (prefers-reduced-motion:reduce){:root{--dur-press:0ms;--dur-fast:0ms;--dur-base:0ms;--dur-slow:0ms;--pop-in:0s;--menu-in:0s;--caret-blink:0s;--ring-breath:0s}}
+[data-motion="off"]{--dur-press:0ms;--dur-fast:0ms;--dur-base:0ms;--dur-slow:0ms;--pop-in:0s;--menu-in:0s;--caret-blink:0s;--ring-breath:0s}
 
-:root {
-  /* Геометрия — одинакова в обеих темах */
-  --pop-radius: 10px;
-  --menu-radius: 9px;
-  --pop-pad: 14px;
-  --pop-width: 400px;
-  --pop-width-expanded: 480px;
-  --pop-body-max-height: 340px;
-  --pop-gap: 12px; /* зазор окно ↔ выделение */
-  --screen-inset: 12px; /* отступ от краёв экрана */
-  --menu-width: 214px;
-
-  /* Типографика */
-  --font-ui: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  --font-term: "Instrument Serif", Georgia, serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --size-ui: 14px;
-  --line-ui: 1.4;
-  --size-term: 19px;
-  --line-term: 1.15;
-  --size-secondary: 13px;
-  --size-example: 13.5px;
-  --size-label: 10px;
-  --ls-label: 0.12em;
-  /* Начертание заголовков: тёплые темы набирают их курсивной антиквой как есть,
-     неоновые — прописными и жирным. Значения по умолчанию — для тёплых. */
-  --term-transform: none;
-  --term-weight: 400;
-
-  /* Анимации */
-  --pop-in: 0.13s;
-  --menu-in: 0.12s;
-  --spin: 0.7s;
-  --skeleton-cycle: 1.2s;
+/* NOAH · theme-dark.css — Тёмная — тёплый уголь, стекло.
+   Подключать после core.css. Имена переменных — прежние из tokens.css и app.css, новые добавлены рядом. */
+:root,[data-theme="dark"]{
+  color-scheme:dark;
+  --pop-radius:12px;
+  --menu-radius:8px;
+  --btn-radius:8px;
+  --field-radius:8px;
+  --card-radius:12px;
+  --chip-radius:999px;
+  --font-ui:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --font-term:"Instrument Serif",Georgia,serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,monospace;
+  --term-transform:none;
+  --term-weight:400;
+  --term-style:italic;
+  --term-ls:0;
+  --bg:rgba(27,24,21,.87);
+  --bg-solid:#1b1815;
+  --backdrop:blur(22px) saturate(150%);
+  --border:rgba(255,240,220,.1);
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 16px 44px -10px rgba(28,20,10,.6);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.3),0 6px 16px -6px rgba(0,0,0,.5);
+  --divider:rgba(255,240,220,.1);
+  --overlay:rgba(10,8,6,.62);
+  --text:#f2ece1;
+  --text-body:#e9e2d6;
+  --text-muted:#aea597;
+  --sel-bg:oklch(.86 .09 68/.35);
+  --sel-fg:#f7f2e9;
+  --accent:oklch(.86 .09 68);
+  --accent-dim:oklch(.7 .11 62);
+  --label:oklch(.72 .1 62);
+  --focus:oklch(.86 .09 68);
+  --focus-on-chrome:oklch(.86 .09 68);
+  --btn-border:rgba(255,240,220,.16);
+  --btn-bg:rgba(255,240,220,.05);
+  --btn-color:#cdc5b8;
+  --btn-hover-bg:rgba(255,240,220,.1);
+  --btn-hover-border:oklch(.7 .11 62);
+  --btn-hover-color:oklch(.86 .09 68);
+  --btn-press-bg:rgba(255,240,220,.16);
+  --btn-primary-bg:oklch(.62 .13 52);
+  --btn-primary-fg:#1b1613;
+  --btn-primary-hover:oklch(.68 .13 52);
+  --btn-primary-press:oklch(.58 .12 50);
+  --btn-shadow:none;
+  --btn-danger-fg:#f0b0a8;
+  --btn-danger-border:rgba(226,112,95,.5);
+  --btn-danger-bg:rgba(226,112,95,.08);
+  --btn-danger-solid:#e2705f;
+  --btn-danger-solid-fg:#1b1815;
+  --disabled-bg:rgba(255,240,220,.04);
+  --disabled-fg:#6e665b;
+  --disabled-border:rgba(255,240,220,.08);
+  --input-border:#6e665b;
+  --input-bg:rgba(255,240,220,.045);
+  --input-color:#f2ece1;
+  --send-color:#ded5c6;
+  --skeleton:rgba(255,255,255,.14);
+  --spin-track:rgba(255,255,255,.22);
+  --spin-head:#d9d9df;
+  --scroll-thumb:rgba(255,255,255,.22);
+  --simple:#e8e2d8;
+  --example:#cdc5b8;
+  --thread-q:oklch(.82 .09 68);
+  --thread-a:#d8d2c7;
+  --pending:#9c9488;
+  --pending-spin-head:#d9d2c6;
+  --error:#e2705f;
+  --error-text:#f0b0a8;
+  --bad-bg:rgba(240,140,120,.12);
+  --bad-line:rgba(240,140,120,.3);
+  --ok:#9fdcb4;
+  --ok-fill:#8fd6a8;
+  --ok-bg:rgba(143,214,168,.12);
+  --ok-line:rgba(143,214,168,.3);
+  --warn:oklch(.82 .12 85);
+  --warn-text:#f0cf7a;
+  --warn-bg:rgba(242,193,78,.12);
+  --warn-line:rgba(242,193,78,.3);
+  --ground:#110e0c;
+  --chrome:#1b1815;
+  --chrome-text:#f2ece1;
+  --chrome-muted:#aea597;
+  --chrome-line:rgba(255,240,220,.16);
+  --hair:rgba(255,240,220,.12);
+  --field:#231f1b;
+  --soft:rgba(255,240,220,.06);
+  --mine:rgba(255,240,220,.1);
+  --track:rgba(255,240,220,.12);
+  --gold:oklch(.86 .09 68);
+  --gold-hover:oklch(.9 .08 68);
+  --gold-ink:#1b1815;
+  --code-bg:#0f0d0b;
+  --code-line:rgba(255,240,220,.1);
+  --code-text:#efe7da;
+  --code-muted:#9c9488;
+  --code-key:#9fdcb4;
+  --code-str:oklch(.86 .09 68);
+  --code-num:#e8a0c8;
+  --voice-bg:#0f0d0b;
+  --voice-text:#f2ece1;
+  --voice-muted:#aea597;
 }
 
-/* ── Тёмная тема (по умолчанию) ─────────────────────────────────────────── */
-:root,
-:root[data-theme="dark"] {
-  color-scheme: dark;
-
-  --bg: rgba(27, 24, 21, 0.87);
-  --bg-solid: #1b1815; /* фолбэк, когда backdrop-filter недоступен */
-  --backdrop: blur(22px) saturate(150%);
-  --border: rgba(255, 240, 220, 0.1);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 44px -10px rgba(28, 20, 10, 0.6);
-  --divider: rgba(255, 240, 220, 0.1);
-
-  --text: #f2ece1;
-  --text-body: #e8e8ec;
-  --text-muted: #a3a3ab;
-
-  --accent: oklch(0.86 0.09 68);
-  --accent-dim: oklch(0.7 0.11 62); /* маркеры, точка раскрытия, hover-рамка */
-  --label: oklch(0.72 0.1 62);
-
-  --error: #e2705f;
-  --error-text: #f0b0a8;
-
-  --btn-border: rgba(255, 240, 220, 0.16);
-  --btn-bg: rgba(255, 240, 220, 0.05);
-  --btn-color: #cdc5b8;
-  --btn-hover-bg: rgba(255, 240, 220, 0.1);
-  --btn-hover-border: oklch(0.7 0.11 62);
-  --btn-hover-color: oklch(0.86 0.09 68);
-
-  --skeleton: rgba(255, 255, 255, 0.14);
-  --spin-track: rgba(255, 255, 255, 0.22);
-  --spin-head: #d9d9df;
-  --scroll-thumb: rgba(255, 255, 255, 0.22);
-
-  --simple: #e8e2d8;
-  --example: #cdc5b8;
-  --thread-q: oklch(0.82 0.09 68);
-  --thread-a: #d8d2c7;
-  --pending: #9c9488;
-  --pending-spin-head: #d9d2c6;
-
-  --input-border: rgba(255, 240, 220, 0.14);
-  --input-bg: rgba(255, 240, 220, 0.045);
-  --input-color: #f2ece1;
-  --send-color: #ded5c6;
-
-  /* Кнопка главного действия — заливка акцентом, текст по ней тёмный. */
-  --btn-primary-bg: oklch(0.62 0.13 52);
-  --btn-primary-fg: #1b1613;
-  --btn-primary-hover: oklch(0.68 0.13 52);
+/* NOAH · theme-noah.css — NOAH — фирменная (по умолчанию на сайте и в Ноа онлайн).
+   Подключать после core.css. Имена переменных — прежние из tokens.css и app.css, новые добавлены рядом. */
+[data-theme="noah"]{
+  color-scheme:light;
+  --pop-radius:0px;
+  --menu-radius:0px;
+  --btn-radius:0px;
+  --field-radius:0px;
+  --card-radius:0px;
+  --chip-radius:0px;
+  --font-ui:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --font-term:"Exo 2","Segoe UI",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --term-transform:uppercase;
+  --term-weight:700;
+  --term-style:normal;
+  --term-ls:0.01em;
+  --bg:#ffffff;
+  --bg-solid:#ffffff;
+  --backdrop:none;
+  --border:#171b26;
+  --shadow:6px 6px 0 #14306b;
+  --shadow-sm:3px 3px 0 #14306b;
+  --divider:#dddcd6;
+  --overlay:rgba(20,48,107,.55);
+  --text:#171b26;
+  --text-body:#2a3040;
+  --text-muted:#5d677e;
+  --sel-bg:#f2c14e;
+  --sel-fg:#171b26;
+  --accent:#2b5bc4;
+  --accent-dim:#2f6bd4;
+  --label:#2b5bc4;
+  --focus:#171b26;
+  --focus-on-chrome:#f2c14e;
+  --btn-border:#171b26;
+  --btn-bg:#ffffff;
+  --btn-color:#171b26;
+  --btn-hover-bg:#f0efea;
+  --btn-hover-border:#2b5bc4;
+  --btn-hover-color:#2b5bc4;
+  --btn-press-bg:#e4e3dc;
+  --btn-primary-bg:#f2c14e;
+  --btn-primary-fg:#171b26;
+  --btn-primary-hover:#f5cd68;
+  --btn-primary-press:#e5b23e;
+  --btn-shadow:3px 3px 0 #14306b;
+  --press-shift:3px 3px;
+  --btn-danger-fg:#b23f34;
+  --btn-danger-border:#d4564a;
+  --btn-danger-bg:#ffffff;
+  --btn-danger-solid:#b23f34;
+  --btn-danger-solid-fg:#ffffff;
+  --disabled-bg:#f0efea;
+  --disabled-fg:#9aa0ae;
+  --disabled-border:#c9c8c1;
+  --input-border:#171b26;
+  --input-bg:#fbfaf7;
+  --input-color:#171b26;
+  --send-color:#2b5bc4;
+  --skeleton:#ecebe5;
+  --spin-track:#dddcd6;
+  --spin-head:#2b5bc4;
+  --scroll-thumb:#c9c8c1;
+  --simple:#171b26;
+  --example:#555f78;
+  --thread-q:#2b5bc4;
+  --thread-a:#2a3040;
+  --pending:#5d677e;
+  --pending-spin-head:#2b5bc4;
+  --error:#d4564a;
+  --error-text:#b23f34;
+  --bad-bg:#f8e9e6;
+  --bad-line:#e7b7b0;
+  --ok:#3f6b30;
+  --ok-fill:#5f8c4c;
+  --ok-bg:#eaf0e6;
+  --ok-line:#b9ccb0;
+  --warn:#f2c14e;
+  --warn-text:#7d5a00;
+  --warn-bg:#fbf2dc;
+  --warn-line:#e9cf8a;
+  --ground:#2f6bd4;
+  --chrome:#14306b;
+  --chrome-text:#ffffff;
+  --chrome-muted:#bcc6dc;
+  --chrome-line:#27509e;
+  --hair:#dddcd6;
+  --field:#ffffff;
+  --soft:#f0efea;
+  --mine:#fbf2dc;
+  --track:#ecebe5;
+  --gold:#f2c14e;
+  --gold-hover:#f6d27a;
+  --gold-ink:#171b26;
+  --code-bg:#0b1220;
+  --code-line:#22304d;
+  --code-text:#e6edf7;
+  --code-muted:#8fa6c8;
+  --code-key:#6fd3a8;
+  --code-str:#f2c14e;
+  --code-num:#e8a0f0;
+  --voice-bg:#0b1220;
+  --voice-text:#e6edf7;
+  --voice-muted:#8fa6c8;
 }
 
-/* ── Светлая тема ───────────────────────────────────────────────────────── */
-:root[data-theme="light"] {
-  color-scheme: light;
-
-  --bg: rgba(253, 251, 246, 0.9);
-  --bg-solid: #fdfbf6;
-  --border: rgba(60, 45, 25, 0.09);
-  --shadow: 0 1px 2px rgba(40, 30, 15, 0.1), 0 16px 44px -12px rgba(40, 30, 15, 0.32);
-  --divider: rgba(60, 45, 25, 0.1);
-
-  --text: #221f1b;
-  --text-body: #2c2a27;
-  --text-muted: #6f6a63;
-
-  --accent: oklch(0.48 0.11 48);
-  --accent-dim: oklch(0.62 0.11 52);
-  --label: oklch(0.55 0.11 52);
-
-  --error: #c2503c;
-  --error-text: #a3402f;
-
-  --btn-border: rgba(60, 45, 25, 0.14);
-  --btn-bg: rgba(60, 45, 25, 0.035);
-  --btn-color: #6b6355;
-  --btn-hover-bg: rgba(60, 45, 25, 0.07);
-  --btn-hover-border: oklch(0.68 0.1 52);
-  --btn-hover-color: oklch(0.45 0.11 48);
-
-  --skeleton: rgba(20, 18, 15, 0.09);
-  --spin-track: rgba(0, 0, 0, 0.14);
-  --spin-head: #4a4741;
-  --scroll-thumb: rgba(20, 18, 15, 0.2);
-
-  --simple: #302c25;
-  --example: #5c5548;
-  --thread-q: oklch(0.48 0.11 48);
-  --thread-a: #3a352d;
-  --pending: #776f61;
-  --pending-spin-head: #4a4741;
-
-  --input-border: rgba(60, 45, 25, 0.14);
-  --input-bg: rgba(60, 45, 25, 0.03);
-  --input-color: #221f1b;
-  --send-color: #4a4438;
-
-  --btn-primary-bg: oklch(0.55 0.12 50);
-  --btn-primary-fg: #fdfbf6;
-  --btn-primary-hover: oklch(0.48 0.11 48);
+/* NOAH · theme-light.css — Светлая — тёплая бумага.
+   Подключать после core.css. Имена переменных — прежние из tokens.css и app.css, новые добавлены рядом. */
+[data-theme="light"]{
+  color-scheme:light;
+  --pop-radius:12px;
+  --menu-radius:8px;
+  --btn-radius:8px;
+  --field-radius:8px;
+  --card-radius:12px;
+  --chip-radius:999px;
+  --font-ui:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --font-term:"Instrument Serif",Georgia,serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,monospace;
+  --term-transform:none;
+  --term-weight:400;
+  --term-style:italic;
+  --term-ls:0;
+  --bg:rgba(253,251,246,.9);
+  --bg-solid:#fdfbf6;
+  --backdrop:blur(22px) saturate(150%);
+  --border:rgba(60,45,25,.09);
+  --shadow:0 1px 2px rgba(40,30,15,.1),0 16px 44px -12px rgba(40,30,15,.32);
+  --shadow-sm:0 1px 2px rgba(40,30,15,.1),0 6px 16px -8px rgba(40,30,15,.3);
+  --divider:rgba(60,45,25,.1);
+  --overlay:rgba(34,31,27,.45);
+  --text:#221f1b;
+  --text-body:#2c2a27;
+  --text-muted:#6f6a63;
+  --sel-bg:oklch(.85 .09 68);
+  --sel-fg:#221f1b;
+  --accent:oklch(.48 .11 48);
+  --accent-dim:oklch(.62 .11 52);
+  --label:oklch(.55 .11 52);
+  --focus:oklch(.48 .11 48);
+  --focus-on-chrome:oklch(.86 .09 68);
+  --btn-border:rgba(60,45,25,.14);
+  --btn-bg:rgba(60,45,25,.035);
+  --btn-color:#6b6355;
+  --btn-hover-bg:rgba(60,45,25,.07);
+  --btn-hover-border:oklch(.68 .1 52);
+  --btn-hover-color:oklch(.45 .11 48);
+  --btn-press-bg:rgba(60,45,25,.12);
+  --btn-primary-bg:oklch(.55 .12 50);
+  --btn-primary-fg:#fdfbf6;
+  --btn-primary-hover:oklch(.48 .11 48);
+  --btn-primary-press:oklch(.44 .1 46);
+  --btn-shadow:none;
+  --btn-danger-fg:#a3402f;
+  --btn-danger-border:rgba(194,80,60,.45);
+  --btn-danger-bg:rgba(194,80,60,.05);
+  --btn-danger-solid:#a3402f;
+  --btn-danger-solid-fg:#ffffff;
+  --disabled-bg:rgba(60,45,25,.04);
+  --disabled-fg:#a8a095;
+  --disabled-border:rgba(60,45,25,.1);
+  --input-border:#948b7e;
+  --input-bg:rgba(60,45,25,.03);
+  --input-color:#221f1b;
+  --send-color:#4a4438;
+  --skeleton:rgba(20,18,15,.09);
+  --spin-track:rgba(0,0,0,.14);
+  --spin-head:#4a4741;
+  --scroll-thumb:rgba(20,18,15,.2);
+  --simple:#302c25;
+  --example:#5c5548;
+  --thread-q:oklch(.48 .11 48);
+  --thread-a:#3a352d;
+  --pending:#776f61;
+  --pending-spin-head:#4a4741;
+  --error:#c2503c;
+  --error-text:#a3402f;
+  --bad-bg:#f6e6e2;
+  --bad-line:#e2b3aa;
+  --ok:#3f6b30;
+  --ok-fill:#5f8c4c;
+  --ok-bg:#e7efe2;
+  --ok-line:#b9ccb0;
+  --warn:#d9a520;
+  --warn-text:#7d5a00;
+  --warn-bg:#fbf1d8;
+  --warn-line:#e7cf92;
+  --ground:#ece7dd;
+  --chrome:#221f1b;
+  --chrome-text:#f2ece1;
+  --chrome-muted:#b9b2a6;
+  --chrome-line:#4a443c;
+  --hair:rgba(60,45,25,.12);
+  --field:#ffffff;
+  --soft:rgba(60,45,25,.05);
+  --mine:#f6ecd6;
+  --track:rgba(60,45,25,.1);
+  --gold:oklch(.48 .11 48);
+  --gold-hover:oklch(.52 .11 48);
+  --gold-ink:#ffffff;
+  --code-bg:#221f1b;
+  --code-line:#3a342c;
+  --code-text:#f2ece1;
+  --code-muted:#b9b2a6;
+  --code-key:#a9d8a0;
+  --code-str:#f0c77a;
+  --code-num:#e8b0c8;
+  --voice-bg:#221f1b;
+  --voice-text:#f2ece1;
+  --voice-muted:#b9b2a6;
 }
 
-/* data-theme="system": те же светлые значения, но по системной настройке.
-   Дублирование неизбежно — CSS не умеет «наследовать» блок переменных. */
-@media (prefers-color-scheme: light) {
-  :root[data-theme="system"] {
-    color-scheme: light;
-
-    --bg: rgba(253, 251, 246, 0.9);
-    --bg-solid: #fdfbf6;
-    --border: rgba(60, 45, 25, 0.09);
-    --shadow: 0 1px 2px rgba(40, 30, 15, 0.1), 0 16px 44px -12px rgba(40, 30, 15, 0.32);
-    --divider: rgba(60, 45, 25, 0.1);
-
-    --text: #221f1b;
-    --text-body: #2c2a27;
-    --text-muted: #6f6a63;
-
-    --accent: oklch(0.48 0.11 48);
-    --accent-dim: oklch(0.62 0.11 52);
-    --label: oklch(0.55 0.11 52);
-
-    --error: #c2503c;
-    --error-text: #a3402f;
-
-    --btn-border: rgba(60, 45, 25, 0.14);
-    --btn-bg: rgba(60, 45, 25, 0.035);
-    --btn-color: #6b6355;
-    --btn-hover-bg: rgba(60, 45, 25, 0.07);
-    --btn-hover-border: oklch(0.68 0.1 52);
-    --btn-hover-color: oklch(0.45 0.11 48);
-
-    --skeleton: rgba(20, 18, 15, 0.09);
-    --spin-track: rgba(0, 0, 0, 0.14);
-    --spin-head: #4a4741;
-    --scroll-thumb: rgba(20, 18, 15, 0.2);
-
-    --simple: #302c25;
-    --example: #5c5548;
-    --thread-q: oklch(0.48 0.11 48);
-    --thread-a: #3a352d;
-    --pending: #776f61;
-    --pending-spin-head: #4a4741;
-
-    --input-border: rgba(60, 45, 25, 0.14);
-    --input-bg: rgba(60, 45, 25, 0.03);
-    --input-color: #221f1b;
-    --send-color: #4a4438;
-
-    --btn-primary-bg: oklch(0.55 0.12 50);
-    --btn-primary-fg: #fdfbf6;
-    --btn-primary-hover: oklch(0.48 0.11 48);
-  }
+/* NOAH · theme-system.css — «Как в системе»: светлая по умолчанию, тёмная, если так в ОС.
+   На десктопе Rust ставит data-theme="light|dark" сам ещё до первого кадра; этот файл — для веба и Android. */
+[data-theme="system"]{
+  color-scheme:light;
+  --pop-radius:12px;
+  --menu-radius:8px;
+  --btn-radius:8px;
+  --field-radius:8px;
+  --card-radius:12px;
+  --chip-radius:999px;
+  --font-ui:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --font-term:"Instrument Serif",Georgia,serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,monospace;
+  --term-transform:none;
+  --term-weight:400;
+  --term-style:italic;
+  --term-ls:0;
+  --bg:rgba(253,251,246,.9);
+  --bg-solid:#fdfbf6;
+  --backdrop:blur(22px) saturate(150%);
+  --border:rgba(60,45,25,.09);
+  --shadow:0 1px 2px rgba(40,30,15,.1),0 16px 44px -12px rgba(40,30,15,.32);
+  --shadow-sm:0 1px 2px rgba(40,30,15,.1),0 6px 16px -8px rgba(40,30,15,.3);
+  --divider:rgba(60,45,25,.1);
+  --overlay:rgba(34,31,27,.45);
+  --text:#221f1b;
+  --text-body:#2c2a27;
+  --text-muted:#6f6a63;
+  --sel-bg:oklch(.85 .09 68);
+  --sel-fg:#221f1b;
+  --accent:oklch(.48 .11 48);
+  --accent-dim:oklch(.62 .11 52);
+  --label:oklch(.55 .11 52);
+  --focus:oklch(.48 .11 48);
+  --focus-on-chrome:oklch(.86 .09 68);
+  --btn-border:rgba(60,45,25,.14);
+  --btn-bg:rgba(60,45,25,.035);
+  --btn-color:#6b6355;
+  --btn-hover-bg:rgba(60,45,25,.07);
+  --btn-hover-border:oklch(.68 .1 52);
+  --btn-hover-color:oklch(.45 .11 48);
+  --btn-press-bg:rgba(60,45,25,.12);
+  --btn-primary-bg:oklch(.55 .12 50);
+  --btn-primary-fg:#fdfbf6;
+  --btn-primary-hover:oklch(.48 .11 48);
+  --btn-primary-press:oklch(.44 .1 46);
+  --btn-shadow:none;
+  --btn-danger-fg:#a3402f;
+  --btn-danger-border:rgba(194,80,60,.45);
+  --btn-danger-bg:rgba(194,80,60,.05);
+  --btn-danger-solid:#a3402f;
+  --btn-danger-solid-fg:#ffffff;
+  --disabled-bg:rgba(60,45,25,.04);
+  --disabled-fg:#a8a095;
+  --disabled-border:rgba(60,45,25,.1);
+  --input-border:#948b7e;
+  --input-bg:rgba(60,45,25,.03);
+  --input-color:#221f1b;
+  --send-color:#4a4438;
+  --skeleton:rgba(20,18,15,.09);
+  --spin-track:rgba(0,0,0,.14);
+  --spin-head:#4a4741;
+  --scroll-thumb:rgba(20,18,15,.2);
+  --simple:#302c25;
+  --example:#5c5548;
+  --thread-q:oklch(.48 .11 48);
+  --thread-a:#3a352d;
+  --pending:#776f61;
+  --pending-spin-head:#4a4741;
+  --error:#c2503c;
+  --error-text:#a3402f;
+  --bad-bg:#f6e6e2;
+  --bad-line:#e2b3aa;
+  --ok:#3f6b30;
+  --ok-fill:#5f8c4c;
+  --ok-bg:#e7efe2;
+  --ok-line:#b9ccb0;
+  --warn:#d9a520;
+  --warn-text:#7d5a00;
+  --warn-bg:#fbf1d8;
+  --warn-line:#e7cf92;
+  --ground:#ece7dd;
+  --chrome:#221f1b;
+  --chrome-text:#f2ece1;
+  --chrome-muted:#b9b2a6;
+  --chrome-line:#4a443c;
+  --hair:rgba(60,45,25,.12);
+  --field:#ffffff;
+  --soft:rgba(60,45,25,.05);
+  --mine:#f6ecd6;
+  --track:rgba(60,45,25,.1);
+  --gold:oklch(.48 .11 48);
+  --gold-hover:oklch(.52 .11 48);
+  --gold-ink:#ffffff;
+  --code-bg:#221f1b;
+  --code-line:#3a342c;
+  --code-text:#f2ece1;
+  --code-muted:#b9b2a6;
+  --code-key:#a9d8a0;
+  --code-str:#f0c77a;
+  --code-num:#e8b0c8;
+  --voice-bg:#221f1b;
+  --voice-text:#f2ece1;
+  --voice-muted:#b9b2a6;
+}
+@media (prefers-color-scheme:dark){
+[data-theme="system"]{
+  color-scheme:dark;
+  --pop-radius:12px;
+  --menu-radius:8px;
+  --btn-radius:8px;
+  --field-radius:8px;
+  --card-radius:12px;
+  --chip-radius:999px;
+  --font-ui:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --font-term:"Instrument Serif",Georgia,serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,monospace;
+  --term-transform:none;
+  --term-weight:400;
+  --term-style:italic;
+  --term-ls:0;
+  --bg:rgba(27,24,21,.87);
+  --bg-solid:#1b1815;
+  --backdrop:blur(22px) saturate(150%);
+  --border:rgba(255,240,220,.1);
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 16px 44px -10px rgba(28,20,10,.6);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.3),0 6px 16px -6px rgba(0,0,0,.5);
+  --divider:rgba(255,240,220,.1);
+  --overlay:rgba(10,8,6,.62);
+  --text:#f2ece1;
+  --text-body:#e9e2d6;
+  --text-muted:#aea597;
+  --sel-bg:oklch(.86 .09 68/.35);
+  --sel-fg:#f7f2e9;
+  --accent:oklch(.86 .09 68);
+  --accent-dim:oklch(.7 .11 62);
+  --label:oklch(.72 .1 62);
+  --focus:oklch(.86 .09 68);
+  --focus-on-chrome:oklch(.86 .09 68);
+  --btn-border:rgba(255,240,220,.16);
+  --btn-bg:rgba(255,240,220,.05);
+  --btn-color:#cdc5b8;
+  --btn-hover-bg:rgba(255,240,220,.1);
+  --btn-hover-border:oklch(.7 .11 62);
+  --btn-hover-color:oklch(.86 .09 68);
+  --btn-press-bg:rgba(255,240,220,.16);
+  --btn-primary-bg:oklch(.62 .13 52);
+  --btn-primary-fg:#1b1613;
+  --btn-primary-hover:oklch(.68 .13 52);
+  --btn-primary-press:oklch(.58 .12 50);
+  --btn-shadow:none;
+  --btn-danger-fg:#f0b0a8;
+  --btn-danger-border:rgba(226,112,95,.5);
+  --btn-danger-bg:rgba(226,112,95,.08);
+  --btn-danger-solid:#e2705f;
+  --btn-danger-solid-fg:#1b1815;
+  --disabled-bg:rgba(255,240,220,.04);
+  --disabled-fg:#6e665b;
+  --disabled-border:rgba(255,240,220,.08);
+  --input-border:#6e665b;
+  --input-bg:rgba(255,240,220,.045);
+  --input-color:#f2ece1;
+  --send-color:#ded5c6;
+  --skeleton:rgba(255,255,255,.14);
+  --spin-track:rgba(255,255,255,.22);
+  --spin-head:#d9d9df;
+  --scroll-thumb:rgba(255,255,255,.22);
+  --simple:#e8e2d8;
+  --example:#cdc5b8;
+  --thread-q:oklch(.82 .09 68);
+  --thread-a:#d8d2c7;
+  --pending:#9c9488;
+  --pending-spin-head:#d9d2c6;
+  --error:#e2705f;
+  --error-text:#f0b0a8;
+  --bad-bg:rgba(240,140,120,.12);
+  --bad-line:rgba(240,140,120,.3);
+  --ok:#9fdcb4;
+  --ok-fill:#8fd6a8;
+  --ok-bg:rgba(143,214,168,.12);
+  --ok-line:rgba(143,214,168,.3);
+  --warn:oklch(.82 .12 85);
+  --warn-text:#f0cf7a;
+  --warn-bg:rgba(242,193,78,.12);
+  --warn-line:rgba(242,193,78,.3);
+  --ground:#110e0c;
+  --chrome:#1b1815;
+  --chrome-text:#f2ece1;
+  --chrome-muted:#aea597;
+  --chrome-line:rgba(255,240,220,.16);
+  --hair:rgba(255,240,220,.12);
+  --field:#231f1b;
+  --soft:rgba(255,240,220,.06);
+  --mine:rgba(255,240,220,.1);
+  --track:rgba(255,240,220,.12);
+  --gold:oklch(.86 .09 68);
+  --gold-hover:oklch(.9 .08 68);
+  --gold-ink:#1b1815;
+  --code-bg:#0f0d0b;
+  --code-line:rgba(255,240,220,.1);
+  --code-text:#efe7da;
+  --code-muted:#9c9488;
+  --code-key:#9fdcb4;
+  --code-str:oklch(.86 .09 68);
+  --code-num:#e8a0c8;
+  --voice-bg:#0f0d0b;
+  --voice-text:#f2ece1;
+  --voice-muted:#aea597;
+}
 }
 
-/* ── Неон ───────────────────────────────────────────────────────────────────
-   Тёмная тема другой природы: не «фон + мягкая тень», а свечение по контуру.
-   Отсюда острые углы вместо скруглений, отсутствие размытия под окном
-   (за неоновой рамкой размывать нечего) и другая пара шрифтов.
-
-   Rajdhani без кириллицы — за ним в стопке идёт Exo 2 того же склада, браузер
-   сам берёт из него недостающие буквы. Порядок важен: поменяй местами — и
-   латиница поедет в Exo 2, а весь смысл Rajdhani пропадёт. */
-:root[data-theme="neon"] {
-  color-scheme: dark;
-
-  --pop-radius: 2px;
-  --menu-radius: 2px;
-
-  --font-ui: "JetBrains Mono", ui-monospace, monospace;
-  --font-term: "Rajdhani", "Exo 2", "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  /* Заголовки в неоне набираются прописными — так задумано в макете. */
-  --term-transform: uppercase;
-  --term-weight: 700;
-
-  --bg: linear-gradient(165deg, #0b0f16 0%, #060809 60%, #0a0710 100%);
-  --bg-solid: #070a0f;
-  --backdrop: none;
-  --border: rgba(0, 240, 255, 0.4);
-  --shadow: 0 0 12px rgba(0, 240, 255, 0.35), 0 0 60px -10px oklch(0.7 0.22 330 / 0.4);
-  --divider: rgba(0, 240, 255, 0.16);
-
-  --text: #d8f7fa;
-  --text-body: #c5eef3;
-  --text-muted: #6f9aa3;
-
-  --accent: oklch(0.85 0.16 195);
-  --accent-dim: oklch(0.7 0.18 330);
-  --label: oklch(0.7 0.18 330);
-
-  --error: oklch(0.72 0.2 20);
-  --error-text: oklch(0.78 0.16 20);
-
-  --btn-border: rgba(0, 240, 255, 0.35);
-  --btn-bg: rgba(0, 240, 255, 0.06);
-  --btn-color: #9fdde6;
-  --btn-hover-bg: rgba(0, 240, 255, 0.12);
-  --btn-hover-border: oklch(0.85 0.16 195);
-  --btn-hover-color: oklch(0.9 0.14 195);
-
-  --skeleton: rgba(0, 240, 255, 0.14);
-  --spin-track: rgba(0, 240, 255, 0.2);
-  --spin-head: oklch(0.85 0.16 195);
-  --scroll-thumb: rgba(0, 240, 255, 0.25);
-
-  --simple: #cfeff4;
-  --example: #a8d6de;
-  --thread-q: oklch(0.85 0.16 195);
-  --thread-a: #bfe6ec;
-  --pending: #6f9aa3;
-  --pending-spin-head: oklch(0.85 0.16 195);
-
-  --input-border: rgba(0, 240, 255, 0.28);
-  --input-bg: rgba(0, 240, 255, 0.05);
-  --input-color: #d8f7fa;
-  --send-color: oklch(0.85 0.16 195);
-
-  --btn-primary-bg: oklch(0.85 0.16 195);
-  --btn-primary-fg: #04181c;
-  --btn-primary-hover: oklch(0.9 0.14 195);
+/* NOAH · theme-neon.css — Неон — циан по чёрному, JetBrains Mono.
+   Подключать после core.css. Имена переменных — прежние из tokens.css и app.css, новые добавлены рядом. */
+[data-theme="neon"]{
+  color-scheme:dark;
+  --pop-radius:2px;
+  --menu-radius:2px;
+  --btn-radius:2px;
+  --field-radius:2px;
+  --card-radius:2px;
+  --chip-radius:2px;
+  --font-ui:"JetBrains Mono",ui-monospace,monospace;
+  --font-term:"Rajdhani","Exo 2",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --term-transform:uppercase;
+  --term-weight:700;
+  --term-style:normal;
+  --term-ls:0.02em;
+  --bg:linear-gradient(165deg,#0b0f16 0%,#060809 60%,#0a0710 100%);
+  --bg-solid:#070a0f;
+  --backdrop:none;
+  --border:rgba(0,240,255,.4);
+  --shadow:0 0 12px rgba(0,240,255,.35),0 0 60px -10px oklch(.7 .22 330/.4);
+  --shadow-sm:0 0 8px rgba(0,240,255,.3);
+  --divider:rgba(0,240,255,.16);
+  --overlay:rgba(0,6,10,.72);
+  --text:#d8f7fa;
+  --text-body:#c5eef3;
+  --text-muted:#6f9aa3;
+  --sel-bg:rgba(0,240,255,.28);
+  --sel-fg:#f2fdff;
+  --accent:oklch(.85 .16 195);
+  --accent-dim:oklch(.7 .18 330);
+  --label:oklch(.7 .18 330);
+  --focus:#f2fdff;
+  --focus-on-chrome:#f2fdff;
+  --btn-border:rgba(0,240,255,.35);
+  --btn-bg:rgba(0,240,255,.06);
+  --btn-color:#9fdde6;
+  --btn-hover-bg:rgba(0,240,255,.12);
+  --btn-hover-border:oklch(.85 .16 195);
+  --btn-hover-color:oklch(.9 .14 195);
+  --btn-press-bg:rgba(0,240,255,.2);
+  --btn-primary-bg:oklch(.85 .16 195);
+  --btn-primary-fg:#04181c;
+  --btn-primary-hover:oklch(.9 .14 195);
+  --btn-primary-press:oklch(.78 .15 195);
+  --btn-shadow:0 0 10px rgba(0,240,255,.35);
+  --btn-danger-fg:oklch(.78 .16 20);
+  --btn-danger-border:oklch(.72 .2 20/.6);
+  --btn-danger-bg:oklch(.72 .2 20/.08);
+  --btn-danger-solid:oklch(.72 .2 20);
+  --btn-danger-solid-fg:#1a0508;
+  --disabled-bg:rgba(0,240,255,.03);
+  --disabled-fg:#3f6a72;
+  --disabled-border:rgba(0,240,255,.15);
+  --input-border:rgba(0,240,255,.5);
+  --input-bg:rgba(0,240,255,.05);
+  --input-color:#d8f7fa;
+  --send-color:oklch(.85 .16 195);
+  --skeleton:rgba(0,240,255,.14);
+  --spin-track:rgba(0,240,255,.2);
+  --spin-head:oklch(.85 .16 195);
+  --scroll-thumb:rgba(0,240,255,.25);
+  --simple:#cfeff4;
+  --example:#a8d6de;
+  --thread-q:oklch(.85 .16 195);
+  --thread-a:#bfe6ec;
+  --pending:#6f9aa3;
+  --pending-spin-head:oklch(.85 .16 195);
+  --error:oklch(.72 .2 20);
+  --error-text:oklch(.78 .16 20);
+  --bad-bg:rgba(255,80,120,.12);
+  --bad-line:rgba(255,80,120,.35);
+  --ok:#7dfcc6;
+  --ok-fill:#00ffaa;
+  --ok-bg:rgba(0,255,170,.1);
+  --ok-line:rgba(0,255,170,.35);
+  --warn:#ffd166;
+  --warn-text:#ffd98a;
+  --warn-bg:rgba(255,209,102,.1);
+  --warn-line:rgba(255,209,102,.35);
+  --ground:#04060a;
+  --chrome:#070a0f;
+  --chrome-text:#d8f7fa;
+  --chrome-muted:#6f9aa3;
+  --chrome-line:rgba(0,240,255,.35);
+  --hair:rgba(0,240,255,.16);
+  --field:#0b1119;
+  --soft:rgba(0,240,255,.06);
+  --mine:rgba(0,240,255,.12);
+  --track:rgba(0,240,255,.15);
+  --gold:oklch(.85 .16 195);
+  --gold-hover:oklch(.9 .14 195);
+  --gold-ink:#041015;
+  --code-bg:#03060a;
+  --code-line:rgba(0,240,255,.16);
+  --code-text:#d8f7fa;
+  --code-muted:#6f9aa3;
+  --code-key:#7dfcc6;
+  --code-str:oklch(.85 .16 195);
+  --code-num:oklch(.75 .18 330);
+  --voice-bg:#03060a;
+  --voice-text:#d8f7fa;
+  --voice-muted:#6f9aa3;
 }
 
-/* ── Синтвейв ───────────────────────────────────────────────────────────────
-   Тот же строй, что у неона, но розово-оранжевый: закат вместо терминала. */
-:root[data-theme="synthwave"] {
-  color-scheme: dark;
-
-  --pop-radius: 2px;
-  --menu-radius: 2px;
-
-  --font-ui: "JetBrains Mono", ui-monospace, monospace;
-  --font-term: "Rajdhani", "Exo 2", "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --term-transform: uppercase;
-  --term-weight: 700;
-
-  --bg: linear-gradient(165deg, #1a0a24 0%, #12081c 55%, #200a1a 100%);
-  --bg-solid: #150a1e;
-  --backdrop: none;
-  --border: rgba(255, 70, 180, 0.4);
-  --shadow: 0 0 16px rgba(255, 70, 180, 0.3), 0 0 70px -10px oklch(0.75 0.18 55 / 0.35);
-  --divider: rgba(255, 70, 180, 0.16);
-
-  --text: #fbe9f6;
-  --text-body: #f2ddec;
-  --text-muted: #a8809e;
-
-  --accent: oklch(0.72 0.24 350);
-  --accent-dim: oklch(0.75 0.18 55);
-  --label: oklch(0.75 0.18 55);
-
-  --error: oklch(0.72 0.2 20);
-  --error-text: oklch(0.78 0.16 20);
-
-  --btn-border: rgba(255, 70, 180, 0.35);
-  --btn-bg: rgba(255, 70, 180, 0.07);
-  --btn-color: #e5b6d6;
-  --btn-hover-bg: rgba(255, 70, 180, 0.14);
-  --btn-hover-border: oklch(0.72 0.24 350);
-  --btn-hover-color: oklch(0.8 0.2 350);
-
-  --skeleton: rgba(255, 70, 180, 0.16);
-  --spin-track: rgba(255, 70, 180, 0.22);
-  --spin-head: oklch(0.72 0.24 350);
-  --scroll-thumb: rgba(255, 70, 180, 0.28);
-
-  --simple: #f6e2f0;
-  --example: #d9b3cd;
-  --thread-q: oklch(0.72 0.24 350);
-  --thread-a: #eed7e7;
-  --pending: #a8809e;
-  --pending-spin-head: oklch(0.72 0.24 350);
-
-  --input-border: rgba(255, 70, 180, 0.3);
-  --input-bg: rgba(255, 70, 180, 0.06);
-  --input-color: #fbe9f6;
-  --send-color: oklch(0.75 0.18 55);
-
-  --btn-primary-bg: oklch(0.72 0.24 350);
-  --btn-primary-fg: #1d0716;
-  --btn-primary-hover: oklch(0.8 0.2 350);
+/* NOAH · theme-synthwave.css — Синтвейв — розовый закат, Rajdhani.
+   Подключать после core.css. Имена переменных — прежние из tokens.css и app.css, новые добавлены рядом. */
+[data-theme="synthwave"]{
+  color-scheme:dark;
+  --pop-radius:2px;
+  --menu-radius:2px;
+  --btn-radius:2px;
+  --field-radius:2px;
+  --card-radius:2px;
+  --chip-radius:2px;
+  --font-ui:"JetBrains Mono",ui-monospace,monospace;
+  --font-term:"Rajdhani","Exo 2",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --term-transform:uppercase;
+  --term-weight:700;
+  --term-style:normal;
+  --term-ls:0.02em;
+  --bg:linear-gradient(165deg,#1a0a24 0%,#12081c 55%,#200a1a 100%);
+  --bg-solid:#150a1e;
+  --backdrop:none;
+  --border:rgba(255,70,180,.4);
+  --shadow:0 0 16px rgba(255,70,180,.3),0 0 70px -10px oklch(.75 .18 55/.35);
+  --shadow-sm:0 0 8px rgba(255,70,180,.3);
+  --divider:rgba(255,70,180,.16);
+  --overlay:rgba(10,2,14,.72);
+  --text:#fbe9f6;
+  --text-body:#f2ddec;
+  --text-muted:#a8809e;
+  --sel-bg:rgba(255,70,180,.3);
+  --sel-fg:#fff2fa;
+  --accent:oklch(.72 .24 350);
+  --accent-dim:oklch(.75 .18 55);
+  --label:oklch(.75 .18 55);
+  --focus:#fff2fa;
+  --focus-on-chrome:#fff2fa;
+  --btn-border:rgba(255,70,180,.35);
+  --btn-bg:rgba(255,70,180,.07);
+  --btn-color:#e5b6d6;
+  --btn-hover-bg:rgba(255,70,180,.14);
+  --btn-hover-border:oklch(.72 .24 350);
+  --btn-hover-color:oklch(.8 .2 350);
+  --btn-press-bg:rgba(255,70,180,.22);
+  --btn-primary-bg:oklch(.72 .24 350);
+  --btn-primary-fg:#1d0716;
+  --btn-primary-hover:oklch(.8 .2 350);
+  --btn-primary-press:oklch(.66 .23 350);
+  --btn-shadow:0 0 10px rgba(255,70,180,.35);
+  --btn-danger-fg:oklch(.78 .16 20);
+  --btn-danger-border:oklch(.72 .2 20/.6);
+  --btn-danger-bg:oklch(.72 .2 20/.08);
+  --btn-danger-solid:oklch(.72 .2 20);
+  --btn-danger-solid-fg:#1a0508;
+  --disabled-bg:rgba(255,70,180,.04);
+  --disabled-fg:#6d5066;
+  --disabled-border:rgba(255,70,180,.15);
+  --input-border:rgba(255,70,180,.7);
+  --input-bg:rgba(255,70,180,.06);
+  --input-color:#fbe9f6;
+  --send-color:oklch(.75 .18 55);
+  --skeleton:rgba(255,70,180,.16);
+  --spin-track:rgba(255,70,180,.22);
+  --spin-head:oklch(.72 .24 350);
+  --scroll-thumb:rgba(255,70,180,.28);
+  --simple:#f6e2f0;
+  --example:#d9b3cd;
+  --thread-q:oklch(.72 .24 350);
+  --thread-a:#eed7e7;
+  --pending:#a8809e;
+  --pending-spin-head:oklch(.72 .24 350);
+  --error:oklch(.72 .2 20);
+  --error-text:oklch(.78 .16 20);
+  --bad-bg:rgba(255,90,90,.12);
+  --bad-line:rgba(255,90,90,.35);
+  --ok:#9ff5d0;
+  --ok-fill:#78ffc8;
+  --ok-bg:rgba(120,255,200,.1);
+  --ok-line:rgba(120,255,200,.3);
+  --warn:#ffc46b;
+  --warn-text:#ffd49a;
+  --warn-bg:rgba(255,196,107,.1);
+  --warn-line:rgba(255,196,107,.35);
+  --ground:#0d0514;
+  --chrome:#150a1e;
+  --chrome-text:#fbe9f6;
+  --chrome-muted:#a8809e;
+  --chrome-line:rgba(255,70,180,.35);
+  --hair:rgba(255,70,180,.16);
+  --field:#1d0f28;
+  --soft:rgba(255,70,180,.07);
+  --mine:rgba(255,70,180,.14);
+  --track:rgba(255,70,180,.16);
+  --gold:oklch(.72 .24 350);
+  --gold-hover:oklch(.78 .22 350);
+  --gold-ink:#1d0716;
+  --code-bg:#0d0514;
+  --code-line:rgba(255,70,180,.16);
+  --code-text:#fbe9f6;
+  --code-muted:#a8809e;
+  --code-key:#9ff5d0;
+  --code-str:oklch(.75 .18 55);
+  --code-num:oklch(.8 .2 350);
+  --voice-bg:#0d0514;
+  --voice-text:#fbe9f6;
+  --voice-muted:#a8809e;
 }
 
-/* Мини-меню на мобильных в референсе есть только в тёмном варианте — так и оставлено:
-   системные меню выделения текста и на светлой теме обычно тёмные. */
-:root {
-  --menu-bg: rgba(27, 24, 21, 0.92);
-  --menu-backdrop: blur(18px) saturate(150%);
-  --menu-border: rgba(255, 240, 220, 0.1);
-  --menu-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 26px -8px rgba(28, 20, 10, 0.55);
-  --menu-divider: rgba(255, 240, 220, 0.12);
-  --menu-text: #e8e2d8;
-  --menu-accent: oklch(0.86 0.09 68);
-  --menu-hover: rgba(255, 240, 220, 0.09);
-}
-
-/* ── NOAH ─────────────────────────────────────────────────────────────────────
-   Тема сайта noahlab.ru: белая плита на синем, тёмно-синий текст, золотые
-   кнопки, прямые углы и жёсткая тень. Заголовки — прописными и жирным, как
-   на сайте; шрифты — вшитые в программу, без загрузки из сети. */
-:root[data-theme="noah"] {
-  color-scheme: light;
-
-  --pop-radius: 0px;
-  --menu-radius: 0px;
-  --btn-radius: 0px;
-  --term-style: normal;
-
-  --font-ui: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-  --font-term: "Exo 2", "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --term-transform: uppercase;
-  --term-weight: 700;
-
-  --bg: #ffffff;
-  --bg-solid: #ffffff;
-  --backdrop: none;
-  --border: #171b26;
-  --shadow: 6px 6px 0 #14306b;
-  --divider: #dddcd6;
-
-  --text: #171b26;
-  --text-body: #2a3040;
-  --text-muted: #5d677e;
-
-  --accent: #2b5bc4;
-  --accent-dim: #2f6bd4;
-  --label: #2b5bc4;
-
-  --error: #d4564a;
-  --error-text: #b23f34;
-
-  --btn-border: #171b26;
-  --btn-bg: #ffffff;
-  --btn-color: #171b26;
-  --btn-hover-bg: #f0efea;
-  --btn-hover-border: #2b5bc4;
-  --btn-hover-color: #2b5bc4;
-
-  --skeleton: #ecebe5;
-  --spin-track: #dddcd6;
-  --spin-head: #2b5bc4;
-  --scroll-thumb: #c9c8c1;
-
-  --simple: #171b26;
-  --example: #555f78;
-  --thread-q: #2b5bc4;
-  --thread-a: #2a3040;
-  --pending: #5d677e;
-  --pending-spin-head: #2b5bc4;
-
-  --input-border: #c9c8c1;
-  --input-bg: #fbfaf7;
-  --input-color: #171b26;
-  --send-color: #2b5bc4;
-
-  --btn-primary-bg: #f2c14e;
-  --btn-primary-fg: #171b26;
-  --btn-primary-hover: #f5cd68;
-}
+/* NOAH · base.css — общие правила поверх токенов (не из хендоффа дизайна).
+   Собирается в tokens.css следом за темами: scripts/build-tokens.mjs. */
 
 /* Прямые углы в теме NOAH — у кнопок, полей и карточек во всех окнах, как на
    сайте. Круглое по смыслу (точки, переключатели, индикатор голоса) не трогаем. */

@@ -422,6 +422,8 @@ pub fn run() {
             commands::azure_check,
             commands::voice_speak,
             commands::voice_stop,
+            commands::voice_busy,
+            commands::open_settings,
             commands::speech_status,
             commands::input_devices,
             #[cfg(desktop)]

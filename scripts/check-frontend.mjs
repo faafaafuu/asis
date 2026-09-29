@@ -42,31 +42,27 @@ for (const file of files.filter((f) => f.endsWith(".js"))) {
 }
 if (!failures) ok("все модули разбираются");
 
-// 2. Дизайн-токены — значения должны присутствовать буквально.
+// 2. Дизайн-токены — ключевые значения дизайн-системы NOAH (src/styles/noah/).
+//    Сверяются без пробелов: файлы тем записаны сжато.
 console.log("Дизайн-токены:");
-const tokens = await readFile(join(SRC, "styles/tokens.css"), "utf8");
+const squash = (text) => text.toLowerCase().replace(/\s+/g, "");
+const tokens = squash(await readFile(join(SRC, "styles/tokens.css"), "utf8"));
 const REQUIRED = [
-  ["радиус окна 10px", "--pop-radius: 10px"],
-  ["радиус меню 9px", "--menu-radius: 9px"],
-  ["padding 14px", "--pop-pad: 14px"],
-  ["ширина 400px", "--pop-width: 400px"],
-  ["ширина раскрытая 480px", "--pop-width-expanded: 480px"],
-  ["max-height тела 340px", "--pop-body-max-height: 340px"],
-  ["зазор 12px", "--pop-gap: 12px"],
-  ["screen inset 12px", "--screen-inset: 12px"],
-  ["анимация 0.13s", "--pop-in: 0.13s"],
-  ["accent dark", "oklch(0.86 0.09 68)"],
-  ["accent light", "oklch(0.48 0.11 48)"],
-  ["error dark", "#e2705f"],
-  ["error light", "#c2503c"],
-  ["фон dark", "rgba(27, 24, 21, 0.87)"],
-  ["фон light", "rgba(253, 251, 246, 0.9)"],
-  ["фолбэк dark", "#1b1815"],
-  ["фолбэк light", "#fdfbf6"],
-  ["blur 22px", "blur(22px) saturate(150%)"],
+  ["поля попапа 16px", "--pop-pad:16px"],
+  ["ширина 400px", "--pop-width:400px"],
+  ["ширина раскрытая 480px", "--pop-width-expanded:480px"],
+  ["max-height тела 340px", "--pop-body-max-height:340px"],
+  ["зазор 12px", "--pop-gap:12px"],
+  ["отступ под тень 48px", "--shadow-inset:48px"],
+  ["анимация .13s", "--pop-in:.13s"],
+  ["NOAH: тень", "--shadow:6px6px0#14306b"],
+  ["NOAH: акцент", "--accent:#2b5bc4"],
+  ["тёмная: фолбэк", "--bg-solid:#1b1815"],
+  ["светлая: фолбэк", "--bg-solid:#fdfbf6"],
+  ["все шесть тем", '[data-theme="synthwave"]'],
 ];
 for (const [name, needle] of REQUIRED) {
-  if (tokens.toLowerCase().includes(needle.toLowerCase())) ok(name);
+  if (tokens.includes(squash(needle))) ok(name);
   else fail(`нет токена: ${name} (${needle})`);
 }
 

@@ -1,0 +1,28 @@
+/* NOAH · core.css — общие токены, одинаковые во всех темах. Подключается первым.
+   <html data-theme="noah|system|light|dark|neon|synthwave" data-scale="window|window-l|site|phone" data-motion="on|off">
+   Сетка — 4 px. Шкала шрифтов переключается атрибутом data-scale у корня поверхности. */
+:root{
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-8:32px;--sp-10:40px;--sp-12:48px;--sp-16:64px;
+  --pop-pad:16px;--pop-width:400px;--pop-width-expanded:480px;--pop-min-height:160px;--pop-body-max-height:340px;
+  --pop-gap:12px;--screen-inset:12px;--shadow-inset:48px;--menu-width:216px;
+  --ctl-h:36px;--ctl-h-sm:28px;--icon-btn:28px;--tap:44px;--titlebar-h:40px;--tabbar-h:40px;--appbar-h:56px;--bottomnav-h:64px;
+  --size-ui:14px;--line-ui:1.4;--size-term:19px;--line-term:1.15;--size-secondary:13px;--size-example:13.5px;--size-label:10px;--ls-label:.12em;
+  --fs-label:10px;--lh-label:12px;--fs-small:12px;--lh-small:16px;--fs-secondary:13px;--lh-secondary:18px;
+  --fs-body:14px;--lh-body:20px;--fs-read:14px;--lh-read:20px;--fs-h3:15px;--lh-h3:20px;--fs-h2:17px;--lh-h2:24px;
+  --fs-h1:19px;--lh-h1:24px;--fs-display:24px;--lh-display:28px;--fs-code:12.5px;--lh-code:20px;
+  --dur-press:90ms;--dur-fast:130ms;--dur-base:200ms;--dur-slow:320ms;
+  --ease-out:cubic-bezier(.2,.7,.2,1);--ease-inout:cubic-bezier(.4,0,.2,1);--ease-in:cubic-bezier(.4,0,1,1);
+  --pop-in:.13s;--menu-in:.12s;--spin:.7s;--skeleton-cycle:1.2s;--caret-blink:1s;--ring-breath:2.4s;
+  --z-pop:60;--z-menu:70;--z-toast:80;--z-dialog:90;
+  --focus-width:2px;--focus-offset:2px;--press-shift:0 1px;
+  --logo-tile:#b5342e;--logo-mark:#f4efe6;
+  --menu-bg:rgba(27,24,21,.94);--menu-backdrop:blur(18px) saturate(150%);--menu-border:rgba(255,240,220,.1);
+  --menu-shadow:0 1px 2px rgba(0,0,0,.3),0 10px 26px -8px rgba(28,20,10,.55);--menu-divider:rgba(255,240,220,.12);
+  --menu-text:#f2ece1;--menu-accent:oklch(.86 .09 68);--menu-hover:rgba(255,240,220,.09);
+}
+[data-scale="window"]{--fs-label:10px;--lh-label:12px;--fs-small:12px;--lh-small:16px;--fs-secondary:13px;--lh-secondary:18px;--fs-body:14px;--lh-body:20px;--fs-read:14px;--lh-read:20px;--fs-h3:15px;--lh-h3:20px;--fs-h2:17px;--lh-h2:24px;--fs-h1:19px;--lh-h1:24px;--fs-display:24px;--lh-display:28px;--fs-code:12.5px;--lh-code:20px;--ctl-h:36px;--icon-btn:28px}
+[data-scale="window-l"]{--fs-label:10px;--lh-label:12px;--fs-small:12px;--lh-small:16px;--fs-secondary:13px;--lh-secondary:18px;--fs-body:14px;--lh-body:20px;--lh-code:20px;--ctl-h:36px;--icon-btn:28px;--fs-read:16px;--lh-read:24px;--fs-h3:16px;--lh-h3:24px;--fs-h2:19px;--lh-h2:24px;--fs-h1:24px;--lh-h1:28px;--fs-display:32px;--lh-display:36px;--fs-code:13px}
+[data-scale="site"]{--fs-label:11px;--lh-label:16px;--fs-small:13px;--lh-small:20px;--fs-secondary:14px;--lh-secondary:20px;--fs-body:16px;--lh-body:24px;--fs-read:17px;--lh-read:28px;--fs-h3:18px;--lh-h3:24px;--fs-h2:24px;--lh-h2:28px;--fs-h1:32px;--lh-h1:36px;--fs-display:clamp(32px,4vw,48px);--lh-display:1.08;--fs-code:13px}
+[data-scale="phone"]{--fs-label:11px;--lh-label:16px;--fs-small:13px;--lh-small:18px;--fs-secondary:14px;--lh-secondary:20px;--fs-body:16px;--lh-body:24px;--fs-read:16px;--lh-read:24px;--fs-h3:16px;--lh-h3:24px;--fs-h2:18px;--lh-h2:24px;--fs-h1:22px;--lh-h1:28px;--fs-display:28px;--lh-display:32px;--fs-code:13px;--ctl-h:44px;--icon-btn:44px}
+@media (prefers-reduced-motion:reduce){:root{--dur-press:0ms;--dur-fast:0ms;--dur-base:0ms;--dur-slow:0ms;--pop-in:0s;--menu-in:0s;--caret-blink:0s;--ring-breath:0s}}
+[data-motion="off"]{--dur-press:0ms;--dur-fast:0ms;--dur-base:0ms;--dur-slow:0ms;--pop-in:0s;--menu-in:0s;--caret-blink:0s;--ring-breath:0s}

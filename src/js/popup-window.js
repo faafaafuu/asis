@@ -177,7 +177,8 @@ if (api) {
     if (dialogue !== undefined) view.dialogue = Boolean(dialogue);
     // Готовый текст показываем как есть, ничего не спрашивая.
     if (answer) {
-      view.announce(answer);
+      // Весть о версии — «Весть», остальное — напоминание о деле.
+      view.announce(answer, { kind: /^Вышла версия/.test(answer) ? "news" : "reminder" });
       return;
     }
     view.open({ term: term ?? "", context: context ?? "", speak: Boolean(speak) });
@@ -203,17 +204,65 @@ if (api) {
     applyOpen(event.payload);
   });
 
+  // Читает ли голос: полоса «Читаю вслух» держится, пока Rust говорит, что
+  // речь звучит. voice_speak возвращается сразу, поэтому конец речи узнаём
+  // вопросом раз в треть секунды — только пока полоса на экране.
+  let readWatch = 0;
+  function reading() {
+    view.speaking = true;
+    clearInterval(readWatch);
+    // Первые полсекунды синтез только начинается — не принимаем тишину за конец.
+    const since = Date.now();
+    readWatch = setInterval(() => {
+      api
+        .invoke("voice_busy")
+        .then((busy) => {
+          if (busy || Date.now() - since < 1500) return;
+          clearInterval(readWatch);
+          view.speaking = false;
+        })
+        .catch(() => {
+          clearInterval(readWatch);
+          view.speaking = false;
+        });
+    }, 350);
+  }
+  function quiet() {
+    clearInterval(readWatch);
+    view.speaking = false;
+  }
+
   // Пробел: прочитать вслух. Клавишу ловит и забирает себе Rust — окно
   // намеренно не держит фокус, и до него нажатия не доходят.
   api.listen("voice:speak", (event) => {
     // Номер просьбы возвращается с текстом: если чтение успели оборвать, Rust
     // его не начнёт. Пустой текст тоже отвечаем — иначе просьба висела бы.
     const text = view.spokenText() ?? "";
+    if (text) reading();
     api.invoke("voice_speak", { text, request: event.payload ?? null }).catch(() => {
       // Голос не скачан или выключен. Молча: попап живёт секунды, и ругаться
       // на него поверх чужого окна незачем — состояние видно в настройках.
+      quiet();
     });
   });
+
+  // Кнопки попапа: прочитать, замолчать, микрофон, настройки.
+  view.onSpeak = (text) => {
+    if (!text) return;
+    reading();
+    api.invoke("voice_speak", { text }).catch(quiet);
+  };
+  view.onStopSpeaking = () => {
+    quiet();
+    api.invoke("voice_stop").catch(() => {});
+  };
+  // Микрофон — как пробел: зажал — слушаем, отпустил — вопрос ушёл.
+  view.onMic = (down) => {
+    api.invoke("popup_space", { down }).catch(() => {});
+  };
+  view.onOpenSettings = () => {
+    api.invoke("open_settings", { section: "model" }).catch(() => {});
+  };
 
   // Расшифрованный вопрос: кладём в тред и ждём ответа.
   api.listen("voice:question", (event) => {
@@ -222,12 +271,16 @@ if (api) {
 
   // Ответ на голосовой вопрос читаем вслух — круг замыкается.
   view.onAnswer = (answer) => {
-    api.invoke("voice_speak", { text: answer }).catch(() => {});
+    reading();
+    api.invoke("voice_speak", { text: answer }).catch(quiet);
   };
 
   // Окно спрятали со стороны Rust — Esc, конец разговора. Незаконченные
   // запросы отменяются: иначе ответ, пришедший после Esc, прочитался бы вслух.
-  api.listen("popup:closed", () => view.close());
+  api.listen("popup:closed", () => {
+    quiet();
+    view.close();
+  });
 
   // Идёт запись голоса — показываем, что слушаем.
   api.listen("voice:listening", (event) => {

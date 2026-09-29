@@ -930,6 +930,25 @@ pub async fn voice_stop() {
     crate::voice::stop();
 }
 
+/// Звучит ли сейчас речь. Окно объяснения показывает «Читаю вслух» и
+/// спрашивает это, чтобы убрать полосу, когда голос договорил: `voice_speak`
+/// возвращается сразу, не дожидаясь конца речи.
+#[tauri::command]
+pub fn voice_busy() -> bool {
+    crate::voice::speaking()
+}
+
+/// Открыть настройки на нужном разделе — кнопка «Открыть настройки» в
+/// окне объяснения, когда модель не ответила из-за ключа или адреса.
+#[tauri::command]
+pub fn open_settings(app: AppHandle, section: Option<String>) -> Result<(), String> {
+    let result = match section.as_deref() {
+        Some(section) if !section.is_empty() => crate::overlay::show_settings_section(&app, section),
+        _ => crate::overlay::show_onboarding(&app),
+    };
+    result.map_err(|err| err.to_string())
+}
+
 /// Готово ли распознавание речи и чем оно будет считать.
 #[tauri::command]
 pub fn speech_status(app: AppHandle) -> serde_json::Value {

@@ -1,0 +1,47 @@
+/* NOAH · base.css — общие правила поверх токенов (не из хендоффа дизайна).
+   Собирается в tokens.css следом за темами: scripts/build-tokens.mjs. */
+
+/* Прямые углы в теме NOAH — у кнопок, полей и карточек во всех окнах, как на
+   сайте. Круглое по смыслу (точки, переключатели, индикатор голоса) не трогаем. */
+:root[data-theme="noah"] :is(button, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea,
+  .button, .card, .today, .question, .concept, .flash, .recall, .focus-card, .focus-mode, .chip, .step, .grade,
+  .map-holder, .verdict, .mod, .task, .pop, .menu) {
+  border-radius: 0;
+}
+
+/* ── Телефон ──────────────────────────────────────────────────────────────────
+   Android рисует приложение от края до края: строка состояния и жестовая
+   панель лежат поверх страницы. Отступы от них приходят из плагина (bridge.js),
+   полоса под часами закрашивается фоном страницы — иначе под ней просвечивает
+   прокручиваемое содержимое. Общее для всех страниц: модули открываются в том
+   же окне. */
+html.is-phone body {
+  box-sizing: border-box;
+  padding-top: var(--inset-top, 0px);
+  padding-bottom: var(--inset-bottom, 0px);
+  padding-left: var(--inset-left, 0px);
+  padding-right: var(--inset-right, 0px);
+}
+
+html.is-phone body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: var(--inset-top, 0px);
+  background: var(--bg-solid);
+  z-index: 100;
+  pointer-events: none;
+}
+
+/* Кнопки и вкладки на телефоне — не текст: долгое касание выделяло подпись
+   и вызывало системное меню «Копировать / Объяснить». */
+html.is-phone :is(button, [role="tab"], label) {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Свернуть окно на телефоне нечего: страница модуля — часть единственного окна. */
+html.is-phone [data-el="minimize"] {
+  display: none !important;
+}

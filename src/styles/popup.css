@@ -1,5 +1,6 @@
-/* Вёрстка попапа — перенос `AI Popup.dc.html` из инлайновых стилей в классы.
-   Значения не меняются: там, где в референсе 9px или 13.5px, здесь тоже 9px и 13.5px. */
+/* Попап объяснения — дизайн-система NOAH, опорный экран A.
+   Все значения — токены (tokens.css) или числа из хендоффа дизайна: 400 px
+   ширина, поля 16, кнопки 28, тело до 340 px, затухание 36 px, поле 32. */
 
 @keyframes pop-in {
   from {
@@ -13,14 +14,12 @@
 }
 
 @keyframes skl {
-  0% {
+  0%,
+  100% {
     opacity: 0.45;
   }
   50% {
     opacity: 0.9;
-  }
-  100% {
-    opacity: 0.45;
   }
 }
 
@@ -30,13 +29,23 @@
   }
 }
 
+@keyframes bars {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
 /* Слой попапа в веб-режиме. В приложении его нет: попап там — отдельное системное
    окно, поэтому ни transform, ни overflow родителей на него не влияют. */
 .popup-layer {
   position: fixed;
   left: 0;
   top: 0;
-  z-index: 60;
+  z-index: var(--z-pop, 60);
 }
 
 .popup {
@@ -45,28 +54,26 @@
   max-width: calc(100vw - 24px);
   padding: var(--pop-pad);
   border-radius: var(--pop-radius);
-  background: var(--bg);
-  backdrop-filter: var(--backdrop);
-  -webkit-backdrop-filter: var(--backdrop);
+  background: var(--bg-solid);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: var(--size-ui);
-  line-height: var(--line-ui);
-  animation: pop-in var(--pop-in) ease-out;
+  font-size: 14px;
+  line-height: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pop-gap);
+  animation: pop-in var(--pop-in) var(--ease-out);
   outline: none;
+}
+
+.popup[data-state="loading"] {
+  min-height: var(--pop-min-height);
 }
 
 .popup[data-expanded="true"] {
   width: var(--pop-width-expanded);
-}
-
-/* Фолбэк по и §12.6: без blur — сплошной фон, а не полупрозрачная каша. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .popup {
-    background: var(--bg-solid);
-  }
 }
 
 .popup *,
@@ -81,199 +88,218 @@
   display: none !important;
 }
 
+.popup .icon {
+  flex: none;
+  stroke-width: 2.25;
+}
+
+.popup button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.popup button:focus-visible,
+.popup summary:focus-visible {
+  outline: var(--focus-width) solid var(--focus);
+  outline-offset: var(--focus-offset);
+}
+
 /* ── Шапка ──────────────────────────────────────────────────────────────── */
 
 .popup__head {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 9px;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+}
+
+.popup__term,
+.popup__title {
+  font-family: var(--font-term);
+  font-weight: var(--term-weight);
+  text-transform: var(--term-transform);
+  font-style: var(--term-style);
+  letter-spacing: var(--term-ls);
+  font-size: 19px;
+  line-height: 24px;
+  color: var(--accent);
 }
 
 .popup__term {
   flex: 1;
   min-width: 0;
-  font-family: var(--font-term);
-  font-style: var(--term-style, italic);
-  font-size: var(--size-term);
-  line-height: var(--line-term);
-  color: var(--accent);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.popup__expand {
-  flex: none;
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border-radius: 6px;
-  border: 1px solid var(--btn-border);
-  background: var(--btn-bg);
-  color: var(--btn-color);
-  font-family: var(--font-term);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.popup__expand:hover,
-.popup__expand:focus-visible {
-  border-color: var(--btn-hover-border);
-  color: var(--btn-hover-color);
-  background: var(--btn-hover-bg);
-}
-
-/* Крестик: у окна нет рамки, а значит, и системного крестика. */
-.popup__close {
-  flex: none;
-  align-self: center;
-  width: 22px;
-  height: 22px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 17px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.popup__close:hover,
-.popup__close:focus-visible {
-  color: var(--btn-hover-color);
-  background: var(--btn-hover-bg);
-}
-
-/* Точка вместо кнопки «?» после раскрытия. */
-.popup__mark {
-  flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent-dim);
-  margin-bottom: 4px;
-}
-
-/* ── Loading ────────────────────────────────────────────────────────────── */
-
-.popup__loading {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-.popup__loading-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-muted);
-  font-size: var(--size-secondary);
-}
-
-.spinner {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1.5px solid var(--spin-track);
-  border-top-color: var(--spin-head);
-  animation: spin var(--spin) linear infinite;
-}
-
-.spinner--sm {
-  width: 10px;
-  height: 10px;
-  border-top-color: var(--pending-spin-head);
-}
-
-.skeleton {
-  height: 9px;
-  border-radius: 5px;
-  background: var(--skeleton);
-  animation: skl var(--skeleton-cycle) ease-in-out infinite;
-}
-
-.skeleton--1 {
-  width: 100%;
-}
-.skeleton--2 {
-  width: 88%;
-  animation-delay: 0.15s;
-}
-.skeleton--3 {
-  width: 54%;
-  animation-delay: 0.3s;
-}
-
-/* ── Success ────────────────────────────────────────────────────────────── */
-
-.popup__body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: var(--pop-body-max-height);
-  overflow-y: auto;
-  padding-right: 2px;
-  color: var(--text-body);
-  scrollbar-width: thin;
-  scrollbar-color: var(--scroll-thumb) transparent;
-  /* Переносы по ширине окна. Длинные ссылки, команды и слова без пробелов
-     раньше вылезали за край и наезжали на соседний текст; теперь они
-     переносятся, а обычные слова — по слогам (язык окна — русский). */
+.popup__title {
+  margin-top: -4px;
   overflow-wrap: anywhere;
-  hyphens: auto;
-  text-wrap: pretty;
 }
 
-/* Шаги под «?» и ответы модели приходят строками — строки и сохраняются. */
-.popup__simple,
-.popup__answer-line,
-.popup__body > [data-el="answer"] {
-  white-space: pre-line;
-}
-
-.popup__body::-webkit-scrollbar {
-  width: 6px;
-}
-.popup__body::-webkit-scrollbar-thumb {
-  background: var(--scroll-thumb);
-  border-radius: 3px;
-}
-.popup__body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.popup__extra {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 9px;
-  border-top: 1px solid var(--divider);
-}
-
-.popup__section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.popup__label {
+/* Подпись вести: «Весть», «Напоминание · 15:00». */
+.popup__kicker {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-family: var(--font-mono);
   font-size: var(--size-label);
+  line-height: 12px;
   letter-spacing: var(--ls-label);
   text-transform: uppercase;
   color: var(--label);
 }
 
-.popup__simple {
-  color: var(--simple);
+.popup__icon {
+  width: var(--icon-btn);
+  height: var(--icon-btn);
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--btn-radius);
+  background: transparent;
+  color: var(--text-muted);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+
+.popup__icon:hover {
+  background: var(--btn-hover-bg);
+  color: var(--text);
+}
+
+/* Голос читает — кнопка горит, как в дизайне: акцент на мягкой подложке. */
+.popup__icon.is-on {
+  background: var(--soft);
+  color: var(--accent);
+}
+
+/* ── Думает ─────────────────────────────────────────────────────────────── */
+
+.popup__loading {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.popup__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--pending);
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--spin-track);
+  border-top-color: var(--pending-spin-head);
+  animation: spin var(--spin) linear infinite;
+}
+
+.skeleton {
+  display: block;
+  height: 9px;
+  background: var(--skeleton);
+  border-radius: min(var(--btn-radius), 5px);
+  animation: skl var(--skeleton-cycle) ease-in-out infinite;
+}
+
+.skeleton--2 {
+  width: 88%;
+  animation-delay: 0.15s;
+}
+
+.skeleton--3 {
+  width: 54%;
+  animation-delay: 0.3s;
+}
+
+/* ── Ответ ──────────────────────────────────────────────────────────────── */
+
+.popup__main {
+  position: relative;
+}
+
+.popup__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: var(--pop-body-max-height);
+  overflow-y: auto;
+  padding-right: 6px;
+  margin-right: -6px;
+  color: var(--text-body);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--divider);
+  /* Переносы по ширине окна. Длинные ссылки, команды и слова без пробелов
+     переносятся, обычные слова — по слогам (язык окна — русский). */
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  text-wrap: pretty;
+}
+
+.popup__body::-webkit-scrollbar {
+  width: 4px;
+}
+.popup__body::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 2px;
+}
+.popup__body::-webkit-scrollbar-track {
+  background: var(--divider);
+  border-radius: 2px;
+}
+
+/* Ниже есть ещё текст — край тает, окно при этом не растёт. */
+.popup__fade {
+  position: absolute;
+  left: 0;
+  right: 10px;
+  bottom: 0;
+  height: 36px;
+  background: linear-gradient(transparent, var(--bg-solid));
+  pointer-events: none;
+}
+
+.popup__answer,
+.popup__simple,
+.popup__reply {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.popup__extra {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.popup__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.popup__label {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--size-label);
+  line-height: 12px;
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--label);
 }
 
 .popup__examples {
@@ -283,85 +309,381 @@
 }
 
 .popup__example {
-  display: flex;
-  gap: 7px;
-  color: var(--example);
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
   font-size: var(--size-example);
+  color: var(--example);
 }
 
 .popup__bullet {
   color: var(--accent-dim);
 }
 
-/* ── Follow-up тред ─────────────────────────────────────────────────────── */
-
-.popup__thread {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  padding-top: 10px;
-  border-top: 1px solid var(--divider);
-}
-
+/* Уточнения: вопрос — строкой, ответ — под ним. */
 .popup__messages {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 12px;
+}
+
+.popup__messages:empty {
+  display: none;
 }
 
 .popup__message {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--divider);
 }
 
 .popup__question {
-  font-family: var(--font-term);
-  font-style: var(--term-style, italic);
-  font-size: 15px;
+  font-weight: 600;
   color: var(--thread-q);
 }
 
-.popup__answer-line {
+.popup__reply {
   color: var(--thread-a);
-  font-size: var(--size-example);
 }
 
-.popup__pending,
-.popup__listening {
+/* ── Текст ответа: абзацы, код, таблицы, списки (js/rich-text.js) ──────── */
+
+.rt-p {
+  margin: 0;
+  white-space: pre-line;
+}
+
+.popup strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.popup :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  padding: 0 4px;
+  background: var(--soft);
+  border-radius: min(var(--btn-radius), 4px);
+  color: var(--text);
+}
+
+.rt-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rt-list li::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rt-code {
+  background: var(--code-bg);
+  border: 1px solid var(--code-line);
+  border-radius: min(var(--card-radius), 8px);
+  overflow: hidden;
+}
+
+.rt-code__head {
   display: flex;
   align-items: center;
-  gap: 7px;
-  color: var(--pending);
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border-bottom: 1px solid var(--code-line);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--code-muted);
+}
+
+.rt-code__copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: min(var(--btn-radius), 4px);
+  background: transparent;
+  color: var(--code-text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rt-code__copy:hover {
+  background: var(--code-line);
+}
+
+.rt-code pre {
+  margin: 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
   font-size: 12.5px;
+  line-height: 20px;
+  color: var(--code-text);
+  white-space: pre;
+  user-select: text;
 }
 
-/* «Слушаю…» стоит под шапкой и в свёрнутом окне тоже: запись голоса начинается
-   с любого состояния, а не только из раскрытого треда. */
-.popup__listening {
-  margin-bottom: 9px;
+.rt-table {
+  overflow-x: auto;
+  border: 1px solid var(--divider);
+  border-radius: min(var(--card-radius), 8px);
 }
 
-.popup__listening[hidden] {
+.rt-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.rt-table th,
+.rt-table td {
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--divider);
+}
+
+.rt-table th {
+  background: var(--soft);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rt-table tr:last-child td {
+  border-bottom: 0;
+}
+
+/* ── Читает вслух ───────────────────────────────────────────────────────── */
+
+.popup__reading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+  background: var(--soft);
+  border-radius: var(--btn-radius);
+}
+
+.popup__bars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+}
+
+.popup__bars i {
+  width: 2px;
+  height: 14px;
+  background: var(--accent);
+  animation: bars 0.9s ease-in-out infinite;
+}
+.popup__bars i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.popup__bars i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.popup__bars i:nth-child(4) {
+  animation-delay: 0.45s;
+}
+
+.popup__reading-text {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.popup__textbtn {
+  height: 24px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: var(--btn-radius);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.popup__textbtn:hover {
+  background: var(--btn-hover-bg);
+}
+
+/* ── Ошибка, нет связи, остановлено ─────────────────────────────────────── */
+
+.popup__error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.popup__error-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.popup__error-title .icon {
+  margin-top: 2px;
+  color: var(--error);
+}
+
+.popup__error-title.is-quiet {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.popup__error-title.is-quiet .icon {
   display: none;
 }
 
+.popup__error-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-body);
+}
+
+.popup__offline {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 2px 2px 10px;
+  background: var(--bad-bg);
+  border: 1px solid var(--bad-line);
+  border-radius: var(--btn-radius);
+  color: var(--error-text);
+  font-size: 12.5px;
+}
+
+.popup__chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--btn-radius);
+  background: var(--bg-solid);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.popup__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.popup__btn {
+  height: var(--ctl-h-sm);
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--btn-border);
+  border-radius: var(--btn-radius);
+  background: var(--btn-bg);
+  color: var(--btn-color);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    translate var(--dur-press) var(--ease-out),
+    box-shadow var(--dur-press) var(--ease-out);
+}
+
+.popup__btn:hover {
+  background: var(--btn-hover-bg);
+  border-color: var(--btn-hover-border);
+  color: var(--btn-hover-color);
+}
+
+.popup__btn:active {
+  background: var(--btn-press-bg);
+}
+
+.popup__btn--primary {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-fg);
+  border-color: var(--btn-border);
+  box-shadow: var(--btn-shadow);
+}
+
+.popup__btn--primary:hover {
+  background: var(--btn-primary-hover);
+  color: var(--btn-primary-fg);
+  border-color: var(--btn-border);
+}
+
+/* В NOAH главная кнопка при нажатии съезжает в свою тень. */
+.popup__btn--primary:active {
+  background: var(--btn-primary-press);
+  translate: var(--press-shift);
+  box-shadow: none;
+}
+
+.popup__details {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.popup__details summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.popup__details pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 120px;
+  overflow: auto;
+  background: var(--soft);
+  border-radius: min(var(--btn-radius), 4px);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* ── Уточнить словами или голосом ──────────────────────────────────────── */
+
 .popup__ask {
   display: flex;
-  gap: 7px;
   align-items: center;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider);
 }
 
 .popup__input {
   flex: 1;
   min-width: 0;
-  font: inherit;
-  font-size: var(--size-secondary);
-  padding: 7px 10px;
-  border-radius: 7px;
+  height: 32px;
+  padding: 0 10px;
   border: 1px solid var(--input-border);
+  border-radius: var(--field-radius);
   background: var(--input-bg);
   color: var(--input-color);
+  font: inherit;
+  font-size: 13px;
   outline: none;
 }
 
@@ -370,59 +692,51 @@
 }
 
 .popup__input:focus {
-  border-color: var(--btn-hover-border);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }
 
-.popup__send {
+.popup__input:disabled {
+  background: var(--disabled-bg);
+  color: var(--disabled-fg);
+}
+
+.popup__square {
+  width: 32px;
+  height: 32px;
   flex: none;
-  width: 30px;
-  height: 30px;
   display: grid;
   place-items: center;
   padding: 0;
-  border-radius: 7px;
   border: 1px solid var(--btn-border);
+  border-radius: var(--btn-radius);
   background: var(--btn-bg);
-  color: var(--send-color);
-  font-size: var(--size-secondary);
-  cursor: pointer;
+  color: var(--btn-color);
+  transition: background var(--dur-fast) var(--ease-out);
 }
 
-.popup__send:hover,
-.popup__send:focus-visible {
+.popup__square:hover {
+  background: var(--btn-hover-bg);
   border-color: var(--btn-hover-border);
   color: var(--btn-hover-color);
 }
 
-/* ── Error ──────────────────────────────────────────────────────────────── */
-
-.popup__error {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--error-text);
-  font-size: var(--size-secondary);
+.popup__square--send {
+  color: var(--send-color);
 }
 
-.popup__error-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--error);
-  display: inline-block;
+/* Микрофон зажат — слушаем. */
+.popup__square.is-held {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-solid);
 }
-
-/* ── Доступность ────────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
-  .popup {
+  .popup,
+  .spinner,
+  .skeleton,
+  .popup__bars i {
     animation: none;
-  }
-  .skeleton {
-    animation: none;
-    opacity: 0.7;
-  }
-  .spinner {
-    animation-duration: 2s;
   }
 }
