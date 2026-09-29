@@ -20,7 +20,10 @@
       "endpoints": [
         "https://github.com/faafaafuu/asis/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2N0VBNTM5MzkxNjUzNDMKUldSRFV4WTVPYVYrMWcxd3lYNHExeUlUeXJFNGQ3ZUxhQnBEdDMxbjBZOUM1K3FBcndHa3MrcTEK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ2N0VBNTM5MzkxNjUzNDMKUldSRFV4WTVPYVYrMWcxd3lYNHExeUlUeXJFNGQ3ZUxhQnBEdDMxbjBZOUM1K3FBcndHa3MrcTEK",
+      "windows": {
+        "installMode": "quiet"
+      }
     }
   },
   "bundle": {
@@ -46,6 +49,7 @@
         "type": "downloadBootstrapper"
       },
       "nsis": {
+        "installMode": "currentUser",
         "installerHooks": "./windows/hooks.nsh"
       }
     },

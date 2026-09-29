@@ -1,13 +1,15 @@
-//! Обновление поверх установленной программы.
+//! Обновление поверх установленной программы — само, без установщика.
 //!
 //! Раньше новая версия значила для человека одно и то же: найти релиз, скачать
-//! установщик, закрыть программу, поставить заново. Половина людей так и
-//! остаётся на той версии, с которой начала, — не потому что новая им не нужна,
-//! а потому что это пять шагов ради того, чего они ещё не видели.
+//! установщик, закрыть программу, поставить заново, согласиться с окнами Windows.
+//! Половина людей так и остаётся на той версии, с которой начала.
 //!
-//! Теперь программа сама раз в несколько часов смотрит, не вышло ли новое, и
-//! говорит об этом один раз — не переспрашивая на каждом запуске. Всё остальное
-//! делается кнопкой в настройках: загрузить, поставить поверх, перезапуститься.
+//! Теперь программа раз в несколько часов смотрит, не вышло ли новое, скачивает
+//! его в фоне и ставит в тихую минуту — когда её окна закрыты, Ноа не говорит и
+//! не слушает, а к компьютеру пару минут не прикасались. Установщик работает без
+//! окна (`/S`), программа стоит в папке пользователя, поэтому Windows не
+//! спрашивает прав; после установки он сам запускает новую версию (`/R`).
+//! Человек ничего не нажимает. Кнопка в «Помощи» — чтобы не ждать тихой минуты.
 //!
 //! Чему верить, решает подпись. Обновление приходит по сети, и без проверки
 //! подписи любой, кто сумел вмешаться в соединение, подменил бы программу целиком.
@@ -31,9 +33,13 @@ pub struct Found {
 /// дожидаясь собственной проверки.
 static FOUND: std::sync::Mutex<Option<Found>> = std::sync::Mutex::new(None);
 
-/// О какой версии человеку уже сказали. Сказать один раз — помощь, повторять
-/// при каждой проверке — навязчивость.
-static TOLD: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// Скачанное и проверенное обновление, которое ждёт тихой минуты.
+struct Ready {
+    update: tauri_plugin_updater::Update,
+    bytes: Vec<u8>,
+}
+
+static READY: std::sync::Mutex<Option<Ready>> = std::sync::Mutex::new(None);
 
 /// Через сколько после запуска смотреть в первый раз.
 ///
@@ -44,6 +50,13 @@ const FIRST_LOOK: std::time::Duration = std::time::Duration::from_secs(120);
 /// Как часто смотреть дальше. Версии выходят не чаще раза в неделю, и чаще
 /// шести часов проверять незачем.
 const EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+
+/// Как часто, пока обновление ждёт, смотреть, не настала ли тихая минута.
+const QUIET_POLL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Сколько к компьютеру не должны прикасаться, чтобы перезапуск прошёл незаметно.
+/// Две минуты: за это время человек успевает отойти, а не задуматься над фразой.
+const AWAY: std::time::Duration = std::time::Duration::from_secs(2 * 60);
 
 /// Сколько ждём ответа на вопрос «что вышло».
 ///
@@ -85,86 +98,117 @@ pub fn found() -> Option<Found> {
     FOUND.lock().unwrap_or_else(|err| err.into_inner()).clone()
 }
 
-/// Загружает и ставит новую версию поверх текущей, затем перезапускает программу.
-///
-/// Установщик работает молча и сохраняет папку, в которую программа была
-/// поставлена: для человека это одна кнопка, а не мастер установки заново.
+/// Скачивает найденное в фоне, если оно ещё не скачано. Подпись проверяется
+/// при загрузке: неподписанный файл сюда не попадёт.
+async fn fetch(update: tauri_plugin_updater::Update) -> Result<(), String> {
+    if READY
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .as_ref()
+        .is_some_and(|ready| ready.update.version == update.version)
+    {
+        return Ok(());
+    }
+    log::info!("обновление {}: скачиваю в фоне", update.version);
+    let bytes = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|err| format!("не удалось скачать: {err}"))?;
+    log::info!("обновление {}: скачано, жду тихой минуты", update.version);
+    *READY.lock().unwrap_or_else(|err| err.into_inner()) = Some(Ready { update, bytes });
+    Ok(())
+}
+
+/// Ставит скачанное и перезапускается. На Windows установщик запускается без
+/// окна, программа выходит, а он после установки поднимает новую версию сам.
+fn apply(app: &AppHandle, ready: Ready) -> Result<(), String> {
+    log::info!("обновление {}: ставлю и перезапускаюсь", ready.update.version);
+    ready.update.install(&ready.bytes).map_err(|err| format!("не удалось поставить: {err}"))?;
+    app.restart()
+}
+
+/// Ставит новую версию сейчас, не дожидаясь тихой минуты: кнопка в «Помощи».
 pub async fn install(app: AppHandle) -> Result<(), String> {
     let update = updater(&app, None)?
         .check()
         .await
         .map_err(|err| format!("не удалось проверить: {err}"))?
         .ok_or("Уже стоит последняя версия.")?;
-
-    let version = update.version.clone();
-    log::info!("обновление {version}: загружаю");
-    update
-        .download_and_install(|_, _| {}, || log::info!("обновление {version}: загружено, ставлю"))
-        .await
-        .map_err(|err| format!("не удалось поставить: {err}"))?;
-
-    log::info!("обновление поставлено — перезапускаюсь");
-    app.restart()
+    fetch(update).await?;
+    let ready = READY.lock().unwrap_or_else(|err| err.into_inner()).take().ok_or("Обновление не скачалось.")?;
+    apply(&app, ready)
 }
 
-/// Фоновая проверка: первый раз вскоре после запуска, дальше раз в несколько
-/// часов. О находке говорит один раз на версию.
+/// Фоновая работа: первый раз вскоре после запуска, дальше раз в несколько
+/// часов — посмотреть, скачать и поставить в тихую минуту.
 pub fn watch(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(FIRST_LOOK).await;
         loop {
-            match look(&app).await {
-                Ok(Some(found)) => tell(&app, &found),
-                Ok(None) => log::info!("обновлений нет, стоит {}", current(&app)),
+            match updater(&app, Some(ASK_WAIT)) {
+                Ok(asker) => match asker.check().await {
+                    Ok(Some(update)) => {
+                        *FOUND.lock().unwrap_or_else(|err| err.into_inner()) = Some(Found {
+                            version: update.version.clone(),
+                            notes: update.body.clone().unwrap_or_default(),
+                        });
+                        if let Err(err) = fetch(update).await {
+                            log::warn!("обновление: {err}");
+                        }
+                    }
+                    Ok(None) => log::info!("обновлений нет, стоит {}", current(&app)),
+                    Err(err) => log::warn!("проверка обновления: {err}"),
+                },
                 Err(err) => log::warn!("проверка обновления: {err}"),
             }
-            tokio::time::sleep(EVERY).await;
+            wait_and_apply(&app).await;
         }
     });
 }
 
-/// Говорит о находке — и только о новой. Окно с ответами для этого уже есть:
-/// заводить ради одной строки системное уведомление, которое Windows покажет
-/// поверх всего и запишет в свой центр, значит вести себя навязчивее, чем
-/// того стоит новость.
-fn tell(app: &AppHandle, found: &Found) {
-    if !first_word_about(&found.version) {
-        return;
-    }
-    log::info!("вышла версия {}", found.version);
-    let text = format!(
-        "Вышла версия {}. Обновиться — в настройках, раздел «Обновление»: программа поставит её поверх и перезапустится.",
-        found.version
-    );
-    if let Err(err) = crate::overlay::show_for_reminder(app, text) {
-        log::warn!("не удалось показать весть об обновлении: {err}");
+/// До следующей проверки: если обновление скачано — ставит его в первую тихую
+/// минуту; если нет — просто ждёт.
+async fn wait_and_apply(app: &AppHandle) {
+    let until = std::time::Instant::now() + EVERY;
+    while std::time::Instant::now() < until {
+        tokio::time::sleep(QUIET_POLL).await;
+        let waiting = READY.lock().unwrap_or_else(|err| err.into_inner()).is_some();
+        if !waiting || !quiet(app) {
+            continue;
+        }
+        let Some(ready) = READY.lock().unwrap_or_else(|err| err.into_inner()).take() else {
+            continue;
+        };
+        if let Err(err) = apply(app, ready) {
+            log::warn!("обновление: {err}");
+        }
     }
 }
 
-/// Первая ли это весть об этой версии.
-///
-/// Проверка идёт каждые несколько часов, а новость одна: сказать о ней стоит
-/// один раз. О следующей версии — снова один раз.
-fn first_word_about(version: &str) -> bool {
-    let mut told = TOLD.lock().unwrap_or_else(|err| err.into_inner());
-    if *told == version {
-        return false;
-    }
-    *told = version.to_string();
-    true
+/// Тихая минута: ни одного открытого окна, Ноа не говорит и не слушает, к
+/// компьютеру давно не прикасались. Перезапуск в такую минуту никто не заметит.
+fn quiet(app: &AppHandle) -> bool {
+    use tauri::Manager;
+    let window_open = app.webview_windows().values().any(|window| window.is_visible().unwrap_or(false));
+    !window_open && !crate::voice::speaking() && !crate::voice::hotkey::recording() && away() >= AWAY
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn about_one_version_we_speak_once() {
-        *TOLD.lock().unwrap() = String::new();
-
-        assert!(first_word_about("1.7.0"), "о новой версии говорим");
-        assert!(!first_word_about("1.7.0"), "о той же — молчим");
-        assert!(first_word_about("1.8.0"), "о следующей — снова говорим");
+/// Сколько к компьютеру не прикасались — ни мышью, ни клавиатурой.
+#[cfg(target_os = "windows")]
+fn away() -> std::time::Duration {
+    use windows::Win32::System::SystemInformation::GetTickCount;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    if !unsafe { GetLastInputInfo(&mut info) }.as_bool() {
+        return std::time::Duration::ZERO;
     }
+    std::time::Duration::from_millis(u64::from(unsafe { GetTickCount() }.wrapping_sub(info.dwTime)))
+}
+
+/// На macOS и Linux узнать это без лишних прав нельзя: хватает закрытых окон
+/// и молчащего голоса.
+#[cfg(not(target_os = "windows"))]
+fn away() -> std::time::Duration {
+    std::time::Duration::MAX
 }

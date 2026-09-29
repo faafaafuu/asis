@@ -496,46 +496,46 @@ Then write to it as you'd speak: “send the last screenshot”, “find the con
     section: "howto",
     ru: {
       title: "Обновить NOAH",
-      lead: "Новая версия ставится поверх текущей из окна настроек — удалять и ставить заново не нужно.",
+      lead: "С версии 1.13 NOAH обновляется сам: скачивает новую версию в фоне, ставит без окон и перезапускается.",
       body: `
-NOAH сам раз в несколько часов смотрит, не вышла ли новая версия, и говорит об этом один раз — навязываться не будет.
+Делать ничего не нужно. NOAH раз в несколько часов смотрит, не вышла ли новая версия, и скачивает её в фоне. Ставит в тихую минуту — когда его окна закрыты, он не говорит и не слушает, а к компьютеру пару минут не прикасались. Установка идёт без окна и без вопросов Windows: программа стоит в вашей папке, прав администратора ей не нужно. Через несколько секунд NOAH снова в трее — уже новый.
 
-## Как обновиться
+Настройки, модули, курсы и память о вас остаются на месте: обновляется программа, а не ваши данные.
 
-1. Откройте окно NOAH (двойной щелчок по значку в трее) → вкладка **Настройки**.
-2. Раздел **Обновление** внизу: там написано, какая версия стоит и какая вышла.
-3. Нажмите **Обновить и перезапустить**.
+## Не ждать
 
-NOAH скачает новую версию, поставит её поверх текущей и перезапустится сам. Настройки, модули, курсы и память о вас остаются на месте: обновляется программа, а не ваши данные.
+1. Откройте окно NOAH (двойной щелчок по значку в трее) → вкладка **Помощь**.
+2. Раздел **Обновление**: там написано, какая версия стоит и какая вышла.
+3. **Обновить сейчас** — NOAH поставит её и перезапустится.
 
-Кнопки **Обновить** нет, когда обновляться не на что — значит, у вас последняя версия. Посмотреть самому, что вышло, можно кнопкой **Проверить**.
+Кнопки нет, когда обновляться не на что. Посмотреть самому, что вышло, — **Проверить**.
 
 ## Почему обновление безопасно
 
 Файл обновления подписан ключом выпуска, и NOAH ставит только то, что этой подписью подтверждено. Подменить обновление по дороге нельзя: подпись не сойдётся, и программа откажется его ставить.
 
-Версии до 1.7.0 обновляться сами не умеют — с них нужно один раз поставить свежую вручную, [скачав установщик](/download). Дальше обновления приходят внутрь программы.
+Версии до 1.7.0 обновляться сами не умеют — с них нужно один раз поставить свежую вручную, [скачав установщик](/download). С 1.7.0 до 1.12 обновление ставится кнопкой, с 1.13 — само.
+
+На Android .apk ставит сама система: NOAH скачивает его, а подтвердить установку Android попросит вас.
 `,
     },
     en: {
       title: "Update NOAH",
-      lead: "A new version installs over the current one from the settings window — no uninstalling.",
+      lead: "Since 1.13 NOAH updates itself: it downloads the new version in the background, installs it without any windows and restarts.",
       body: `
-NOAH checks for a new version every few hours and mentions it once.
-
-## How to update
-
-1. Open the NOAH window (double-click the tray icon) → **Settings**.
-2. The update section at the bottom shows the installed and the available version.
-3. Click the update button — NOAH installs the new version over the current one and restarts itself.
+Nothing to do. NOAH checks for a new version every few hours and downloads it in the background. It installs it at a quiet moment — its windows are closed, it is not speaking or listening, and the computer has been idle for a couple of minutes. No installer window, no Windows prompts; a few seconds later NOAH is back in the tray, updated.
 
 Settings, modules, courses and what it remembers about you stay where they are.
+
+## Don't want to wait
+
+Open the NOAH window → **Help** → **Update** → **Update now**.
 
 ## Why it is safe
 
 The update file is signed with the release key, and NOAH installs only what that signature confirms.
 
-Versions before 1.7.0 cannot update themselves — install a fresh one manually once, [from the installer](/download).
+Versions before 1.7.0 cannot update themselves — install a fresh one manually once, [from the installer](/download). From 1.7.0 to 1.12 the update is installed with a button, from 1.13 by itself.
 `,
     },
   },
