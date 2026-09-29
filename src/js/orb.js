@@ -14,10 +14,15 @@ const PARTICLE_COUNT = 26;
 
 /** Цвета по состояниям: три оттенка на градиент кольца, облака и частиц. */
 export const PALETTE = {
-  idle: ["oklch(0.55 0.08 270)", "oklch(0.5 0.07 250)", "oklch(0.58 0.06 230)"],
-  listening: ["oklch(0.75 0.15 160)", "oklch(0.72 0.16 190)", "oklch(0.78 0.13 140)"],
-  thinking: ["oklch(0.7 0.15 250)", "oklch(0.65 0.18 290)", "oklch(0.72 0.13 210)"],
-  speaking: ["oklch(0.75 0.19 300)", "oklch(0.78 0.17 260)", "oklch(0.82 0.14 200)"],
+  // Цвета — дизайн-система NOAH, «Кольцо Ноа».
+  idle: ["#6f7fa6", "#5f6f96", "#7c8bb0"],
+  listening: ["#5fd3a8", "#4fc3d8", "#7fe0b0"],
+  thinking: ["#7c8cf0", "#9a7cf0", "#6fb0f0"],
+  speaking: ["#e07cf0", "#b08cff", "#7cc8f5"],
+  // Смотрит на окно (левый Shift + пробел): янтарное кольцо в уголках кадра.
+  watching: ["#f2c14e", "#e5a93a", "#f6d27a"],
+  // Микрофон молчит или недоступен: серое кольцо, перечёркнутое.
+  muted: ["#8a8f99", "#7a7f89", "#9aa0ab"],
   // Загрузка распознавания: одни точки, без кольца. Кольцо значит «я тут и
   // работаю», а пока распознавание поднимается, работать ещё нечем.
   loading: ["oklch(0.7 0.15 250)", "oklch(0.65 0.18 290)", "oklch(0.8 0.12 220)"],
@@ -29,6 +34,11 @@ const APPEAR_MS = 260;
 /** Добавляет прозрачность к цвету, не разбирая его на части. */
 function withAlpha(color, alpha) {
   if (color.startsWith("oklch")) return color.replace(")", ` / ${alpha})`);
+  if (/^#[0-9a-f]{6}$/i.test(color)) {
+    return `${color}${Math.round(Math.max(0, Math.min(1, alpha)) * 255)
+      .toString(16)
+      .padStart(2, "0")}`;
+  }
   return color;
 }
 
@@ -60,7 +70,10 @@ export function createOrb(canvas) {
     switch (mode) {
       case "loading":
         return 0.25;
+      case "muted":
+        return 0.05;
       case "listening":
+      case "watching":
       case "thinking":
         // Спокойная медленная пульсация: программа ждёт, а не суетится.
         return 0.32 + Math.sin(time * 2) * 0.08;
@@ -168,21 +181,44 @@ export function createOrb(canvas) {
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      // Второе кольцо — только когда молчит: в речи оно мешает главному движению.
-      if (mode !== "speaking") {
-        const facets = 18;
+      // Думает — вокруг бежит дуга: видно, что работа идёт.
+      if (mode === "thinking") {
+        ctx.strokeStyle = colors[2];
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        for (let i = 0; i <= facets; i++) {
-          const a = (i / facets) * Math.PI * 2 - time * 0.6;
-          const r = baseR + 16 + Math.sin(a * 3 + time * 3) * (3 + level * 6);
-          const x = cx + Math.cos(a) * r;
-          const y = cy + Math.sin(a) * r;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
+        ctx.arc(cx, cy, baseR + 18, time * 2.2, time * 2.2 + 1.1);
+        ctx.stroke();
+      }
+
+      // Смотрит на окно — уголки кадра вокруг кольца.
+      if (mode === "watching") {
+        const box = baseR + 22;
+        const arm = 12;
+        ctx.strokeStyle = colors[0];
+        ctx.lineWidth = 2;
+        for (const [dx, dy] of [
+          [-1, -1],
+          [1, -1],
+          [1, 1],
+          [-1, 1],
+        ]) {
+          const x = cx + dx * box;
+          const y = cy + dy * box;
+          ctx.beginPath();
+          ctx.moveTo(x - dx * arm, y);
+          ctx.lineTo(x, y);
+          ctx.lineTo(x, y - dy * arm);
+          ctx.stroke();
         }
-        ctx.closePath();
-        ctx.strokeStyle = withAlpha(colors[2], 0.35);
-        ctx.lineWidth = 1;
+      }
+
+      // Микрофон молчит — кольцо перечёркнуто.
+      if (mode === "muted") {
+        ctx.strokeStyle = colors[1];
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx - baseR - 6, cy + baseR + 6);
+        ctx.lineTo(cx + baseR + 6, cy - baseR - 6);
         ctx.stroke();
       }
     }
