@@ -212,20 +212,22 @@ pub async fn publish(id: &str, description: &str, category: &str) -> Result<Stri
 /// нейросеть пользователя собрала через MCP по ссылке, проверяет их, ставит
 /// прошедшие и отправляет отчёт обратно. Без ключа площадки — молчит.
 pub fn sync(app: &tauri::AppHandle) {
-    let _ = app;
-    let _ = std::thread::Builder::new().name("sufler-platform".into()).spawn(|| {
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("sufler-platform".into()).spawn(move || {
         let mut last_hello = std::time::Instant::now() - Duration::from_secs(3600);
+        let mut last_progress = std::time::Instant::now() - Duration::from_secs(3600);
         loop {
             let (url, token) = settings();
             if !token.is_empty() {
                 if last_hello.elapsed() > Duration::from_secs(240) {
                     let env = crate::mcp::environment();
                     let courses = crate::mcp::list_courses();
+                    let ids: Vec<String> = crate::learning::overview().into_iter().map(|card| card.id).collect();
                     let hello = tauri::async_runtime::block_on(post(
                         &url,
                         "/api/app/hello",
                         &token,
-                        &json!({ "env": env, "courses": courses }),
+                        &json!({ "env": env, "courses": courses, "courseIds": ids }),
                     ));
                     match hello {
                         Ok(_) => last_hello = std::time::Instant::now(),
@@ -237,6 +239,26 @@ pub fn sync(app: &tauri::AppHandle) {
                 }
                 if let Err(err) = take_courses(&url, &token) {
                     log::debug!("площадка: курсы не взяты ({err})");
+                }
+                // Прогресс обучения — сразу после ответов и раз в две минуты,
+                // чтобы подтянуть сделанное в браузере и на телефоне.
+                let unsent = crate::learning::take_unsent();
+                if unsent || last_progress.elapsed() > Duration::from_secs(120) {
+                    match sync_progress(&url, &token) {
+                        Ok(changed) => {
+                            last_progress = std::time::Instant::now();
+                            if changed {
+                                use tauri::Emitter;
+                                let _ = app.emit_to(crate::overlay::LEARN_LABEL, "learn:changed", ());
+                            }
+                        }
+                        Err(err) => {
+                            if unsent {
+                                crate::learning::mark_unsent();
+                            }
+                            log::debug!("площадка: прогресс не сверен ({err})");
+                        }
+                    }
                 }
             }
             std::thread::sleep(Duration::from_secs(5));
@@ -280,6 +302,14 @@ fn take_drafts(url: &str, token: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Отправляет прогресс обучения и берёт общий, слитый с браузером и
+/// телефоном. Отдаёт, пришло ли что-то новое.
+fn sync_progress(url: &str, token: &str) -> Result<bool, String> {
+    let body = json!({ "data": crate::learning::snapshot() });
+    let reply = tauri::async_runtime::block_on(post(url, "/api/app/progress", token, &body))?;
+    Ok(reply.get("data").is_some_and(crate::learning::adopt))
 }
 
 async fn get_with(url: &str, path: &str, token: &str) -> Result<Value, String> {

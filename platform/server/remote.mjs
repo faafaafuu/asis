@@ -12,7 +12,7 @@
 // Курс забирается кусками по несколько килобайт: с части каналов длинный
 // TCP-ответ до зарубежного сервера обрывается на первых десятках килобайт.
 
-import { saveCourse, saveTopic } from "./noa.mjs";
+import { saveCourse, saveTopic, readProgress, writeProgress, queueMissingForApp } from "./noa.mjs";
 import { randomUUID } from "node:crypto";
 import { authChallenge } from "./mcpauth.mjs";
 import { existsSync, readFileSync } from "node:fs";
@@ -228,12 +228,22 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
 
   route("POST", /^\/api\/app\/hello$/, async ({ req }) => {
     const user = appUser(req);
-    const { env, courses } = await readJson(req);
+    const { env, courses, courseIds } = await readJson(req);
     touch(user.id, String(env ?? "").slice(0, 2000));
     if (typeof courses === "string") {
       db.prepare("UPDATE devices SET courses = ? WHERE user_id = ?").run(courses.slice(0, 20000), user.id);
     }
+    // Курсы аккаунта, которых у программы нет, — в очередь ей.
+    if (Array.isArray(courseIds)) queueMissingForApp(db, user.id, courseIds.slice(0, 200));
     return { name: user.name };
+  });
+
+  // Прогресс обучения: программа присылает свой, получает общий — слитый по
+  // курсам с тем, что накопили браузер и телефон (writeProgress).
+  route("POST", /^\/api\/app\/progress$/, async ({ req }) => {
+    const user = appUser(req);
+    const { data } = await readJson(req);
+    return data ? writeProgress(db, user.id, data, Fail) : readProgress(db, user.id);
   });
 
   // Курсы: список ждущих, затем каждый кусками, затем отчёт.

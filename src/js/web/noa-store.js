@@ -5,7 +5,7 @@
 // оттуда, а прогресс догоняет вас на другом устройстве. Спор решается
 // временем: какой прогресс сохранён позже, тот и верен.
 
-import { createLearning, validate, normalizeCourse } from "./learn-core.js";
+import { createLearning, validate, normalizeCourse, mergeProgress } from "./learn-core.js";
 import { chat, loadModel } from "./ai-web.js";
 import { request } from "./net.js";
 import { remembered, whoIsIn } from "./early.js";
@@ -96,15 +96,32 @@ async function start() {
   /** До какого сохранения прогресс уже лежит в аккаунте. */
   let pushedAt = saved.pushedAt ?? 0;
   let remoteAt = 0;
+  // С другими устройствами — по курсам: у каждого остаётся более свежий.
+  // Программа на компьютере шлёт свой прогресс туда же, поэтому здесь и
+  // появляется, где вы остановились в ней.
+  let localAhead = false;
   if (user) {
     const remote = await api("/api/noa/progress").catch(() => null);
     remoteAt = remote?.savedAt ?? 0;
-    if (remote?.data && remoteAt > savedAt) {
-      data = remote.data;
-      savedAt = remoteAt;
-      pushedAt = remoteAt;
+    if (remote?.data) {
+      const merged = mergeProgress(remote.data, data);
+      localAhead = JSON.stringify(merged.courses) !== JSON.stringify(remote.data.courses ?? {});
+      data = merged;
+      if (!localAhead) pushedAt = Math.max(pushedAt, savedAt);
     }
   }
+  /** Пришло ли с других устройств что-то, чего окно ещё не показало. */
+  let arrived = false;
+  const adopt = (remoteData) => {
+    if (!remoteData) return;
+    const merged = mergeProgress(remoteData, store.data);
+    if (JSON.stringify(merged.courses) === JSON.stringify(store.data.courses ?? {})) return;
+    store.data.courses = merged.courses;
+    store.data.deep = merged.deep;
+    write(PROGRESS, { data: store.data, savedAt, pushedAt });
+    arrived = true;
+  };
+  let pulledAt = Date.now();
 
   // В аккаунт — не на каждый щелчок, а пачкой через пару секунд. Связь
   // подвела — прогресс уже лежит в браузере, отправка повторяется с паузой,
@@ -118,8 +135,9 @@ async function start() {
     pushTimer = setTimeout(async () => {
       const sending = savedAt;
       try {
-        await api("/api/noa/progress", { method: "PUT", body: { data: store.data, savedAt: sending } });
+        const reply = await api("/api/noa/progress", { method: "PUT", body: { data: store.data, savedAt: sending } });
         pushedAt = Math.max(pushedAt, sending);
+        adopt(reply?.data);
         write(PROGRESS, { data: store.data, savedAt, pushedAt });
         retryIn = 0;
       } catch {
@@ -140,7 +158,7 @@ async function start() {
     },
   };
   // Прошлый раз не всё дошло до аккаунта — дослать.
-  if (unsent() && savedAt > remoteAt) push(0);
+  if (localAhead || (unsent() && savedAt > remoteAt)) push(0);
 
   const courses = () => {
     // Курс из аккаунта важнее своей копии с тем же id: его обновляет нейросеть.
@@ -203,13 +221,20 @@ async function start() {
         local = now;
         return true;
       }
+      // Прогресс с других устройств — раз в минуту.
+      if (Date.now() - pulledAt > 60_000) {
+        pulledAt = Date.now();
+        adopt((await api("/api/noa/progress").catch(() => null))?.data);
+      }
+      const progressCame = arrived;
+      arrived = false;
       try {
         const { version: now } = await api("/api/noa/courses/version");
-        if (now === version) return false;
+        if (now === version) return progressCame;
         await loadAccount();
         return true;
       } catch {
-        return false;
+        return progressCame;
       }
     },
     /** Сборки курсов на сервере — последние пять. */

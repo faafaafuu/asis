@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createLearning, validate, answerCard, newCardState, levelOf, sections, choiceOf } from "./learn-core.js";
+import { createLearning, validate, answerCard, newCardState, levelOf, sections, choiceOf, mergeProgress } from "./learn-core.js";
 
 const lesson = [
   "# Сети",
@@ -216,4 +216,16 @@ test("устный зачёт: вариант называют словом — 
   learning.oralStart("net", "basics");
   const reply = await learning.oralAnswer("второй");
   assert.match(reply.text, /^Верно\. Порт — квартира\./);
+});
+
+test("прогресс с двух устройств: у каждого курса — более свежий", () => {
+  const phone = { courses: { a: { updated: "2026-09-30 10:05", current: "t2" }, b: { updated: "2026-09-29 20:00", current: "x1" } }, deep: { k1: 1 } };
+  const desk = { courses: { a: { updated: "2026-09-30 09:00", current: "t1" }, c: { updated: "2026-09-30 08:00", current: "y" } }, deep: { k2: 2 } };
+  const merged = mergeProgress(phone, desk);
+  assert.equal(merged.courses.a.current, "t2", "телефон свежее — его тема");
+  assert.equal(merged.courses.b.current, "x1");
+  assert.equal(merged.courses.c.current, "y");
+  assert.deepEqual(merged.deep, { k1: 1, k2: 2 });
+  assert.equal(mergeProgress({ courses: { a: { updated: "2026-09-30 10:00", current: "old" } } }, { courses: { a: { updated: "2026-09-30 10:00", current: "new" } } }).courses.a.current, "new", "при равенстве — присланное");
+  assert.deepEqual(mergeProgress(null, null).courses, {});
 });

@@ -230,6 +230,31 @@ export function advice(raw) {
 
 const START_EASE = 2.5;
 const MIN_EASE = 1.3;
+/* ── Прогресс с разных устройств ──────────────────────────────────────── */
+
+/**
+ * Сливает прогресс двух устройств: у каждого курса берётся тот, что изменён
+ * позже (поле `updated`, «ГГГГ-ММ-ДД ЧЧ:ММ» — строки сравниваются как даты).
+ * При равенстве побеждает `incoming` — то, что прислали только что.
+ *
+ * Раньше выигрывал целиком тот, кто сохранил последним: занимались курсом на
+ * телефоне, потом открыли программу со старым прогрессом — и телефонный
+ * пропадал.
+ */
+export function mergeProgress(stored, incoming) {
+  const a = stored?.courses ?? {};
+  const b = incoming?.courses ?? {};
+  const courses = {};
+  for (const id of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const mine = a[id];
+    const theirs = b[id];
+    if (!mine) courses[id] = theirs;
+    else if (!theirs) courses[id] = mine;
+    else courses[id] = String(theirs.updated ?? "") >= String(mine.updated ?? "") ? theirs : mine;
+  }
+  return { ...(stored ?? {}), ...(incoming ?? {}), courses, deep: { ...(stored?.deep ?? {}), ...(incoming?.deep ?? {}) } };
+}
+
 export const MATURE_DAYS = 21;
 
 export const newCardState = () => ({ due: 0, interval: 0, ease: START_EASE, streak: 0, lapses: 0, seen: 0, last: 0 });

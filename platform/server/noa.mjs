@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
-import { validate, advice, normalizeCourse } from "../../src/js/web/learn-core.js";
+import { validate, advice, normalizeCourse, mergeProgress } from "../../src/js/web/learn-core.js";
 import { buildCourse, Stopped } from "../../src/js/web/course-builder.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -161,7 +161,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
   route("POST", /^\/api\/noa\/courses$/, async ({ req, user: who }) => {
     const user = need(who);
     const { course } = await readJson(req, MAX_COURSE + 1000);
-    return { report: saveCourse(db, user.id, course) };
+    return { report: saveCourse(db, user.id, course, { forApp: true }) };
   });
 
   route("DELETE", /^\/api\/noa\/courses\/([A-Za-z0-9_-]{1,64})$/, ({ user: who, match }) => {
@@ -276,7 +276,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
         return bridgeChat(engine, messages, Boolean(opts?.long), engine.startsWith("claude") ? job.quality : "");
       },
       save: (course) => {
-        saveCourse(db, job.user_id, course);
+        saveCourse(db, job.user_id, course, { forApp: true });
       },
       progress: (p) =>
         updateBuild(job.id, {
@@ -395,24 +395,65 @@ export function mountNoa({ route, db, Fail, readJson }) {
     return { text: String(data.text ?? "") };
   });
 
-  route("GET", /^\/api\/noa\/progress$/, ({ user: who }) => {
-    const user = need(who);
-    const row = db.prepare("SELECT body, saved_at FROM noa_progress WHERE user_id = ?").get(user.id);
-    return row ? { data: JSON.parse(row.body), savedAt: row.saved_at } : { data: null, savedAt: 0 };
-  });
+  route("GET", /^\/api\/noa\/progress$/, ({ user: who }) => readProgress(db, need(who).id));
 
   route("PUT", /^\/api\/noa\/progress$/, async ({ req, user: who }) => {
     const user = need(who);
-    const { data, savedAt } = await readJson(req, MAX_PROGRESS + 1000);
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Fail(400, "Прогресс — объект.");
-    const body = JSON.stringify(data);
-    if (body.length > MAX_PROGRESS) throw new Fail(413, "Прогресс слишком большой.");
-    const at = Number.isFinite(savedAt) ? Math.min(savedAt, Date.now() + 60_000) : Date.now();
-    db.prepare(
-      "INSERT INTO noa_progress (user_id, body, saved_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET body = excluded.body, saved_at = excluded.saved_at WHERE excluded.saved_at >= noa_progress.saved_at",
-    ).run(user.id, body, at);
-    return { ok: true };
+    const { data } = await readJson(req, MAX_PROGRESS + 1000);
+    return { ok: true, ...writeProgress(db, user.id, data, Fail) };
   });
+}
+
+/** Прогресс аккаунта: `{ data, savedAt }`, `data` — как learning.json. */
+export function readProgress(db, userId) {
+  const row = db.prepare("SELECT body, saved_at FROM noa_progress WHERE user_id = ?").get(userId);
+  return row ? { data: JSON.parse(row.body), savedAt: row.saved_at } : { data: null, savedAt: 0 };
+}
+
+/**
+ * Прогресс с устройства — в аккаунт, слитым с тем, что там уже есть: у
+ * каждого курса остаётся более свежий (mergeProgress). Отдаёт общий итог —
+ * устройство берёт его себе, и так программа, телефон и браузер сходятся.
+ */
+export function writeProgress(db, userId, incoming, Fail) {
+  if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) throw new Fail(400, "Прогресс — объект.");
+  const merged = mergeProgress(readProgress(db, userId).data, incoming);
+  const body = JSON.stringify(merged);
+  if (body.length > MAX_PROGRESS) throw new Fail(413, "Прогресс слишком большой.");
+  const at = Date.now();
+  db.prepare(
+    "INSERT INTO noa_progress (user_id, body, saved_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET body = excluded.body, saved_at = excluded.saved_at",
+  ).run(userId, body, at);
+  return { data: merged, savedAt: at };
+}
+
+/**
+ * Досылает программе курсы аккаунта, которых у неё нет и которые ей ещё ни
+ * разу не отправлялись: собранные на сайте до того, как сайт начал ставить
+ * их в очередь. Удалённый на компьютере курс не возвращается — он уже
+ * отправлялся.
+ */
+export function queueMissingForApp(db, userId, have) {
+  const known = new Set(have.map(String));
+  const sent = db.prepare("SELECT 1 FROM course_jobs WHERE user_id = ? AND course_id = ? LIMIT 1");
+  for (const row of db.prepare("SELECT course_id, body FROM noa_courses WHERE user_id = ?").all(String(userId))) {
+    if (known.has(row.course_id) || sent.get(userId, row.course_id)) continue;
+    queueForApp(db, userId, row.course_id, row.body);
+  }
+}
+
+/**
+ * Курс — и в очередь программе на компьютере: собранный на сайте курс иначе
+ * жил только в браузере, и в окне «Обучение» его не было. Прежний
+ * незабранный вариант того же курса заменяется — программа возьмёт свежий.
+ */
+function queueForApp(db, userId, courseId, body) {
+  try {
+    db.prepare("UPDATE course_jobs SET status = 'replaced' WHERE user_id = ? AND course_id = ? AND kind = 'course' AND status = 'pending'").run(userId, courseId);
+    db.prepare("INSERT INTO course_jobs (id, user_id, course_id, kind, payload) VALUES (?, ?, ?, ?, ?)").run(randomUUID(), userId, courseId, "course", body);
+  } catch (err) {
+    console.error("курс не встал в очередь программе:", err.message);
+  }
 }
 
 /**
@@ -420,7 +461,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
  * человек на сайте, и нейросеть, собравшая курс по MCP. Ошибка — исключение
  * со списком того, что исправить.
  */
-export function saveCourse(db, owner, raw) {
+export function saveCourse(db, owner, raw, { forApp = false } = {}) {
   const userId = String(owner);
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("course — объект курса по course_format.");
   const body = JSON.stringify(raw);
@@ -433,6 +474,7 @@ export function saveCourse(db, owner, raw) {
   db.prepare(
     "INSERT INTO noa_courses (user_id, course_id, body) VALUES (?, ?, ?) ON CONFLICT(user_id, course_id) DO UPDATE SET body = excluded.body, updated = datetime('now')",
   ).run(userId, course.id, body);
+  if (forApp) queueForApp(db, userId, course.id, body);
   const concepts = course.topics.reduce((sum, t) => sum + t.concepts.length, 0);
   const questions = course.topics.reduce((sum, t) => sum + t.tasks.length + t.exam.length, 0) + course.final.length;
   const notes = advice(course);
@@ -443,7 +485,7 @@ export function saveCourse(db, owner, raw) {
 }
 
 /** Тема в курс аккаунта: добавить или заменить тему с тем же id. */
-export function saveTopic(db, owner, courseId, topic) {
+export function saveTopic(db, owner, courseId, topic, options = {}) {
   const userId = String(owner);
   const row = db.prepare("SELECT body FROM noa_courses WHERE user_id = ? AND course_id = ?").get(userId, courseId);
   if (!row) return null;
@@ -452,5 +494,5 @@ export function saveTopic(db, owner, courseId, topic) {
   const at = course.topics.findIndex((known) => known?.id === topic?.id);
   if (at >= 0) course.topics[at] = topic;
   else course.topics.push(topic);
-  return saveCourse(db, userId, course);
+  return saveCourse(db, userId, course, options);
 }

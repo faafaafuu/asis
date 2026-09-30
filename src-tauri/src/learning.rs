@@ -623,6 +623,9 @@ struct Store {
 
 static STORE: Mutex<Option<(PathBuf, Store)>> = Mutex::new(None);
 
+/// Есть ли изменения, которые ещё не ушли в аккаунт на сайте.
+static UNSENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
 /// Читает прогресс. Зовётся при запуске.
 pub fn load(dir: PathBuf) {
     let path = dir.join("learning.json");
@@ -640,6 +643,13 @@ pub(crate) fn with<T>(course: &str, change: impl FnOnce(&mut CourseProgress) -> 
     let progress = store.courses.entry(course.to_string()).or_default();
     let value = change(progress);
     progress.updated = Some(chrono::Local::now().format("%Y-%m-%d %H:%M").to_string());
+    UNSENT.store(true, std::sync::atomic::Ordering::Relaxed);
+    save(path, store);
+    value
+}
+
+/// Пишет прогресс на диск.
+fn save(path: &std::path::Path, store: &Store) {
     if !path.as_os_str().is_empty() {
         match serde_json::to_string_pretty(store) {
             Ok(text) => {
@@ -650,7 +660,54 @@ pub(crate) fn with<T>(course: &str, change: impl FnOnce(&mut CourseProgress) -> 
             Err(err) => log::warn!("прогресс обучения не сложился в JSON: {err}"),
         }
     }
-    value
+}
+
+/// Есть ли что отправить в аккаунт — и сбросить отметку.
+pub(crate) fn take_unsent() -> bool {
+    UNSENT.swap(false, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Вернуть отметку: отправить не вышло, попробуем в следующий раз.
+pub(crate) fn mark_unsent() {
+    UNSENT.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Весь прогресс — для отправки в аккаунт (формат learning.json).
+pub(crate) fn snapshot() -> serde_json::Value {
+    let guard = STORE.lock().unwrap_or_else(|err| err.into_inner());
+    guard
+        .as_ref()
+        .and_then(|(_, store)| serde_json::to_value(store).ok())
+        .unwrap_or_else(|| serde_json::json!({ "courses": {} }))
+}
+
+/// Берёт общий прогресс из аккаунта: у каждого курса остаётся более свежий
+/// (поле `updated`, при равенстве — свой). Так сюда приходит то, где
+/// остановились в браузере или на телефоне. Отдаёт, поменялось ли что-то.
+pub(crate) fn adopt(remote: &serde_json::Value) -> bool {
+    let Some(courses) = remote.get("courses").and_then(|value| value.as_object()) else {
+        return false;
+    };
+    let mut guard = STORE.lock().unwrap_or_else(|err| err.into_inner());
+    let (path, store) = guard.get_or_insert_with(|| (PathBuf::new(), Store::default()));
+    let mut changed = false;
+    for (id, value) in courses {
+        let Ok(theirs) = serde_json::from_value::<CourseProgress>(value.clone()) else {
+            continue;
+        };
+        let newer = match store.courses.get(id) {
+            Some(mine) => theirs.updated.as_deref().unwrap_or("") > mine.updated.as_deref().unwrap_or(""),
+            None => true,
+        };
+        if newer {
+            store.courses.insert(id.clone(), theirs);
+            changed = true;
+        }
+    }
+    if changed {
+        save(path, store);
+    }
+    changed
 }
 
 pub(crate) fn progress(course: &str) -> CourseProgress {
