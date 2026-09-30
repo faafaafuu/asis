@@ -877,7 +877,8 @@ async function handle(req, res) {
     // в памяти и отдавал вчерашнюю страницу со вчерашним кодом.
     // Не 302 на адрес с меткой: CDN запомнил бы и его, с меткой того дня.
     // Страница-пересылка ставит метку сама, в браузере (src/go.js).
-    if (req.method === "GET" && (url.pathname === "/app" || url.pathname === "/app/") && !url.search) {
+    // /noa — короткий адрес Ноа онлайн, которого нет в памяти CDN.
+    if (req.method === "GET" && ["/app", "/app/", "/noa", "/noa/"].includes(url.pathname) && !url.search) {
       const body =
         '<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Ноа онлайн — NOAH</title>' +
         '<script src="/app/go.js"></script></head><body></body></html>';
