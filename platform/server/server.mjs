@@ -31,7 +31,7 @@ const WEB = normalize(join(HERE, "..", "web"));
 // и раздаются по адресу /app/.
 const APP = normalize(join(HERE, "..", "..", "src"));
 /** Что из src/ можно отдавать: страницы Ноа онлайн, их скрипты, стили, шрифты. */
-const APP_FILES = /^\/(app\.html|learning\.html|(js|styles|assets)\/[\w./-]+)$/;
+const APP_FILES = /^\/(app\.html|learning\.html|go\.js|(js|styles|assets)\/[\w./-]+)$/;
 const PORT = Number(process.env.NOAH_PORT ?? 8795);
 const HOST = process.env.NOAH_HOST ?? "0.0.0.0";
 const DATA = process.env.NOAH_DATA ?? join(HERE, "..", "data");
@@ -875,9 +875,14 @@ async function handle(req, res) {
     }
     // Голый /app/ — на адрес с меткой версии: сам /app/ CDN зеркала держит
     // в памяти и отдавал вчерашнюю страницу со вчерашним кодом.
+    // Не 302 на адрес с меткой: CDN запомнил бы и его, с меткой того дня.
+    // Страница-пересылка ставит метку сама, в браузере (src/go.js).
     if (req.method === "GET" && (url.pathname === "/app" || url.pathname === "/app/") && !url.search) {
-      res.writeHead(302, { Location: `/app/?v=${appStamp()}`, "Cache-Control": "no-store" });
-      return res.end();
+      const body =
+        '<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Ноа онлайн — NOAH</title>' +
+        '<script src="/app/go.js"></script></head><body></body></html>';
+      res.writeHead(200, { ...SECURITY_HEADERS, "Content-Security-Policy": APP_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(body);
     }
     if (url.pathname === "/download") {
       const asked = url.searchParams.get("os") ?? osOf(String(req.headers["user-agent"] ?? ""));

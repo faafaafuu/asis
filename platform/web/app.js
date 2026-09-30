@@ -302,7 +302,9 @@ function resumeAfterLogin() {
     const saved = sessionStorage.getItem("noah_next");
     if (saved && state.user) {
       sessionStorage.removeItem("noah_next");
-      location.href = saved;
+      // В Ноа онлайн — адресом с одноразовой меткой: голый /app/ CDN зеркала
+      // отдаёт из памяти старым.
+      location.href = saved === "/app/" ? `/app/?v=${Date.now().toString(36)}` : saved;
       return true;
     }
   } catch {

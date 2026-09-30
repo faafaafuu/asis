@@ -563,7 +563,7 @@ export async function telegramLogin(error, back = "#/connect") {
         tab?.close();
         state.user = (await api("/api/me")).user;
         if ((status.next ?? next) === "/app/") {
-          location.href = "/app/?v=54";
+          location.href = `/app/?v=${Date.now().toString(36)}`;
           return;
         }
         if (location.hash === back) hooks.route();
