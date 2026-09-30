@@ -24,6 +24,44 @@ const write = (key, value) => {
   }
 };
 
+// Зеркало m.noahlab.ru стоит за CDN, а CDN кэширует GET-ответы, не глядя ни
+// на Cache-Control, ни на cookie: «кто вошёл», статус входа через Telegram и
+// переход к Google один человек получал из кэша за другого — вход не
+// завершался. Ключ кэша у CDN включает адрес с параметрами, поэтому к каждому
+// своему запросу /api/… и /auth/… добавляется одноразовый параметр `_`.
+(() => {
+  const own = (raw) => {
+    try {
+      const url = new URL(raw, location.href);
+      return url.origin === location.origin && /^\/(api|auth)\//.test(url.pathname) ? url : null;
+    } catch {
+      return null;
+    }
+  };
+  const fresh = (url) => {
+    url.searchParams.set("_", Date.now().toString(36) + Math.random().toString(36).slice(2, 7));
+    return url.href;
+  };
+  const nativeFetch = globalThis.fetch?.bind(globalThis);
+  if (nativeFetch) {
+    globalThis.fetch = (input, init) => {
+      const method = String(init?.method ?? (typeof input === "object" && input?.method) ?? "GET").toUpperCase();
+      const url = typeof input === "string" || input instanceof URL ? own(String(input)) : null;
+      return nativeFetch(method === "GET" && url ? fresh(url) : input, init);
+    };
+  }
+  // Кнопки входа — обычные ссылки: адрес обновляется в момент нажатия.
+  document.addEventListener(
+    "click",
+    (event) => {
+      const link = event.target?.closest?.("a[href]");
+      const url = link && own(link.getAttribute("href"));
+      if (url) link.href = fresh(url);
+    },
+    true,
+  );
+})();
+
 // ?theme=dark в адресе — показать страницу в теме, не запоминая её.
 const theme = new URLSearchParams(location.search).get("theme") || read("noa.theme");
 if (theme) document.documentElement.dataset.theme = theme;
