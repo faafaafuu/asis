@@ -130,7 +130,10 @@ export function paintUser(user, guess = false) {
   me.dataset.state = user ? (guess ? "guess" : "in") : "out";
   me.textContent = user ? user.name || user.email || "Кабинет" : "Войти";
   me.title = "";
-  me.href = user ? "/#/account" : "/#/login?next=%2Fapp%2F";
+  // Сайт — адресом с одноразовой меткой: голый «/» CDN зеркала отдаёт из
+  // памяти старым, и вход оттуда возвращал на старую страницу.
+  const site = `/?v=${Date.now().toString(36)}`;
+  me.href = user ? `${site}#/account` : `${site}#/login?next=%2Fapp%2F`;
 }
 
 if (remembered) paintUser(remembered, true);

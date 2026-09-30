@@ -106,6 +106,12 @@ async function postForm(url, body, headers = {}) {
   return data;
 }
 
+/**
+ * Главная сайта адресом с одноразовой меткой. Голый «/» CDN зеркала держит в
+ * памяти со старым кодом, и возврат после входа попадал в него.
+ */
+const fresh = () => `/?v=${Date.now().toString(36)}`;
+
 export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies, cookieDomain = "", mirrorOrigin = () => "" }) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS identities (
@@ -246,7 +252,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     const saved = states.get(state);
     states.delete(state);
     const back = (message) => {
-      res.writeHead(302, { Location: `${saved?.back ?? ""}/#/login?error=${encodeURIComponent(message)}` });
+      res.writeHead(302, { Location: `${saved?.back ?? ""}${fresh()}#/login?error=${encodeURIComponent(message)}` });
       res.end();
     };
     if (!p || !saved || saved.key !== key || Date.now() - saved.at > STATE_TTL || cookies(req).noah_oauth !== state) {
@@ -273,7 +279,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
       if (!profile.subject) throw new Error("провайдер не прислал профиль");
       const linking = Boolean(sessionUser(req));
       const cookie = signIn(req, key, profile, !p.untrustedEmail);
-      res.writeHead(302, { Location: `${saved.back ?? ""}${linking ? "/#/account" : "/#/connect"}`, "Set-Cookie": cookie });
+      res.writeHead(302, { Location: `${saved.back ?? ""}${fresh()}${linking ? "#/account" : "#/connect"}`, "Set-Cookie": cookie });
       res.end();
     } catch (err) {
       console.error(`вход через ${key}:`, err.message);
@@ -363,12 +369,12 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     const code = String(url.searchParams.get("code") ?? "");
     const entry = /^[A-Za-z0-9]{8,32}$/.test(code) && tgCodes.get(code);
     if (!entry?.user || Date.now() - entry.at > TG_TTL || entry.finished) {
-      res.writeHead(302, { Location: `/#/login?error=${encodeURIComponent("Ссылка входа устарела — нажмите «Войти через Telegram» ещё раз.")}` });
+      res.writeHead(302, { Location: `${fresh()}#/login?error=${encodeURIComponent("Ссылка входа устарела — нажмите «Войти через Telegram» ещё раз.")}` });
       return res.end();
     }
     entry.finished = true;
     // Ноа онлайн — адресом с меткой: голый /app/ CDN зеркала отдаёт из памяти.
-    const to = entry.next === "/app/" ? `/app/?v=${Date.now().toString(36)}` : entry.next;
+    const to = entry.next === "/app/" ? `/app/?v=${Date.now().toString(36)}` : entry.next.replace(/^\/#/, `${fresh()}#`);
     res.writeHead(302, { Location: to, "Set-Cookie": [signIn(req, "telegram", entry.user), `noah_tg=; Path=/; Max-Age=0${cookieDomain}`], "Cache-Control": "no-store" });
     res.end();
   };

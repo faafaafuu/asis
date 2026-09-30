@@ -761,6 +761,7 @@ async function serveStatic(req, res, pathname, versioned) {
       "Content-Length": out.body.length,
       ETag: etag,
       "Cache-Control": cacheControl,
+      ...(versioned ? {} : { "CDN-Cache-Control": "no-store", "Surrogate-Control": "no-store" }),
       ...out.headers,
     });
     res.end(req.method === "HEAD" ? undefined : out.body);
@@ -843,6 +844,9 @@ async function handle(req, res) {
   // сессии — CDN мог бы отдать следующему человеку. Статика задаёт своё
   // правило в writeHead, и оно заменяет это.
   res.setHeader("Cache-Control", "no-store");
+  // Для CDN зеркала отдельно: обычный Cache-Control он не слушает.
+  res.setHeader("CDN-Cache-Control", "no-store");
+  res.setHeader("Surrogate-Control", "no-store");
   if (COOKIE_DOMAIN && !cookieFits(req)) dropCookieDomain(res);
   const url = new URL(req.url, "http://local");
   // Заголовку прокси верим, только если запрос пришёл от него самого.
