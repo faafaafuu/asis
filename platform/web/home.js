@@ -367,7 +367,7 @@ export function renderHome(page, { h, icon, lang, stats, modules, number }) {
         h("a", { class: "btn btn--gold btn--big", href: "#/connect" }, tr.primary),
         h("a", { class: "btn btn--ghost btn--big", href: RELEASES }, tr.download),
       ),
-      h("a", { class: "hero__web", href: "/app/" }, tr.webNoa),
+      h("a", { class: "hero__web", href: "/app/?v=54" }, tr.webNoa),
       h("p", { class: "hero__meta mono" }, tr.meta),
     ),
     console_,

@@ -367,7 +367,9 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
       return res.end();
     }
     entry.finished = true;
-    res.writeHead(302, { Location: entry.next, "Set-Cookie": [signIn(req, "telegram", entry.user), `noah_tg=; Path=/; Max-Age=0${cookieDomain}`], "Cache-Control": "no-store" });
+    // Ноа онлайн — адресом с меткой: голый /app/ CDN зеркала отдаёт из памяти.
+    const to = entry.next === "/app/" ? `/app/?v=${Date.now().toString(36)}` : entry.next;
+    res.writeHead(302, { Location: to, "Set-Cookie": [signIn(req, "telegram", entry.user), `noah_tg=; Path=/; Max-Age=0${cookieDomain}`], "Cache-Control": "no-store" });
     res.end();
   };
 

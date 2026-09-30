@@ -13,10 +13,18 @@ export function mountIcons() {
     .then((response) => (response.ok ? response.text() : ""))
     .then((text) => {
       if (!text || document.getElementById("i-close")) return;
+      // Встроенный style у набора срезал бы CSP Ноа онлайн (style-src 'self'),
+      // и набор встал бы в начало страницы пустым прямоугольником. Прячем
+      // его атрибутами и свойствами — это CSP не запрещает.
       const holder = document.createElement("div");
-      holder.innerHTML = text;
+      holder.innerHTML = text.replace(/\sstyle="[^"]*"/, "");
       const sprite = holder.querySelector("svg");
-      if (sprite) document.body.prepend(sprite);
+      if (!sprite) return;
+      sprite.setAttribute("width", "0");
+      sprite.setAttribute("height", "0");
+      sprite.style.position = "absolute";
+      sprite.style.overflow = "hidden";
+      document.body.prepend(sprite);
     })
     .catch(() => {
       /* без значков кнопки остаются с подписью в title — не беда */

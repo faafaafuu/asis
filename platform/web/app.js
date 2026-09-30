@@ -43,7 +43,7 @@ function renderChrome(route) {
   const count = state.stats ? String(state.stats.modules) : "";
   const moduleLink = state.lastModule ? `module/${state.lastModule}` : "library";
   const groups = [
-    [tr.navDiscover, [["home", tr.navHome, "", "#F2C14E", ""], ["noa", tr.navNoa, "", "#7FB069", "/app/", tr.navNoaShort], ["library", tr.navLibrary, count, "#2B5BC4"], ["module", tr.navModule, "", "#D4564A", moduleLink]]],
+    [tr.navDiscover, [["home", tr.navHome, "", "#F2C14E", ""], ["noa", tr.navNoa, "", "#7FB069", "/app/?v=54", tr.navNoaShort], ["library", tr.navLibrary, count, "#2B5BC4"], ["module", tr.navModule, "", "#D4564A", moduleLink]]],
     [tr.navBuild, [["connect", tr.navConnect, "MCP", "#F2C14E"], ["studio", tr.navStudio, "", "#D4564A"], ["standard", tr.navStandard, "5", "#7FB069"], ["docs", tr.navDocsFull, "", "#2B5BC4", undefined, tr.navDocs]]],
     [tr.navAccount, [["seller", tr.navSeller, "$0", "#D4564A"]]],
   ];

@@ -664,13 +664,13 @@ const TYPES = {
  * ссылок новая метка. Пересчитывается не чаще раза в пять секунд: файлы
  * обновляются копированием, без перезапуска.
  */
-const siteStamp = (() => {
+const stampOf = (dir) => {
   let value = "";
   let at = 0;
   return () => {
     if (value && Date.now() - at < 5000) return value;
     const hash = createHash("sha1");
-    for (const entry of readdirSync(WEB, { recursive: true, withFileTypes: true })) {
+    for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
       if (!entry.isFile()) continue;
       const path = join(entry.parentPath ?? entry.path, entry.name);
       const info = statSync(path);
@@ -680,7 +680,21 @@ const siteStamp = (() => {
     at = Date.now();
     return value;
   };
-})();
+};
+const siteStamp = stampOf(WEB);
+
+/**
+ * Метка версии Ноа онлайн (src/): у её файлов метки в адресах нет, модули
+ * тянут друг друга по голым адресам. CDN зеркала отдавал старые копии из
+ * своей памяти, не спрашивая сервер, — и страница жила на вчерашнем коде.
+ * Сервер сам дописывает `?v=<метка>` к подключаемым файлам в страницах и к
+ * импортам в модулях: изменился хоть один файл — у всех адресов новая метка.
+ */
+const appStamp = stampOf(APP);
+const withVersion = (text, stamp) =>
+  text
+    .replace(/((?:src|href)=")(\.\/[\w./-]+\.(?:js|css))"/g, `$1$2?v=${stamp}"`)
+    .replace(/((?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(["']))(\.{1,2}\/[\w./-]+\.js)\2/g, `$1$3?v=${stamp}$2`);
 
 const STAMPED = new Set([".html", ".js", ".css", ".webmanifest"]);
 
@@ -728,7 +742,8 @@ async function serveStatic(req, res, pathname, versioned) {
     // Сверка — по отпечатку файла: не изменился — «304», без тела. Раньше
     // каждый заход заново тянул все скрипты и стили, и по мобильной сети
     // Ноа онлайн открывалась по нескольку секунд.
-    const stamp = file.startsWith(WEB + sep) && STAMPED.has(extname(file)) ? siteStamp() : "";
+    const inApp = file.startsWith(APP + sep) && [".html", ".js"].includes(extname(file));
+    const stamp = inApp ? appStamp() : file.startsWith(WEB + sep) && STAMPED.has(extname(file)) ? siteStamp() : "";
     const etag = `W/"${info.size.toString(16)}-${Math.trunc(info.mtimeMs).toString(16)}${stamp && `-${stamp}`}"`;
     if (req.headers["if-none-match"] === etag) {
       res.writeHead(304, { ...headers, ETag: etag, "Cache-Control": cacheControl });
@@ -736,7 +751,8 @@ async function serveStatic(req, res, pathname, versioned) {
       return true;
     }
     let raw = await readFile(file);
-    if (stamp) raw = Buffer.from(raw.toString("utf8").replace(/\?v=\d+/g, `?v=${stamp}`));
+    if (inApp) raw = Buffer.from(withVersion(raw.toString("utf8"), stamp));
+    else if (stamp) raw = Buffer.from(raw.toString("utf8").replace(/\?v=\d+/g, `?v=${stamp}`));
     const key = `${file}:${info.mtimeMs}:${stamp}`;
     const out = /^(text|application\/(json|manifest)|image\/svg)/.test(type) ? packed(req, raw, key) : { body: raw, headers: {} };
     res.writeHead(200, {
@@ -853,7 +869,14 @@ async function handle(req, res) {
       (url.pathname === "/" || url.pathname === "/app" || url.pathname === "/app/" || /^\/app\/[\w-]+\.html$/.test(url.pathname));
     const mirrorHost = [...MIRRORS].find((host) => !/^[\d.]+(:\d+)?$/.test(host));
     if (pageOnIp && mirrorHost) {
-      res.writeHead(302, { Location: `https://${mirrorHost}${url.pathname}${url.search}`, "Cache-Control": "no-store" });
+      const search = url.pathname.startsWith("/app") && !url.search ? `?v=${appStamp()}` : url.search;
+      res.writeHead(302, { Location: `https://${mirrorHost}${url.pathname}${search}`, "Cache-Control": "no-store" });
+      return res.end();
+    }
+    // Голый /app/ — на адрес с меткой версии: сам /app/ CDN зеркала держит
+    // в памяти и отдавал вчерашнюю страницу со вчерашним кодом.
+    if (req.method === "GET" && (url.pathname === "/app" || url.pathname === "/app/") && !url.search) {
+      res.writeHead(302, { Location: `/app/?v=${appStamp()}`, "Cache-Control": "no-store" });
       return res.end();
     }
     if (url.pathname === "/download") {
