@@ -8,6 +8,7 @@
 
 import { tauri, appWindow, applyTheme } from "./bridge.js";
 import { renderTalkLesson } from "./lesson-talk.js";
+import { attachReader } from "./lesson-reader.js";
 
 const api = tauri();
 const ui = {};
@@ -534,6 +535,15 @@ function renderLesson(root, topic) {
 
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(parts[at]);
+  // Слушать раздел вместо чтения; дочитали — переход к следующему на виду.
+  root.append(
+    attachReader(lesson, {
+      api,
+      el,
+      button,
+      onFinish: () => root.querySelector(".actions .button:not(.button--quiet)")?.focus(),
+    }),
+  );
   root.append(lesson);
 
   root.append(deepBox(topic, at));
@@ -746,6 +756,7 @@ api?.listen("learn:talk", (event) => {
 function renderWholeLesson(root, topic) {
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(topic.lesson);
+  root.append(attachReader(lesson, { api, el, button }));
   root.append(lesson);
   const actions = el("div", "actions");
   actions.append(discussButton(root, { course: course.id, topic: topic.id, section: 0 }));

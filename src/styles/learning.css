@@ -1408,3 +1408,46 @@ button {
 .tl__weak {
   color: var(--error-text, var(--text-muted));
 }
+
+/* ── Урок вслух (lesson-reader.js) ─────────────────────────────────────── */
+
+.reader {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  background: var(--bg-solid);
+}
+
+.reader__where {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.lesson.reader-focus > *,
+.lesson.reader-focus li,
+.lesson.reader-focus p {
+  transition: opacity var(--dur-base, 0.2s) ease;
+}
+
+.lesson.reader-focus :is(h2, h3, p, li, blockquote):not(.reader-now) {
+  opacity: 0.28;
+}
+
+.lesson .reader-now {
+  opacity: 1;
+  background: color-mix(in srgb, var(--sel-bg, var(--accent)) 22%, transparent);
+  box-shadow: -4px 0 0 var(--accent);
+  border-radius: 2px;
+}
+
+.reader__select {
+  position: fixed;
+  z-index: 70;
+  box-shadow: var(--shadow-sm, 0 2px 8px rgba(0, 0, 0, 0.25));
+}
