@@ -702,7 +702,7 @@ export function createLearning({ courses, store, ai = null, name = "Ноа", clo
   /* ── Проверка ответов ── */
 
   const needAi = () => {
-    if (!ai) throw new Error("Модель не подключена — подключите её на главной странице Ноа.");
+    if (!ai) throw new Error("Модель не подключена. Подключите её в настройках Ноа онлайн — значок шестерёнки в шапке.");
     return ai;
   };
 

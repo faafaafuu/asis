@@ -99,7 +99,32 @@ export function mountDictionary() {
   const base = new URL("../../styles/", import.meta.url);
   addStyle(new URL("popup.css", base).href);
   addStyle(new URL("menu.css", base).href);
-  dictionary = new WebHost({ client: dictionaryClient(), requireLeftCtrl: true }).mount();
+  // Выделили — рядом «Объяснить»: и на телефоне, и на компьютере, без Ctrl.
+  dictionary = new WebHost({ client: dictionaryClient(), requireLeftCtrl: true, forceTouchMenu: true }).mount();
+  // Всё, что умеет окно объяснения в программе, — кнопками вместо клавиш:
+  // уточнить словами или голосом (зажать микрофон), прочитать вслух.
+  const view = dictionary.view;
+  view.dialogue = true;
+  view.onSpeak = (text) => {
+    view.speaking = true;
+    speak(text).finally(() => (view.speaking = false));
+  };
+  view.onStopSpeaking = () => {
+    stopSpeaking();
+    view.speaking = false;
+  };
+  view.onMic = async (down) => {
+    if (down) {
+      view.listening = true;
+      await dictateStart().catch(() => (view.listening = false));
+      return;
+    }
+    view.listening = false;
+    const text = await dictateStop().catch(() => "");
+    if (text) view.askByVoice(text);
+  };
+  view.onAnswer = (answer) => view.onSpeak(answer);
+  view.onOpenSettings = () => (location.href = "/app/#settings");
   const showAt = dictionary.showAt.bind(dictionary);
   dictionary.showAt = (anchor, term, context = "") => showAt(anchor, term, context || selectionContext());
   return dictionary;
@@ -126,7 +151,7 @@ async function ensureModel(user) {
   const bar = document.createElement("div");
   bar.className = "model-missing";
   const link = document.createElement("a");
-  link.href = "./";
+  link.href = "./#settings";
   link.textContent = "Подключить модель";
   bar.append("Модель не подключена — проверка ответов, обсуждение и разбор не заработают. ", link);
   document.body.prepend(bar);

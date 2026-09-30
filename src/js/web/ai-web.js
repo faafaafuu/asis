@@ -187,7 +187,7 @@ const EXPLAIN_RULES =
 export function dictionaryClient(name = "Ноа") {
   const current = () => {
     const model = loadModel();
-    if (!model) throw new AiError("Модель не подключена — подключите её на главной странице Ноа.", { kind: "config" });
+    if (!model) throw new AiError("Модель не подключена. Подключите её в настройках Ноа онлайн — значок шестерёнки в шапке.", { kind: "config" });
     return model;
   };
   return {

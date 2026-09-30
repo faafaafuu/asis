@@ -39,39 +39,44 @@
       <a class="bar__brand" href="/"><span class="bar__logo" aria-hidden="true"><img src="./assets/noah-mark.svg" alt="" /></span>NOAH</a>
       <span class="bar__title">Ноа онлайн</span>
       <nav class="bar__nav">
-        <a href="/#/docs">Справка</a>
-        <a href="/#/library">Модули</a>
+        <a class="bar__link" href="/#/library">Библиотека</a>
+        <button class="bar__icon bar__noa" type="button" data-el="assistantOpen" title="Ноа — спросить голосом или текстом" aria-label="Открыть помощника Ноа" aria-expanded="false"><span>Ноа</span></button>
+        <button class="bar__icon" type="button" data-el="settingsOpen" title="Настройки: модель, вид и голос" aria-label="Настройки"></button>
         <a class="bar__me" data-el="me" href="/#/login?next=%2Fapp%2F" data-state="unknown">…</a>
       </nav>
     </header>
 
-    <main class="page" data-el="page" data-show="chat">
-      <section class="plate chat" data-section="chat" aria-label="Разговор с Ноа">
-        <div class="plate__head">
-          <h1 class="plate__title">Разговор</h1>
-          <label class="toggle"><input type="checkbox" data-el="speakAnswers" /> Читать ответы вслух</label>
+    <!-- Помощник: всплывает из шапки, как Ноа в программе, — поговорил и
+         закрыл. Главное на странице — модули. -->
+    <aside class="assistant" data-el="assistant" aria-label="Помощник Ноа" hidden>
+      <div class="assistant__head">
+        <span class="assistant__title">Ноа</span>
+        <label class="toggle"><input type="checkbox" data-el="speakAnswers" /> Отвечать вслух</label>
+        <button class="assistant__close" type="button" data-el="assistantClose" title="Закрыть · Esc" aria-label="Закрыть помощника"></button>
+      </div>
+      <button class="voice-start" type="button" data-el="mic" title="Разговор голосом, без рук">
+        <span class="voice-start__text">
+          <strong>Поговорить голосом</strong>
+          <span>Ноа слушает и отвечает вслух — пока не скажете «спасибо»</span>
+        </span>
+      </button>
+      <div class="chat__log" data-el="log" aria-live="polite"></div>
+      <form class="chat__form" data-el="form">
+        <textarea data-el="input" rows="2" placeholder="Спросите Ноа…"></textarea>
+        <div class="chat__actions">
+          <button class="btn btn--primary" type="submit" data-el="send">Отправить</button>
+          <button class="btn btn--quiet" type="button" data-el="clear">Новый разговор</button>
         </div>
-        <button class="voice-start" type="button" data-el="mic" title="Разговор голосом, без рук">
-          <span class="voice-start__text">
-            <strong>Поговорить голосом</strong>
-            <span>Ноа слушает и отвечает вслух — пока не скажете «спасибо»</span>
-          </span>
-        </button>
-        <div class="chat__log" data-el="log" aria-live="polite"></div>
-        <form class="chat__form" data-el="form">
-          <textarea data-el="input" rows="2" placeholder="Спросите Ноа о чём угодно. Enter — отправить, Shift+Enter — новая строка."></textarea>
-          <div class="chat__actions">
-            <button class="btn btn--primary" type="submit" data-el="send">Отправить</button>
-            <button class="btn btn--quiet" type="button" data-el="clear">Новый разговор</button>
-          </div>
-        </form>
-        <p class="hint">Непонятное слово в ответе или уроке — выделите его с зажатым <kbd>Ctrl</kbd>, на телефоне — выделите и нажмите «Объяснить».</p>
-      </section>
+      </form>
+      <p class="hint assistant__hint">Непонятное слово на странице — выделите его и нажмите «Объяснить».</p>
+    </aside>
 
-      <aside class="side">
-        <section class="plate" data-section="learning" aria-label="Обучение">
+    <main class="page" data-el="page">
+      <h1 class="page__title">Модули</h1>
+      <div class="modules">
+        <section class="plate module" data-section="learning" aria-label="Обучение">
           <div class="plate__head">
-            <h2 class="plate__title">Обучение</h2>
+            <h2 class="plate__title">🎓 Обучение</h2>
           </div>
           <div class="builds" data-el="builds"></div>
           <div class="courses" data-el="courses"></div>
@@ -106,6 +111,15 @@
           </details>
           <p class="hint" data-el="loginHint" hidden>Войдите на сайт — тогда курсы из нейросети и прогресс будут и здесь, и на других устройствах.</p>
         </section>
+      </div>
+    </main>
+
+    <!-- Настройки — отдельным окном: модель, вид и голос. -->
+    <dialog class="settings" data-el="settings" aria-label="Настройки">
+      <div class="settings__head">
+        <h2 class="settings__title">Настройки</h2>
+        <button class="assistant__close" type="button" data-el="settingsClose" title="Закрыть · Esc" aria-label="Закрыть настройки"></button>
+      </div>
         <section class="plate" data-section="model" aria-label="Модель">
           <div class="plate__head">
             <h2 class="plate__title">Модель</h2>
@@ -176,13 +190,7 @@
           </div>
           <p class="hint">Голос Ноа — тот же, что в программе, — звучит, когда вы вошли на сайт; без входа говорит голос браузера. Тема действует и в окне обучения.</p>
         </section>
-      </aside>
-    </main>
-
-    <!-- На телефоне — один раздел за раз и навигация внизу (дизайн-система,
-         Ноа онлайн на телефоне). На компьютере разделы стоят рядом, и
-         навигация не нужна. Кнопки собирает app.js. -->
-    <nav class="tabbar" data-el="tabbar" aria-label="Разделы"></nav>
+    </dialog>
 
     <script type="module" src="./js/web/app.js"></script>
   </body>

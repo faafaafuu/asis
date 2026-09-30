@@ -16,53 +16,35 @@ import { buildCourse, Stopped } from "./course-builder.js";
 const ui = {};
 for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] = node;
 
-/* ── Разделы на телефоне ───────────────────────────────────────────────── */
+/* ── Шапка: помощник и настройки ───────────────────────────────────────── */
 
-// На узком экране — один раздел за раз и навигация внизу; на широком все
-// разделы стоят рядом, а навигация скрыта стилями. Выбор запоминается.
-const SECTIONS = [
-  ["chat", "chat", "Разговор"],
-  ["learning", "learn", "Обучение"],
-  ["model", "cpu", "Модель"],
-  ["prefs", "settings", "Вид и голос"],
-];
+// Главное на странице — модули. Ноа всплывает из шапки, как в программе:
+// спросил голосом или текстом — закрыл. Настройки — отдельным окном.
 mountIcons();
-// На телефоне подсказка в поле — коротко: длинная не помещается в строку.
-if (matchMedia("(max-width: 720px)").matches) ui.input.placeholder = "Спросите Ноа…";
-function showSection(name) {
-  ui.page.dataset.show = name;
-  for (const button of ui.tabbar.children) {
-    if (button.dataset.go === name) button.setAttribute("aria-current", "page");
-    else button.removeAttribute("aria-current");
-  }
-  try {
-    localStorage.setItem("noa.section", name);
-  } catch {
-    /* не запомнится — не беда */
-  }
+ui.assistantOpen.prepend(orbIcon());
+ui.settingsOpen.append(icon("settings", 20));
+ui.assistantClose.append(icon("close", 18));
+ui.settingsClose.append(icon("close", 18));
+
+function toggleAssistant(open = ui.assistant.hidden) {
+  ui.assistant.hidden = !open;
+  ui.assistantOpen.setAttribute("aria-expanded", String(open));
+  if (open) setTimeout(() => ui.input.focus(), 0);
+  else stopSpeaking();
 }
-ui.tabbar.replaceChildren(
-  ...SECTIONS.map(([name, glyph, label]) => {
-    const button = el("button", "tabbar__item");
-    button.dataset.go = name;
-    button.append(icon(glyph, 24), el("span", "", label));
-    button.addEventListener("click", () => {
-      showSection(name);
-      scrollTo({ top: 0 });
-    });
-    return button;
-  }),
-);
-showSection(
-  (() => {
-    try {
-      const saved = localStorage.getItem("noa.section");
-      return SECTIONS.some(([name]) => name === saved) ? saved : "chat";
-    } catch {
-      return "chat";
-    }
-  })(),
-);
+ui.assistantOpen.addEventListener("click", () => toggleAssistant());
+ui.assistantClose.addEventListener("click", () => toggleAssistant(false));
+ui.settingsOpen.addEventListener("click", () => ui.settings.showModal());
+ui.settingsClose.addEventListener("click", () => ui.settings.close());
+// Щелчок мимо окна настроек — закрыть.
+ui.settings.addEventListener("click", (event) => {
+  if (event.target === ui.settings) ui.settings.close();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !ui.assistant.hidden) toggleAssistant(false);
+});
+// Ссылка «Подключить модель» из плашки окна обучения ведёт сюда — сразу в настройки.
+if (location.hash === "#settings") ui.settings.showModal();
 
 mountDictionary();
 

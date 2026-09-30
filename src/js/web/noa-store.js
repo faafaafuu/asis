@@ -171,7 +171,7 @@ async function start() {
   const ai = {
     chat: (messages, opts) => {
       const model = loadModel();
-      if (!model) throw new Error("Модель не подключена — подключите её на главной странице Ноа.");
+      if (!model) throw new Error("Модель не подключена. Подключите её в настройках Ноа онлайн — значок шестерёнки в шапке.");
       return chat(model, messages, opts);
     },
   };
