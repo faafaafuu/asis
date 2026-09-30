@@ -49,13 +49,16 @@ button {
   cursor: grabbing;
 }
 
+/* Слева — скромно: «NOAH 1.14.3», а не крупное «Обучение» прописными. */
 .head__title {
   margin: 0;
-  font-family: var(--font-term);
-  font-size: 26px;
-  font-weight: var(--term-weight);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   line-height: 1;
-  color: var(--accent);
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .head__course {
@@ -1450,4 +1453,84 @@ button {
   position: fixed;
   z-index: 70;
   box-shadow: var(--shadow-sm, 0 2px 8px rgba(0, 0, 0, 0.25));
+}
+
+/* ── Объясни голосом (lesson-voice.js) ─────────────────────────────────── */
+
+.vx__row {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.vx {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius, 8px);
+  background: var(--bg-solid);
+  box-shadow: var(--shadow-sm, none);
+}
+
+.vx__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.vx__title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.vx__hint {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.vx__status {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.vx__script {
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 17px;
+  line-height: 27px;
+  color: var(--text-muted);
+}
+
+.vx__line--said {
+  color: var(--text-body);
+}
+
+.vx__line--now {
+  color: var(--text);
+  background: color-mix(in srgb, var(--sel-bg, var(--accent)) 25%, transparent);
+}
+
+.vx__line--me {
+  display: block;
+  margin: 6px 0;
+  font-style: italic;
+  color: var(--accent);
+}
+
+.vx__line--answer {
+  color: var(--text);
+}
+
+.vx__ask {
+  min-width: 150px;
+}
+
+.vx__input {
+  flex: 1;
+  min-width: 180px;
 }

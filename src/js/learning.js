@@ -9,10 +9,17 @@
 import { tauri, appWindow, applyTheme } from "./bridge.js";
 import { renderTalkLesson } from "./lesson-talk.js";
 import { attachReader } from "./lesson-reader.js";
+import { voiceButton } from "./lesson-voice.js";
 
 const api = tauri();
 const ui = {};
 for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] = node;
+
+// В шапке — версия, которая стоит: в программе её знает Rust, в браузере это Ноа онлайн.
+api
+  ?.invoke("app_version")
+  .then((version) => (ui.appVersion.textContent = `NOAH ${version}`))
+  .catch(() => (ui.appVersion.textContent = document.documentElement.classList.contains("is-web") ? "NOAH · Ноа онлайн" : "NOAH"));
 
 /** Состояние окна. */
 let courses = [];
@@ -388,6 +395,9 @@ function renderTopic() {
   const card = course.topics.find((t) => t.id === view.topic);
   const topic = topicView.topic;
   const root = page(topic.title, topic.summary);
+  const explainRow = el("div", "vx__row");
+  explainRow.append(voiceButton("🎧 Объясни тему голосом", { course: course.id, topic: topic.id }, "topic", explainRow, { api, el, button }));
+  root.append(explainRow);
 
   const steps = el("div", "steps");
   const step = (key, label, badge = "") => {
@@ -536,14 +546,14 @@ function renderLesson(root, topic) {
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(parts[at]);
   // Слушать раздел вместо чтения; дочитали — переход к следующему на виду.
-  root.append(
-    attachReader(lesson, {
-      api,
-      el,
-      button,
-      onFinish: () => root.querySelector(".actions .button:not(.button--quiet)")?.focus(),
-    }),
-  );
+  const reader = attachReader(lesson, {
+    api,
+    el,
+    button,
+    onFinish: () => root.querySelector(".actions .button:not(.button--quiet)")?.focus(),
+  });
+  reader.prepend(voiceButton("🎧 Объясни раздел", { course: course.id, topic: topic.id, section: at }, "section", reader, { api, el, button }));
+  root.append(reader);
   root.append(lesson);
 
   root.append(deepBox(topic, at));
@@ -635,7 +645,15 @@ function deepBox(topic, at) {
       toggle.disabled = false;
     }
   };
-  box.append(toggle, body);
+  const voice = voiceButton(
+    "🎧 Объясни разбор голосом",
+    { course: course.id, topic: topic.id, section: at },
+    "deep",
+    box,
+    { api, el, button },
+    () => body.textContent,
+  );
+  box.append(toggle, voice, body);
   load(true);
   return box;
 }
