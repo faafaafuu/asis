@@ -45,7 +45,7 @@ const write = (key, value) => {
   const nativeFetch = globalThis.fetch?.bind(globalThis);
   if (nativeFetch) {
     globalThis.fetch = (input, init) => {
-      const method = String(init?.method ?? (typeof input === "object" && input?.method) ?? "GET").toUpperCase();
+      const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
       const url = typeof input === "string" || input instanceof URL ? own(String(input)) : null;
       return nativeFetch(method === "GET" && url ? fresh(url) : input, init);
     };

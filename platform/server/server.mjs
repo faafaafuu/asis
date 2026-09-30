@@ -877,6 +877,21 @@ async function handle(req, res) {
       res.writeHead(302, { Location: `https://${mirrorHost}${url.pathname}${search}`, "Cache-Control": "no-store" });
       return res.end();
     }
+    // noahlab.ru из России — тоже на зеркало. Прямой путь режется на ~16 КБ
+    // на соединение: страница открывалась наполовину, кнопки и курсы не
+    // появлялись. Узнаём по языку браузера; запросы, пришедшие уже через CDN
+    // (CDN ставит X-Forwarded-For, наш nginx — нет), не трогаем — иначе петля.
+    // ?direct=1 — открыть напрямую.
+    const host = String(req.headers.host ?? "").toLowerCase();
+    const viaCdn = Boolean(req.headers["x-forwarded-for"]);
+    const russian = /(^|,)\s*ru\b/i.test(String(req.headers["accept-language"] ?? ""));
+    const entry = ["/", "/app", "/app/", "/noa", "/noa/"].includes(url.pathname);
+    if (req.method === "GET" && entry && mirrorHost && (host === "noahlab.ru" || host === "www.noahlab.ru") && !viaCdn && russian && !url.searchParams.has("direct")) {
+      const path = url.pathname.startsWith("/app") ? "/noa" : url.pathname;
+      const search = path === "/" ? `?v=${Date.now().toString(36)}` : "";
+      res.writeHead(302, { Location: `https://${mirrorHost}${path}${search}`, "Cache-Control": "no-store" });
+      return res.end();
+    }
     // Голый /app/ — на адрес с меткой версии: сам /app/ CDN зеркала держит
     // в памяти и отдавал вчерашнюю страницу со вчерашним кодом.
     // Не 302 на адрес с меткой: CDN запомнил бы и его, с меткой того дня.
