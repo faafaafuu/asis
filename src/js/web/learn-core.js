@@ -1011,7 +1011,7 @@ export function createLearning({ courses, store, ai = null, name = "Ноа", clo
 
     place(courseId, topicId, step, section) {
       topicOf(course(courseId), topicId);
-      if (!["lesson", "concepts", "map", "tasks", "sheet", "mistakes"].includes(step)) return null;
+      if (!["talk", "lesson", "concepts", "map", "tasks", "sheet", "mistakes"].includes(step)) return null;
       change(courseId, (p) => {
         const own = ownTopic(p, topicId);
         own.step = step;

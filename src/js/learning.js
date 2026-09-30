@@ -7,6 +7,7 @@
 // без ответов: подсмотреть их в окне нельзя, проверка идёт на стороне Rust.
 
 import { tauri, appWindow, applyTheme } from "./bridge.js";
+import { renderTalkLesson } from "./lesson-talk.js";
 
 const api = tauri();
 const ui = {};
@@ -342,7 +343,8 @@ function renderHome() {
 function placeOf(id) {
   const card = course?.topics.find((t) => t.id === id);
   return {
-    step: card?.step || (card?.read ? "concepts" : "lesson"),
+    // Без сохранённого места — разговором: так тема учится, а не читается.
+    step: card?.step || "talk",
     section: card?.section ?? 0,
   };
 }
@@ -398,7 +400,8 @@ function renderTopic() {
     });
     steps.append(node);
   };
-  step("lesson", "Урок", card?.read ? "✓" : "");
+  if (topic.concepts?.length) step("talk", "🎙 Разговором");
+  step("lesson", "Урок текстом", card?.read ? "✓" : "");
   if (topic.concepts?.length) {
     step("concepts", "Понятия", `${card?.conceptsMature ?? 0}/${topic.concepts.length}`);
     step("map", "Карта");
@@ -410,7 +413,20 @@ function renderTopic() {
   if (topicView.mistakes.length) step("mistakes", "Ошибки", String(topicView.mistakes.length));
   root.append(steps);
 
-  if (view.step === "lesson") renderLesson(root, topic);
+  if (view.step === "talk" && topic.concepts?.length) {
+    renderTalkLesson(root, {
+      api,
+      course,
+      topic,
+      el,
+      button,
+      dictateButton,
+      onDone: async () => {
+        await refreshOverview();
+        renderHome();
+      },
+    });
+  } else if (view.step === "lesson" || view.step === "talk") renderLesson(root, topic);
   else if (view.step === "concepts") renderConcepts(root, topic);
   else if (view.step === "map") renderTopicMap(root, topic);
   else if (view.step === "review") startReview(topic.id);

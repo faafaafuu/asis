@@ -10,7 +10,7 @@
 
 import { openNoa } from "./noa-store.js";
 import { WebHost } from "../web-host.js";
-import { speak, canListen, dictate } from "./voice.js";
+import { speak, stopSpeaking, canListen, dictate } from "./voice.js";
 import { startTalk } from "./talk.js";
 import { dictionaryClient, loadModel, saveModel, bridgeAvailable } from "./ai-web.js";
 
@@ -208,6 +208,13 @@ async function run(cmd, args = {}) {
       return dictateStop();
     case "learn_focus_done":
       return l.focusDone(args.course, args.session);
+    // Урок разговором читает вслух тем же голосом, что и остальная Ноа.
+    case "voice_speak":
+      speak(args.text ?? "");
+      return null;
+    case "voice_stop":
+      stopSpeaking();
+      return null;
     case "learn_focus_bell":
       speak(args.text ?? "");
       return null;

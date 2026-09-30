@@ -905,7 +905,7 @@ pub fn remember_place(course_id: &str, topic_id: &str, step: &str, section: usiz
     let course = course(course_id)?;
     topic(&course, topic_id)?;
     // Экзамен и повторение — не место, куда возвращаться: к ним приходят сами.
-    if !["lesson", "concepts", "map", "tasks", "sheet", "mistakes"].contains(&step) {
+    if !["talk", "lesson", "concepts", "map", "tasks", "sheet", "mistakes"].contains(&step) {
         return Ok(());
     }
     with(course_id, |progress| {
