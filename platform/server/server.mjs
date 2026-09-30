@@ -734,7 +734,9 @@ async function serveStatic(req, res, pathname, versioned) {
     const info = await stat(file);
     // Файлы с версией в адресе (?v=) не меняются — их браузер берёт из кэша.
     // Остальное сверяется каждый раз, чтобы правки были видны сразу.
-    const cacheControl = versioned
+    // Страницы — всегда с проверкой у сервера, даже с меткой в адресе: иначе
+    // браузер открывал Ноа онлайн из своей памяти мимо пересылки на зеркало.
+    const cacheControl = versioned && extname(file) !== ".html"
       ? "public, max-age=31536000, immutable"
       : [".svg", ".png", ".webp", ".ico", ".woff2", ".woff", ".ttf"].includes(extname(file))
         ? "public, max-age=86400"

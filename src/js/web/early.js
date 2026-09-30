@@ -55,8 +55,17 @@ const write = (key, value) => {
     "click",
     (event) => {
       const link = event.target?.closest?.("a[href]");
-      const url = link && own(link.getAttribute("href"));
-      if (url) link.href = fresh(url);
+      if (!link) return;
+      const url = own(link.getAttribute("href"));
+      if (url) return void (link.href = fresh(url));
+      // Главная сайта и Ноа онлайн — тоже с меткой: голые «/» и «/app/» CDN
+      // зеркала держит в памяти старыми.
+      try {
+        const page = new URL(link.getAttribute("href"), location.href);
+        if (page.origin === location.origin && ["/", "/app", "/app/"].includes(page.pathname)) link.href = fresh(page);
+      } catch {
+        /* чужая или кривая ссылка — не трогаем */
+      }
     },
     true,
   );
