@@ -421,7 +421,7 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
 
 Курс появляется после первой темы — по ней можно учиться сразу, остальные дорастают сами, и в списке, и в открытом окне обучения. С мостом сборка идёт на сервере: около минуты на тему с **Sonnet**, страницу можно закрыть. **Haiku** бережёт лимит подписки, но медленнее и чаще ошибается в фактах. Без моста курс собирает модель, подключённая в браузере, — тогда вкладку закрывать нельзя.
 
-Если с мобильного интернета noahlab.ru не открывается, Ноа онлайн доступна по прямому адресу сервера: [https://84.247.166.53:8795/app/](https://84.247.166.53:8795/app/). Там входите через Telegram — вход Google работает только на noahlab.ru.
+Если с мобильного интернета noahlab.ru не открывается, открывайте Ноа онлайн через российское зеркало: [m.noahlab.ru/app](https://m.noahlab.ru/app/). Там входите через Telegram — вход Google работает только на noahlab.ru.
 
 ## Своей нейросетью
 
@@ -451,7 +451,7 @@ Or create a platform key in the [dashboard](#/seller/keys), paste it into NOAH �
       title: "Your own course",
       lead: "The Learning window is empty until you build a course. Build it right in Noa online or with your own AI.",
       body: `
-**In Noa online:** open [Noa online](/app/), sign in, press **Build a course** in Learning and describe what it is about and why. Noa writes the plan and then topic after topic; the course appears after the first topic and the rest arrive by themselves. With the bridge the build runs on the server, about a minute per topic with Sonnet. If noahlab.ru does not open on mobile internet in Russia, use the server address [https://84.247.166.53:8795/app/](https://84.247.166.53:8795/app/) and sign in with Telegram.
+**In Noa online:** open [Noa online](/app/), sign in, press **Build a course** in Learning and describe what it is about and why. Noa writes the plan and then topic after topic; the course appears after the first topic and the rest arrive by themselves. With the bridge the build runs on the server, about a minute per topic with Sonnet. If noahlab.ru does not open on mobile internet in Russia, use the Russian mirror [m.noahlab.ru/app](https://m.noahlab.ru/app/) and sign in with Telegram.
 
 **With your own AI:**
 

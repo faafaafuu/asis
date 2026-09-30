@@ -842,6 +842,20 @@ async function handle(req, res) {
     if (url.pathname === "/mcp") return await mcpHandler(req, res, url);
     // Вход нейросети в MCP по OAuth: описание сервера, регистрация, согласие, токены.
     if ((url.pathname.startsWith("/.well-known/") || url.pathname.startsWith("/oauth/")) && (await mcpAuthHandler(req, res, url))) return;
+    // Страницы по голому IP — на российское зеркало. Прямой путь к серверу
+    // из РФ замирает после ~16 КБ на соединение: шрифты, модули и список
+    // курсов застревали, забивали все соединения браузера, и даже «кто
+    // вошёл» не доходил — страница писала «Нет связи». Через CDN зеркала всё
+    // приходит целиком. API по IP продолжает отвечать как раньше.
+    const pageOnIp =
+      req.method === "GET" &&
+      /^[\d.]+(:\d+)?$/.test(String(req.headers.host ?? "")) &&
+      (url.pathname === "/" || url.pathname === "/app" || url.pathname === "/app/" || /^\/app\/[\w-]+\.html$/.test(url.pathname));
+    const mirrorHost = [...MIRRORS].find((host) => !/^[\d.]+(:\d+)?$/.test(host));
+    if (pageOnIp && mirrorHost) {
+      res.writeHead(302, { Location: `https://${mirrorHost}${url.pathname}${url.search}`, "Cache-Control": "no-store" });
+      return res.end();
+    }
     if (url.pathname === "/download") {
       const asked = url.searchParams.get("os") ?? osOf(String(req.headers["user-agent"] ?? ""));
       res.writeHead(302, { Location: await latestInstaller(asked), "Cache-Control": "no-store" });
