@@ -83,7 +83,8 @@ async function walkByVoice(learning, target, listenToo) {
       await speak(text);
       if (walking !== session) break;
       emit("learn:listening", true);
-      const said = String((await listen().catch(() => "")) ?? "").trim();
+      // Пересказ — с паузами на подумать: конец фразы — после 2,6 с тишины.
+      const said = String((await listen({ pause: 2600 }).catch(() => "")) ?? "").trim();
       emit("learn:listening", false);
       if (walking !== session) break;
       if (!said) {

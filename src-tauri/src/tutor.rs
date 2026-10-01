@@ -225,6 +225,15 @@ pub fn current_topic() -> Option<(String, String)> {
         .map(|talk| (talk.target.course.clone(), talk.topic.clone()))
 }
 
+/// Идёт ли урок с Ноа голосом: распознавание тогда терпеливее к паузам.
+pub fn walking() -> bool {
+    DISCUSSION
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .as_ref()
+        .is_some_and(|talk| talk.walk && talk.voice)
+}
+
 /// Голосовой разговор кончился. Обсуждение в окне продолжается.
 pub fn end() {
     if let Some(talk) = DISCUSSION.lock().unwrap_or_else(|err| err.into_inner()).as_mut() {

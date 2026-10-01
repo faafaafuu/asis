@@ -91,52 +91,101 @@ function node(tag, attrs = {}, text = "") {
   return el;
 }
 
+/**
+ * Роль блока — для цвета: откуда всё начинается (в него стрелок нет), чем
+ * кончается (из него стрелок нет) и что посередине. Глазу сразу видно
+ * направление: зелёное → синее → золотое.
+ */
+export function roles(scheme) {
+  const into = new Set(scheme.edges.map((e) => e.to));
+  const out = new Set(scheme.edges.map((e) => e.from));
+  return new Map(
+    scheme.nodes.map((n) => [n.id, !scheme.edges.length ? "mid" : !into.has(n.id) ? "start" : !out.has(n.id) ? "end" : "mid"]),
+  );
+}
+
 /** Рисует схему: <figure> с подписью и SVG. */
 export function renderScheme(scheme) {
   const columns = layers(scheme);
-  const W = 150;
-  const H = 54;
-  const GAP_X = 70;
-  const GAP_Y = 22;
+  const CHAR = 7.4;
+  const H = 52;
+  const GAP_X = 96;
+  const GAP_Y = 28;
+  // Ширина колонки — по самой длинной строке её блоков.
+  const widths = columns.map((column) =>
+    Math.min(200, Math.max(116, ...column.map((n) => Math.max(...wrap(n.label, 22).map((l) => l.length)) * CHAR + 26))),
+  );
   const tallest = Math.max(...columns.map((c) => c.length));
-  const width = columns.length * W + (columns.length - 1) * GAP_X + 20;
-  const height = tallest * H + (tallest - 1) * GAP_Y + 20;
+  const width = widths.reduce((sum, w) => sum + w, 0) + (columns.length - 1) * GAP_X + 24;
+  const height = tallest * H + (tallest - 1) * GAP_Y + 24;
 
   const pos = new Map();
+  let left = 12;
   columns.forEach((column, x) => {
     const offset = ((tallest - column.length) * (H + GAP_Y)) / 2;
-    column.forEach((n, y) => pos.set(n.id, { x: 10 + x * (W + GAP_X), y: 10 + offset + y * (H + GAP_Y) }));
+    column.forEach((n, y) => pos.set(n.id, { x: left, y: 12 + offset + y * (H + GAP_Y), w: widths[x] }));
+    left += widths[x] + GAP_X;
   });
 
+  // Точки входа и выхода стрелок разнесены по краю блока: несколько стрелок
+  // в один блок не сливаются в одну линию и подписи не лезут друг на друга.
+  const ports = (list, side) => {
+    const map = new Map();
+    for (const [id, edges] of list) {
+      edges.sort((a, b) => pos.get(side === "out" ? a.to : a.from).y - pos.get(side === "out" ? b.to : b.from).y);
+      edges.forEach((e, k) => map.set(e, ((k + 1) * H) / (edges.length + 1)));
+    }
+    return map;
+  };
+  const group = (key) => {
+    const map = new Map();
+    for (const e of scheme.edges) (map.get(e[key]) ?? map.set(e[key], []).get(e[key])).push(e);
+    return map;
+  };
+  const outPort = ports(group("from"), "out");
+  const inPort = ports(group("to"), "in");
+
   const svg = node("svg", { viewBox: `0 0 ${width} ${height}`, class: "scheme__svg", role: "img", "aria-label": scheme.title || "Схема" });
+  svg.style.maxWidth = `${width}px`;
   const defs = node("defs");
   const marker = node("marker", { id: "scheme-arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
   marker.append(node("path", { d: "M0,0 L10,5 L0,10 z", class: "scheme__head" }));
   defs.append(marker);
   svg.append(defs);
 
+  const labels = [];
   for (const e of scheme.edges) {
     const a = pos.get(e.from);
     const b = pos.get(e.to);
     const forward = b.x > a.x;
-    const x1 = forward ? a.x + W : a.x + W / 2;
-    const y1 = forward ? a.y + H / 2 : a.y + H;
-    const x2 = forward ? b.x : b.x + W / 2;
-    const y2 = forward ? b.y + H / 2 : b.y;
+    const x1 = forward ? a.x + a.w : a.x + a.w / 2;
+    const y1 = forward ? a.y + outPort.get(e) : a.y + H;
+    const x2 = forward ? b.x : b.x + b.w / 2;
+    const y2 = forward ? b.y + inPort.get(e) : b.y;
     const mid = (x1 + x2) / 2;
-    const d = forward ? `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}` : `M${x1},${y1} C${x1},${y1 + 30} ${x2},${y2 - 30} ${x2},${y2}`;
+    const d = forward ? `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}` : `M${x1},${y1} C${x1},${y1 + 34} ${x2},${y2 - 34} ${x2},${y2}`;
     svg.append(node("path", { d, class: "scheme__edge", "marker-end": "url(#scheme-arrow)" }));
-    if (e.label) {
-      svg.append(node("text", { x: mid, y: (y1 + y2) / 2 - 6, class: "scheme__edge-label", "text-anchor": "middle" }, e.label));
-    }
+    if (e.label) labels.push({ text: e.label, x: mid, y: (y1 + y2) / 2 });
   }
 
   for (const n of scheme.nodes) {
-    const { x, y } = pos.get(n.id);
-    svg.append(node("rect", { x, y, width: W, height: H, rx: 8, class: "scheme__box" }));
-    const lines = wrap(n.label, 18);
+    const { x, y, w } = pos.get(n.id);
+    svg.append(node("rect", { x, y, width: w, height: H, rx: 10, class: `scheme__box scheme__box--${roles(scheme).get(n.id)}` }));
+    const lines = wrap(n.label, 22);
     const top = y + H / 2 - ((lines.length - 1) * 15) / 2 + 5;
-    lines.forEach((text, i) => svg.append(node("text", { x: x + W / 2, y: top + i * 15, class: "scheme__label", "text-anchor": "middle" }, text)));
+    lines.forEach((text, i) => svg.append(node("text", { x: x + w / 2, y: top + i * 15, class: "scheme__label", "text-anchor": "middle" }, text)));
+  }
+
+  // Подписи стрелок — поверх, на плашке; совпавшие по месту раздвигаются.
+  labels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) {
+    const prev = labels[i - 1];
+    if (Math.abs(labels[i].x - prev.x) < 70 && labels[i].y - prev.y < 18) labels[i].y = prev.y + 18;
+  }
+  for (const label of labels) {
+    const w = label.text.length * 6.6 + 12;
+    svg.append(node("rect", { x: label.x - w / 2, y: label.y - 11, width: w, height: 16, rx: 8, class: "scheme__pill" }));
+    svg.append(node("text", { x: label.x, y: label.y + 1, class: "scheme__edge-label", "text-anchor": "middle" }, label.text));
   }
 
   const figure = document.createElement("figure");

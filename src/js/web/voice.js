@@ -222,7 +222,7 @@ function isEcho(heard) {
 
 /* ── Распознавание браузером (Chrome, Edge) ──────────────────────────────── */
 
-function listenNative({ onHeard, signal } = {}) {
+function listenNative({ onHeard, signal, pause = END_OF_PHRASE_MS } = {}) {
   return new Promise((resolve, reject) => {
     // На телефоне и в Safari — по одной фразе: непрерывный режим там то
     // молчит, то повторяет сказанное, то обрывается на первой паузе.
@@ -277,7 +277,13 @@ function listenNative({ onHeard, signal } = {}) {
       ear.onend = () => {
         if (finished) return;
         // По фразе: распознавание само закончило её — значит, договорили.
-        if (!continuous && (finals.length || interim)) return finish();
+        // Но в пересказе (долгая пауза) — слушаем дальше: система обрывает
+        // на первом же вдохе, а человек ещё думает.
+        if (!continuous && (finals.length || interim) && pause <= END_OF_PHRASE_MS) return finish();
+        if (interim) {
+          finals.push(interim);
+          interim = "";
+        }
         setTimeout(() => !finished && open(), 120);
       };
       try {
@@ -290,7 +296,7 @@ function listenNative({ onHeard, signal } = {}) {
     const silence = setInterval(() => {
       const now = Date.now();
       if (signal?.aborted) finish();
-      else if (lastVoice && now - lastVoice > END_OF_PHRASE_MS) finish();
+      else if (lastVoice && now - lastVoice > pause) finish();
       else if (!lastVoice && now - started > WAIT_FOR_SPEECH_MS) finish();
     }, 200);
     open();
@@ -351,7 +357,7 @@ function levelMeter(stream) {
   };
 }
 
-async function listenRecorded({ onHeard, signal } = {}) {
+async function listenRecorded({ onHeard, signal, pause = END_OF_PHRASE_MS } = {}) {
   const stream = await openMic();
   const meter = levelMeter(stream);
   const recorder = recorderFor(stream);
@@ -379,7 +385,7 @@ async function listenRecorded({ onHeard, signal } = {}) {
       }
       const done =
         signal?.aborted ||
-        (speechAt && now - lastVoice > END_OF_PHRASE_MS) ||
+        (speechAt && now - lastVoice > pause) ||
         (!speechAt && now - started > WAIT_FOR_SPEECH_MS) ||
         now - started > MAX_PHRASE_MS;
       if (done) {

@@ -68,6 +68,18 @@ const MAX_GAIN: f32 = 8.0;
 /// половину вопроса. Больше — заметная пауза перед каждым ответом.
 const END_OF_PHRASE_MS: u64 = 1000;
 
+/// В уроке с Ноа человек пересказывает и думает вслух: паузы между мыслями
+/// длиннее, и секунда рвала пересказ на середине. Там конец — после 2,6 с.
+const END_OF_RETELL_MS: u64 = 2600;
+
+fn end_of_phrase() -> u64 {
+    if crate::tutor::walking() {
+        END_OF_RETELL_MS
+    } else {
+        END_OF_PHRASE_MS
+    }
+}
+
 /// Короче этого — не фраза, а кашель, щелчок мыши или скрип стула.
 const MIN_SPEECH_MS: u64 = 400;
 
@@ -657,7 +669,7 @@ impl Segmenter {
                 // в одно, и расшифровка стала бы хуже, а не лучше.
                 self.silence += part.len();
                 self.utterance.extend_from_slice(part);
-                if ms(self.silence, rate) >= END_OF_PHRASE_MS {
+                if ms(self.silence, rate) >= end_of_phrase() {
                     self.finish();
                 }
             } else {

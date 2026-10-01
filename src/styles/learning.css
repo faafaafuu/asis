@@ -1556,14 +1556,26 @@ button {
 .scheme__svg {
   display: block;
   width: 100%;
-  min-width: 420px;
-  max-height: 340px;
+  height: auto;
+  min-width: 380px;
+  margin: 0 auto;
 }
 
+/* Цвет — по роли блока: откуда начинается, что посередине, к чему ведёт. */
 .scheme__box {
-  fill: var(--soft, var(--btn-hover-bg));
+  stroke-width: 1.6;
+  fill: color-mix(in srgb, var(--accent) 12%, var(--bg-solid));
   stroke: var(--accent);
-  stroke-width: 1.5;
+}
+
+.scheme__box--start {
+  fill: color-mix(in srgb, var(--ok-fill, #5f8c4c) 16%, var(--bg-solid));
+  stroke: var(--ok-fill, #5f8c4c);
+}
+
+.scheme__box--end {
+  fill: color-mix(in srgb, var(--warn, #f2c14e) 22%, var(--bg-solid));
+  stroke: color-mix(in srgb, var(--warn, #f2c14e) 80%, var(--text));
 }
 
 .scheme__label {
@@ -1576,11 +1588,16 @@ button {
 .scheme__edge {
   fill: none;
   stroke: var(--text-muted);
-  stroke-width: 1.5;
+  stroke-width: 1.6;
 }
 
 .scheme__head {
   fill: var(--text-muted);
+}
+
+.scheme__pill {
+  fill: var(--bg-solid);
+  stroke: var(--divider);
 }
 
 .scheme__edge-label {
