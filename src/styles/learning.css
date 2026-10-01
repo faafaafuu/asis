@@ -1417,3 +1417,65 @@ button {
   font-size: 12.5px;
   padding: 4px 10px;
 }
+
+/* ── Схема раздела (scheme.js) ─────────────────────────────────────────── */
+
+.agent__line--scheme {
+  align-self: stretch;
+  max-width: 100%;
+  padding: 0;
+}
+
+.scheme {
+  margin: 0;
+  padding: 12px 14px 8px;
+  border: 1px solid var(--divider);
+  border-radius: min(var(--card-radius, 10px), 10px);
+  background: var(--bg-solid);
+  overflow-x: auto;
+}
+
+.scheme figcaption {
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label);
+}
+
+.scheme__svg {
+  display: block;
+  width: 100%;
+  min-width: 420px;
+  max-height: 340px;
+}
+
+.scheme__box {
+  fill: var(--soft, var(--btn-hover-bg));
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.scheme__label {
+  fill: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scheme__edge {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+}
+
+.scheme__head {
+  fill: var(--text-muted);
+}
+
+.scheme__edge-label {
+  fill: var(--label);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}

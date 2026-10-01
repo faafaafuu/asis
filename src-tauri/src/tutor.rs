@@ -299,6 +299,8 @@ pub async fn answer(app: &AppHandle, said: &str, voice: bool) -> Result<String, 
     let prompt = if walk && !telling { check_prompt(said) } else { said.to_string() };
     let mut text = converse_once(app, &material, &thread, &prompt, voice).await?;
     remember(&prompt, &text);
+    // Схема раздела — отдельно: её рисует окно, вслух она не читается.
+    let mut scheme = take_scheme(&mut text);
 
     let mut q = if said == OPENING || telling { "" } else { said };
     if walk && text.contains(NEXT) {
@@ -306,8 +308,9 @@ pub async fn answer(app: &AppHandle, said: &str, voice: bool) -> Result<String, 
         match next_section() {
             Some(Ok((tell, material))) => {
                 // Раздел понят — Ноа сама рассказывает следующий.
-                let more = converse_once(app, &material, &[], &tell, voice).await?;
+                let mut more = converse_once(app, &material, &[], &tell, voice).await?;
                 remember(&tell, &more);
+                scheme = take_scheme(&mut more).or(scheme);
                 text = format!("{text}\n\n{more}");
             }
             Some(Err(done)) => text = format!("{text}\n\n{done}"),
@@ -325,9 +328,29 @@ pub async fn answer(app: &AppHandle, said: &str, voice: bool) -> Result<String, 
         if telling {
             q = "";
         }
-        let _ = app.emit("learn:talk", serde_json::json!({ "q": q, "a": text, "section": section }));
+        let _ = app.emit(
+            "learn:talk",
+            serde_json::json!({ "q": q, "a": text, "section": section, "scheme": scheme }),
+        );
     }
     Ok(text)
+}
+
+/// Просьба дописать схему раздела — та же, что SCHEME_ASK в scheme.js.
+const SCHEME_ASK: &str = "В самом конце, после вопроса, добавь схему раздела блоком ```scheme с JSON: \
+    {\"title\": \"…\", \"nodes\": [{\"id\": \"a\", \"label\": \"…\"}], \"edges\": [{\"from\": \"a\", \"to\": \"b\", \"label\": \"…\"}]}. \
+    3–7 блоков по 1–4 слова, стрелки — что из чего следует или что за чем идёт, подпись стрелки 1–2 слова или пусто. \
+    Схема только в этом блоке, вслух её не упоминай.";
+
+/// Вынимает из ответа блок ```scheme … ``` — JSON схемы раздела.
+fn take_scheme(text: &mut String) -> Option<String> {
+    let start = text.find("```scheme")?;
+    let body = start + "```scheme".len();
+    let end = text[body..].find("```").map(|at| body + at)?;
+    let json = text[body..end].trim().to_string();
+    text.replace_range(start..end + 3, "");
+    *text = text.trim().to_string();
+    Some(json)
 }
 
 /// Один ход модели в разговоре об уроке.
@@ -377,7 +400,7 @@ fn tell_prompt(n: usize, total: usize, title: &str) -> String {
         "{TELL_MARK} Сейчас раздел {n} из {total}{title}. Расскажи его своими словами, как репетитор \
          вживую: 4–7 коротких фраз, главное и зачем это на практике, пример из жизни, и как об этом \
          спрашивают на собеседовании. Команды и код не зачитывай — скажи словами, что они делают. \
-         В конце попроси меня пересказать своими словами, как я понял."
+         В конце попроси меня пересказать своими словами, как я понял. {SCHEME_ASK}"
     )
 }
 

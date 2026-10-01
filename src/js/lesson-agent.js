@@ -12,6 +12,8 @@
 // tutor.rs в программе, learn-core.js в браузере. Окно только показывает
 // разговор — он приходит событием `learn:talk`.
 
+import { parseScheme, renderScheme } from "./scheme.js";
+
 /** Заголовок раздела «## …» — для подписи. */
 export function sectionTitle(part) {
   return /^##\s+(.+)$/m.exec(String(part ?? ""))?.[1]?.trim() ?? "";
@@ -57,7 +59,7 @@ function subscribe(api) {
   live.subscribed = true;
   api.listen?.("learn:talk", (event) => {
     if (!live.key) return;
-    const { q, a, section } = event.payload ?? {};
+    const { q, a, section, scheme } = event.payload ?? {};
     const data = loadLog(live.key) ?? { at: 0, lines: [] };
     const add = [];
     if (q) add.push({ who: "me", text: q });
@@ -67,6 +69,8 @@ function subscribe(api) {
       add.push({ who: "mark", text: `— Раздел ${section + 1}${title ? `: ${title}` : ""} —` });
     }
     if (a) add.push({ who: "noa", text: a });
+    // Схема раздела — сразу под рассказом: смотреть, пока Ноа говорит.
+    if (scheme) add.push({ who: "scheme", text: typeof scheme === "string" ? scheme : JSON.stringify(scheme) });
     data.lines.push(...add);
     saveLog(live.key, data);
     live.view?.(add, data.at, a);
@@ -160,7 +164,11 @@ export function renderLessonAgent(root, deps) {
       saveLog(key, { at: state.at, lines });
     }
     const node = el("div", `agent__line agent__line--${who}`);
-    if (who === "noa") node.innerHTML = markdown(text);
+    if (who === "scheme") {
+      const scheme = parseScheme(text);
+      if (!scheme) return node;
+      node.append(renderScheme(scheme));
+    } else if (who === "noa") node.innerHTML = markdown(text);
     else node.textContent = text;
     log.append(node);
     node.scrollIntoView({ block: "nearest", behavior: "smooth" });

@@ -12,6 +12,7 @@ import { openNoa } from "./noa-store.js";
 import { WebHost } from "../web-host.js";
 import { speak, stopSpeaking, speaking, canListen, dictate, listen } from "./voice.js";
 import { startTalk } from "./talk.js";
+import { splitScheme } from "../scheme.js";
 import { dictionaryClient, loadModel, saveModel, bridgeAvailable } from "./ai-web.js";
 
 const listeners = new Map();
@@ -68,8 +69,10 @@ let walking = null;
  * подряд или «стоп», «хватит», «спасибо» — конец; продолжить можно текстом.
  */
 async function walkByVoice(learning, target, listenToo) {
-  const first = await learning.walkStart(target);
-  emit("learn:talk", { q: "", a: first, section: learning.walkSection() });
+  // Схему раздела рисует окно, вслух она не читается.
+  const opening = splitScheme(await learning.walkStart(target));
+  const first = opening.text;
+  emit("learn:talk", { q: "", a: first, section: learning.walkSection(), scheme: opening.scheme });
   if (!listenToo || !canListen) return first;
   const session = {};
   walking = session;
@@ -91,8 +94,9 @@ async function walkByVoice(learning, target, listenToo) {
       quiet = 0;
       if (/^(стоп|хватит|спасибо|пока|закончим)/i.test(said)) break;
       try {
-        text = await learning.ask({ ...target, section: learning.walkSection() ?? target.section }, said, { voice: true });
-        emit("learn:talk", { q: said, a: text, section: learning.walkSection() });
+        const reply = splitScheme(await learning.ask({ ...target, section: learning.walkSection() ?? target.section }, said, { voice: true }));
+        text = reply.text;
+        emit("learn:talk", { q: said, a: text, section: learning.walkSection(), scheme: reply.scheme });
       } catch (err) {
         text = `Не получилось ответить: ${err.message ?? err}`;
       }
@@ -278,9 +282,9 @@ async function run(cmd, args = {}) {
     case "learn_submit":
       return l.submit(args.course, args.scope, args.answers);
     case "learn_ask": {
-      const answer = await l.ask(args.target, args.text, { voice: Boolean(args.voice) });
+      const { text: answer, scheme } = splitScheme(await l.ask(args.target, args.text, { voice: Boolean(args.voice) }));
       // Урок с Ноа слушает разговор событиями — так же, как в программе.
-      if (args.voice) emit("learn:talk", { q: args.text, a: answer, section: l.walkSection() });
+      if (args.voice) emit("learn:talk", { q: args.text, a: answer, section: l.walkSection(), scheme });
       return answer;
     }
     case "learn_walk":
