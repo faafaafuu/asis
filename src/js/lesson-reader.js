@@ -64,15 +64,21 @@ export function attachReader(lesson, { api, el, button, onFinish }) {
     blocks.forEach((node, i) => node.classList.toggle("reader-now", i === state.at && (state.playing || state.at > 0)));
   }
 
-  async function waitQuiet() {
-    // Первые мгновения синтез только начинается — тишину за конец не считаем.
-    const since = Date.now();
+  /**
+   * Ждём, пока голос договорит. В браузере вызов речи и так ждёт конца, в
+   * программе — возвращается раньше; тогда ловим, как речь началась и
+   * кончилась. Паузы между кусками — доли секунды, а не секунда с лишним.
+   */
+  async function waitQuiet(startedAt) {
+    let heard = false;
     for (;;) {
-      await pause(300);
       const busy = await api.invoke("voice_busy").catch(() => false);
-      if (!busy && Date.now() - since > 1200) return;
+      if (busy) heard = true;
+      else if (heard || Date.now() - startedAt > 1500) return;
+      await pause(150);
     }
   }
+
 
   async function start() {
     if (!blocks.length) return;
@@ -83,6 +89,7 @@ export function attachReader(lesson, { api, el, button, onFinish }) {
     while (state.playing && run === state.run && state.at < blocks.length) {
       const node = blocks[state.at];
       node.scrollIntoView({ block: "center", behavior: "smooth" });
+      const startedAt = Date.now();
       try {
         await api.invoke("voice_speak", { text: node.textContent.trim() });
       } catch (err) {
@@ -90,7 +97,7 @@ export function attachReader(lesson, { api, el, button, onFinish }) {
         state.playing = false;
         break;
       }
-      await waitQuiet();
+      await waitQuiet(startedAt);
       if (!state.playing || run !== state.run) return;
       state.at += 1;
       paint();

@@ -25,6 +25,24 @@ export function phrases(text) {
   return parts.map((part) => part.trim()).filter((part) => part.length > 1);
 }
 
+/**
+ * Фразы → куски для речи по две-три фразы, до ~280 знаков. По одной фразе
+ * голос звучал рвано: у каждой своя интонация с начала и пауза на синтез.
+ * Целиком — нельзя продолжить с места, где перебили.
+ */
+export function chunks(lines, limit = 280) {
+  const out = [];
+  let current = "";
+  for (const line of lines) {
+    if (current && current.length + line.length + 1 > limit) {
+      out.push(current);
+      current = line;
+    } else current = current ? `${current} ${line}` : line;
+  }
+  if (current) out.push(current);
+  return out;
+}
+
 const ASK = {
   topic:
     "Объясни эту тему вслух, как живой репетитор объясняет ученику, которому трудно читать: " +
@@ -93,14 +111,21 @@ function open(target, kind, anchor, deps, extra) {
     return start;
   };
 
-  async function waitQuiet() {
-    const since = Date.now();
+  /**
+   * Ждём, пока голос договорит. В браузере вызов речи и так ждёт конца, в
+   * программе — возвращается раньше; тогда ловим, как речь началась и
+   * кончилась. Паузы между кусками — доли секунды, а не секунда с лишним.
+   */
+  async function waitQuiet(startedAt) {
+    let heard = false;
     for (;;) {
-      await pause(250);
       const busy = await api.invoke("voice_busy").catch(() => false);
-      if (!busy && Date.now() - since > 900) return;
+      if (busy) heard = true;
+      else if (heard || Date.now() - startedAt > 1500) return;
+      await pause(150);
     }
   }
+
 
   async function play() {
     if (state.at >= state.lines.length) return;
@@ -111,6 +136,7 @@ function open(target, kind, anchor, deps, extra) {
       const line = state.lines[state.at];
       paint();
       line.node.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      const startedAt = Date.now();
       try {
         await api.invoke("voice_speak", { text: line.text });
       } catch (err) {
@@ -118,7 +144,7 @@ function open(target, kind, anchor, deps, extra) {
         state.playing = false;
         break;
       }
-      await waitQuiet();
+      await waitQuiet(startedAt);
       if (!state.playing || run !== state.run) return;
       state.at += 1;
     }
@@ -229,7 +255,7 @@ function open(target, kind, anchor, deps, extra) {
       return paint();
     }
     // Ответ встаёт сразу за вопросом и звучит первым, потом — недосказанное.
-    addLines(phrases(reply), "answer");
+    addLines(chunks(phrases(reply)), "answer");
     restore();
     play();
   }
@@ -264,7 +290,7 @@ function open(target, kind, anchor, deps, extra) {
   (async () => {
     try {
       const text = await api.invoke("learn_ask", { target, text: ASK[kind] + (kind === "deep" ? String(extra).slice(0, 4000) : "") });
-      const lines = phrases(text);
+      const lines = chunks(phrases(text));
       if (!lines.length) throw new Error("пустой ответ");
       addLines(lines, "noa");
       play();

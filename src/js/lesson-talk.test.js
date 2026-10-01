@@ -32,3 +32,11 @@ test("объяснение делится на фразы без разметк�
   assert.deepEqual(phrases("- пункт один\n- пункт два"), ["пункт один пункт два"]);
   assert.deepEqual(phrases(""), []);
 });
+
+import { chunks } from "./lesson-voice.js";
+
+test("фразы склеиваются в куски для речи, не длиннее предела", () => {
+  assert.deepEqual(chunks(["Раз.", "Два.", "Три."], 9), ["Раз. Два.", "Три."]);
+  assert.deepEqual(chunks(["Очень длинная фраза."], 5), ["Очень длинная фраза."]);
+  assert.deepEqual(chunks([]), []);
+});
