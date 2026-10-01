@@ -9,13 +9,15 @@ const TEMPLATE = `
 <div class="menu" role="menu" aria-label="Действия с выделенным текстом">
   <button class="menu__btn" data-el="copy" type="button" role="menuitem" tabindex="-1">Копировать</button>
   <span class="menu__sep" aria-hidden="true"></span>
+  <button class="menu__btn" data-el="read" type="button" role="menuitem" tabindex="-1" hidden>🔊 Прочитать</button>
+  <span class="menu__sep" data-el="readSep" aria-hidden="true" hidden></span>
   <button class="menu__btn menu__btn--explain" data-el="explain" type="button" role="menuitem" tabindex="-1">
     <span class="menu__glyph" aria-hidden="true">?</span>Объяснить
   </button>
 </div>`;
 
 export class MenuView {
-  /** @param {{onCopy: () => void, onExplain: () => void}} handlers */
+  /** @param {{onCopy: () => void, onExplain: () => void, onRead?: () => void}} handlers */
   constructor(handlers) {
     const host = document.createElement("div");
     host.innerHTML = TEMPLATE.trim();
@@ -32,6 +34,15 @@ export class MenuView {
       e.preventDefault();
       handlers.onCopy();
     });
+    // «Прочитать» — там, где есть чем читать вслух.
+    if (handlers.onRead) {
+      this.ui.read.hidden = false;
+      this.ui.readSep.hidden = false;
+      this.ui.read.addEventListener("click", (e) => {
+        e.preventDefault();
+        handlers.onRead();
+      });
+    }
     this.ui.explain.addEventListener("click", (e) => {
       e.preventDefault();
       handlers.onExplain();

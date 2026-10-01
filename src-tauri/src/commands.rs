@@ -1699,9 +1699,12 @@ pub fn learn_oral(app: AppHandle, course: String, topic: Option<String>) -> Resu
 /// Обсуждение голосом: раздела урока или вопроса. Ноа открывает разговор
 /// короткой фразой и слушает.
 #[tauri::command]
-pub fn learn_discuss(app: AppHandle, target: crate::tutor::Target) -> Result<(), String> {
+pub async fn learn_discuss(app: AppHandle, target: crate::tutor::Target) -> Result<(), String> {
     let intro = crate::tutor::open_voice(&target)?;
-    crate::say_then_listen(&app, intro);
+    // Разбор ведёт Ноа: первую реплику пишет модель — о чём тема и первый
+    // вопрос. Модель не ответила — начинаем с обычного «слушаю».
+    let opening = crate::tutor::answer(&app, crate::tutor::OPENING, true).await.unwrap_or(intro);
+    crate::say_then_listen(&app, opening);
     Ok(())
 }
 

@@ -869,7 +869,13 @@ export function createLearning({ courses, store, ai = null, name = "Ноа", clo
     if (!discussion || !sameTarget(discussion.target, target)) discussion = { target: { ...target }, material, thread: [] };
   };
 
-  const tutorRules = (material) =>
+  const LEAD =
+    "Это живой разбор голосом, а не чтение урока. Рассказывай своими словами: что это, зачем на практике, где встречается, " +
+    "как об этом спрашивают на собеседовании и что там хотят услышать, на чём обычно ошибаются. Реплика — три–пять коротких фраз " +
+    "и заканчивается вопросом человеку: проверить понимание, попросить пример из жизни или «как бы ты ответил на собеседовании». " +
+    "Человек ответил — коротко оцени по существу, поправь, если не так, и веди дальше по теме. Не понял — объясни иначе, проще. " +
+    "Команды и код не зачитывай — скажи словами, что они делают. Без списков, разметки и ссылок: это звучит вслух.";
+  const tutorRules = (material, voice = false) =>
     `Ты — репетитор ${name}: помогаешь человеку разобраться в уроке. Ниже — то, что у него сейчас перед глазами; «тут», «это», «первый пункт» относятся к этому.\n\n` +
     `${material}\n` +
     "Как отвечать:\n" +
@@ -877,7 +883,7 @@ export function createLearning({ courses, store, ai = null, name = "Ноа", clo
     "- Опирайся на живой пример или бытовую аналогию. Термин, которого нет в материале, объясни одной фразой.\n" +
     "- Человек говорит «не понял» — не переспрашивай, что именно: объясни главное ещё раз, проще и с другой стороны. Переспроси, только если вопрос совсем не разобрать.\n" +
     "- Вопрос шире материала, но по теме курса — отвечай.\n" +
-    "- Ответ читают в окне: до 150 слов; можно короткий список и `команды` в обратных кавычках.\n" +
+    (voice ? `- ${LEAD}\n` : "- Ответ читают в окне: до 150 слов; можно короткий список и `команды` в обратных кавычках.\n") +
     "- Без вступлений, похвалы вопросу и предложений помочь ещё. В конце можно одним коротким вопросом проверить, понятно ли.\n" +
     "Отвечай по-русски.";
 
@@ -1191,11 +1197,11 @@ export function createLearning({ courses, store, ai = null, name = "Ноа", clo
       });
     },
 
-    async ask(target, text) {
+    async ask(target, text, { voice = false } = {}) {
       const said = String(text ?? "").trim();
       if (!said) throw new Error("Напишите вопрос.");
       openDiscussion(target);
-      const messages = [{ role: "system", content: tutorRules(discussion.material) }];
+      const messages = [{ role: "system", content: tutorRules(discussion.material, voice) }];
       for (const item of discussion.thread) messages.push({ role: "user", content: item.q }, { role: "assistant", content: item.a });
       messages.push({ role: "user", content: said });
       const reply = String((await needAi().chat(messages, { maxTokens: 700 })) ?? "").trim();

@@ -41,11 +41,17 @@ async function dictateStop() {
 }
 
 /** Обсуждение урока голосом: тот же экран разговора, отвечает репетитор. */
-function discussByVoice(learning, target) {
+/** С чего Ноа начинает разбор — она ведёт, а не ждёт вопроса. */
+const OPENING =
+  "Начни живой разбор: в двух-трёх фразах — о чём это и где пригодится на практике и на собеседовании, " +
+  "и задай мне первый вопрос, чтобы понять, что я уже знаю.";
+
+async function discussByVoice(learning, target) {
+  const greeting = await learning.ask(target, OPENING, { voice: true }).catch(() => "Слушаю. Что разобрать?");
   startTalk({
-    title: "Обсуждение урока",
-    greeting: "Слушаю. Что в этом разделе разобрать?",
-    reply: (said) => learning.ask(target, said),
+    title: "Разбор с Ноа",
+    greeting,
+    reply: (said) => learning.ask(target, said, { voice: true }),
     // Сказанное голосом — в ту же ленту обсуждения, что и напечатанное.
     onExchange: (said, answer) => emit("learn:talk", { q: said, a: answer }),
   });
@@ -100,7 +106,12 @@ export function mountDictionary() {
   addStyle(new URL("popup.css", base).href);
   addStyle(new URL("menu.css", base).href);
   // Выделили — рядом «Объяснить»: и на телефоне, и на компьютере, без Ctrl.
-  dictionary = new WebHost({ client: dictionaryClient(), requireLeftCtrl: true, forceTouchMenu: true }).mount();
+  dictionary = new WebHost({
+    client: dictionaryClient(),
+    requireLeftCtrl: true,
+    forceTouchMenu: true,
+    onRead: (text) => speak(text),
+  }).mount();
   // Всё, что умеет окно объяснения в программе, — кнопками вместо клавиш:
   // уточнить словами или голосом (зажать микрофон), прочитать вслух.
   const view = dictionary.view;

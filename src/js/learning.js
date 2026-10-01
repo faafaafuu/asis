@@ -9,7 +9,6 @@
 import { tauri, appWindow, applyTheme } from "./bridge.js";
 import { renderTalkLesson } from "./lesson-talk.js";
 import { attachReader } from "./lesson-reader.js";
-import { voiceButton } from "./lesson-voice.js";
 
 const api = tauri();
 const ui = {};
@@ -395,34 +394,54 @@ function renderTopic() {
   const card = course.topics.find((t) => t.id === view.topic);
   const topic = topicView.topic;
   const root = page(topic.title, topic.summary);
-  const explainRow = el("div", "vx__row");
-  explainRow.append(voiceButton("🎧 Объясни тему голосом", { course: course.id, topic: topic.id }, "topic", explainRow, { api, el, button }));
-  root.append(explainRow);
+  // Главное действие темы — живой разбор с Ноа голосом: она рассказывает,
+  // спрашивает, как об этом спросят на собеседовании, и разбирает непонятное.
+  const lead = el("div", "lead-row");
+  lead.append(discussNow({ course: course.id, topic: topic.id }, "🎙 Разобрать тему с Ноа"));
+  lead.append(el("span", "note", "Ноа рассказывает своими словами и спрашивает — отвечайте голосом, перебивайте, уточняйте."));
+  root.append(lead);
+
+  // Три раздела вместо девяти вкладок: учить, материал, проверить себя.
+  const GROUPS = {
+    talk: ["talk"],
+    material: ["lesson", "concepts", "map", "sheet"],
+    check: ["tasks", "exam", "mistakes"],
+  };
+  const groupOf = (key) => Object.keys(GROUPS).find((g) => GROUPS[g].includes(key)) ?? "material";
+  if (view.step === "review") view.step = "concepts";
+  if (view.step === "talk" && !topic.concepts?.length) view.step = "lesson";
+  const current = groupOf(view.step);
 
   const steps = el("div", "steps");
-  const step = (key, label, badge = "") => {
+  const step = (key, label, badge = "", into = steps, selected = view.step === key) => {
     const node = el("button", "step", label);
-    node.setAttribute("aria-selected", String(view.step === key));
+    node.setAttribute("aria-selected", String(selected));
     if (badge) node.append(el("span", "step__badge", badge));
     node.addEventListener("click", () => {
       view.step = key;
       exam = null;
       renderTopic();
     });
-    steps.append(node);
+    into.append(node);
   };
-  if (topic.concepts?.length) step("talk", "🎙 Разговором");
-  step("lesson", "Урок текстом", card?.read ? "✓" : "");
-  if (topic.concepts?.length) {
-    step("concepts", "Понятия", `${card?.conceptsMature ?? 0}/${topic.concepts.length}`);
-    step("map", "Карта");
-    step("review", "Повторить");
-  }
-  step("tasks", "Задачи", `${card?.tasksDone ?? 0}/${card?.tasksTotal ?? 0}`);
-  step("exam", "Мини-экзамен", card?.examBest != null ? `${card.examBest}%` : "");
-  if (topicView.cheatsheet) step("sheet", "Шпаргалка");
-  if (topicView.mistakes.length) step("mistakes", "Ошибки", String(topicView.mistakes.length));
+  if (topic.concepts?.length) step("talk", "Учить по понятиям", `${card?.conceptsMature ?? 0}/${topic.concepts.length}`, steps, current === "talk");
+  step("lesson", "Материал", card?.read ? "✓" : "", steps, current === "material");
+  step("tasks", "Проверить себя", card?.examBest != null ? `${card.examBest}%` : "", steps, current === "check");
   root.append(steps);
+
+  // Внутри раздела — мелкая строка, только если в нём больше одного.
+  const sub = el("div", "substeps");
+  if (current === "material") {
+    step("lesson", "Урок", "", sub);
+    if (topic.concepts?.length) step("concepts", "Понятия", "", sub);
+    if (topic.concepts?.length) step("map", "Карта", "", sub);
+    if (topicView.cheatsheet) step("sheet", "Шпаргалка", "", sub);
+  } else if (current === "check") {
+    step("tasks", "Задачи", `${card?.tasksDone ?? 0}/${card?.tasksTotal ?? 0}`, sub);
+    step("exam", "Мини-экзамен", "", sub);
+    if (topicView.mistakes.length) step("mistakes", "Ошибки", String(topicView.mistakes.length), sub);
+  }
+  if (sub.childElementCount > 1) root.append(sub);
 
   if (view.step === "talk" && topic.concepts?.length) {
     renderTalkLesson(root, {
@@ -552,7 +571,7 @@ function renderLesson(root, topic) {
     button,
     onFinish: () => root.querySelector(".actions .button:not(.button--quiet)")?.focus(),
   });
-  reader.prepend(voiceButton("🎧 Объясни раздел", { course: course.id, topic: topic.id, section: at }, "section", reader, { api, el, button }));
+  reader.prepend(discussNow({ course: course.id, topic: topic.id, section: at }, "🎙 Разобрать раздел"));
   root.append(reader);
   root.append(lesson);
 
@@ -645,15 +664,7 @@ function deepBox(topic, at) {
       toggle.disabled = false;
     }
   };
-  const voice = voiceButton(
-    "🎧 Объясни разбор голосом",
-    { course: course.id, topic: topic.id, section: at },
-    "deep",
-    box,
-    { api, el, button },
-    () => body.textContent,
-  );
-  box.append(toggle, voice, body);
+  box.append(toggle, body);
   load(true);
   return box;
 }
@@ -683,6 +694,27 @@ let talk = null;
  * Спросить можно текстом или голосом; это один разговор, и Ноа знает, о чём
  * он: раздел целиком с его понятиями или вопрос с эталоном и ответом.
  */
+/** Живой разбор голосом: Ноа ведёт разговор о теме или разделе. */
+function discussNow(target, label) {
+  const node = button(label, async () => {
+    node.disabled = true;
+    const was = node.textContent;
+    node.textContent = "Ноа готовится…";
+    try {
+      await api?.invoke("learn_discuss", { target });
+    } catch (err) {
+      node.title = String(err);
+    } finally {
+      setTimeout(() => {
+        node.disabled = false;
+        node.textContent = was;
+      }, 1500);
+    }
+  });
+  node.classList.add("discuss-now");
+  return node;
+}
+
 function discussButton(root, target) {
   return button("💬 Обсудить", () => {
     let panel = root.querySelector(":scope > .talk");

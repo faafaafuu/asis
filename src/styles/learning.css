@@ -1455,82 +1455,29 @@ button {
   box-shadow: var(--shadow-sm, 0 2px 8px rgba(0, 0, 0, 0.25));
 }
 
-/* ── Объясни голосом (lesson-voice.js) ─────────────────────────────────── */
+/* ── Тема: разбор с Ноа и три раздела ───────────────────────────────────── */
 
-.vx__row {
+.lead-row {
   display: flex;
-  gap: 8px;
-  margin: 4px 0 8px;
-}
-
-.vx {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 10px 0;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--card-radius, 8px);
-  background: var(--bg-solid);
-  box-shadow: var(--shadow-sm, none);
-}
-
-.vx__head {
-  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 10px 14px;
+  margin: 6px 0 14px;
 }
 
-.vx__title {
-  font-weight: 600;
-  color: var(--text);
+.discuss-now {
+  font-size: 15px;
+  padding-inline: 18px;
 }
 
-.vx__hint {
-  flex: 1;
-  font-size: 12px;
-  color: var(--text-muted);
+.substeps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -4px 0 12px;
 }
 
-.vx__status {
-  margin: 0;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-
-.vx__script {
-  max-height: 260px;
-  overflow-y: auto;
-  font-size: 17px;
-  line-height: 27px;
-  color: var(--text-muted);
-}
-
-.vx__line--said {
-  color: var(--text-body);
-}
-
-.vx__line--now {
-  color: var(--text);
-  background: color-mix(in srgb, var(--sel-bg, var(--accent)) 25%, transparent);
-}
-
-.vx__line--me {
-  display: block;
-  margin: 6px 0;
-  font-style: italic;
-  color: var(--accent);
-}
-
-.vx__line--answer {
-  color: var(--text);
-}
-
-.vx__ask {
-  min-width: 150px;
-}
-
-.vx__input {
-  flex: 1;
-  min-width: 180px;
+.substeps .step {
+  font-size: 12.5px;
+  padding: 4px 10px;
 }

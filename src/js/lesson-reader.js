@@ -145,7 +145,10 @@ export function attachReader(lesson, { api, el, button, onFinish }) {
   selectBtn.classList.add("reader__select");
   selectBtn.hidden = true;
   document.body.append(selectBtn);
+  // В браузере выделение уже даёт меню «Копировать · Прочитать · Объяснить».
+  const ownMenu = !document.documentElement.classList.contains("is-web");
   lesson.addEventListener("mouseup", () => {
+    if (!ownMenu) return;
     setTimeout(() => {
       const selection = window.getSelection();
       const text = selection?.toString().trim() ?? "";

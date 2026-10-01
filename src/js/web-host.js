@@ -62,6 +62,12 @@ export class WebHost {
         this.hideMenu();
       },
       onExplain: () => this.explainFromMenu(),
+      onRead: opts.onRead
+        ? () => {
+            opts.onRead(this.menuText);
+            this.hideMenu();
+          }
+        : undefined,
     });
     this.menuLayer.append(this.menu.el);
   }

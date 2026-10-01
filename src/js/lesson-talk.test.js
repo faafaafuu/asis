@@ -20,23 +20,3 @@ test("сначала новые и слабые понятия, выученны
   ]).map((c) => c.id);
   assert.deepEqual(order, ["b", "d", "c", "a"]);
 });
-
-import { phrases } from "./lesson-voice.js";
-
-test("объяснение делится на фразы без разметки", () => {
-  assert.deepEqual(phrases("**Порт** — номер программы. Как квартира в доме! А IP — сам дом…"), [
-    "Порт — номер программы.",
-    "Как квартира в доме!",
-    "А IP — сам дом…",
-  ]);
-  assert.deepEqual(phrases("- пункт один\n- пункт два"), ["пункт один пункт два"]);
-  assert.deepEqual(phrases(""), []);
-});
-
-import { chunks } from "./lesson-voice.js";
-
-test("фразы склеиваются в куски для речи, не длиннее предела", () => {
-  assert.deepEqual(chunks(["Раз.", "Два.", "Три."], 9), ["Раз. Два.", "Три."]);
-  assert.deepEqual(chunks(["Очень длинная фраза."], 5), ["Очень длинная фраза."]);
-  assert.deepEqual(chunks([]), []);
-});
