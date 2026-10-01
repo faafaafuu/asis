@@ -1,76 +1,119 @@
-// Урок с Ноа — урок как разговор с репетитором, от первого раздела до
+// Урок с Ноа — урок как живой разговор с репетитором, от первого раздела до
 // последнего.
 //
-// Ноа держит в уме весь урок (план разделов и текст текущего) и ведёт по нему:
-// рассказывает раздел своими словами — что это, зачем на практике, как об этом
-// спросят на собеседовании, — и просит пересказать, как вы поняли. Ваш
-// пересказ она разбирает: что верно, что упустили или перепутали. Поняли —
-// идёте дальше; нет — объясняет иначе и спрашивает снова. Можно перебивать
-// вопросами — она ответит и вернётся к уроку. Отвечать — голосом или текстом.
+// Ноа держит урок в уме и ведёт по нему: рассказывает раздел своими словами —
+// что это, зачем на практике, как об этом спросят на собеседовании, — и
+// просит пересказать, как вы поняли. Пересказ она разбирает: что верно, что
+// упустили или перепутали. Поняли — сама переходит к следующему разделу; нет
+// — объясняет иначе и спрашивает снова. Можно перебивать вопросами.
 //
-// Модель зовётся через learn_ask (обсуждение раздела, разговорный стиль):
-// в программе — Rust, в браузере — web-api.js. Ход урока — здесь.
+// Разговор голосом — без кнопок: Ноа говорит, потом слушает, вы отвечаете,
+// она отвечает. Можно и текстом. Ведение урока живёт там же, где модель:
+// tutor.rs в программе, learn-core.js в браузере. Окно только показывает
+// разговор — он приходит событием `learn:talk`.
 
-/** Метка в ответе модели: раздел понят, можно дальше. */
-export const NEXT = "[ДАЛЬШЕ]";
-
-const TELL = (n, total, title) =>
-  `Ведём урок разговором. Сейчас раздел ${n} из ${total}${title ? ` — «${title}»` : ""}. ` +
-  "Расскажи его своими словами, как репетитор вживую: 4–7 коротких фраз, главное и зачем это на практике, " +
-  "пример из жизни, и как об этом спрашивают на собеседовании. Команды и код не зачитывай — скажи словами, что они делают. " +
-  "В конце попроси меня пересказать своими словами, как я понял.";
-
-const CHECK = (said) =>
-  `Мой ответ: «${said}».\n` +
-  "Если это пересказ — оцени по существу: что верно, что упустил или перепутал, коротко, 2–4 фразы. " +
-  `Понял главное — скажи, что идём дальше, и закончи ответ меткой ${NEXT}. ` +
-  "Не понял — объясни упущенное иначе, проще, и снова попроси пересказать. " +
-  "Если это вопрос — ответь на него и попроси пересказать раздел.";
-
-/** Заголовок раздела «## …» — для плана и подписи. */
+/** Заголовок раздела «## …» — для подписи. */
 export function sectionTitle(part) {
   return /^##\s+(.+)$/m.exec(String(part ?? ""))?.[1]?.trim() ?? "";
 }
 
-/** Ответ модели → текст без метки и признак «можно дальше». */
-export function splitNext(reply) {
-  const text = String(reply ?? "");
-  const next = text.includes(NEXT);
-  return { next, text: text.replaceAll(NEXT, "").trim() };
+/** Признак конца урока в реплике Ноа. */
+export const DONE = "Урок пройден";
+
+/**
+ * Разговор урока переживает переход на «Материал» и обратно, и даже
+ * перезагрузку: строки лежат в памяти браузера по курсу и теме.
+ */
+const LOG_KEY = (course, topic) => `noa.agent.${course}/${topic}`;
+const MAX_LINES = 80;
+
+function loadLog(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) ?? "null");
+    return Array.isArray(saved?.lines) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLog(key, data) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ ...data, lines: data.lines.slice(-MAX_LINES) }));
+  } catch {
+    /* не запомнится — не беда */
+  }
+}
+
+/**
+ * Один слушатель разговора на страницу. Окно урока перерисовывается при
+ * каждом переходе между вкладками; слушатель же живёт всё время и пишет
+ * реплики в память темы — и пока открыт «Материал», голос продолжается, а
+ * вернувшись, вы видите весь разговор.
+ */
+const live = { key: null, parts: [], view: null, subscribed: false };
+
+function subscribe(api) {
+  if (live.subscribed) return;
+  live.subscribed = true;
+  api.listen?.("learn:talk", (event) => {
+    if (!live.key) return;
+    const { q, a, section } = event.payload ?? {};
+    const data = loadLog(live.key) ?? { at: 0, lines: [] };
+    const add = [];
+    if (q) add.push({ who: "me", text: q });
+    if (Number.isInteger(section) && section !== data.at) {
+      data.at = section;
+      const title = sectionTitle(live.parts[section]);
+      add.push({ who: "mark", text: `— Раздел ${section + 1}${title ? `: ${title}` : ""} —` });
+    }
+    if (a) add.push({ who: "noa", text: a });
+    data.lines.push(...add);
+    saveLog(live.key, data);
+    live.view?.(add, data.at, a);
+  });
+  api.listen?.("learn:listening", (event) => live.listening?.(Boolean(event.payload)));
 }
 
 /**
  * Рисует урок с Ноа в `root`.
- * deps: { api, course, topic, parts, el, button, dictateButton, markdown, onDone, start }
- * parts — разделы урока (sections()), start — с какого начать.
+ * deps: { api, course, topic, parts, start, el, button, markdown, openStep }
  */
 export function renderLessonAgent(root, deps) {
-  const { api, course, topic, parts, el, button, dictateButton, markdown } = deps;
+  const { api, course, topic, parts, el, button, markdown } = deps;
   const total = parts.length;
-  const state = { at: Math.min(deps.start ?? 0, total - 1), busy: false, voice: readVoice(), ready: false };
+  const key = LOG_KEY(course.id, topic.id);
+  const saved = loadLog(key);
+  const state = {
+    at: Math.min(saved?.at ?? deps.start ?? 0, total - 1),
+    // Голос после перехода не продолжается сам: продолжить — одной кнопкой.
+    mode: saved?.lines.length ? "text" : "idle",
+    busy: false,
+  };
+  const lines = saved?.lines ?? [];
 
   const box = el("section", "agent");
   const head = el("div", "agent__head");
   const where = el("span", "agent__where");
-  const voiceBtn = button("", () => {
-    state.voice = !state.voice;
-    saveVoice(state.voice);
-    if (!state.voice) hush();
-    paint();
-  }, true);
-  head.append(where, voiceBtn);
+  const status = el("span", "agent__status");
+  head.append(where, status);
 
   const log = el("div", "agent__log");
+  const startRow = el("div", "actions agent__start");
+  const voiceStart = button("🎙 Начать урок голосом", () => start(true));
+  const textStart = button("Текстом", () => start(false), true);
+  startRow.append(voiceStart, textStart);
+  startRow.prepend(el("p", "note agent__intro", "Ноа рассказывает раздел своими словами и просит пересказать, как вы поняли. Голосом — просто говорите, когда она замолчит."));
+
   const area = el("textarea", "answer agent__input");
   area.rows = 2;
-  area.placeholder = "Перескажите своими словами или спросите — Enter, отправить";
+  area.placeholder = "Ответить текстом — Enter";
   const send = button("Отправить", () => reply());
-  const dictate = dictateButton(area);
-  dictate.addEventListener("click", hush, true);
-  const next = button("Следующий раздел →", () => go(state.at + 1), true);
+  const stop = button("⏹ Закончить голосом", () => stopVoice(), true);
+  const voiceAgain = button("🎙 Продолжить голосом", () => start(true), true);
   const actions = el("div", "actions agent__actions");
-  actions.append(send, dictate, next);
-  box.append(head, log, area, actions);
+  actions.append(send, stop, voiceAgain);
+  const finish = el("div", "actions agent__finish");
+  box.append(head, log, startRow, area, actions, finish);
   root.append(box);
 
   area.addEventListener("keydown", (event) => {
@@ -83,17 +126,19 @@ export function renderLessonAgent(root, deps) {
   function paint() {
     const title = sectionTitle(parts[state.at]);
     where.textContent = `Раздел ${state.at + 1} из ${total}${title ? ` · ${title}` : ""}`;
-    voiceBtn.textContent = state.voice ? "🔊 Ноа говорит вслух" : "🔇 Только текстом";
+    startRow.hidden = state.mode !== "idle";
+    area.hidden = state.mode === "idle";
+    actions.hidden = state.mode === "idle";
+    stop.hidden = state.mode !== "voice";
+    voiceAgain.hidden = state.mode !== "text";
     send.disabled = state.busy;
-    next.disabled = state.busy;
-    next.textContent = state.at + 1 >= total ? "Закончить урок ✓" : "Следующий раздел →";
   }
 
-  function hush() {
-    api.invoke("voice_stop").catch(() => {});
-  }
-
-  function line(who, text) {
+  function line(who, text, keep = true) {
+    if (keep && who !== "wait") {
+      lines.push({ who, text });
+      saveLog(key, { at: state.at, lines });
+    }
     const node = el("div", `agent__line agent__line--${who}`);
     if (who === "noa") node.innerHTML = markdown(text);
     else node.textContent = text;
@@ -104,104 +149,104 @@ export function renderLessonAgent(root, deps) {
 
   const target = () => ({ course: course.id, topic: topic.id, section: state.at });
 
-  async function ask(text) {
+  // Разговор приходит событиями — общий слушатель пишет его в память темы,
+  // а сюда отдаёт новые строки, пока это окно на экране.
+  let wait = null;
+  subscribe(api);
+  live.key = key;
+  live.parts = parts;
+  live.view = (added, at, a) => {
+    if (!box.isConnected) return;
+    wait?.remove();
+    wait = null;
+    state.at = at;
+    for (const x of added) {
+      lines.push(x);
+      line(x.who, x.text, false);
+    }
+    if (state.mode === "text" && a) api.invoke("voice_speak", { text: a }).catch(() => {});
+    if (a?.includes(DONE)) finished();
+    paint();
+  };
+  live.listening = (on) => {
+    if (box.isConnected) status.textContent = on ? "🎙 Слушаю…" : "";
+  };
+
+  async function start(voice) {
+    state.mode = voice ? "voice" : "text";
     state.busy = true;
     paint();
-    const wait = line("wait", "Ноа думает…");
+    if (!log.childElementCount) {
+      line("mark", `— Раздел ${state.at + 1}${sectionTitle(parts[state.at]) ? `: ${sectionTitle(parts[state.at])}` : ""} —`);
+    }
+    wait = line("wait", "Ноа готовится…");
     try {
-      const answer = await api.invoke("learn_ask", { target: target(), text, voice: true });
-      wait.remove();
-      return answer;
+      await api.invoke("learn_walk", { target: target(), listen: voice });
     } catch (err) {
-      wait.remove();
-      line("error", `Ответа нет: ${err}`);
-      return "";
+      wait?.remove();
+      wait = null;
+      line("error", `Не получилось начать: ${err}`);
+      state.mode = "idle";
     } finally {
       state.busy = false;
       paint();
     }
   }
 
-  /** Ждём, пока Ноа договорит (не дольше минуты). */
-  async function quiet() {
-    const started = Date.now();
-    let heard = false;
-    while (Date.now() - started < 60_000) {
-      const busy = await api.invoke("voice_busy").catch(() => false);
-      if (busy) heard = true;
-      else if (heard || Date.now() - started > 1500) return;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-  }
-
-  function say(text) {
-    if (state.voice && text) api.invoke("voice_speak", { text }).catch(() => {});
-  }
-
-  /** Начать раздел: Ноа рассказывает и просит пересказать. */
-  async function go(at) {
-    hush();
-    if (at >= total) return finish();
-    state.at = at;
-    api.invoke("learn_place", { course: course.id, topic: topic.id, step: "talk", section: at }).catch(() => {});
-    paint();
-    line("mark", `— Раздел ${at + 1}${sectionTitle(parts[at]) ? `: ${sectionTitle(parts[at])}` : ""} —`);
-    const answer = await ask(TELL(at + 1, total, sectionTitle(parts[at])));
-    if (!answer) return;
-    line("noa", answer);
-    say(answer);
-    area.focus();
-  }
-
-  /** Ответ человека: пересказ или вопрос. */
   async function reply() {
     const said = area.value.trim();
     if (!said || state.busy) return;
-    hush();
+    if (state.mode === "voice") stopVoice();
+    api.invoke("voice_stop").catch(() => {});
     area.value = "";
-    line("me", said);
-    if (/^(дальше|далее|следующ|пропусти|го дальше)/i.test(said)) return go(state.at + 1);
-    const answer = await ask(CHECK(said));
-    if (!answer) return;
-    const { next: understood, text } = splitNext(answer);
-    line("noa", text);
-    say(text);
-    if (understood) {
-      // Раздел понят — дослушали оценку, и Ноа сама ведёт к следующему.
-      const at = state.at;
-      await quiet();
-      if (state.at === at && !state.busy) go(at + 1);
+    state.busy = true;
+    paint();
+    wait = line("wait", "Ноа думает…");
+    try {
+      await api.invoke("learn_ask", { target: target(), text: said, voice: true });
+    } catch (err) {
+      wait?.remove();
+      wait = null;
+      line("error", `Ответа нет: ${err}`);
+    } finally {
+      state.busy = false;
+      paint();
     }
   }
 
-  async function finish() {
-    await api.invoke("learn_read", { course: course.id, topic: topic.id }).catch(() => {});
-    line("mark", "— Урок пройден —");
-    const done = "Урок пройден. Дальше — «Проверить себя»: задачи и мини-экзамен закрепят тему.";
-    line("noa", done);
-    say(done);
-    next.hidden = true;
-    deps.onDone?.();
+  function stopVoice() {
+    api.invoke("learn_walk_stop").catch(() => {});
+    state.mode = "text";
+    status.textContent = "";
+    paint();
   }
 
+  function finished() {
+    finish.replaceChildren();
+    for (const [key, label] of [
+      ["sheet", "📝 Конспект"],
+      ["review", "🃏 Карточки"],
+      ["tasks", "Проверить себя"],
+    ]) {
+      finish.append(button(label, () => deps.openStep?.(key), key !== "sheet"));
+    }
+  }
+
+  // Прежний разговор этой темы — на место.
+  for (const { who, text } of lines) line(who, text, false);
+  if (lines.some((x) => x.who === "noa" && x.text.includes(DONE))) finished();
+  if (state.mode === "text") {
+    const clear = button("Начать урок заново", () => {
+      lines.length = 0;
+      saveLog(key, { at: 0, lines });
+      log.replaceChildren();
+      state.at = 0;
+      state.mode = "idle";
+      finish.replaceChildren();
+      clear.remove();
+      paint();
+    }, true);
+    actions.append(clear);
+  }
   paint();
-  go(state.at);
-}
-
-const VOICE_KEY = "noa.agentVoice";
-
-function readVoice() {
-  try {
-    return localStorage.getItem(VOICE_KEY) !== "off";
-  } catch {
-    return true;
-  }
-}
-
-function saveVoice(on) {
-  try {
-    localStorage.setItem(VOICE_KEY, on ? "on" : "off");
-  } catch {
-    /* не запомнится */
-  }
 }

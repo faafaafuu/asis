@@ -10,7 +10,7 @@
 
 import { openNoa } from "./noa-store.js";
 import { WebHost } from "../web-host.js";
-import { speak, stopSpeaking, speaking, canListen, dictate } from "./voice.js";
+import { speak, stopSpeaking, speaking, canListen, dictate, listen } from "./voice.js";
 import { startTalk } from "./talk.js";
 import { dictionaryClient, loadModel, saveModel, bridgeAvailable } from "./ai-web.js";
 
@@ -55,6 +55,52 @@ async function discussByVoice(learning, target) {
     // Сказанное голосом — в ту же ленту обсуждения, что и напечатанное.
     onExchange: (said, answer) => emit("learn:talk", { q: said, a: answer }),
   });
+}
+
+/* ── Урок с Ноа голосом ─────────────────────────────────────────────────── */
+
+/** Идущий урок голосом — чтобы «Закончить» его остановил. */
+let walking = null;
+
+/**
+ * Урок с Ноа без рук: Ноа рассказывает раздел, слушает пересказ, разбирает и
+ * ведёт дальше. Сказанное приходит в окно событием learn:talk. Две паузы
+ * подряд или «стоп», «хватит», «спасибо» — конец; продолжить можно текстом.
+ */
+async function walkByVoice(learning, target, listenToo) {
+  const first = await learning.walkStart(target);
+  emit("learn:talk", { q: "", a: first, section: learning.walkSection() });
+  if (!listenToo || !canListen) return first;
+  const session = {};
+  walking = session;
+  (async () => {
+    let text = first;
+    let quiet = 0;
+    while (walking === session) {
+      await speak(text);
+      if (walking !== session) break;
+      emit("learn:listening", true);
+      const said = String((await listen().catch(() => "")) ?? "").trim();
+      emit("learn:listening", false);
+      if (walking !== session) break;
+      if (!said) {
+        if (++quiet >= 2) break;
+        text = "Я здесь. Перескажите, как поняли, или спросите.";
+        continue;
+      }
+      quiet = 0;
+      if (/^(стоп|хватит|спасибо|пока|закончим)/i.test(said)) break;
+      try {
+        text = await learning.ask({ ...target, section: learning.walkSection() ?? target.section }, said, { voice: true });
+        emit("learn:talk", { q: said, a: text, section: learning.walkSection() });
+      } catch (err) {
+        text = `Не получилось ответить: ${err.message ?? err}`;
+      }
+    }
+    if (walking === session) walking = null;
+    emit("learn:listening", false);
+  })();
+  return first;
 }
 
 /* ── Устный зачёт ───────────────────────────────────────────────────────── */
@@ -231,8 +277,18 @@ async function run(cmd, args = {}) {
       return l.exam(args.course, args.scope);
     case "learn_submit":
       return l.submit(args.course, args.scope, args.answers);
-    case "learn_ask":
-      return l.ask(args.target, args.text, { voice: Boolean(args.voice) });
+    case "learn_ask": {
+      const answer = await l.ask(args.target, args.text, { voice: Boolean(args.voice) });
+      // Урок с Ноа слушает разговор событиями — так же, как в программе.
+      if (args.voice) emit("learn:talk", { q: args.text, a: answer, section: l.walkSection() });
+      return answer;
+    }
+    case "learn_walk":
+      return walkByVoice(l, args.target, args.listen !== false);
+    case "learn_walk_stop":
+      walking = null;
+      stopSpeaking();
+      return null;
     case "learn_deep":
       return l.deep(args.course, args.topic, args.section, Boolean(args.cached));
     case "learn_discuss":

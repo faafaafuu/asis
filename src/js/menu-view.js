@@ -6,16 +6,14 @@
 // в системное меню (актуально прежде всего для iOS).
 
 const TEMPLATE = `
-<div class="menu" role="menu" aria-label="Действия с выделенным текстом">
-  <button class="menu__btn" data-el="copy" type="button" role="menuitem" tabindex="-1">Копировать</button>
-  <span class="menu__sep" aria-hidden="true"></span>
-  <button class="menu__btn" data-el="read" type="button" role="menuitem" tabindex="-1" hidden>
-    <span class="menu__glyph" aria-hidden="true">🔊</span> Прочитать
-  </button>
-  <span class="menu__sep" data-el="readSep" aria-hidden="true" hidden></span>
-  <button class="menu__btn menu__btn--explain" data-el="explain" type="button" role="menuitem" tabindex="-1">
-    <span class="menu__glyph" aria-hidden="true">?</span>Объяснить
-  </button>
+<div class="menu menu--icons" role="menu" aria-label="Действия с выделенным текстом">
+  <button class="menu__btn" data-el="copy" type="button" role="menuitem" tabindex="-1"
+          title="Копировать" aria-label="Копировать">⧉</button>
+  <button class="menu__btn" data-el="read" type="button" role="menuitem" tabindex="-1"
+          title="Прочитать вслух" aria-label="Прочитать вслух" hidden>🔊</button>
+  <span data-el="readSep" hidden></span>
+  <button class="menu__btn menu__btn--explain" data-el="explain" type="button" role="menuitem" tabindex="-1"
+          title="Объяснить" aria-label="Объяснить"><span class="menu__glyph">?</span></button>
 </div>`;
 
 export class MenuView {

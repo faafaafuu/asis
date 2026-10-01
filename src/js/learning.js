@@ -397,11 +397,12 @@ function renderTopic() {
   // Три раздела вместо девяти вкладок: учить, материал, проверить себя.
   const GROUPS = {
     talk: ["talk"],
-    material: ["lesson", "concepts", "map", "sheet"],
+    material: ["lesson", "concepts", "map"],
+    cards: ["review"],
+    sheet: ["sheet"],
     check: ["tasks", "exam", "mistakes"],
   };
   const groupOf = (key) => Object.keys(GROUPS).find((g) => GROUPS[g].includes(key)) ?? "material";
-  if (view.step === "review") view.step = "concepts";
   const current = groupOf(view.step);
 
   const steps = el("div", "steps");
@@ -419,6 +420,8 @@ function renderTopic() {
   // Главный способ пройти тему — урок разговором с Ноа.
   step("talk", "🎙 Урок с Ноа", card?.read ? "✓" : "", steps, current === "talk");
   step("lesson", "Материал", "", steps, current === "material");
+  if (topic.concepts?.length) step("review", "🃏 Карточки", `${card?.conceptsMature ?? 0}/${topic.concepts.length}`, steps, current === "cards");
+  if (topicView.cheatsheet) step("sheet", "📝 Конспект", "", steps, current === "sheet");
   step("tasks", "Проверить себя", card?.examBest != null ? `${card.examBest}%` : "", steps, current === "check");
   root.append(steps);
 
@@ -428,7 +431,6 @@ function renderTopic() {
     step("lesson", "Урок", "", sub);
     if (topic.concepts?.length) step("concepts", "Понятия", "", sub);
     if (topic.concepts?.length) step("map", "Карта", "", sub);
-    if (topicView.cheatsheet) step("sheet", "Шпаргалка", "", sub);
   } else if (current === "check") {
     step("tasks", "Задачи", `${card?.tasksDone ?? 0}/${card?.tasksTotal ?? 0}`, sub);
     step("exam", "Мини-экзамен", "", sub);
@@ -437,9 +439,6 @@ function renderTopic() {
   if (sub.childElementCount > 1) root.append(sub);
 
   if (view.step === "talk") {
-    root.append(
-      el("p", "note", "Ноа рассказывает раздел своими словами и просит пересказать, как вы поняли. Отвечайте голосом или текстом, спрашивайте по ходу."),
-    );
     renderLessonAgent(root, {
       api,
       course,
@@ -448,9 +447,12 @@ function renderTopic() {
       start: view.section ?? 0,
       el,
       button,
-      dictateButton,
       markdown,
-      onDone: () => refreshOverview(),
+      openStep: async (key) => {
+        await refreshOverview();
+        view.step = key;
+        renderTopic();
+      },
     });
   } else if (view.step === "lesson") renderLesson(root, topic);
   else if (view.step === "concepts") renderConcepts(root, topic);

@@ -869,6 +869,61 @@ export function createLearning({ courses, store, ai = null, name = "Ноа", clo
     if (!discussion || !sameTarget(discussion.target, target)) discussion = { target: { ...target }, material, thread: [] };
   };
 
+  /* ── Урок с Ноа: ведение по разделам — tutor.rs ── */
+
+  const NEXT = "[ДАЛЬШЕ]";
+  const TELL_MARK = "Ведём урок разговором.";
+  const tellPrompt = (n, total, title) =>
+    `${TELL_MARK} Сейчас раздел ${n} из ${total}${title ? ` — «${title}»` : ""}. ` +
+    "Расскажи его своими словами, как репетитор вживую: 4–7 коротких фраз, главное и зачем это на практике, " +
+    "пример из жизни, и как об этом спрашивают на собеседовании. Команды и код не зачитывай — скажи словами, что они делают. " +
+    "В конце попроси меня пересказать своими словами, как я понял.";
+  const checkPrompt = (said) =>
+    `Мой ответ: «${said}».
+Если это пересказ — оцени по существу: что верно, что упустил или перепутал, коротко, 2–4 фразы. ` +
+    `Понял главное — скажи, что идём дальше, и закончи ответ меткой ${NEXT}. Не понял — объясни упущенное иначе, проще, ` +
+    `и снова попроси пересказать. Если это вопрос — ответь на него и попроси пересказать раздел. ` +
+    `Если я прошу идти дальше — закончи ответ меткой ${NEXT}.`;
+
+  /** Один ход модели в обсуждении — с историей и записью в неё. */
+  const converse = async (said, voice) => {
+    const messages = [{ role: "system", content: tutorRules(discussion.material, voice) }];
+    for (const item of discussion.thread) messages.push({ role: "user", content: item.q }, { role: "assistant", content: item.a });
+    messages.push({ role: "user", content: said });
+    const reply = String((await needAi().chat(messages, { maxTokens: 700 })) ?? "").trim();
+    if (!reply) throw new Error("Модель прислала пустой ответ.");
+    discussion.thread.push({ q: said, a: reply });
+    discussion.thread = discussion.thread.slice(-DEPTH);
+    return reply;
+  };
+
+  /** Урок с Ноа — к следующему разделу: { tell } или { done } в конце. */
+  const nextSection = () => {
+    const c = course(discussion.target.course);
+    const t = topicOf(c, discussion.target.topic);
+    const parts = sections(t.lesson);
+    const at = (discussion.target.section ?? 0) + 1;
+    if (at >= parts.length) {
+      discussion.walk = false;
+      change(c.id, (p) => {
+        ownTopic(p, t.id).read = true;
+        p.current = t.id;
+      });
+      return { done: "Урок пройден. Для быстрого повторения — конспект и карточки, а «Проверить себя» закрепит тему." };
+    }
+    const [material, name] = sectionMaterial(c, t, at);
+    discussion.target = { ...discussion.target, section: at };
+    discussion.material = material;
+    discussion.thread = [];
+    change(c.id, (p) => {
+      const own = ownTopic(p, t.id);
+      own.step = "talk";
+      own.section = at;
+      p.current = t.id;
+    });
+    return { tell: tellPrompt(at + 1, parts.length, name) };
+  };
+
   const LEAD =
     "Это живой разбор голосом, а не чтение урока. Рассказывай своими словами: что это, зачем на практике, где встречается, " +
     "как об этом спрашивают на собеседовании и что там хотят услышать, на чём обычно ошибаются. Реплика — три–пять коротких фраз " +
@@ -1197,18 +1252,43 @@ export function createLearning({ courses, store, ai = null, name = "Ноа", clo
       });
     },
 
+    /**
+     * Реплика в разговоре об уроке. В уроке с Ноа (walk) сказанное —
+     * пересказ или вопрос: модель его разбирает, а когда понято, сама
+     * рассказывает следующий раздел. Так же, как tutor.rs в программе.
+     */
     async ask(target, text, { voice = false } = {}) {
       const said = String(text ?? "").trim();
       if (!said) throw new Error("Напишите вопрос.");
       openDiscussion(target);
-      const messages = [{ role: "system", content: tutorRules(discussion.material, voice) }];
-      for (const item of discussion.thread) messages.push({ role: "user", content: item.q }, { role: "assistant", content: item.a });
-      messages.push({ role: "user", content: said });
-      const reply = String((await needAi().chat(messages, { maxTokens: 700 })) ?? "").trim();
-      if (!reply) throw new Error("Модель прислала пустой ответ.");
-      discussion.thread.push({ q: said, a: reply });
-      discussion.thread = discussion.thread.slice(-DEPTH);
+      const telling = said.startsWith(TELL_MARK);
+      const walking = Boolean(discussion.walk);
+      const prompt = walking && !telling ? checkPrompt(said) : said;
+      let reply = await converse(prompt, voice);
+      if (walking && reply.includes(NEXT)) {
+        reply = reply.replaceAll(NEXT, "").trim();
+        const next = nextSection();
+        if (next?.tell) reply = `${reply}\n\n${await converse(next.tell, voice)}`;
+        else if (next?.done) reply = `${reply}\n\n${next.done}`;
+      } else reply = reply.replaceAll(NEXT, "").trim();
       return reply;
+    },
+
+    /** Начать урок с Ноа с раздела target.section. */
+    async walkStart(target) {
+      openDiscussion(target);
+      discussion.walk = true;
+      discussion.thread = [];
+      const c = course(target.course);
+      const t = topicOf(c, target.topic);
+      const parts = sections(t.lesson);
+      const at = Math.min(Number(target.section) || 0, parts.length - 1);
+      return this.ask(discussion.target, tellPrompt(at + 1, parts.length, heading(parts[at]) ?? ""), { voice: true });
+    },
+
+    /** На каком разделе идёт урок с Ноа. */
+    walkSection() {
+      return discussion?.walk ? (discussion.target.section ?? 0) : null;
     },
 
     async deep(courseId, topicId, at, cachedOnly = false) {

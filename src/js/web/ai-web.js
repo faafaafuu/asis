@@ -102,6 +102,8 @@ export async function chat(model, messages, { json = false, maxTokens = 700, sig
   const wrongBase = baseError(model);
   if (wrongBase) throw new AiError(wrongBase, { kind: "config" });
   const body = { model: model.model, messages, temperature: 0.2, max_tokens: maxTokens };
+  // Мост к подписке Claude: какой моделью отвечать — Sonnet, Haiku или Opus.
+  if (model.kind === "bridge" && model.quality) body.noa_model = model.quality;
   // Мост зовёт программу подписки на сервере: холодный старт и ответ — до трёх минут.
   if (model.kind === "bridge") timeoutMs = Math.max(timeoutMs, 200_000);
   if (json) body.response_format = { type: "json_object" };

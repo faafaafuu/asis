@@ -79,3 +79,23 @@
     animation: none;
   }
 }
+
+/* Только значки: коротко, подписи — во всплывающей подсказке. */
+.menu--icons {
+  min-width: 0;
+  gap: 2px;
+}
+
+.menu--icons .menu__btn {
+  flex: none;
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.menu--icons .menu__glyph {
+  font-size: 18px;
+  font-weight: 700;
+}

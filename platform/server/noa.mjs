@@ -74,10 +74,13 @@ async function readRaw(req, limit, Fail) {
   return Buffer.concat(chunks);
 }
 
-/** WAV → MP3 через ffmpeg. */
+/**
+ * WAV → MP3 через ffmpeg. 24 кГц и 64 кбит/с: при 48 кбит/с кодер сам
+ * срезал верхние частоты, и голос в браузере звучал глухо и «грязно».
+ */
 function toMp3(wav) {
   return new Promise((resolve, reject) => {
-    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "48k", "-f", "mp3", "pipe:1"]);
+    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-ar", "24000", "-c:a", "libmp3lame", "-b:a", "64k", "-f", "mp3", "pipe:1"]);
     const out = [];
     ff.stdout.on("data", (chunk) => out.push(chunk));
     ff.on("error", reject);
@@ -199,13 +202,15 @@ export function mountNoa({ route, db, Fail, readJson }) {
 
   route("POST", /^\/api\/noa\/bridge\/chat\/completions$/, async ({ req, user }) => {
     bridgeUser(user);
-    const { model, messages } = await readJson(req);
+    const { model, messages, noa_model: level } = await readJson(req);
     if (!Array.isArray(messages) || !messages.length) throw new Fail(400, "Нет сообщений.");
+    // Модель Claude выбирается только у Claude; у Codex, Gemini, Qwen — своя.
+    const quality = String(model ?? "").startsWith("claude") && ["haiku", "sonnet", "opus"].includes(level) ? level : "";
     // noa_web — мост ответит разово, не трогая сессию Ноа на компьютере.
     return bridge("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: String(model ?? ""), messages, noa_web: true }),
+      body: JSON.stringify({ model: String(model ?? ""), messages, noa_web: true, ...(quality ? { noa_model: quality } : {}) }),
     });
   });
 

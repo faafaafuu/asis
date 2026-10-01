@@ -138,6 +138,14 @@
               <span class="field__label">Ключ</span>
               <input data-el="key" type="password" autocomplete="off" spellcheck="false" />
             </label>
+            <label class="field" data-el="qualityRow" hidden>
+              <span class="field__label">Модель Claude</span>
+              <select data-el="quality">
+                <option value="sonnet">Sonnet — точнее</option>
+                <option value="haiku">Haiku — быстрее, бережёт лимит подписки</option>
+                <option value="opus">Opus — самая сильная, лимит тратит быстро</option>
+              </select>
+            </label>
             <label class="field">
               <span class="field__label">Модель</span>
               <input data-el="model" list="models" spellcheck="false" placeholder="начните вводить или выберите" />

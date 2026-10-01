@@ -229,3 +229,30 @@ test("прогресс с двух устройств: у каждого кур�
   assert.equal(mergeProgress({ courses: { a: { updated: "2026-09-30 10:00", current: "old" } } }, { courses: { a: { updated: "2026-09-30 10:00", current: "new" } } }).courses.a.current, "new", "при равенстве — присланное");
   assert.deepEqual(mergeProgress(null, null).courses, {});
 });
+
+test("урок с Ноа: разбор пересказа и переход к следующему разделу сам", async () => {
+  const asked = [];
+  const ai = {
+    chat: async (messages) => {
+      const last = messages[messages.length - 1].content;
+      asked.push(last.slice(0, 30));
+      if (last.startsWith("Ведём урок разговором.")) return `Рассказ: ${/раздел (\d+)/.exec(last)[1]}. Перескажи.`;
+      if (last.includes("плохо")) return "Почти. Упустил главное. Перескажи ещё.";
+      return "Верно, идём дальше. [ДАЛЬШЕ]";
+    },
+  };
+  const store = { data: {}, save() {} };
+  const l = createLearning({ courses: () => [sampleCourse()], store, ai });
+  const target = { course: "net", topic: "basics", section: 0 };
+  assert.equal(await l.walkStart(target), "Рассказ: 1. Перескажи.");
+  assert.equal(l.walkSection(), 0);
+  assert.equal(await l.ask(target, "плохо понял", { voice: true }), "Почти. Упустил главное. Перескажи ещё.");
+  assert.equal(l.walkSection(), 0, "не понял — остаёмся");
+  const next = await l.ask(target, "адрес ведёт к устройству", { voice: true });
+  assert.equal(next, "Верно, идём дальше.\n\nРассказ: 2. Перескажи.");
+  assert.equal(l.walkSection(), 1);
+  await l.ask({ ...target, section: 1 }, "порт ведёт к программе", { voice: true });
+  const last = await l.ask({ ...target, section: 2 }, "dns ищет адрес по имени", { voice: true });
+  assert.match(last, /Урок пройден/);
+  assert.equal(store.data.courses.net.topics.basics.read, true);
+});

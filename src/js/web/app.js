@@ -178,7 +178,9 @@ whoIsIn()
 });
 
 function formModel() {
-  return { kind: ui.provider.value, base: ui.base.value.trim(), key: ui.key.value.trim(), model: ui.model.value.trim() };
+  const model = { kind: ui.provider.value, base: ui.base.value.trim(), key: ui.key.value.trim(), model: ui.model.value.trim() };
+  if (model.kind === "bridge" && model.model.startsWith("claude")) model.quality = ui.quality.value;
+  return model;
 }
 
 function paintProvider() {
@@ -189,11 +191,14 @@ function paintProvider() {
   if (kind === "ollama" && !ui.base.value) ui.base.value = provider.base;
   ui.key.placeholder = provider.keyHint;
   ui.providerHint.textContent = HINTS[kind];
+  // У моста к Claude — выбор модели: Sonnet, Haiku или Opus.
+  ui.qualityRow.hidden = !(kind === "bridge" && (ui.model.value || "claude").startsWith("claude"));
 }
 
 function paintStatus() {
   const model = loadModel();
-  ui.modelStatus.textContent = model ? `${PROVIDERS[model.kind].title.split(" (")[0]} · ${model.model}` : "не подключена";
+  const level = model?.quality ? ` · ${model.quality[0].toUpperCase()}${model.quality.slice(1)}` : "";
+  ui.modelStatus.textContent = model ? `${PROVIDERS[model.kind].title.split(" (")[0]} · ${model.model}${level}` : "не подключена";
   ui.modelStatus.classList.toggle("status--on", Boolean(model));
 }
 
@@ -227,6 +232,15 @@ ui.provider.value = saved?.kind === "bridge" ? "openrouter" : (saved?.kind ?? "o
 ui.base.value = saved?.base ?? "";
 ui.key.value = saved?.key ?? "";
 ui.model.value = saved?.model ?? "";
+ui.quality.value = saved?.quality ?? "sonnet";
+ui.model.addEventListener("input", paintProvider);
+// Смена модели Claude — сразу, без «Сохранить и проверить»: мост тот же.
+ui.quality.addEventListener("change", () => {
+  const current = loadModel();
+  if (current?.kind !== "bridge") return;
+  saveModel({ ...current, quality: ui.quality.value });
+  paintStatus();
+});
 paintProvider();
 paintStatus();
 if (saved) refreshModels();

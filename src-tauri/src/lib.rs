@@ -350,6 +350,8 @@ pub fn run() {
             commands::learn_oral,
             commands::learn_discuss,
             commands::learn_ask,
+            commands::learn_walk,
+            commands::learn_walk_stop,
             commands::learn_deep,
             commands::delete_model,
             commands::watch_chart,

@@ -45,6 +45,9 @@ struct Discussion {
     /// Идёт голосом: фразы разговора без рук уходят репетитору. Кончился
     /// голосовой разговор — обсуждение остаётся в окне, с той же историей.
     voice: bool,
+    /// Урок с Ноа: она ведёт по разделам — рассказывает, просит пересказать,
+    /// разбирает пересказ и сама переходит к следующему разделу.
+    walk: bool,
 }
 
 static DISCUSSION: Mutex<Option<Discussion>> = Mutex::new(None);
@@ -188,6 +191,7 @@ pub fn open(target: &Target) -> Result<String, String> {
             material,
             thread: Vec::new(),
             voice: false,
+            walk: false,
         });
     }
     Ok(intro)
@@ -284,38 +288,152 @@ fn rules(app: &AppHandle, material: &str, voice: bool) -> String {
 /// `voice` — ответ прозвучит вслух: он короче и без разметки. Обмен уходит и в
 /// окно обучения, чтобы сказанное голосом было видно в том же разговоре.
 pub async fn answer(app: &AppHandle, said: &str, voice: bool) -> Result<String, String> {
-    let (material, thread) = {
+    let (material, thread, walk) = {
         let guard = DISCUSSION.lock().unwrap_or_else(|err| err.into_inner());
         let talk = guard.as_ref().ok_or("Обсуждение не начато.")?;
-        (talk.material.clone(), talk.thread.clone())
+        (talk.material.clone(), talk.thread.clone(), talk.walk)
     };
+    // В уроке с Ноа сказанное — пересказ или вопрос: модели уходит просьба
+    // его разобрать. Рассказ раздела просит сама программа.
+    let telling = said.starts_with(TELL_MARK);
+    let prompt = if walk && !telling { check_prompt(said) } else { said.to_string() };
+    let mut text = converse_once(app, &material, &thread, &prompt, voice).await?;
+    remember(&prompt, &text);
+
+    let mut q = if said == OPENING || telling { "" } else { said };
+    if walk && text.contains(NEXT) {
+        text = text.replace(NEXT, "").trim().to_string();
+        match next_section() {
+            Some(Ok((tell, material))) => {
+                // Раздел понят — Ноа сама рассказывает следующий.
+                let more = converse_once(app, &material, &[], &tell, voice).await?;
+                remember(&tell, &more);
+                text = format!("{text}\n\n{more}");
+            }
+            Some(Err(done)) => text = format!("{text}\n\n{done}"),
+            None => {}
+        }
+    } else {
+        text = text.replace(NEXT, "").trim().to_string();
+    }
+    if voice {
+        let section = DISCUSSION
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .as_ref()
+            .and_then(|talk| talk.target.section);
+        if telling {
+            q = "";
+        }
+        let _ = app.emit("learn:talk", serde_json::json!({ "q": q, "a": text, "section": section }));
+    }
+    Ok(text)
+}
+
+/// Один ход модели в разговоре об уроке.
+async fn converse_once(
+    app: &AppHandle,
+    material: &str,
+    thread: &[ThreadItem],
+    said: &str,
+    voice: bool,
+) -> Result<String, String> {
     let (provider, limit) = {
         let state = app.state::<crate::state::AppState>();
         let limit = state.config().ai.call_limit();
         (state.provider(), limit)
     };
-    let rules = rules(app, &material, voice);
-    let asked = tokio::time::timeout(limit, provider.converse(&rules, &thread, said, false)).await;
-    let text = match asked {
-        Ok(Ok(text)) if !text.trim().is_empty() => text.trim().to_string(),
-        Ok(Ok(_)) => return Err("Модель прислала пустой ответ.".into()),
-        Ok(Err(err)) => return Err(format!("Не получилось ответить: {}", err.user_text("модель не ответила"))),
-        Err(_) => return Err("Модель не успела ответить.".into()),
-    };
+    let rules = rules(app, material, voice);
+    let asked = tokio::time::timeout(limit, provider.converse(&rules, thread, said, false)).await;
+    match asked {
+        Ok(Ok(text)) if !text.trim().is_empty() => Ok(text.trim().to_string()),
+        Ok(Ok(_)) => Err("Модель прислала пустой ответ.".into()),
+        Ok(Err(err)) => Err(format!("Не получилось ответить: {}", err.user_text("модель не ответила"))),
+        Err(_) => Err("Модель не успела ответить.".into()),
+    }
+}
+
+/// Записывает обмен в историю разговора.
+fn remember(q: &str, a: &str) {
     if let Some(talk) = DISCUSSION.lock().unwrap_or_else(|err| err.into_inner()).as_mut() {
         talk.thread.push(ThreadItem {
-            q: said.to_string(),
-            a: text.clone(),
+            q: q.to_string(),
+            a: a.to_string(),
         });
         let excess = talk.thread.len().saturating_sub(DEPTH);
         talk.thread.drain(..excess);
     }
-    if voice {
-        // Начало разбора — просьба самой программы, в ленту её не пишем.
-        let q = if said == OPENING { "" } else { said };
-        let _ = app.emit("learn:talk", serde_json::json!({ "q": q, "a": text }));
+}
+
+/// Метка в ответе модели: раздел понят, можно дальше.
+pub const NEXT: &str = "[ДАЛЬШЕ]";
+
+/// Начало просьбы рассказать раздел — по нему её узнаёт `answer`.
+const TELL_MARK: &str = "Ведём урок разговором.";
+
+fn tell_prompt(n: usize, total: usize, title: &str) -> String {
+    let title = if title.is_empty() { String::new() } else { format!(" — «{title}»") };
+    format!(
+        "{TELL_MARK} Сейчас раздел {n} из {total}{title}. Расскажи его своими словами, как репетитор \
+         вживую: 4–7 коротких фраз, главное и зачем это на практике, пример из жизни, и как об этом \
+         спрашивают на собеседовании. Команды и код не зачитывай — скажи словами, что они делают. \
+         В конце попроси меня пересказать своими словами, как я понял."
+    )
+}
+
+fn check_prompt(said: &str) -> String {
+    format!(
+        "Мой ответ: «{said}».\nЕсли это пересказ — оцени по существу: что верно, что упустил или \
+         перепутал, коротко, 2–4 фразы. Понял главное — скажи, что идём дальше, и закончи ответ \
+         меткой {NEXT}. Не понял — объясни упущенное иначе, проще, и снова попроси пересказать. \
+         Если это вопрос — ответь на него и попроси пересказать раздел. Если я прошу идти дальше — \
+         закончи ответ меткой {NEXT}."
+    )
+}
+
+/// Переход урока с Ноа к следующему разделу. `Ok` — просьба рассказать его и
+/// материал; `Err` — урок кончился (текст итога); `None` — урока нет.
+fn next_section() -> Option<Result<(String, String), String>> {
+    let mut guard = DISCUSSION.lock().unwrap_or_else(|err| err.into_inner());
+    let talk = guard.as_mut().filter(|talk| talk.walk)?;
+    let course = learning::course(&talk.target.course).ok()?;
+    let topic = learning::topic(&course, talk.target.topic.as_deref()?).ok()?;
+    let total = sections(&topic.lesson).len();
+    let at = talk.target.section.unwrap_or(0) + 1;
+    if at >= total {
+        talk.walk = false;
+        let _ = learning::mark_read(&course.id, &topic.id);
+        return Some(Err(
+            "Урок пройден. Для быстрого повторения — конспект и карточки, а «Проверить себя» закрепит тему.".into(),
+        ));
     }
-    Ok(text)
+    let (material, name) = section_material(&course, topic, Some(at));
+    talk.target.section = Some(at);
+    talk.material = material.clone();
+    talk.thread.clear();
+    let _ = learning::remember_place(&course.id, &topic.id, "talk", at);
+    Some(Ok((tell_prompt(at + 1, total, &name), material)))
+}
+
+/// Начинает урок с Ноа с раздела `target.section`: включает ведение и
+/// отдаёт рассказ первого раздела.
+pub async fn walk_start(app: &AppHandle, target: &Target) -> Result<String, String> {
+    open(target)?;
+    let (tell, total) = {
+        let mut guard = DISCUSSION.lock().unwrap_or_else(|err| err.into_inner());
+        let talk = guard.as_mut().ok_or("Обсуждение не начато.")?;
+        talk.walk = true;
+        talk.voice = true;
+        talk.thread.clear();
+        let course = learning::course(&talk.target.course)?;
+        let topic = learning::topic(&course, talk.target.topic.as_deref().ok_or("Не сказано, какая тема.")?)?;
+        let parts = sections(&topic.lesson);
+        let at = talk.target.section.unwrap_or(0).min(parts.len() - 1);
+        let name = heading(&parts[at]).unwrap_or_default();
+        (tell_prompt(at + 1, parts.len(), &name), parts.len())
+    };
+    log::info!("урок с Ноа: курс {}, тема {:?}, разделов {total}", target.course, target.topic);
+    answer(app, &tell, true).await
 }
 
 /// С чего Ноа начинает разбор голосом: она ведёт, а не ждёт вопроса.

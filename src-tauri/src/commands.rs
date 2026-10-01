@@ -1708,6 +1708,30 @@ pub async fn learn_discuss(app: AppHandle, target: crate::tutor::Target) -> Resu
     Ok(())
 }
 
+/// Урок с Ноа: она рассказывает раздел и дальше ведёт разговор голосом без
+/// рук — слушает пересказ, разбирает, переходит к следующему разделу. Всё
+/// сказанное приходит в окно событием `learn:talk`.
+#[tauri::command]
+pub async fn learn_walk(app: AppHandle, target: crate::tutor::Target, listen: Option<bool>) -> Result<String, String> {
+    let text = crate::tutor::walk_start(&app, &target).await?;
+    if listen.unwrap_or(true) {
+        crate::say_then_listen(&app, text.clone());
+    }
+    Ok(text)
+}
+
+/// Закончить урок с Ноа голосом: замолчать и перестать слушать. Разговор в
+/// окне остаётся — продолжить можно текстом или снова голосом.
+#[tauri::command]
+pub fn learn_walk_stop(app: AppHandle) {
+    crate::voice::stop();
+    #[cfg(desktop)]
+    crate::stop_conversation(&app);
+    #[cfg(not(desktop))]
+    let _ = app;
+    crate::tutor::end();
+}
+
 /// Вопрос текстом в том же обсуждении: ответ приходит в окно, вслух не звучит.
 #[tauri::command]
 pub async fn learn_ask(
