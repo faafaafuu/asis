@@ -108,14 +108,32 @@ export function renderLessonAgent(root, deps) {
   area.rows = 2;
   area.placeholder = "Ответить текстом — Enter";
   const send = button("Отправить", () => reply());
+  // Замолчать — сразу, в любой момент. В разговоре голосом Ноа после этого
+  // слушает: можно перебить и спросить.
+  const hush = button("⏸ Замолчать", () => api.invoke("voice_stop").catch(() => {}), true);
+  hush.title = "Замолчать · Esc";
   const stop = button("⏹ Закончить голосом", () => stopVoice(), true);
   const voiceAgain = button("🎙 Продолжить голосом", () => start(true), true);
+  let aloud = readAloud();
+  const aloudBtn = button("", () => {
+    aloud = !aloud;
+    saveAloud(aloud);
+    if (!aloud) api.invoke("voice_stop").catch(() => {});
+    paint();
+  }, true);
   const actions = el("div", "actions agent__actions");
-  actions.append(send, stop, voiceAgain);
+  actions.append(send, hush, stop, voiceAgain, aloudBtn);
   const finish = el("div", "actions agent__finish");
   box.append(head, log, startRow, area, actions, finish);
   root.append(box);
 
+  // Начали печатать — Ноа замолкает: вас слушают, а не перебивают.
+  area.addEventListener("input", () => api.invoke("voice_stop").catch(() => {}), { once: false });
+  const esc = (event) => {
+    if (!box.isConnected) return document.removeEventListener("keydown", esc);
+    if (event.key === "Escape") api.invoke("voice_stop").catch(() => {});
+  };
+  document.addEventListener("keydown", esc);
   area.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -131,6 +149,8 @@ export function renderLessonAgent(root, deps) {
     actions.hidden = state.mode === "idle";
     stop.hidden = state.mode !== "voice";
     voiceAgain.hidden = state.mode !== "text";
+    aloudBtn.hidden = state.mode !== "text";
+    aloudBtn.textContent = aloud ? "🔊 Вслух" : "🔇 Без голоса";
     send.disabled = state.busy;
   }
 
@@ -164,7 +184,7 @@ export function renderLessonAgent(root, deps) {
       lines.push(x);
       line(x.who, x.text, false);
     }
-    if (state.mode === "text" && a) api.invoke("voice_speak", { text: a }).catch(() => {});
+    if (state.mode === "text" && aloud && a) api.invoke("voice_speak", { text: a }).catch(() => {});
     if (a?.includes(DONE)) finished();
     paint();
   };
@@ -249,4 +269,22 @@ export function renderLessonAgent(root, deps) {
     actions.append(clear);
   }
   paint();
+}
+
+const ALOUD_KEY = "noa.agentAloud";
+
+function readAloud() {
+  try {
+    return localStorage.getItem(ALOUD_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function saveAloud(on) {
+  try {
+    localStorage.setItem(ALOUD_KEY, on ? "on" : "off");
+  } catch {
+    /* не запомнится */
+  }
 }
