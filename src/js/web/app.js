@@ -449,6 +449,7 @@ async function paintCourses() {
   const cards = noa.learning.overview();
   if (!cards.length) {
     ui.courses.replaceChildren(el("p", "empty", "Курсов пока нет. Нажмите «Собрать курс» — напишите, о чём он, и Ноа соберёт его сама."));
+    paintRemoved(noa);
     return;
   }
   ui.courses.replaceChildren(
@@ -480,6 +481,31 @@ async function paintCourses() {
       return item;
     }),
   );
+  paintRemoved(noa);
+}
+
+/** Убранные курсы — строкой «Вернуть» под списком. */
+function paintRemoved(noa) {
+  ui.courses.querySelector(".removed")?.remove();
+  const gone = noa.removed?.() ?? [];
+  if (!gone.length) return;
+  const box = el("div", "removed");
+  box.append(el("span", "hint", "Убраны недавно:"));
+  for (const course of gone) {
+    const back = el("button", "btn btn--quiet", `↩ Вернуть «${course.title}»`);
+    back.addEventListener("click", async () => {
+      back.disabled = true;
+      try {
+        await noa.restoreCourse(course.id);
+        note(ui.courseNote, `Курс «${course.title}» вернулся.`, "ok");
+      } catch (err) {
+        note(ui.courseNote, err.message, "error");
+      }
+      paintCourses();
+    });
+    box.append(back);
+  }
+  ui.courses.append(box);
 }
 
 ui.addCourse.addEventListener("click", () => ui.courseFile.click());

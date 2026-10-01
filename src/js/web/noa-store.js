@@ -12,6 +12,7 @@ import { remembered, whoIsIn } from "./early.js";
 
 const COURSES = "noa.courses";
 const PROGRESS = "noa.learning";
+const REMOVED = "noa.removed";
 
 const read = (key, fallback) => {
   try {
@@ -198,13 +199,35 @@ async function start() {
       // собрала (их видит MCP), а не ученику.
       return `Курс «${course.title}» добавлен.`;
     },
+    /**
+     * Убирает курс. Сам курс остаётся в этом браузере среди убранных — его
+     * можно вернуть: курс собирается долго, а нажать «Убрать» с телефона
+     * легко случайно.
+     */
     async removeCourse(id) {
+      const gone = account.find((c) => c.id === id) ?? local.find((c) => c.id === id);
+      if (gone) {
+        const { source, ...course } = gone;
+        write(REMOVED, [course, ...read(REMOVED, []).filter((c) => c.id !== id)].slice(0, 3));
+      }
       if (account.some((c) => c.id === id)) {
         await api(`/api/noa/courses/${encodeURIComponent(id)}`, { method: "DELETE" });
         account = account.filter((c) => c.id !== id);
       }
       local = local.filter((c) => c.id !== id);
       write(COURSES, local);
+    },
+    /** Убранные курсы этого браузера — последние три. */
+    removed() {
+      const here = new Set(courses().map((c) => c.id));
+      return read(REMOVED, []).filter((c) => !here.has(c.id));
+    },
+    /** Вернуть убранный курс — в аккаунт, если вошли, иначе в браузер. */
+    async restoreCourse(id) {
+      const course = read(REMOVED, []).find((c) => c.id === id);
+      if (!course) throw new Error("Этого курса среди убранных нет.");
+      await this.addCourse(course);
+      write(REMOVED, read(REMOVED, []).filter((c) => c.id !== id));
     },
     /** Перечитать курсы аккаунта: нейросеть могла собрать новый. */
     /**

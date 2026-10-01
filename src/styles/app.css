@@ -915,3 +915,13 @@ form.build {
     font-size: 16px;
   }
 }
+
+.removed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--divider);
+}
