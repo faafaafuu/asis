@@ -27,16 +27,24 @@ export function parseScheme(raw) {
   } catch {
     return null;
   }
-  const nodes = (Array.isArray(data?.nodes) ? data.nodes : [])
+  // Главное раздела — 3–5 коротких пунктов: их видно, пока Ноа рассказывает.
+  const points = (Array.isArray(data?.points) ? data.points : [])
+    .map((p) => String(p ?? "").trim().slice(0, 90))
+    .filter(Boolean)
+    .slice(0, 5);
+  let nodes = (Array.isArray(data?.nodes) ? data.nodes : [])
     .filter((n) => n && n.id != null && String(n.label ?? "").trim())
     .slice(0, MAX_NODES)
     .map((n) => ({ id: String(n.id), label: String(n.label).trim().slice(0, 40) }));
-  if (nodes.length < 2) return null;
+  if (nodes.length < 2) {
+    if (!points.length) return null;
+    nodes = [];
+  }
   const known = new Set(nodes.map((n) => n.id));
   const edges = (Array.isArray(data?.edges) ? data.edges : [])
     .filter((e) => e && known.has(String(e.from)) && known.has(String(e.to)) && String(e.from) !== String(e.to))
     .map((e) => ({ from: String(e.from), to: String(e.to), label: String(e.label ?? "").trim().slice(0, 24) }));
-  return { title: String(data?.title ?? "").trim().slice(0, 60), nodes, edges };
+  return { title: String(data?.title ?? "").trim().slice(0, 60), points, nodes, edges };
 }
 
 /**
@@ -144,7 +152,8 @@ export function renderScheme(scheme) {
 
 /** Просьба к модели — дописать схему в конце рассказа. */
 export const SCHEME_ASK =
-  "В самом конце, после вопроса, добавь схему раздела блоком ```scheme с JSON: " +
-  '{"title": "…", "nodes": [{"id": "a", "label": "…"}], "edges": [{"from": "a", "to": "b", "label": "…"}]}. ' +
-  "3–7 блоков по 1–4 слова, стрелки — что из чего следует или что за чем идёт, подпись стрелки 1–2 слова или пусто. " +
-  "Схема только в этом блоке, вслух её не упоминай.";
+  "В самом конце, после вопроса, добавь блок ```scheme с JSON: " +
+  '{"title": "…", "points": ["…"], "nodes": [{"id": "a", "label": "…"}], "edges": [{"from": "a", "to": "b", "label": "…"}]}. ' +
+  "points — 3–5 главных мыслей раздела, каждая до 8 слов. nodes и edges — схема: 3–7 блоков по 1–4 слова, " +
+  "стрелки — что из чего следует или что за чем идёт, подпись стрелки 1–2 слова или пусто. " +
+  "Блок — только для экрана, вслух его не упоминай.";
