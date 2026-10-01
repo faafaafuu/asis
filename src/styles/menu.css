@@ -13,7 +13,10 @@
 
 .menu {
   box-sizing: border-box;
-  width: var(--menu-width);
+  /* По содержимому: пунктов бывает два или три, и подписи не переносятся. */
+  width: max-content;
+  min-width: var(--menu-width);
+  max-width: calc(100vw - 16px);
   display: flex;
   align-items: stretch;
   padding: 3px;
@@ -37,7 +40,8 @@
   flex: 1;
   font: inherit;
   font-size: 13px;
-  padding: 7px 4px;
+  padding: 7px 10px;
+  white-space: nowrap;
   border: none;
   background: none;
   color: var(--menu-text);

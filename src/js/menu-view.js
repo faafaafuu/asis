@@ -9,7 +9,9 @@ const TEMPLATE = `
 <div class="menu" role="menu" aria-label="Действия с выделенным текстом">
   <button class="menu__btn" data-el="copy" type="button" role="menuitem" tabindex="-1">Копировать</button>
   <span class="menu__sep" aria-hidden="true"></span>
-  <button class="menu__btn" data-el="read" type="button" role="menuitem" tabindex="-1" hidden>🔊 Прочитать</button>
+  <button class="menu__btn" data-el="read" type="button" role="menuitem" tabindex="-1" hidden>
+    <span class="menu__glyph" aria-hidden="true">🔊</span> Прочитать
+  </button>
   <span class="menu__sep" data-el="readSep" aria-hidden="true" hidden></span>
   <button class="menu__btn menu__btn--explain" data-el="explain" type="button" role="menuitem" tabindex="-1">
     <span class="menu__glyph" aria-hidden="true">?</span>Объяснить
