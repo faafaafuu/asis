@@ -703,6 +703,23 @@ function discussButton(root, target) {
   }, true);
 }
 
+/** Флажок в памяти браузера; по умолчанию — включён. */
+function readFlag(key) {
+  try {
+    return localStorage.getItem(key) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+function writeFlag(key, on) {
+  try {
+    localStorage.setItem(key, on ? "on" : "off");
+  } catch {
+    /* не запомнится */
+  }
+}
+
 function talkPanel(target) {
   const panel = el("div", "talk");
   const log = el("div", "talk__log");
@@ -723,10 +740,21 @@ function talkPanel(target) {
     node.scrollIntoView({ block: "nearest" });
     return node;
   };
+  // Ответы обсуждения — и вслух, как у Ноа везде. Выключается кнопкой.
+  let aloud = readFlag("noa.talkAloud");
+  const aloudBtn = button("", () => {
+    aloud = !aloud;
+    writeFlag("noa.talkAloud", aloud);
+    if (!aloud) api?.invoke("voice_stop").catch(() => {});
+    paintAloud();
+  }, true);
+  const paintAloud = () => (aloudBtn.textContent = aloud ? "🔊 Вслух" : "🔇 Без голоса");
+  paintAloud();
   const send = button("Отправить", async () => {
     const text = area.value.trim();
     if (!text || send.disabled || !api) return;
     area.value = "";
+    api.invoke("voice_stop").catch(() => {});
     line("me", text);
     const wait = line("wait", "Ноа думает…");
     send.disabled = true;
@@ -734,6 +762,7 @@ function talkPanel(target) {
       const reply = await api.invoke("learn_ask", { target, text });
       wait.remove();
       line("noa", reply);
+      if (aloud) api.invoke("voice_speak", { text: reply }).catch(() => {});
     } catch (err) {
       wait.remove();
       line("error", String(err));
@@ -757,7 +786,7 @@ function talkPanel(target) {
     }
   });
   const actions = el("div", "actions talk__actions");
-  actions.append(send, voice);
+  actions.append(send, voice, aloudBtn);
   panel.append(log, area, actions, hint);
   talk = { panel, line };
   return panel;
@@ -775,8 +804,8 @@ api?.listen("learn:changed", async () => {
 // Сказанное голосом в обсуждении — в ту же ленту, что и напечатанное.
 api?.listen("learn:talk", (event) => {
   if (!talk?.panel.isConnected) return;
-  talk.line("me", `🎙 ${event.payload.q}`);
-  talk.line("noa", event.payload.a);
+  if (event.payload.q) talk.line("me", `🎙 ${event.payload.q}`);
+  if (event.payload.a) talk.line("noa", event.payload.a);
 });
 
 function renderWholeLesson(root, topic) {
