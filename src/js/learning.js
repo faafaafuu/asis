@@ -7,7 +7,7 @@
 // без ответов: подсмотреть их в окне нельзя, проверка идёт на стороне Rust.
 
 import { tauri, appWindow, applyTheme } from "./bridge.js";
-import { renderTalkLesson } from "./lesson-talk.js";
+import { renderLessonAgent } from "./lesson-agent.js";
 import { attachReader } from "./lesson-reader.js";
 
 const api = tauri();
@@ -394,13 +394,6 @@ function renderTopic() {
   const card = course.topics.find((t) => t.id === view.topic);
   const topic = topicView.topic;
   const root = page(topic.title, topic.summary);
-  // Главное действие темы — живой разбор с Ноа голосом: она рассказывает,
-  // спрашивает, как об этом спросят на собеседовании, и разбирает непонятное.
-  const lead = el("div", "lead-row");
-  lead.append(discussNow({ course: course.id, topic: topic.id }, "🎙 Разобрать тему с Ноа"));
-  lead.append(el("span", "note", "Ноа рассказывает своими словами и спрашивает — отвечайте голосом, перебивайте, уточняйте."));
-  root.append(lead);
-
   // Три раздела вместо девяти вкладок: учить, материал, проверить себя.
   const GROUPS = {
     talk: ["talk"],
@@ -409,7 +402,6 @@ function renderTopic() {
   };
   const groupOf = (key) => Object.keys(GROUPS).find((g) => GROUPS[g].includes(key)) ?? "material";
   if (view.step === "review") view.step = "concepts";
-  if (view.step === "talk" && !topic.concepts?.length) view.step = "lesson";
   const current = groupOf(view.step);
 
   const steps = el("div", "steps");
@@ -424,8 +416,9 @@ function renderTopic() {
     });
     into.append(node);
   };
-  if (topic.concepts?.length) step("talk", "Учить по понятиям", `${card?.conceptsMature ?? 0}/${topic.concepts.length}`, steps, current === "talk");
-  step("lesson", "Материал", card?.read ? "✓" : "", steps, current === "material");
+  // Главный способ пройти тему — урок разговором с Ноа.
+  step("talk", "🎙 Урок с Ноа", card?.read ? "✓" : "", steps, current === "talk");
+  step("lesson", "Материал", "", steps, current === "material");
   step("tasks", "Проверить себя", card?.examBest != null ? `${card.examBest}%` : "", steps, current === "check");
   root.append(steps);
 
@@ -443,20 +436,23 @@ function renderTopic() {
   }
   if (sub.childElementCount > 1) root.append(sub);
 
-  if (view.step === "talk" && topic.concepts?.length) {
-    renderTalkLesson(root, {
+  if (view.step === "talk") {
+    root.append(
+      el("p", "note", "Ноа рассказывает раздел своими словами и просит пересказать, как вы поняли. Отвечайте голосом или текстом, спрашивайте по ходу."),
+    );
+    renderLessonAgent(root, {
       api,
       course,
       topic,
+      parts: sections(topic.lesson),
+      start: view.section ?? 0,
       el,
       button,
       dictateButton,
-      onDone: async () => {
-        await refreshOverview();
-        renderHome();
-      },
+      markdown,
+      onDone: () => refreshOverview(),
     });
-  } else if (view.step === "lesson" || view.step === "talk") renderLesson(root, topic);
+  } else if (view.step === "lesson") renderLesson(root, topic);
   else if (view.step === "concepts") renderConcepts(root, topic);
   else if (view.step === "map") renderTopicMap(root, topic);
   else if (view.step === "review") startReview(topic.id);
@@ -571,7 +567,6 @@ function renderLesson(root, topic) {
     button,
     onFinish: () => root.querySelector(".actions .button:not(.button--quiet)")?.focus(),
   });
-  reader.prepend(discussNow({ course: course.id, topic: topic.id, section: at }, "🎙 Разобрать раздел"));
   root.append(reader);
   root.append(lesson);
 
@@ -694,27 +689,6 @@ let talk = null;
  * Спросить можно текстом или голосом; это один разговор, и Ноа знает, о чём
  * он: раздел целиком с его понятиями или вопрос с эталоном и ответом.
  */
-/** Живой разбор голосом: Ноа ведёт разговор о теме или разделе. */
-function discussNow(target, label) {
-  const node = button(label, async () => {
-    node.disabled = true;
-    const was = node.textContent;
-    node.textContent = "Ноа готовится…";
-    try {
-      await api?.invoke("learn_discuss", { target });
-    } catch (err) {
-      node.title = String(err);
-    } finally {
-      setTimeout(() => {
-        node.disabled = false;
-        node.textContent = was;
-      }, 1500);
-    }
-  });
-  node.classList.add("discuss-now");
-  return node;
-}
-
 function discussButton(root, target) {
   return button("💬 Обсудить", () => {
     let panel = root.querySelector(":scope > .talk");

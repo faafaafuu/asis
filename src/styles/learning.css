@@ -1259,157 +1259,93 @@ button {
   color: #2b5bc4;
 }
 
-/* ── Урок разговором (lesson-talk.js) ─────────────────────────────────────
-   Одна мысль на экране, крупно; ничего лишнего вокруг — чтобы не отвлекаться. */
+/* ── Урок с Ноа (lesson-agent.js) ──────────────────────────────────────── */
 
-.tl {
-  max-width: 640px;
+.agent {
+  max-width: 720px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 8px 0 24px;
+  gap: 10px;
 }
 
-.tl__head {
+.agent__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.tl__progress {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.tl__dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--track, var(--divider));
-}
-
-.tl__dot--done {
-  background: var(--accent);
-}
-
-.tl__dot--now {
-  background: var(--label);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--label) 30%, transparent);
-}
-
-.tl__count {
-  margin-left: 6px;
+.agent__where {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
-.tl__ask {
-  margin: 0;
-  font-size: 22px;
-  line-height: 30px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.tl__sub {
-  margin: -6px 0 0;
-  font-size: 14px;
-  color: var(--text-muted);
-}
-
-.tl__term {
-  margin: 0;
-  font-family: var(--font-term);
-  font-weight: var(--term-weight);
-  text-transform: var(--term-transform);
-  font-style: var(--term-style);
-  font-size: 24px;
-  line-height: 30px;
-  color: var(--accent);
-}
-
-.tl__def {
-  margin: 0;
-  font-size: 19px;
-  line-height: 28px;
-  color: var(--text);
-}
-
-.tl__hook {
-  margin: 0;
-  padding: 10px 12px;
-  background: var(--soft, var(--btn-hover-bg));
-  border-radius: min(var(--card-radius, 8px), 8px);
-  font-size: 16px;
-  line-height: 24px;
-  color: var(--text-body);
-}
-
-.tl__pitfall {
-  margin: 0;
-  font-size: 15px;
-  color: var(--warn-text, var(--text-muted));
-}
-
-.tl__mine {
-  margin: 0;
-  font-size: 14px;
-  font-style: italic;
-  color: var(--text-muted);
-}
-
-.tl__example {
-  margin: 0;
-  padding: 10px 12px;
-  overflow-x: auto;
-  background: var(--code-bg, var(--soft));
-  color: var(--code-text, var(--text));
-  font-family: var(--font-mono);
-  font-size: 13px;
-}
-
-.tl__input {
-  font-size: 17px;
-}
-
-.tl__verdict {
+.agent__log {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  max-height: 58vh;
+  overflow-y: auto;
+  padding: 4px 2px;
 }
 
-.tl__verdict:empty {
-  display: none;
-}
-
-.tl__feedback {
-  margin: 0;
-  padding: 10px 12px;
-  border-left: 3px solid var(--accent);
+.agent__line {
+  max-width: 90%;
+  padding: 10px 14px;
+  border-radius: min(var(--card-radius, 10px), 10px);
   font-size: 16px;
-  line-height: 24px;
+  line-height: 25px;
 }
 
-.tl__feedback--good {
-  border-color: var(--ok, var(--accent));
+.agent__line--noa {
+  align-self: flex-start;
+  background: var(--soft, var(--btn-hover-bg));
+  color: var(--text);
 }
 
-.tl__feedback--again {
-  border-color: var(--error);
+.agent__line--noa p {
+  margin: 0 0 6px;
 }
 
-.tl__list {
+.agent__line--noa p:last-child {
   margin: 0;
-  padding-left: 22px;
-  font-size: 18px;
-  line-height: 30px;
 }
 
-.tl__weak {
-  color: var(--error-text, var(--text-muted));
+.agent__line--me {
+  align-self: flex-end;
+  border: 1px solid var(--accent);
+  color: var(--text-body);
+}
+
+.agent__line--wait {
+  align-self: flex-start;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.agent__line--error {
+  align-self: flex-start;
+  color: var(--error-text);
+  font-size: 14px;
+}
+
+.agent__line--mark {
+  align-self: center;
+  padding: 2px 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--label);
+}
+
+.agent__input {
+  font-size: 16px;
+}
+
+.agent__next--ready {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 /* ── Урок вслух (lesson-reader.js) ─────────────────────────────────────── */

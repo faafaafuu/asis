@@ -232,7 +232,7 @@ async function run(cmd, args = {}) {
     case "learn_submit":
       return l.submit(args.course, args.scope, args.answers);
     case "learn_ask":
-      return l.ask(args.target, args.text);
+      return l.ask(args.target, args.text, { voice: Boolean(args.voice) });
     case "learn_deep":
       return l.deep(args.course, args.topic, args.section, Boolean(args.cached));
     case "learn_discuss":

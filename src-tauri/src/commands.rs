@@ -1710,8 +1710,13 @@ pub async fn learn_discuss(app: AppHandle, target: crate::tutor::Target) -> Resu
 
 /// Вопрос текстом в том же обсуждении: ответ приходит в окно, вслух не звучит.
 #[tauri::command]
-pub async fn learn_ask(app: AppHandle, target: crate::tutor::Target, text: String) -> Result<String, String> {
-    crate::tutor::ask(&app, &target, &text).await
+pub async fn learn_ask(
+    app: AppHandle,
+    target: crate::tutor::Target,
+    text: String,
+    voice: Option<bool>,
+) -> Result<String, String> {
+    crate::tutor::ask(&app, &target, &text, voice.unwrap_or(false)).await
 }
 
 /// Подробный разбор раздела урока. `cached` — только готовый, без модели.

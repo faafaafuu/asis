@@ -323,13 +323,14 @@ pub const OPENING: &str = "Начни живой разбор: в двух-тр�
     на практике и на собеседовании, и задай мне первый вопрос, чтобы понять, что я уже знаю.";
 
 /// Вопрос текстом из окна обучения.
-pub async fn ask(app: &AppHandle, target: &Target, text: &str) -> Result<String, String> {
+/// `voice` — разговорный стиль: урок с Ноа, ответы звучат вслух.
+pub async fn ask(app: &AppHandle, target: &Target, text: &str, voice: bool) -> Result<String, String> {
     let text = text.trim();
     if text.is_empty() {
         return Err("Напишите вопрос.".into());
     }
     open(target)?;
-    answer(app, text, false).await
+    answer(app, text, voice).await
 }
 
 /* ── Подробный разбор раздела ──────────────────────────────────────────── */
