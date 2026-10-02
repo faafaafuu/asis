@@ -162,6 +162,7 @@ export function mountDictionary() {
     requireLeftCtrl: true,
     forceTouchMenu: true,
     onRead: (text) => speak(text),
+    onStopRead: () => stopSpeaking(),
   }).mount();
   // Всё, что умеет окно объяснения в программе, — кнопками вместо клавиш:
   // уточнить словами или голосом (зажать микрофон), прочитать вслух.

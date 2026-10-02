@@ -26,27 +26,56 @@ export class MenuView {
     this.ui = {};
     for (const node of this.el.querySelectorAll("[data-el]")) this.ui[node.dataset.el] = node;
 
-    // Меню не должно снимать выделение, ради которого оно и появилось.
+    // Меню не должно снимать выделение, ради которого оно и появилось. Только
+    // для мыши: отменённый touchstart на телефоне глотает и сам тап — кнопки
+    // молчали. Пальцем выделение может и сняться, но текст меню уже запомнило.
     this.el.addEventListener("mousedown", (e) => e.preventDefault());
-    this.el.addEventListener("touchstart", (e) => e.preventDefault(), { passive: false });
+    this.el.addEventListener("pointerdown", (e) => {
+      this.pressed = true;
+      if (e.pointerType === "mouse") e.preventDefault();
+    });
+    const release = () => setTimeout(() => (this.pressed = false), 0);
+    this.el.addEventListener("pointerup", release);
+    this.el.addEventListener("pointercancel", release);
 
     this.ui.copy.addEventListener("click", (e) => {
       e.preventDefault();
       handlers.onCopy();
     });
-    // «Прочитать» — там, где есть чем читать вслух.
+    // «Прочитать» — там, где есть чем читать вслух. Пока звучит, кнопка —
+    // «стоп»: без неё длинное выделение было не остановить.
     if (handlers.onRead) {
       this.ui.read.hidden = false;
       this.ui.readSep.hidden = false;
       this.ui.read.addEventListener("click", (e) => {
         e.preventDefault();
-        handlers.onRead();
+        if (this.reading) {
+          handlers.onStopRead?.();
+          this.setReading(false);
+          return;
+        }
+        this.setReading(true);
+        Promise.resolve(handlers.onRead()).finally(() => this.setReading(false));
       });
     }
     this.ui.explain.addEventListener("click", (e) => {
       e.preventDefault();
       handlers.onExplain();
     });
+  }
+
+  setReading(on) {
+    this.reading = on;
+    this.ui.read.textContent = on ? "■" : "🔊";
+    this.ui.read.title = this.ui.read.ariaLabel = on ? "Остановить" : "Прочитать вслух";
+  }
+
+  /** Короткий знак на кнопке — «сделано» или «не вышло». */
+  flash(name, glyph) {
+    const button = this.ui[name];
+    const was = button.textContent;
+    button.textContent = glyph;
+    setTimeout(() => (button.textContent = was), 700);
   }
 }
 
@@ -58,10 +87,22 @@ export async function copyText(text) {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      // Отказ в разрешении на буфер обмена — молча, без ошибки в UI:
-      // пользователь всё ещё может скопировать системным меню.
-      return false;
+      // Отказ в разрешении на буфер обмена — пробуем по-старому ниже.
     }
   }
-  return false;
+  // Старый путь: незащищённая страница, WebView, отказ в разрешении.
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.cssText = "position:fixed;top:0;left:0;opacity:0;pointer-events:none";
+  document.body.append(area);
+  area.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  area.remove();
+  return ok;
 }

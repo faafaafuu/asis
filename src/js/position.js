@@ -69,18 +69,21 @@ export function isAnchorVisible(anchor, viewport) {
 export const MENU_PAD = 10; // отступ меню от краёв экрана
 export const MENU_LIFT = 48; // насколько меню поднимается над выделением
 export const MENU_DROP = 12; // насколько опускается, если сверху не поместилось
+export const MENU_HANDLES = 34; // зазор под ручками выделения на телефоне
 
 /**
  * Мини-меню ставится над НАЧАЛОМ выделения (первый rect): палец пользователя обычно
  * в конце выделения, и меню не должно оказаться под ним.
  * @param {{anchor: Anchor, size: Size, viewport: Viewport}} params
  */
-export function placeMenu({ anchor, size, viewport }) {
+export function placeMenu({ anchor, size, viewport, below = false }) {
   const vw = viewport.width;
   let left = anchor.left + anchor.width / 2 - size.width / 2;
   left = Math.max(MENU_PAD, Math.min(left, vw - size.width - MENU_PAD));
 
-  let top = anchor.top - MENU_LIFT;
+  // below — под выделением с запасом на ручки: сверху системная панель телефона.
+  let top = below ? anchor.bottom + MENU_HANDLES : anchor.top - MENU_LIFT;
+  if (below && viewport.height && top + size.height > viewport.height - MENU_PAD) top = anchor.top - MENU_LIFT;
   if (top < MENU_PAD) top = anchor.bottom + MENU_DROP;
 
   return { left: Math.round(left), top: Math.round(top) };

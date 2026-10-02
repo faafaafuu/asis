@@ -57,17 +57,18 @@ export class WebHost {
     this.menuLayer.className = "menu-layer";
     this.menuLayer.hidden = true;
     this.menu = new MenuView({
-      onCopy: () => {
-        copyText(this.menuText);
-        this.hideMenu();
+      // Скопировали — на кнопке галочка, потом меню уходит: иначе казалось,
+      // что кнопка ничего не делает.
+      onCopy: async () => {
+        const ok = await copyText(this.menuText);
+        this.menu.flash("copy", ok ? "✓" : "✕");
+        clearTimeout(this.menuTimer);
+        this.menuTimer = setTimeout(() => this.hideMenu(), 700);
       },
       onExplain: () => this.explainFromMenu(),
-      onRead: opts.onRead
-        ? () => {
-            opts.onRead(this.menuText);
-            this.hideMenu();
-          }
-        : undefined,
+      // Читает, пока меню на месте: кнопка показывает «стоп».
+      onRead: opts.onRead ? () => opts.onRead(this.menuText) : undefined,
+      onStopRead: opts.onStopRead,
     });
     this.menuLayer.append(this.menu.el);
   }
@@ -191,6 +192,8 @@ export class WebHost {
   showTouchMenu() {
     const sel = window.getSelection();
     const text = sel ? sel.toString().trim() : "";
+    // Палец на кнопке меню: тап мог снять выделение, но меню ждёт свой click.
+    if (this.menu.pressed) return;
     if (!text || !sel.rangeCount) {
       this.hideMenu();
       return;
@@ -201,7 +204,10 @@ export class WebHost {
     this.range = sel.getRangeAt(0).cloneRange();
     this.menuText = text;
 
-    const anchor = anchorFromRange(this.range, "first");
+    // На телефоне над выделением стоит системная панель «Копировать…» и
+    // закрывает меню — там оно встаёт под конец выделения, ниже ручек.
+    const finger = Boolean(window.matchMedia?.("(pointer: coarse)").matches);
+    const anchor = anchorFromRange(this.range, finger ? "last" : "first");
     if (!anchor) return;
 
     this.menuLayer.hidden = false;
@@ -209,6 +215,7 @@ export class WebHost {
       anchor,
       size: { width: this.menu.el.offsetWidth, height: this.menu.el.offsetHeight },
       viewport: { width: window.innerWidth, height: window.innerHeight },
+      below: finger,
     });
     this.menuLayer.style.left = `${left}px`;
     this.menuLayer.style.top = `${top}px`;
