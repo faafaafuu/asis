@@ -1752,9 +1752,11 @@ pub fn window_error(page: String, text: String) {
 /* ── Практика в терминале ──────────────────────────────────────────────── */
 
 /// Открыть окно практики — из темы курса или само по себе.
+// Асинхронная, как open_module: окно из синхронной команды на Windows
+// оставалось белым — команда ждёт главный поток, а он ждёт команду.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn practice_open(app: AppHandle, course: Option<String>, topic: Option<String>) -> Result<(), String> {
+pub async fn practice_open(app: AppHandle, course: Option<String>, topic: Option<String>) -> Result<(), String> {
     crate::practice::set_context(&app, course, topic);
     crate::overlay::show_practice(&app).map_err(|err| err.to_string())
 }
@@ -1820,7 +1822,7 @@ pub async fn practice_ask(app: AppHandle, text: String) -> Result<String, String
 /// Спросить голосом: разговор без рук, фразы — вопросы практике.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn practice_listen(app: AppHandle, on: bool) {
+pub async fn practice_listen(app: AppHandle, on: bool) {
     crate::practice::set_voice(on);
     if on {
         crate::voice::stop();
