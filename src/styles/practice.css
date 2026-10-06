@@ -1,0 +1,403 @@
+/* Окно практики: слева терминал, справа Ноа. Язык окна — тот же, что у
+   обучения (learning.css подключён раньше): кнопки, схема, кольцо. Здесь —
+   только раскладка и лента замечаний. Терминал тёмный в любой теме: вывод
+   серверов и цвета ls рассчитаны на тёмный фон. */
+
+:root {
+  --term-bg: #16130f;
+  --coach-width: 420px;
+}
+
+.head__spacer {
+  margin-left: auto;
+}
+
+.practice {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--coach-width);
+}
+
+/* ── Терминал ──────────────────────────────────────────────────────────── */
+
+.practice__term {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--term-bg);
+}
+
+.practice__term-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 14px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: rgb(242 236 225 / 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.practice__term-bar code {
+  color: rgb(242 236 225 / 0.9);
+}
+
+.practice__term-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Видит ли Ноа терминал — всегда на виду: вывод уходит модели. */
+.practice__eye {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #8fd19e;
+}
+.practice__eye::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.practice__eye.is-off {
+  color: rgb(242 236 225 / 0.45);
+}
+
+.practice__screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px 4px 4px 12px;
+}
+
+.practice__screen .xterm {
+  height: 100%;
+}
+
+/* Фон под строками — тот же, что у полосы терминала, а не чёрный xterm. */
+.practice__screen .xterm-viewport,
+.practice__screen .xterm-screen {
+  background-color: var(--term-bg) !important;
+}
+
+/* ── Ноа ───────────────────────────────────────────────────────────────── */
+
+.coach {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 14px 16px 12px;
+  border-left: 1px solid var(--divider);
+  overflow: hidden;
+}
+
+.coach__stage {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.coach__orb {
+  flex: none;
+  width: 120px;
+  height: 60px;
+  margin: -6px -14px -6px -18px;
+}
+
+.coach__now {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.coach__status {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.coach__sub {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coach__toggles {
+  display: flex;
+  gap: 4px;
+}
+
+.icon-toggle {
+  width: 32px;
+  height: 30px;
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.icon-toggle[aria-pressed="false"] {
+  opacity: 0.45;
+}
+.icon-toggle:hover {
+  background: var(--btn-hover-bg);
+}
+
+/* Текущий шаг — главное на панели. */
+.coach__step {
+  padding: 12px 14px;
+  border: 1.5px solid var(--accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-solid));
+}
+
+.coach__step-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label);
+}
+
+.coach__step-title {
+  margin: 4px 0 6px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.coach__step-goal {
+  margin: 0;
+}
+
+.coach__step-why,
+.coach__step-check {
+  margin: 6px 0 0;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}
+
+.coach__step-check b {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.coach__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.coach__actions .button {
+  padding: 6px 12px;
+}
+
+.coach__picture .scheme {
+  padding: 8px 10px 4px;
+}
+
+.coach__picture .scheme__svg {
+  min-width: 0;
+}
+
+.coach__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-right: 4px;
+}
+
+/* Где сейчас работа — блок картины обведён и подсвечен. */
+.scheme__box--here {
+  stroke-width: 3;
+  stroke: var(--accent);
+  fill: color-mix(in srgb, var(--accent) 26%, var(--bg-solid));
+}
+
+.coach details > summary {
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label);
+}
+
+.coach__steps {
+  margin: 8px 0 0;
+  padding-left: 22px;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}
+.coach__steps li.is-done {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.coach__steps li.is-now {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Лента замечаний: свежее внизу, прокручивается сама. */
+.coach__feed {
+  flex: 0 0 34%;
+  min-height: 140px;
+  padding-top: 10px;
+  border-top: 1px solid var(--divider);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.line {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--divider);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  line-height: 1.45;
+}
+.line code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+}
+.line--me {
+  align-self: flex-end;
+  max-width: 85%;
+  border-left: 0;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.line--error {
+  border-left-color: var(--bad);
+}
+.line--step {
+  border-left-color: var(--good);
+}
+.line--hint {
+  border-left-color: var(--accent);
+  color: var(--text-muted);
+}
+.line--overview {
+  border-left-color: color-mix(in srgb, var(--warn, #f2c14e) 80%, var(--text));
+}
+
+.coach__ask {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.coach__ask .answer {
+  min-height: 42px;
+  height: 42px;
+  resize: none;
+}
+
+.coach__mic[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  opacity: 1;
+}
+
+.coach__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--size-secondary);
+}
+
+.link {
+  flex: none;
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link:hover {
+  color: var(--text);
+}
+
+/* ── Начало: что строим ────────────────────────────────────────────────── */
+
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.setup h2 {
+  margin: 4px 0 0;
+  font-family: var(--font-display, inherit);
+  font-size: 24px;
+  line-height: 30px;
+}
+
+.setup p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.setup .answer {
+  min-height: 70px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 6px 10px;
+  border: 1px solid var(--btn-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--size-secondary);
+}
+.chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.chip--topic {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.setup__error {
+  color: var(--bad);
+}
+
+@media (max-width: 1100px) {
+  :root {
+    --coach-width: 360px;
+  }
+}

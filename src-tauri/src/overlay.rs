@@ -1015,6 +1015,33 @@ pub fn hide_learning(app: &AppHandle) {
     }
 }
 
+/// Показывает окно практики в терминале. Если окно уже есть — поднимает его.
+#[cfg(desktop)]
+pub fn show_practice(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(crate::practice::LABEL) {
+        bring_forward(&window);
+        return Ok(());
+    }
+    // Крупное: слева терминал на всю высоту, справа Ноа со сценарием.
+    let window = WebviewWindowBuilder::new(app, crate::practice::LABEL, WebviewUrl::App("practice.html".into()))
+        .initialization_script(theme_script(app))
+        .title("NOAH — Практика")
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(900.0, 560.0)
+        .resizable(true)
+        .decorations(false)
+        .center()
+        .build()?;
+    // Окно закрыли — оболочка и голос практики уходят вместе с ним.
+    window.on_window_event(|event| {
+        if let tauri::WindowEvent::Destroyed = event {
+            crate::practice::term_stop();
+            crate::practice::set_voice(false);
+        }
+    });
+    Ok(())
+}
+
 pub const WATCH_LABEL: &str = "watchlist";
 
 /// Показывает список активов. Если окно уже есть — поднимает его наверх.

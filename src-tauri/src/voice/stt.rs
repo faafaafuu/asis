@@ -73,7 +73,7 @@ const END_OF_PHRASE_MS: u64 = 1000;
 const END_OF_RETELL_MS: u64 = 2600;
 
 fn end_of_phrase() -> u64 {
-    if crate::tutor::walking() {
+    if crate::tutor::walking() || crate::practice::voice_on() {
         END_OF_RETELL_MS
     } else {
         END_OF_PHRASE_MS

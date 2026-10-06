@@ -1743,6 +1743,108 @@ pub async fn learn_ask(
     crate::tutor::ask(&app, &target, &text, voice.unwrap_or(false)).await
 }
 
+/* ── Практика в терминале ──────────────────────────────────────────────── */
+
+/// Открыть окно практики — из темы курса или само по себе.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_open(app: AppHandle, course: Option<String>, topic: Option<String>) -> Result<(), String> {
+    crate::practice::set_context(&app, course, topic);
+    crate::overlay::show_practice(&app).map_err(|err| err.to_string())
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_state(app: AppHandle) -> crate::practice::Practice {
+    crate::practice::state(&app)
+}
+
+/// Составить сценарий по цели человека (или по теме, из которой открыли).
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn practice_plan(app: AppHandle, goal: String) -> Result<crate::practice::Practice, String> {
+    crate::practice::plan(&app, &goal).await
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_reset(app: AppHandle) {
+    crate::practice::reset(&app);
+}
+
+/// Шаг вперёд (сделан) или назад.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_step(app: AppHandle, delta: i32) {
+    crate::practice::move_step(&app, delta);
+}
+
+/// Смотрит ли Ноа в терминал.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_watch(app: AppHandle, on: bool) {
+    crate::practice::set_watching(&app, on);
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn practice_ask(app: AppHandle, text: String) -> Result<String, String> {
+    crate::practice::ask(&app, &text, false).await
+}
+
+/// Спросить голосом: разговор без рук, фразы — вопросы практике.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_listen(app: AppHandle, on: bool) {
+    crate::practice::set_voice(on);
+    if on {
+        crate::voice::stop();
+        crate::start_conversation_by_hand(&app);
+    } else {
+        crate::stop_conversation(&app);
+    }
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_term_start(app: AppHandle, cols: u16, rows: u16) -> Result<String, String> {
+    crate::practice::term_start(&app, cols, rows)
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_term_write(data: String) -> Result<(), String> {
+    crate::practice::term_write(&data)
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_term_resize(cols: u16, rows: u16) {
+    crate::practice::term_resize(cols, rows);
+}
+
+/// Слушает ли Ноа вопросы практики голосом: разговор без рук кончается сам —
+/// после минуты тишины или прощания, — и кнопка микрофона должна это видеть.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_listening() -> bool {
+    crate::practice::voice_on() && crate::in_conversation()
+}
+
+/// Текст из буфера обмена — вставить в терминал. Через программу, а не
+/// через браузер: webview на чтение буфера спрашивает разрешение.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn practice_clipboard() -> Option<String> {
+    crate::screen::clipboard_text()
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_term_stop() {
+    crate::practice::term_stop();
+}
+
 /// Подробный разбор раздела урока. `cached` — только готовый, без модели.
 #[tauri::command]
 pub async fn learn_deep(

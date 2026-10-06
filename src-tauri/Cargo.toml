@@ -1,6 +1,6 @@
 [package]
 name = "sufler"
-version = "1.14.10"
+version = "1.15.0"
 description = "Суфлёр. Ноа — мультимодальная оболочка для ИИ: подключите любую нейросеть и соберите модуль под свою задачу за пару минут, без программирования"
 authors = ["Sufler"]
 edition = "2021"
@@ -99,6 +99,10 @@ reqwest = { version = "0.13", default-features = false, features = [
 # поэтому только настольные системы.
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 tauri-plugin-autostart = "2"
+# portable-pty — терминал практики (practice.rs): настоящая оболочка в
+# псевдотерминале, на Windows через ConPTY. Ноа видит, что человек набирает и
+# что отвечает сервер, и ведёт по сценарию.
+portable-pty = "0.9"
 
 # Обновление изнутри программы: проверка версии, загрузка и установка поверх.
 # Только настольные системы — на телефонах обновляет магазин приложений.

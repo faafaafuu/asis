@@ -167,6 +167,12 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(reply) = timer_request(app, said, Local::now()) {
         return Some(reply);
     }
+    // Практика в терминале: «как открыть порт» — вопрос о сервере, а не
+    // просьба открыть программу.
+    #[cfg(desktop)]
+    if crate::practice::voice_on() {
+        return None;
+    }
     // Обсуждают урок: сказанное — вопрос по нему, а не распоряжение. Опрос и
     // карточки, начатые из обсуждения, своё слышат — они проверяются первыми.
     if crate::tutor::active() {
@@ -358,6 +364,8 @@ enum OwnWindow {
     FoodSettings,
     /// Окно текущего заказа.
     Order,
+    /// Практика в терминале.
+    Practice,
 }
 
 /// Просят ли открыть окно самого Суфлёра, а не чужую программу.
@@ -388,6 +396,7 @@ fn own_window(program: &str) -> Option<OwnWindow> {
     match (about_orders, settings) {
         (true, true) => Some(OwnWindow::FoodSettings),
         (true, false) => Some(OwnWindow::Order),
+        _ if lower.contains("практик") => Some(OwnWindow::Practice),
         _ if lower.contains("суфл") || lower.contains("ноа") => Some(OwnWindow::Settings),
         _ => None,
     }
@@ -414,6 +423,10 @@ fn open_own(app: &AppHandle, window: OwnWindow) -> String {
             ),
         },
         OwnWindow::Order => (crate::overlay::show_order(app), "Открываю заказ."),
+        #[cfg(desktop)]
+        OwnWindow::Practice => (crate::overlay::show_practice(app), "Открываю практику."),
+        #[cfg(not(desktop))]
+        OwnWindow::Practice => (Ok(()), "Практика с терминалом — в программе на компьютере."),
     };
     match opened {
         Ok(()) => spoken.into(),

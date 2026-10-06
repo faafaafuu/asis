@@ -397,6 +397,7 @@ function renderTopic() {
   // Три раздела вместо девяти вкладок: учить, материал, проверить себя.
   const GROUPS = {
     talk: ["talk"],
+    practice: ["practice"],
     material: ["lesson", "concepts", "map"],
     cards: ["review"],
     sheet: ["sheet"],
@@ -419,6 +420,7 @@ function renderTopic() {
   };
   // Главный способ пройти тему — урок разговором с Ноа.
   step("talk", "🎙 Урок с Ноа", card?.read ? "✓" : "", steps, current === "talk");
+  step("practice", "🖥 Практика", "", steps, current === "practice");
   step("lesson", "Материал", "", steps, current === "material");
   if (topic.concepts?.length) step("review", "🃏 Карточки", `${card?.conceptsMature ?? 0}/${topic.concepts.length}`, steps, current === "cards");
   if (topicView.cheatsheet) step("sheet", "📝 Конспект", "", steps, current === "sheet");
@@ -454,7 +456,8 @@ function renderTopic() {
         renderTopic();
       },
     });
-  } else if (view.step === "lesson") renderLesson(root, topic);
+  } else if (view.step === "practice") renderPractice(root, topic);
+  else if (view.step === "lesson") renderLesson(root, topic);
   else if (view.step === "concepts") renderConcepts(root, topic);
   else if (view.step === "map") renderTopicMap(root, topic);
   else if (view.step === "review") startReview(topic.id);
@@ -462,6 +465,33 @@ function renderTopic() {
   else if (view.step === "tasks") renderQuestions(root, topic.tasks, "Задача");
   else if (view.step === "mistakes") renderQuestions(root, topicView.mistakes, "Повтор");
   else renderExamIntro(root, view.topic, card?.examBest, course.topicPass);
+}
+
+/**
+ * Практика в терминале: тема — руками на своём сервере, Ноа смотрит в
+ * терминал и ведёт по шагам. Окно отдельное: терминалу нужно место.
+ */
+function renderPractice(root, topic) {
+  const box = el("section", "practice-intro");
+  box.append(
+    el(
+      "p",
+      "",
+      "Учитесь руками: живая задача по теме на вашем сервере. Вы работаете в терминале, Ноа его видит — объясняет, что происходит, замечает ошибки, подсказывает следующий шаг и показывает общую картину.",
+    ),
+  );
+  if (document.documentElement.classList.contains("is-web")) {
+    box.append(el("p", "muted", "Терминал браузеру недоступен — практика открывается в программе Ноа на компьютере."));
+  } else {
+    const failed = el("p", "muted");
+    box.append(
+      button("🖥 Открыть практику по теме", () =>
+        api?.invoke("practice_open", { course: course.id, topic: topic.id }).catch((err) => (failed.textContent = `Не открылось: ${err}`)),
+      ),
+      failed,
+    );
+  }
+  root.append(box);
 }
 
 /**

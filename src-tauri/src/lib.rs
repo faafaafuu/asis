@@ -39,6 +39,8 @@ mod shots;
 mod focus;
 mod learning;
 mod tutor;
+#[cfg(desktop)]
+mod practice;
 mod glance;
 mod local_cli;
 mod recall;
@@ -328,6 +330,34 @@ pub fn run() {
             #[cfg(desktop)]
             commands::audio_decoded,
             commands::learn_overview,
+            #[cfg(desktop)]
+            commands::practice_open,
+            #[cfg(desktop)]
+            commands::practice_state,
+            #[cfg(desktop)]
+            commands::practice_plan,
+            #[cfg(desktop)]
+            commands::practice_reset,
+            #[cfg(desktop)]
+            commands::practice_step,
+            #[cfg(desktop)]
+            commands::practice_watch,
+            #[cfg(desktop)]
+            commands::practice_ask,
+            #[cfg(desktop)]
+            commands::practice_listen,
+            #[cfg(desktop)]
+            commands::practice_term_start,
+            #[cfg(desktop)]
+            commands::practice_term_write,
+            #[cfg(desktop)]
+            commands::practice_term_resize,
+            #[cfg(desktop)]
+            commands::practice_term_stop,
+            #[cfg(desktop)]
+            commands::practice_clipboard,
+            #[cfg(desktop)]
+            commands::practice_listening,
             commands::learn_topic,
             commands::learn_read,
             commands::learn_place,
@@ -1231,7 +1261,7 @@ fn answer_aloud(app: &tauri::AppHandle, text: &str) {
 
     // Идёт обсуждение урока или разговор об окне — отвечают голосом те, кто
     // знает, о чём речь: окно ответов не знает ни раздела, ни окна.
-    if tutor::active() || glance::active() {
+    if tutor::active() || glance::active() || practice::voice_on() {
         answer_without_window(app, text);
         return;
     }
@@ -1932,7 +1962,7 @@ fn headset_mic(app: &tauri::AppHandle) -> bool {
 /// то, о чём его попросили. Без этого Ноа умолкала сразу после ответа: разговор
 /// не начинался, и со стороны это выглядело как «сказала и выключилась».
 #[cfg(desktop)]
-fn start_conversation_by_hand(app: &tauri::AppHandle) {
+pub(crate) fn start_conversation_by_hand(app: &tauri::AppHandle) {
     EXPLICIT_TALK.store(true, std::sync::atomic::Ordering::SeqCst);
     start_conversation(app);
 }
@@ -2421,6 +2451,7 @@ pub(crate) fn in_conversation() -> bool {
 /// Заканчивает разговор: микрофон закрывается, клавиши работают как прежде.
 #[cfg(desktop)]
 pub(crate) fn stop_conversation(app: &tauri::AppHandle) {
+    practice::set_voice(false);
     end_conversation(app, true, false);
 }
 
@@ -2436,6 +2467,7 @@ pub(crate) fn stop_conversation(app: &tauri::AppHandle) {
 #[cfg(desktop)]
 fn finish_conversation(app: &tauri::AppHandle) {
     tutor::end();
+    practice::set_voice(false);
     glance::end();
     end_conversation(app, true, true);
 }
@@ -2842,8 +2874,11 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
     };
     // Обсуждают урок — отвечает репетитор, зная раздел, и со своей историей:
     // разговор об уроке не мешается с разговором обо всём остальном.
-    if tutor::active() || glance::active() {
-        let answer = if tutor::active() {
+    if tutor::active() || glance::active() || practice::voice_on() {
+        // Практика — вопрос по терминалу и сценарию: отвечает она.
+        let answer = if practice::voice_on() {
+            tauri::async_runtime::block_on(practice::ask(app, question, true))
+        } else if tutor::active() {
             tauri::async_runtime::block_on(tutor::answer(app, question, true))
         } else {
             tauri::async_runtime::block_on(glance::answer(app, question))

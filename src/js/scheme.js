@@ -104,36 +104,62 @@ export function roles(scheme) {
   );
 }
 
-/** Рисует схему: <figure> с подписью и SVG. */
-export function renderScheme(scheme) {
+/**
+ * Рисует схему: <figure> с подписью и SVG. `here` — id блока, где сейчас
+ * работа: он подсвечен (практика в терминале).
+ */
+export function renderScheme(scheme, { here = "", down = false } = {}) {
   const columns = layers(scheme);
   const CHAR = 7.4;
   const H = 52;
   const GAP_X = 96;
   const GAP_Y = 28;
-  // Ширина колонки — по самой длинной строке её блоков.
-  const widths = columns.map((column) =>
-    Math.min(200, Math.max(116, ...column.map((n) => Math.max(...wrap(n.label, 22).map((l) => l.length)) * CHAR + 26))),
-  );
-  const tallest = Math.max(...columns.map((c) => c.length));
-  const width = widths.reduce((sum, w) => sum + w, 0) + (columns.length - 1) * GAP_X + 24;
-  const height = tallest * H + (tallest - 1) * GAP_Y + 24;
+  // Сверху вниз — для узкой панели: слои идут строками, блоки в строке рядом.
+  const WRAP = down ? 16 : 22;
+  const ROW_GAP = 46;
+  const GAP_IN_ROW = 14;
+  const SIDE = 40; // запас справа под стрелки, идущие назад
+  const textWidth = (n) => Math.max(...wrap(n.label, WRAP).map((l) => l.length)) * CHAR;
 
   const pos = new Map();
-  let left = 12;
-  columns.forEach((column, x) => {
-    const offset = ((tallest - column.length) * (H + GAP_Y)) / 2;
-    column.forEach((n, y) => pos.set(n.id, { x: left, y: 12 + offset + y * (H + GAP_Y), w: widths[x] }));
-    left += widths[x] + GAP_X;
-  });
+  let width;
+  let height;
+  if (down) {
+    const nodeWidth = (n) => Math.min(170, Math.max(96, textWidth(n) + 22));
+    const rowWidths = columns.map((row) => row.reduce((sum, n) => sum + nodeWidth(n), 0) + (row.length - 1) * GAP_IN_ROW);
+    const widest = Math.max(...rowWidths);
+    width = widest + 24 + SIDE;
+    height = columns.length * H + (columns.length - 1) * ROW_GAP + 24;
+    columns.forEach((row, y) => {
+      let left = 12 + (widest - rowWidths[y]) / 2;
+      for (const n of row) {
+        pos.set(n.id, { x: left, y: 12 + y * (H + ROW_GAP), w: nodeWidth(n) });
+        left += nodeWidth(n) + GAP_IN_ROW;
+      }
+    });
+  } else {
+    // Ширина колонки — по самой длинной строке её блоков.
+    const widths = columns.map((column) => Math.min(200, Math.max(116, ...column.map((n) => textWidth(n) + 26))));
+    const tallest = Math.max(...columns.map((c) => c.length));
+    width = widths.reduce((sum, w) => sum + w, 0) + (columns.length - 1) * GAP_X + 24;
+    height = tallest * H + (tallest - 1) * GAP_Y + 24;
+    let left = 12;
+    columns.forEach((column, x) => {
+      const offset = ((tallest - column.length) * (H + GAP_Y)) / 2;
+      column.forEach((n, y) => pos.set(n.id, { x: left, y: 12 + offset + y * (H + GAP_Y), w: widths[x] }));
+      left += widths[x] + GAP_X;
+    });
+  }
 
   // Точки входа и выхода стрелок разнесены по краю блока: несколько стрелок
   // в один блок не сливаются в одну линию и подписи не лезут друг на друга.
+  // Порт — доля края: по высоте блока слева направо, по ширине сверху вниз.
+  const axis = down ? "x" : "y";
   const ports = (list, side) => {
     const map = new Map();
-    for (const [id, edges] of list) {
-      edges.sort((a, b) => pos.get(side === "out" ? a.to : a.from).y - pos.get(side === "out" ? b.to : b.from).y);
-      edges.forEach((e, k) => map.set(e, ((k + 1) * H) / (edges.length + 1)));
+    for (const [, edges] of list) {
+      edges.sort((a, b) => pos.get(side === "out" ? a.to : a.from)[axis] - pos.get(side === "out" ? b.to : b.from)[axis]);
+      edges.forEach((e, k) => map.set(e, (k + 1) / (edges.length + 1)));
     }
     return map;
   };
@@ -157,21 +183,55 @@ export function renderScheme(scheme) {
   for (const e of scheme.edges) {
     const a = pos.get(e.from);
     const b = pos.get(e.to);
-    const forward = b.x > a.x;
-    const x1 = forward ? a.x + a.w : a.x + a.w / 2;
-    const y1 = forward ? a.y + outPort.get(e) : a.y + H;
-    const x2 = forward ? b.x : b.x + b.w / 2;
-    const y2 = forward ? b.y + inPort.get(e) : b.y;
-    const mid = (x1 + x2) / 2;
-    const d = forward ? `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}` : `M${x1},${y1} C${x1},${y1 + 34} ${x2},${y2 - 34} ${x2},${y2}`;
+    let d;
+    let lx;
+    let ly;
+    if (down && b.y > a.y) {
+      // Вниз: из нижнего края в верхний.
+      const x1 = a.x + a.w * outPort.get(e);
+      const y1 = a.y + H;
+      const x2 = b.x + b.w * inPort.get(e);
+      const y2 = b.y;
+      ly = (y1 + y2) / 2;
+      lx = (x1 + x2) / 2;
+      d = `M${x1},${y1} C${x1},${ly} ${x2},${ly} ${x2},${y2}`;
+    } else if (down && b.y === a.y) {
+      // В одной строке — прямо, от бока к боку.
+      const right = b.x > a.x;
+      const x1 = right ? a.x + a.w : a.x;
+      const x2 = right ? b.x : b.x + b.w;
+      ly = a.y + H / 2;
+      lx = (x1 + x2) / 2;
+      d = `M${x1},${ly} L${x2},${ly}`;
+    } else if (down) {
+      // Назад, вверх — дугой справа, мимо блоков.
+      const x1 = a.x + a.w;
+      const y1 = a.y + H / 2;
+      const x2 = b.x + b.w;
+      const y2 = b.y + H / 2;
+      const bend = Math.max(x1, x2) + SIDE - 6;
+      lx = bend - 12;
+      ly = (y1 + y2) / 2;
+      d = `M${x1},${y1} C${bend},${y1} ${bend},${y2} ${x2},${y2}`;
+    } else {
+      const forward = b.x > a.x;
+      const x1 = forward ? a.x + a.w : a.x + a.w / 2;
+      const y1 = forward ? a.y + H * outPort.get(e) : a.y + H;
+      const x2 = forward ? b.x : b.x + b.w / 2;
+      const y2 = forward ? b.y + H * inPort.get(e) : b.y;
+      lx = (x1 + x2) / 2;
+      ly = (y1 + y2) / 2;
+      d = forward ? `M${x1},${y1} C${lx},${y1} ${lx},${y2} ${x2},${y2}` : `M${x1},${y1} C${x1},${y1 + 34} ${x2},${y2 - 34} ${x2},${y2}`;
+    }
     svg.append(node("path", { d, class: "scheme__edge", "marker-end": "url(#scheme-arrow)" }));
-    if (e.label) labels.push({ text: e.label, x: mid, y: (y1 + y2) / 2 });
+    if (e.label) labels.push({ text: e.label, x: lx, y: ly });
   }
 
   for (const n of scheme.nodes) {
     const { x, y, w } = pos.get(n.id);
-    svg.append(node("rect", { x, y, width: w, height: H, rx: 10, class: `scheme__box scheme__box--${roles(scheme).get(n.id)}` }));
-    const lines = wrap(n.label, 22);
+    const mark = n.id === here ? " scheme__box--here" : "";
+    svg.append(node("rect", { x, y, width: w, height: H, rx: 10, class: `scheme__box scheme__box--${roles(scheme).get(n.id)}${mark}`, "data-id": n.id }));
+    const lines = wrap(n.label, WRAP);
     const top = y + H / 2 - ((lines.length - 1) * 15) / 2 + 5;
     lines.forEach((text, i) => svg.append(node("text", { x: x + w / 2, y: top + i * 15, class: "scheme__label", "text-anchor": "middle" }, text)));
   }

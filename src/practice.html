@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Практика — NOAH</title>
+    <link rel="stylesheet" href="./styles/fonts.css" />
+    <link rel="stylesheet" href="./styles/tokens.css" />
+    <link rel="stylesheet" href="./styles/learning.css" />
+    <link rel="stylesheet" href="./vendor/xterm/xterm.css" />
+    <link rel="stylesheet" href="./styles/practice.css" />
+  </head>
+  <body>
+    <header class="head" data-el="head">
+      <h1 class="head__title" data-el="appVersion">NOAH</h1>
+      <span class="head__course" data-el="title">Практика в терминале</span>
+      <span class="head__spacer"></span>
+      <button class="head__button" data-el="minimize" type="button" title="Свернуть" aria-label="Свернуть окно практики">—</button>
+      <button class="head__button head__close" data-el="close" type="button" title="Закрыть — терминал закроется" aria-label="Закрыть окно практики">×</button>
+    </header>
+
+    <div class="practice">
+      <!-- Слева — настоящий терминал: подключаетесь к серверу и работаете. -->
+      <section class="practice__term" aria-label="Терминал">
+        <div class="practice__term-bar">
+          <span class="practice__eye" data-el="eye"></span>
+          <span class="practice__term-hint">Подключитесь к серверу: <code>ssh user@адрес</code> · вставить — Ctrl+V или правый клик</span>
+        </div>
+        <div class="practice__screen" data-el="screen"></div>
+      </section>
+
+      <!-- Справа — Ноа: сценарий, текущий шаг, общая картина, её замечания. -->
+      <aside class="coach" data-el="coach" aria-label="Ноа"></aside>
+    </div>
+
+    <script type="module" src="./js/practice.js"></script>
+  </body>
+</html>

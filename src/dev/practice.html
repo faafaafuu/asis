@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru" data-theme="noah">
+  <head>
+    <meta charset="utf-8" />
+    <title>Практика — витрина</title>
+    <!-- Витрина окна практики без программы: терминал и Ноа на подменных
+         командах. Открывать через `npm run dev`:
+         http://localhost:5173/dev/practice.html (?empty=1 — без сценария,
+         ?theme=dark — другая тема). -->
+    <link rel="stylesheet" href="../styles/fonts.css" />
+    <link rel="stylesheet" href="../styles/tokens.css" />
+    <link rel="stylesheet" href="../styles/learning.css" />
+    <link rel="stylesheet" href="../vendor/xterm/xterm.css" />
+    <link rel="stylesheet" href="../styles/practice.css" />
+    <script src="./practice-mock.js"></script>
+  </head>
+  <body>
+    <header class="head" data-el="head">
+      <h1 class="head__title" data-el="appVersion">NOAH</h1>
+      <span class="head__course" data-el="title">Практика в терминале</span>
+      <span class="head__spacer"></span>
+      <button class="head__button" data-el="minimize" type="button">—</button>
+      <button class="head__button head__close" data-el="close" type="button">×</button>
+    </header>
+    <div class="practice">
+      <section class="practice__term" aria-label="Терминал">
+        <div class="practice__term-bar">
+          <span class="practice__eye" data-el="eye"></span>
+          <span class="practice__term-hint">Подключитесь к серверу: <code>ssh user@адрес</code> · вставить — Ctrl+V или правый клик</span>
+        </div>
+        <div class="practice__screen" data-el="screen"></div>
+      </section>
+      <aside class="coach" data-el="coach" aria-label="Ноа"></aside>
+    </div>
+    <script type="module" src="../js/practice.js"></script>
+  </body>
+</html>
