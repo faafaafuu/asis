@@ -212,24 +212,60 @@ function paintEye() {
   ui.eye.textContent = on ? "Ноа видит терминал" : "Ноа не смотрит";
 }
 
-/** Курсы для выбора темы — грузятся один раз, при первом показе выбора. */
+/** Курсы для выбора темы — грузятся при показе выбора. */
 let courses = null;
-/** Выбранные курс и тема — до того, как сценарий составлен. */
-let picked = { course: null, topic: null };
+/** Практики тем: «курс/тема» → шаг, всего шагов, пройдена. */
+let progress = new Map();
+/** Выбор темы поверх идущего сценария — «Тема ▾». */
+let picking = false;
+/** К теме курса переходили сами — второй раз не пробуем, даже если не вышло. */
+let autoOpened = false;
 
 const STATUS_MARK = { done: "✓", practice: "◐", reading: "◔", new: "" };
+
+async function loadTopics() {
+  const [list, done] = await Promise.all([
+    api.invoke("learn_overview").catch(() => []),
+    api.invoke("practice_progress").catch(() => []),
+  ]);
+  // Курс без тем (ещё собирается) практиковать не на чем.
+  courses = (Array.isArray(list) ? list : []).filter((c) => c.topics?.length);
+  progress = new Map((Array.isArray(done) ? done : []).map((p) => [`${p.course}/${p.topic}`, p]));
+}
+
+/** У каждой темы своя практика: перейти к ней — с её сценарием и шагом. */
+async function openTopic(course, topic) {
+  picking = false;
+  error = "";
+  practice = await api.invoke("practice_switch", { course, topic }).catch(() => practice);
+  render();
+}
+
+function topicTitle() {
+  const course = courses?.find((c) => c.id === practice?.course);
+  return course?.topics.find((t) => t.id === practice?.topic)?.title ?? "";
+}
 
 function setup(root) {
   const box = el("div", "setup");
   root.append(box);
   if (!courses) {
     box.append(el("p", "", "Загружаю курсы…"));
-    api
-      .invoke("learn_overview")
-      .then((list) => (courses = Array.isArray(list) ? list : []))
-      .catch(() => (courses = []))
-      .then(() => render());
+    loadTopics().then(() => render());
     return;
+  }
+  // Курсы есть, а практика ни к какой теме не привязана — сразу к теме, на
+  // которой человек остановился в курсе.
+  if (courses.length && !practice?.topic && !picking && !autoOpened) {
+    autoOpened = true;
+    // Курс, где человек остановился, — иначе первый.
+    const course = courses.find((c) => c.current) ?? courses[0];
+    const topic = course.current ?? course.topics[0]?.id;
+    if (topic) {
+      box.append(el("p", "", "Открываю тему…"));
+      openTopic(course.id, topic);
+      return;
+    }
   }
   box.append(el("h2", "", "Практика по теме"));
   box.append(
@@ -244,10 +280,7 @@ function setup(root) {
   wish.rows = 2;
 
   if (courses.length) {
-    // По умолчанию — тема, из которой открыли практику, иначе текущая в курсе.
-    const course = courses.find((c) => c.id === (picked.course ?? practice?.course)) ?? courses[0];
-    picked.course = course.id;
-    picked.topic ??= practice?.course === course.id && practice?.topic ? practice.topic : course.current ?? course.topics[0]?.id;
+    const course = courses.find((c) => c.id === practice?.course) ?? courses[0];
 
     if (courses.length > 1) {
       const select = el("select", "answer setup__course");
@@ -258,25 +291,39 @@ function setup(root) {
         select.append(option);
       }
       select.addEventListener("change", () => {
-        picked = { course: select.value, topic: null };
-        render();
+        const next = courses.find((c) => c.id === select.value);
+        const topic = next?.current ?? next?.topics[0]?.id;
+        if (topic) openTopic(next.id, topic);
       });
       box.append(select);
     } else box.append(el("div", "coach__sub", course.title));
 
+    // Темы курса: у каждой своя практика. Начатая — с шагом, пройденная — ✓.
     const list = el("div", "topics-pick");
     for (const topic of course.topics) {
       const item = el("button", "topic-pick", "");
-      item.append(el("span", "topic-pick__mark", STATUS_MARK[topic.status] ?? ""), el("span", "", topic.title));
-      item.setAttribute("aria-pressed", String(topic.id === picked.topic));
-      if (topic.id === course.current) item.title = "Тема, на которой вы остановились";
-      item.addEventListener("click", () => {
-        picked.topic = topic.id;
-        render();
-      });
+      const own = progress.get(`${course.id}/${topic.id}`);
+      const state = own ? (own.done ? "практика ✓" : `шаг ${own.step + 1} из ${own.total}`) : "";
+      item.append(
+        el("span", "topic-pick__mark", STATUS_MARK[topic.status] ?? ""),
+        el("span", "topic-pick__title", topic.title),
+        el("span", "topic-pick__state", state),
+      );
+      item.setAttribute("aria-pressed", String(topic.id === practice?.topic && course.id === practice?.course));
+      item.title = own ? "Продолжить практику этой темы" : "Практика по этой теме";
+      item.addEventListener("click", () => openTopic(course.id, topic.id));
       list.append(item);
     }
     box.append(list);
+    if (picking) {
+      const back = el("button", "link", "← вернуться к сценарию");
+      back.addEventListener("click", () => {
+        picking = false;
+        render();
+      });
+      box.append(back);
+      return;
+    }
     wish.placeholder = "Пожелание, если есть: «на трёх серверах», «через Docker»…";
   } else {
     box.append(el("p", "", "Курсов пока нет — опишите задачу сами. Курс можно собрать в окне «Обучение»."));
@@ -448,9 +495,9 @@ async function plan(goal) {
   error = "";
   render();
   try {
-    const topic = courses?.length ? { course: picked.course, topic: picked.topic } : { course: null, topic: null };
+    const topic = practice?.topic ? { course: practice.course, topic: practice.topic } : { course: null, topic: null };
     practice = await api.invoke("practice_plan", { ...topic, goal });
-    picked = { course: null, topic: null };
+    await loadTopics();
   } catch (err) {
     error = String(err);
   }
@@ -463,8 +510,9 @@ function render() {
   const root = ui.coach;
   root.replaceChildren(stage());
   paintEye();
-  const scenario = practice?.scenario;
-  ui.title.textContent = scenario?.title ?? "Практика в терминале";
+  const scenario = picking ? null : practice?.scenario;
+  const topic = topicTitle();
+  ui.title.textContent = [topic, practice?.scenario?.title].filter(Boolean).join(" · ") || "Практика в терминале";
   // Середина прокручивается, лента и поле вопроса всегда внизу на виду:
   // длинная схема не должна уводить их за край окна.
   const body = el("div", "coach__body");
@@ -499,7 +547,15 @@ function render() {
       fresh.textContent = "↺ Новый сценарий";
     }, 4000);
   });
-  foot.append(fresh);
+  // Другая тема — своя практика, эта остаётся как есть.
+  const other = el("button", "link", topic ? `Тема: ${topic} ▾` : "Тема ▾");
+  other.title = "Перейти к практике другой темы — эта сохранится";
+  other.addEventListener("click", () => {
+    picking = true;
+    courses = null;
+    render();
+  });
+  foot.append(fresh, other);
   if (scenario.setup) {
     const need = el("span", "coach__sub", `Нужно: ${scenario.setup}`);
     need.title = scenario.setup;
@@ -513,7 +569,8 @@ function render() {
 api?.listen("practice:state", (event) => {
   const { practice: fresh, say, spoken } = event.payload ?? {};
   if (!fresh) return;
-  const sameScenario = practice?.scenario?.title === fresh.scenario?.title && practice?.step === fresh.step;
+  const sameScenario =
+    practice?.topic === fresh.topic && practice?.scenario?.title === fresh.scenario?.title && practice?.step === fresh.step;
   practice = fresh;
   // Лента меняется часто — панель целиком перерисовывается только при новом
   // шаге или сценарии: иначе схема мигала бы на каждое замечание.
@@ -651,7 +708,12 @@ applySizes();
   term.open(ui.screen);
   // Размер — после того как окно разложилось: замер раньше давал две
   // колонки, и первое приглашение оболочки ломалось по два знака в строке.
-  const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+  // Кадр — или 50 мс: свёрнутое окно кадров не рисует, и без таймера
+  // практика не открылась бы вовсе.
+  const frame = () => new Promise((resolve) => {
+    requestAnimationFrame(resolve);
+    setTimeout(resolve, 50);
+  });
   for (let tries = 0; tries < 20; tries++) {
     await frame();
     fit.fit();
@@ -660,5 +722,6 @@ applySizes();
   await startShell();
   term.focus();
   practice = await api.invoke("practice_state").catch(() => null);
+  await loadTopics();
   render();
 })();

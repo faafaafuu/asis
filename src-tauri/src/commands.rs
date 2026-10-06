@@ -1757,7 +1757,7 @@ pub fn window_error(page: String, text: String) {
 #[cfg(desktop)]
 #[tauri::command]
 pub async fn practice_open(app: AppHandle, course: Option<String>, topic: Option<String>) -> Result<(), String> {
-    crate::practice::set_context(&app, course, topic);
+    crate::practice::switch(&app, course, topic);
     crate::overlay::show_practice(&app).map_err(|err| err.to_string())
 }
 
@@ -1765,6 +1765,21 @@ pub async fn practice_open(app: AppHandle, course: Option<String>, topic: Option
 #[tauri::command]
 pub fn practice_state(app: AppHandle) -> crate::practice::Practice {
     crate::practice::state(&app)
+}
+
+/// Перейти в окне к практике другой темы.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_switch(app: AppHandle, course: String, topic: String) -> crate::practice::Practice {
+    crate::practice::switch(&app, Some(course), Some(topic));
+    crate::practice::state(&app)
+}
+
+/// Практики тем: на каком шаге, пройдена ли — для выбора темы.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_progress(app: AppHandle) -> Vec<crate::practice::Progress> {
+    crate::practice::progress(&app)
 }
 
 /// Составить сценарий по цели человека (или по теме, из которой открыли).

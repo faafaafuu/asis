@@ -484,12 +484,20 @@ function renderPractice(root, topic) {
     box.append(el("p", "muted", "Терминал браузеру недоступен — практика открывается в программе Ноа на компьютере."));
   } else {
     const failed = el("p", "muted");
-    box.append(
-      button("🖥 Открыть практику по теме", () =>
-        api?.invoke("practice_open", { course: course.id, topic: topic.id }).catch((err) => (failed.textContent = `Не открылось: ${err}`)),
-      ),
-      failed,
+    const open = button("🖥 Открыть практику по теме", () =>
+      api?.invoke("practice_open", { course: course.id, topic: topic.id }).catch((err) => (failed.textContent = `Не открылось: ${err}`)),
     );
+    box.append(open, failed);
+    // У темы своя практика: начата — продолжается с того же шага.
+    api
+      ?.invoke("practice_progress")
+      .then((list) => {
+        const own = (list ?? []).find((p) => p.course === course.id && p.topic === topic.id);
+        if (!own) return;
+        open.textContent = own.done ? "🖥 Практика пройдена — открыть" : "🖥 Продолжить практику";
+        failed.textContent = own.done ? "" : `Остановились на шаге ${own.step + 1} из ${own.total}.`;
+      })
+      .catch(() => {});
   }
   root.append(box);
 }

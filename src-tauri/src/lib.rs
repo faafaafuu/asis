@@ -363,6 +363,10 @@ pub fn run() {
             commands::practice_check,
             #[cfg(desktop)]
             commands::practice_verbose,
+            #[cfg(desktop)]
+            commands::practice_switch,
+            #[cfg(desktop)]
+            commands::practice_progress,
             commands::learn_topic,
             commands::learn_read,
             commands::learn_place,

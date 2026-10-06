@@ -494,3 +494,23 @@
   flex: none;
   color: var(--good);
 }
+
+.topic-pick__title {
+  flex: 1;
+}
+
+/* Своя практика темы: на каком шаге или пройдена. */
+.topic-pick__state {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.topic-pick__state:empty {
+  display: none;
+}
+
+.coach__foot {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}

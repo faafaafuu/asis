@@ -36,13 +36,14 @@
       { title: "Открыть наружу", goal: "Сервис NodePort и проверка из браузера.", why: "Без сервиса под виден только внутри.", check: "страница nginx по адресу узла", node: "svc" },
     ],
   };
-  const state = {
+  let state = {
+    course: "k8s",
     scenario: params.get("empty") ? null : scenario,
     step: 1,
     done: false,
     here: "server",
     watching: true,
-    topic: "k8s",
+    topic: "k3s",
     feed: params.get("empty")
       ? []
       : [
@@ -55,6 +56,7 @@
         ],
   };
 
+  const items = { "k8s/k3s": state };
   let line = "";
   const prompt = "\x1b[32mroot@node1\x1b[0m:~# ";
   globalThis.__TAURI__ = {
@@ -110,6 +112,16 @@
             state.feed.push({ who: "noa", kind: "comment", text: "Пока не вижу в терминале, что шаг сделан: kubectl get nodes ещё не запускали." });
             emit("practice:state", { practice: structuredClone(state), say: "", spoken: false });
             return null;
+          case "practice_switch": {
+            const key = `${args.course}/${args.topic}`;
+            items[key] ??= { course: args.course, topic: args.topic, scenario: null, step: 0, done: false, here: "", watching: state.watching, verbose: state.verbose, feed: [] };
+            state = items[key];
+            return structuredClone(state);
+          }
+          case "practice_progress":
+            return Object.values(items)
+              .filter((p) => p.scenario)
+              .map((p) => ({ course: p.course, topic: p.topic, step: p.step, total: p.scenario.steps.length, done: p.done }));
           case "learn_overview":
             return [
               {

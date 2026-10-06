@@ -17,6 +17,7 @@
 //! наблюдение совсем.
 
 use std::io::{Read, Write};
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -110,10 +111,23 @@ fn yes() -> bool {
     true
 }
 
+/// Практики по темам: у каждой темы курса своя — сценарий, шаг, лента. Иначе
+/// практика одной темы открывалась в другой, и выходила каша. Ключ —
+/// «курс/тема»; пустой — своя задача без курса.
+#[derive(Default, Serialize, Deserialize)]
+struct Saved {
+    /// Какая практика сейчас в окне.
+    #[serde(default)]
+    current: String,
+    #[serde(default)]
+    items: BTreeMap<String, Practice>,
+}
+
 struct Store {
     loaded: bool,
-    practice: Practice,
-    /// Последние замечания Ноа — чтобы не повторялась.
+    saved: Saved,
+    /// Последние замечания Ноа — чтобы не повторялась. Своя у каждой
+    /// практики: при смене темы начинается заново.
     thread: Vec<ThreadItem>,
     /// Ответ голосом идёт: фразы разговора без рук — вопросы практике.
     voice: bool,
@@ -121,17 +135,7 @@ struct Store {
 
 static STORE: Mutex<Store> = Mutex::new(Store {
     loaded: false,
-    practice: Practice {
-        scenario: None,
-        step: 0,
-        done: false,
-        feed: Vec::new(),
-        here: String::new(),
-        course: None,
-        topic: None,
-        watching: true,
-        verbose: false,
-    },
+    saved: Saved { current: String::new(), items: BTreeMap::new() },
     thread: Vec::new(),
     voice: false,
 });
@@ -143,40 +147,78 @@ fn path(app: &AppHandle) -> Option<std::path::PathBuf> {
     app.path().app_config_dir().ok().map(|dir| dir.join("practice.json"))
 }
 
-/// Первый доступ — с диска.
+fn key_of(course: Option<&str>, topic: Option<&str>) -> String {
+    match (course, topic) {
+        (Some(course), Some(topic)) => format!("{course}/{topic}"),
+        _ => String::new(),
+    }
+}
+
+/// Новая практика темы. Глаз и подробный режим — как были у прежней: это
+/// настройки человека, а не темы.
+fn blank(course: Option<String>, topic: Option<String>, like: Option<&Practice>) -> Practice {
+    Practice {
+        course,
+        topic,
+        watching: like.map_or(true, |p| p.watching),
+        verbose: like.is_some_and(|p| p.verbose),
+        ..Practice::default()
+    }
+}
+
+/// Первый доступ — с диска. Файл до разделения по темам — одна практика:
+/// она встаёт под свою тему.
 fn load(store: &mut Store, app: &AppHandle) {
     if store.loaded {
         return;
     }
     store.loaded = true;
-    if let Some(saved) = path(app)
+    let Some(value) = path(app)
         .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str::<Practice>(&text).ok())
-    {
-        store.practice = saved;
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+    else {
+        return;
+    };
+    if value.get("items").is_some() {
+        if let Ok(saved) = serde_json::from_value::<Saved>(value) {
+            store.saved = saved;
+        }
+    } else if let Ok(old) = serde_json::from_value::<Practice>(value) {
+        let key = key_of(old.course.as_deref(), old.topic.as_deref());
+        store.saved.current = key.clone();
+        store.saved.items.insert(key, old);
     }
 }
 
-/// Взглянуть на ход практики, ничего не меняя.
+/// Взглянуть на текущую практику, ничего не меняя.
 fn peek<R>(app: &AppHandle, look: impl FnOnce(&Practice) -> R) -> R {
     let mut store = STORE.lock().unwrap_or_else(|err| err.into_inner());
     load(&mut store, app);
-    look(&store.practice)
+    match store.saved.items.get(&store.saved.current) {
+        Some(practice) => look(practice),
+        None => look(&blank(None, None, None)),
+    }
 }
 
-/// Поменять ход практики — и сразу на диск.
+/// Поменять текущую практику — и сразу на диск.
 fn with<R>(app: &AppHandle, change: impl FnOnce(&mut Practice) -> R) -> R {
     let mut store = STORE.lock().unwrap_or_else(|err| err.into_inner());
     load(&mut store, app);
-    let out = change(&mut store.practice);
-    let excess = store.practice.feed.len().saturating_sub(MAX_FEED);
-    store.practice.feed.drain(..excess);
-    if let (Some(path), Ok(json)) = (path(app), serde_json::to_string(&store.practice)) {
+    let key = store.saved.current.clone();
+    let practice = store.saved.items.entry(key).or_insert_with(|| blank(None, None, None));
+    let out = change(practice);
+    let excess = practice.feed.len().saturating_sub(MAX_FEED);
+    practice.feed.drain(..excess);
+    save(app, &store.saved);
+    out
+}
+
+fn save(app: &AppHandle, saved: &Saved) {
+    if let (Some(path), Ok(json)) = (path(app), serde_json::to_string(saved)) {
         if let Err(err) = std::fs::write(path, json) {
             log::warn!("практика не сохранилась: {err}");
         }
     }
-    out
 }
 
 pub fn state(app: &AppHandle) -> Practice {
@@ -204,17 +246,58 @@ fn note(p: &mut Practice, who: &str, kind: &str, text: &str) {
     }
 }
 
-/// Открыли практику из темы курса — запоминаем тему для сценария.
-pub fn set_context(app: &AppHandle, course: Option<String>, topic: Option<String>) {
-    if course.is_none() {
+/// Перейти к практике темы: открыли из урока или выбрали в окне. Своя у
+/// каждой темы — с её сценарием, шагом и лентой; новой теме — чистая.
+pub fn switch(app: &AppHandle, course: Option<String>, topic: Option<String>) {
+    if course.is_none() || topic.is_none() {
         return;
     }
-    with(app, |p| {
-        if p.scenario.is_none() {
-            p.course = course;
-            p.topic = topic;
+    let key = key_of(course.as_deref(), topic.as_deref());
+    {
+        let mut store = STORE.lock().unwrap_or_else(|err| err.into_inner());
+        load(&mut store, app);
+        if store.saved.current == key {
+            return;
         }
-    });
+        let like = store.saved.items.get(&store.saved.current).cloned();
+        store.saved.items.entry(key.clone()).or_insert_with(|| blank(course, topic, like.as_ref()));
+        store.saved.current = key.clone();
+        store.thread.clear();
+        save(app, &store.saved);
+    }
+    log::info!("практика: тема {key}");
+    publish(app, "", false);
+}
+
+/// Практики тем — для выбора темы: на каком шаге и пройдена ли.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Progress {
+    pub course: String,
+    pub topic: String,
+    pub step: usize,
+    pub total: usize,
+    pub done: bool,
+}
+
+pub fn progress(app: &AppHandle) -> Vec<Progress> {
+    let mut store = STORE.lock().unwrap_or_else(|err| err.into_inner());
+    load(&mut store, app);
+    store
+        .saved
+        .items
+        .values()
+        .filter_map(|p| {
+            let scenario = p.scenario.as_ref()?;
+            Some(Progress {
+                course: p.course.clone()?,
+                topic: p.topic.clone()?,
+                step: p.step,
+                total: scenario.steps.len(),
+                done: p.done,
+            })
+        })
+        .collect()
 }
 
 /// Начать заново: сценарий и лента — прочь, терминал остаётся.
@@ -375,10 +458,17 @@ fn scenario_material(p: &Practice) -> String {
 pub async fn plan(app: &AppHandle, course: Option<String>, topic: Option<String>, wish: &str) -> Result<Practice, String> {
     let wish = wish.trim();
     if topic.is_some() {
-        with(app, |p| {
-            p.course = course;
-            p.topic = topic;
-        });
+        switch(app, course, topic);
+    } else {
+        // Своя задача без курса — своя практика, не поверх темы.
+        let mut store = STORE.lock().unwrap_or_else(|err| err.into_inner());
+        load(&mut store, app);
+        if !store.saved.current.is_empty() {
+            let like = store.saved.items.get(&store.saved.current).cloned();
+            store.saved.items.insert(String::new(), blank(None, None, like.as_ref()));
+            store.saved.current = String::new();
+            store.thread.clear();
+        }
     }
     let context = peek(app, |p| topic_material(p, true));
     if wish.is_empty() && context.is_empty() {
