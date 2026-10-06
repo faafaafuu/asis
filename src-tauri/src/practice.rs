@@ -414,6 +414,8 @@ pub async fn plan(app: &AppHandle, course: Option<String>, topic: Option<String>
          сделать и что должно получиться, 1–2 фразы, без готовых команд: человек ищет сам, \
          команду подскажешь по ходу. why — зачем шаг в общей картине, одна фраза. check — как \
          убедиться, что получилось: команда или признак. node — id блока картины.\n\
+         - {PROD} Шаги подготовки и защиты сервера — часть сценария, а не «потом». В why \
+         говори и о том, почему так делают в проде.\n\
          Пиши по-русски.",
         name(app)
     );
@@ -462,6 +464,17 @@ struct Look {
     error: bool,
 }
 
+/// Практика — как в настоящей эксплуатации, а не учебное упрощение: этому
+/// правилу следуют и сценарий, и замечания, и ответы.
+const PROD: &str = "Всё — как в продакшене у настоящей команды, без учебных упрощений и \
+    костылей: официальные способы установки и пакеты, закреплённые версии; работа от \
+    пользователя с sudo, а не от root; вход по SSH-ключам; фаервол включён, открыто только \
+    нужное; секреты не в командах и не в git; настройка файлами (манифесты YAML, конфиги, \
+    юниты systemd), которые можно положить в git, а не разовыми командами; проверки \
+    здоровья, логи, перезапуск после сбоя; HTTPS для всего, что смотрит наружу. Срезает \
+    человек угол (chmod 777, выключенный фаервол, образ :latest, --insecure, всё от root) — \
+    коротко скажи, почему в проде так не делают и как правильно.";
+
 /// Зачем Ноа смотрит в терминал.
 #[derive(Clone, Copy, PartialEq)]
 enum Glance {
@@ -494,7 +507,9 @@ async fn observe(app: &AppHandle, chunk: String, glance: Glance) {
          - next — следующее конкретное действие, можно с командой в `обратных кавычках`; пусто, \
          если человек и так идёт верно.\n\
          - node — id блока общей картины, которого касается сделанное, или пусто.\n\
-         - error — true, если команда упала или сделано не то.\n\
+         - error — true, если команда упала или сделано не то, в том числе так, как в проде \
+         не делают.\n\
+         {PROD}\n\
          Если сделанное — это понятие из урока, назови его так, как в уроке: так практика \
          связывается с теорией. Команды в say не зачитывай — говори словами, что они делают. \
          Без похвалы и вступлений. Не повторяй сказанное раньше. По-русски.",
@@ -569,7 +584,7 @@ pub async fn ask(app: &AppHandle, text: &str, voice: bool) -> Result<String, Str
          Как отвечать: сразу по существу, простыми словами, с опорой на то, что сейчас в \
          терминале. Просят подсказку — сначала направление, команду — если застрял. Просят общую \
          картину — что уже построено, где мы сейчас, что впереди и как части связаны. {length} \
-         Без вступлений и похвалы. По-русски.",
+         {PROD} Без вступлений и похвалы. По-русски.",
         name(app)
     );
     let thread = STORE.lock().unwrap_or_else(|err| err.into_inner()).thread.clone();
@@ -852,6 +867,12 @@ async fn watch_loop(app: AppHandle, id: u64) {
         // Каждый взгляд модели — секунды и токены. Известные ошибки Ноа
         // разбирает сразу и сама; к модели идёт только упавшее, а в подробном
         // режиме — и всякая команда, кроме рутины (cd, ls).
+        if !running {
+            if let Some(warning) = shortcut(&command_of(&chunk)) {
+                with(&app, |p| note(p, "noa", "error", warning));
+                publish(&app, warning, false);
+            }
+        }
         if running {
             observe(&app, chunk, Glance::Running).await;
         } else if let Some(hint) = instant(&chunk) {
@@ -898,6 +919,36 @@ fn failed(chunk: &str) -> bool {
 pub async fn check(app: &AppHandle) {
     let tail = terminal_tail(4000);
     observe(app, tail, Glance::Check).await;
+}
+
+/// Костыль, который в проде не прошёл бы ревью, — замечание сразу, без модели.
+fn shortcut(command: &str) -> Option<&'static str> {
+    let lower = command.to_lowercase();
+    let has = |part: &str| lower.contains(part);
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    let word = |w: &str| words.contains(&w);
+    if word("chmod") && (word("777") || word("-r") && has("777") || has("a+rwx")) {
+        return Some("chmod 777 открывает файл всем — в проде так не делают. Дайте права владельцу и группе, которым они нужны: chown и chmod 750 или 640.");
+    }
+    if (word("ufw") && word("disable")) || (has("firewalld") && (word("stop") || word("disable"))) || has("iptables -f") {
+        return Some("Фаервол выключать нельзя даже на время — сервер сразу виден всему интернету. Откройте только нужный порт: ufw allow 443/tcp.");
+    }
+    if word("setenforce") && word("0") {
+        return Some("SELinux не выключают, а настраивают: посмотрите, что он запретил, в audit.log и разрешите именно это.");
+    }
+    if has("--insecure") || has("-k https") || has("--no-check-certificate") || has("insecure-skip-tls-verify") {
+        return Some("Проверку сертификата отключать нельзя: так не отличить свой сервер от подменённого. Поставьте правильный сертификат или укажите свой центр через --cacert.");
+    }
+    if has("permitrootlogin yes") || has("passwordauthentication yes") {
+        return Some("В проде вход по SSH — только по ключам и не под root: PermitRootLogin no, PasswordAuthentication no.");
+    }
+    if (word("docker") || word("podman") || word("kubectl")) && words.iter().any(|w| w.ends_with(":latest")) {
+        return Some("Тег :latest в проде не берут: завтра под ним будет другая версия. Закрепите конкретную, например nginx:1.27.");
+    }
+    if word("docker") && word("run") && has("--privileged") {
+        return Some("--privileged даёт контейнеру всю машину. Выдайте только нужные права: --cap-add или нужное устройство.");
+    }
+    None
 }
 
 /// Частые ошибки — ответ сразу, без модели. Первая подходящая.
@@ -1171,6 +1222,17 @@ mod tests {
         assert!(routine("PS C:\\Users\\manda> cd projects"));
         assert!(!routine("root@node1:~# ls /nope\nls: cannot access '/nope': No such file or directory"));
         assert!(!routine("root@node1:~# kubectl get nodes\nNAME STATUS"));
+    }
+
+    #[test]
+    fn shortcuts_are_flagged() {
+        assert!(shortcut("chmod -R 777 /var/www").is_some());
+        assert!(shortcut("sudo ufw disable").is_some());
+        assert!(shortcut("docker run -d nginx:latest").is_some());
+        assert!(shortcut("curl -k https://localhost:6443").is_some());
+        assert_eq!(shortcut("chmod 640 /etc/app.conf"), None);
+        assert_eq!(shortcut("sudo ufw allow 443/tcp"), None);
+        assert_eq!(shortcut("docker run -d nginx:1.27"), None);
     }
 
     #[test]
