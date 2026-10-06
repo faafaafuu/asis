@@ -193,7 +193,15 @@ function stage() {
     if (!aloud()) api.invoke("voice_stop").catch(() => {});
     render();
   });
-  toggles.append(eye, voice);
+  // 💬 — разбирать каждую команду. Выключено — только ошибки и просьбы:
+  // каждая команда — запрос к модели.
+  const verbose = el("button", "icon-toggle", "💬");
+  verbose.title = practice?.verbose
+    ? "Разбирает каждую команду — выключить, говорить только об ошибках и по просьбе"
+    : "Говорит только об ошибках и по просьбе — включить разбор каждой команды";
+  verbose.setAttribute("aria-pressed", String(Boolean(practice?.verbose)));
+  verbose.addEventListener("click", () => api.invoke("practice_verbose", { on: !practice?.verbose }).catch(() => {}));
+  toggles.append(eye, verbose, voice);
   box.append(canvas, now, toggles);
   return box;
 }
@@ -204,58 +212,94 @@ function paintEye() {
   ui.eye.textContent = on ? "Ноа видит терминал" : "Ноа не смотрит";
 }
 
-const EXAMPLES = [
-  "Поднять k3s-кластер из трёх узлов и запустить в нём приложение",
-  "Nginx перед приложением в Docker, с HTTPS от Let's Encrypt",
-  "PostgreSQL с репликой и резервной копией",
-  "Свой VPN на WireGuard",
-  "Мониторинг: Prometheus и Grafana",
-];
+/** Курсы для выбора темы — грузятся один раз, при первом показе выбора. */
+let courses = null;
+/** Выбранные курс и тема — до того, как сценарий составлен. */
+let picked = { course: null, topic: null };
+
+const STATUS_MARK = { done: "✓", practice: "◐", reading: "◔", new: "" };
 
 function setup(root) {
   const box = el("div", "setup");
-  box.append(el("h2", "", "Что строим?"));
+  root.append(box);
+  if (!courses) {
+    box.append(el("p", "", "Загружаю курсы…"));
+    api
+      .invoke("learn_overview")
+      .then((list) => (courses = Array.isArray(list) ? list : []))
+      .catch(() => (courses = []))
+      .then(() => render());
+    return;
+  }
+  box.append(el("h2", "", "Практика по теме"));
   box.append(
     el(
       "p",
       "",
-      "Опишите задачу — Ноа составит сценарий по шагам и общую картину. Работаете вы сами в терминале слева: подключитесь к своему серверу, а Ноа смотрит, объясняет, что происходит, и подсказывает, куда дальше.",
+      "Выберите тему курса — Ноа соберёт живую задачу на её понятиях: шаги в порядке урока и общую картину. Работаете вы сами в терминале слева, Ноа смотрит и подключается, когда нужна.",
     ),
   );
-  const area = el("textarea", "answer");
-  area.placeholder = "Например: поднять кластер Kubernetes из трёх серверов";
-  const chips = el("div", "chips");
-  if (practice?.topic) {
-    const chip = el("button", "chip chip--topic", "По теме, которую сейчас прохожу");
-    chip.addEventListener("click", () => plan(""));
-    chips.append(chip);
+
+  const wish = el("textarea", "answer");
+  wish.rows = 2;
+
+  if (courses.length) {
+    // По умолчанию — тема, из которой открыли практику, иначе текущая в курсе.
+    const course = courses.find((c) => c.id === (picked.course ?? practice?.course)) ?? courses[0];
+    picked.course = course.id;
+    picked.topic ??= practice?.course === course.id && practice?.topic ? practice.topic : course.current ?? course.topics[0]?.id;
+
+    if (courses.length > 1) {
+      const select = el("select", "answer setup__course");
+      for (const c of courses) {
+        const option = el("option", "", c.title);
+        option.value = c.id;
+        option.selected = c.id === course.id;
+        select.append(option);
+      }
+      select.addEventListener("change", () => {
+        picked = { course: select.value, topic: null };
+        render();
+      });
+      box.append(select);
+    } else box.append(el("div", "coach__sub", course.title));
+
+    const list = el("div", "topics-pick");
+    for (const topic of course.topics) {
+      const item = el("button", "topic-pick", "");
+      item.append(el("span", "topic-pick__mark", STATUS_MARK[topic.status] ?? ""), el("span", "", topic.title));
+      item.setAttribute("aria-pressed", String(topic.id === picked.topic));
+      if (topic.id === course.current) item.title = "Тема, на которой вы остановились";
+      item.addEventListener("click", () => {
+        picked.topic = topic.id;
+        render();
+      });
+      list.append(item);
+    }
+    box.append(list);
+    wish.placeholder = "Пожелание, если есть: «на трёх серверах», «через Docker»…";
+  } else {
+    box.append(el("p", "", "Курсов пока нет — опишите задачу сами. Курс можно собрать в окне «Обучение»."));
+    wish.placeholder = "Например: поднять кластер Kubernetes из трёх серверов";
   }
-  for (const text of EXAMPLES) {
-    const chip = el("button", "chip", text);
-    chip.addEventListener("click", () => {
-      area.value = text;
-      area.focus();
-    });
-    chips.append(chip);
-  }
-  const go = button(waiting ? "Ноа составляет сценарий…" : "Составить сценарий", () => plan(area.value));
+
+  const go = button(waiting ? "Ноа составляет сценарий…" : "Составить сценарий", () => plan(wish.value));
   go.disabled = waiting;
-  area.addEventListener("keydown", (event) => {
+  wish.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      plan(area.value);
+      plan(wish.value);
     }
   });
-  box.append(area, chips, go);
+  box.append(wish, go);
   if (error) box.append(el("p", "setup__error", error));
   box.append(
     el(
       "p",
       "",
-      "Можно и без сценария: просто работайте — Ноа будет объяснять, что вы делаете. Вывод терминала уходит вашей модели; пароли и токены Ноа закрывает, а глаз 👁 выключает наблюдение совсем.",
+      "Вывод терминала уходит вашей модели, поэтому Ноа смотрит экономно: молчит, пока всё идёт как надо, и подключается, если что-то упало, если спросите или нажмёте «Проверь шаг». 💬 — разбирать каждую команду. Пароли и токены она закрывает, 👁 выключает наблюдение.",
     ),
   );
-  root.append(box);
 }
 
 function stepCard(scenario) {
@@ -267,6 +311,11 @@ function stepCard(scenario) {
   } else if (step) {
     card.append(el("div", "coach__step-num", `Шаг ${practice.step + 1} из ${scenario.steps.length}`));
     card.append(el("h2", "coach__step-title", step.title));
+    if (step.concept) {
+      const concept = el("span", "coach__concept", `Из урока: ${step.concept}`);
+      concept.title = "Понятие урока, которое этот шаг отрабатывает руками";
+      card.append(concept);
+    }
     card.append(el("p", "coach__step-goal", step.goal));
     if (step.why) card.append(el("p", "coach__step-why", step.why));
     if (step.check) {
@@ -276,7 +325,8 @@ function stepCard(scenario) {
     }
   }
   const actions = el("div", "coach__actions");
-  if (!practice.done) actions.append(button("✓ Шаг готов", () => api.invoke("practice_step", { delta: 1 })));
+  // «Проверь шаг» — Ноа смотрит в терминал и сама решает, сделан ли он.
+  if (!practice.done) actions.append(button("✓ Проверь шаг", () => think(() => api.invoke("practice_check"))));
   actions.append(
     button("💡 Подсказка", () => ask("Подскажи, что делать дальше на этом шаге."), true),
     button("🗺 Общая картина", () => ask("Общая картина: что уже построено, где мы сейчас, что впереди и как части связаны?"), true),
@@ -285,6 +335,11 @@ function stepCard(scenario) {
     const back = button("←", () => api.invoke("practice_step", { delta: -1 }), true);
     back.title = "Вернуться к прошлому шагу";
     actions.append(back);
+  }
+  if (!practice.done) {
+    const skip = button("→", () => api.invoke("practice_step", { delta: 1 }), true);
+    skip.title = "Считать шаг сделанным без проверки";
+    actions.append(skip);
   }
   card.append(actions);
   return card;
@@ -368,18 +423,24 @@ function send() {
   ask(text);
 }
 
-async function ask(text) {
+/** Запрос к Ноа: пока она думает, это видно в ленте и на кольце. */
+async function think(request) {
+  if (waiting) return;
   api.invoke("voice_stop").catch(() => {});
   waiting = true;
   paintFeed();
+  paintStatus();
   try {
-    await api.invoke("practice_ask", { text });
+    await request();
   } catch (err) {
     practice?.feed.push({ who: "noa", kind: "error", text: String(err) });
   }
   waiting = false;
   paintFeed();
+  paintStatus();
 }
+
+const ask = (text) => think(() => api.invoke("practice_ask", { text }));
 
 async function plan(goal) {
   if (waiting) return;
@@ -387,7 +448,9 @@ async function plan(goal) {
   error = "";
   render();
   try {
-    practice = await api.invoke("practice_plan", { goal });
+    const topic = courses?.length ? { course: picked.course, topic: picked.topic } : { course: null, topic: null };
+    practice = await api.invoke("practice_plan", { ...topic, goal });
+    picked = { course: null, topic: null };
   } catch (err) {
     error = String(err);
   }
@@ -409,7 +472,7 @@ function render() {
   if (!scenario) {
     setup(body);
     if (practice?.feed?.length) {
-      root.append(feed);
+      root.append(feedSplit, feed);
       paintFeed();
     }
     root.append(askRow);
@@ -420,7 +483,7 @@ function render() {
   const pic = picture(scenario);
   if (pic) body.append(pic);
   body.append(stepsList(scenario));
-  root.append(feed, askRow);
+  root.append(feedSplit, feed, askRow);
   const foot = el("div", "coach__foot");
   const fresh = el("button", "link", "↺ Новый сценарий");
   // Сценарий не теряется от случайного клика: второй клик — подтверждение.
@@ -457,8 +520,8 @@ api?.listen("practice:state", (event) => {
   if (sameScenario && practice.scenario) {
     paintFeed();
     paintEye();
-    const eye = ui.coach.querySelector(".coach__toggles .icon-toggle");
-    eye?.setAttribute("aria-pressed", String(Boolean(practice.watching)));
+    // Переключатели 👁 и 💬 — по свежему состоянию.
+    ui.coach.querySelector(".coach__stage")?.replaceWith(stage());
     const here = ui.coach.querySelector(".coach__picture .scheme");
     const scheme = parseScheme(practice.scenario.picture);
     if (here && scheme) here.replaceWith(renderScheme(scheme, { here: practice.here, down: true }));
@@ -502,6 +565,84 @@ function paintStatus() {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !ui.screen.contains(document.activeElement)) api.invoke("voice_stop").catch(() => {});
 });
+
+/* ── Размеры частей окна ───────────────────────────────────────────────── */
+
+// Границы двигаются мышью: между терминалом и Ноа и внутри панели Ноа —
+// между шагом и лентой. Размеры помнятся; двойной клик — как было.
+const SIZES = "noa.practiceSizes";
+const sizes = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(SIZES) ?? "{}") ?? {};
+  } catch {
+    return {};
+  }
+})();
+const saveSizes = () => {
+  try {
+    localStorage.setItem(SIZES, JSON.stringify(sizes));
+  } catch {
+    /* не запомнится — не беда */
+  }
+};
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+function applySizes() {
+  const root = document.documentElement.style;
+  if (sizes.coach) root.setProperty("--coach-width", `${clamp(sizes.coach, 300, innerWidth * 0.7)}px`);
+  else root.removeProperty("--coach-width");
+  if (sizes.feed) ui.coach.style.setProperty("--feed-height", `${sizes.feed}px`);
+  else ui.coach.style.removeProperty("--feed-height");
+}
+
+/** Тянуть границу: `onMove` получает событие указателя. */
+function draggable(handle, onMove, onReset) {
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("is-dragging");
+    const move = (ev) => {
+      onMove(ev);
+      applySizes();
+    };
+    const up = () => {
+      handle.classList.remove("is-dragging");
+      handle.removeEventListener("pointermove", move);
+      saveSizes();
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up, { once: true });
+    handle.addEventListener("pointercancel", up, { once: true });
+  });
+  handle.addEventListener("dblclick", () => {
+    onReset();
+    applySizes();
+    saveSizes();
+  });
+}
+
+draggable(
+  ui.split,
+  (event) => (sizes.coach = clamp(innerWidth - event.clientX, 300, innerWidth * 0.7)),
+  () => delete sizes.coach,
+);
+
+// Граница ленты живёт в панели, которая перерисовывается, — создаётся один раз.
+const feedSplit = el("div", "coach__split");
+feedSplit.setAttribute("role", "separator");
+feedSplit.title = "Потяните, чтобы поменять высоту ленты · двойной клик — как было";
+draggable(
+  feedSplit,
+  (event) => {
+    const box = ui.coach.getBoundingClientRect();
+    const below = askRow.offsetHeight + (ui.coach.querySelector(".coach__foot")?.offsetHeight ?? 0) + 24;
+    sizes.feed = clamp(box.bottom - event.clientY - below, 90, box.height * 0.75);
+  },
+  () => delete sizes.feed,
+);
+addEventListener("resize", applySizes);
+applySizes();
 
 /* ── Начало ────────────────────────────────────────────────────────────── */
 

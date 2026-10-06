@@ -359,6 +359,10 @@ pub fn run() {
             commands::practice_clipboard,
             #[cfg(desktop)]
             commands::practice_listening,
+            #[cfg(desktop)]
+            commands::practice_check,
+            #[cfg(desktop)]
+            commands::practice_verbose,
             commands::learn_topic,
             commands::learn_read,
             commands::learn_place,

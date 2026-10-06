@@ -29,8 +29,8 @@
       ],
     },
     steps: [
-      { title: "Подготовить серверы", goal: "Обновить пакеты и задать имена узлам.", why: "Узлы узнают друг друга по именам.", check: "`hostnamectl` показывает новое имя", node: "server" },
-      { title: "Поставить k3s server", goal: "На первом сервере запустить управляющий узел.", why: "Он хранит состояние кластера и раздаёт задачи.", check: "`kubectl get nodes` — один узел Ready", node: "server" },
+      { title: "Подготовить серверы", goal: "Обновить пакеты и задать имена узлам.", why: "Узлы узнают друг друга по именам.", check: "`hostnamectl` показывает новое имя", node: "server", concept: "узел" },
+      { title: "Поставить k3s server", concept: "control plane", goal: "На первом сервере запустить управляющий узел.", why: "Он хранит состояние кластера и раздаёт задачи.", check: "`kubectl get nodes` — один узел Ready", node: "server" },
       { title: "Подключить агентов", goal: "Два других сервера присоединить по токену.", why: "На агентах запускаются поды.", check: "три узла Ready", node: "agent" },
       { title: "Запустить nginx", goal: "Создать Deployment с nginx.", why: "Первое приложение в кластере.", check: "под Running", node: "pod" },
       { title: "Открыть наружу", goal: "Сервис NodePort и проверка из браузера.", why: "Без сервиса под виден только внутри.", check: "страница nginx по адресу узла", node: "svc" },
@@ -101,6 +101,30 @@
             state.watching = args.on;
             emit("practice:state", { practice: structuredClone(state), say: "", spoken: false });
             return null;
+          case "practice_verbose":
+            state.verbose = args.on;
+            emit("practice:state", { practice: structuredClone(state), say: "", spoken: false });
+            return null;
+          case "practice_check":
+            await new Promise((r) => setTimeout(r, 700));
+            state.feed.push({ who: "noa", kind: "comment", text: "Пока не вижу в терминале, что шаг сделан: kubectl get nodes ещё не запускали." });
+            emit("practice:state", { practice: structuredClone(state), say: "", spoken: false });
+            return null;
+          case "learn_overview":
+            return [
+              {
+                id: "k8s",
+                title: "Kubernetes с нуля",
+                current: "k3s",
+                topics: [
+                  { id: "containers", title: "Контейнеры и образы", status: "done" },
+                  { id: "k3s", title: "Кластер k3s: server и agent", status: "reading" },
+                  { id: "deploy", title: "Deployment и Service", status: "new" },
+                  { id: "ingress", title: "Ingress и HTTPS", status: "new" },
+                ],
+              },
+              { id: "net", title: "Сети для админа", current: null, topics: [{ id: "osi", title: "Модель OSI", status: "new" }] },
+            ];
           case "runtime_config":
             return { theme: document.documentElement.dataset.theme };
           case "app_version":

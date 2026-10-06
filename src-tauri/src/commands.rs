@@ -1768,8 +1768,27 @@ pub fn practice_state(app: AppHandle) -> crate::practice::Practice {
 /// Составить сценарий по цели человека (или по теме, из которой открыли).
 #[cfg(desktop)]
 #[tauri::command]
-pub async fn practice_plan(app: AppHandle, goal: String) -> Result<crate::practice::Practice, String> {
-    crate::practice::plan(&app, &goal).await
+pub async fn practice_plan(
+    app: AppHandle,
+    course: Option<String>,
+    topic: Option<String>,
+    goal: String,
+) -> Result<crate::practice::Practice, String> {
+    crate::practice::plan(&app, course, topic, &goal).await
+}
+
+/// «Проверь шаг»: Ноа смотрит в терминал и говорит, сделан ли шаг.
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn practice_check(app: AppHandle) {
+    crate::practice::check(&app).await;
+}
+
+/// Разбирать каждую команду или только ошибки и просьбы.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_verbose(app: AppHandle, on: bool) {
+    crate::practice::set_verbose(&app, on);
 }
 
 #[cfg(desktop)]

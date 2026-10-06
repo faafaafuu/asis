@@ -47,6 +47,9 @@ pub struct Step {
     /// Блок общей картины, к которому относится шаг.
     #[serde(default)]
     pub node: String,
+    /// Понятие урока, которое шаг отрабатывает руками.
+    #[serde(default)]
+    pub concept: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -97,6 +100,10 @@ pub struct Practice {
     /// Смотрит ли Ноа в терминал. Выключили — вывод никуда не уходит.
     #[serde(default = "yes")]
     pub watching: bool,
+    /// Разбирать каждую команду. Выключено — Ноа говорит только об ошибках,
+    /// по просьбе и при проверке шага: каждая команда — это запрос к модели.
+    #[serde(default)]
+    pub verbose: bool,
 }
 
 fn yes() -> bool {
@@ -123,6 +130,7 @@ static STORE: Mutex<Store> = Mutex::new(Store {
         course: None,
         topic: None,
         watching: true,
+        verbose: false,
     },
     thread: Vec::new(),
     voice: false,
@@ -212,10 +220,15 @@ pub fn set_context(app: &AppHandle, course: Option<String>, topic: Option<String
 /// Начать заново: сценарий и лента — прочь, терминал остаётся.
 pub fn reset(app: &AppHandle) {
     with(app, |p| {
-        let watching = p.watching;
-        *p = Practice { watching, ..Practice::default() };
+        let (watching, verbose, course, topic) = (p.watching, p.verbose, p.course.clone(), p.topic.clone());
+        *p = Practice { watching, verbose, course, topic, ..Practice::default() };
     });
     STORE.lock().unwrap_or_else(|err| err.into_inner()).thread.clear();
+    publish(app, "", false);
+}
+
+pub fn set_verbose(app: &AppHandle, on: bool) {
+    with(app, |p| p.verbose = on);
     publish(app, "", false);
 }
 
@@ -305,23 +318,39 @@ fn name(app: &AppHandle) -> String {
     app.state::<crate::state::AppState>().wake_name()
 }
 
-/// Тема курса, из которой открыли практику, — для сценария.
-fn topic_material(p: &Practice) -> String {
+/// Тема курса, по которой практика: урок целиком для сценария (`full`) или
+/// коротко — название и понятия — для каждого хода.
+fn topic_material(p: &Practice, full: bool) -> String {
     let (Some(course), Some(topic)) = (&p.course, &p.topic) else { return String::new() };
     let Ok(course) = crate::learning::course(course) else { return String::new() };
     let Ok(topic) = crate::learning::topic(&course, topic) else { return String::new() };
-    let lesson: String = topic.lesson.chars().take(3000).collect();
-    let terms = topic.concepts.iter().map(|c| c.term.as_str()).collect::<Vec<_>>().join(", ");
+    if !full {
+        let terms = topic.concepts.iter().map(|c| c.term.as_str()).collect::<Vec<_>>().join(", ");
+        return format!("Практика по теме «{}» курса «{}». Понятия урока: {terms}\n", topic.title, course.title);
+    }
+    let outline = crate::tutor::sections(&topic.lesson)
+        .iter()
+        .filter_map(|part| part.lines().find_map(|l| l.strip_prefix("## ")).map(|h| format!("- {}", h.trim())))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let concepts = topic
+        .concepts
+        .iter()
+        .map(|c| format!("- {} — {}", c.term, c.definition))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let lesson: String = topic.lesson.chars().take(4000).collect();
     format!(
-        "Практика по курсу «{}», тема «{}»: {}\nПонятия темы: {terms}\nНачало урока:\n{lesson}\n",
+        "Курс «{}», тема «{}»: {}\nРазделы урока:\n{outline}\nПонятия урока:\n{concepts}\nУрок (начало):\n{lesson}\n",
         course.title, topic.title, topic.summary
     )
 }
 
-/// Сценарий для модели: цель, общая картина, шаги с отметкой текущего.
+/// Сценарий для модели: тема, цель, общая картина, шаги с отметкой текущего.
 fn scenario_material(p: &Practice) -> String {
+    let topic = topic_material(p, false);
     let Some(s) = &p.scenario else {
-        return "Сценария пока нет: человек просто работает в терминале. Объясняй, что он делает.\n".into();
+        return format!("{topic}Сценария пока нет: человек просто работает в терминале. Объясняй, что он делает.\n");
     };
     let steps = s
         .steps
@@ -329,25 +358,44 @@ fn scenario_material(p: &Practice) -> String {
         .enumerate()
         .map(|(i, step)| {
             let mark = if p.done || i < p.step { "✓" } else if i == p.step { "→ сейчас" } else { " " };
-            format!("{}. [{mark}] {} — {} (проверка: {})", i + 1, step.title, step.goal, step.check)
+            let concept = if step.concept.is_empty() { String::new() } else { format!(" [понятие: {}]", step.concept) };
+            format!("{}. [{mark}] {} — {} (проверка: {}){concept}", i + 1, step.title, step.goal, step.check)
         })
         .collect::<Vec<_>>()
         .join("\n");
     let picture = serde_json::to_string(&s.picture).unwrap_or_default();
     format!(
-        "Сценарий «{}». Цель: {}\nЧто нужно заранее: {}\nОбщая картина (блоки и связи): {picture}\nШаги:\n{steps}\n",
+        "{topic}Сценарий «{}». Цель: {}\nЧто нужно заранее: {}\nОбщая картина (блоки и связи): {picture}\nШаги:\n{steps}\n",
         s.title, s.goal, s.setup
     )
 }
 
-/// Составить сценарий практики по цели человека.
-pub async fn plan(app: &AppHandle, goal: &str) -> Result<Practice, String> {
-    let goal = goal.trim();
-    let context = peek(app, topic_material);
-    if goal.is_empty() && context.is_empty() {
-        return Err("Напишите, что хотите собрать.".into());
+/// Составить сценарий практики по теме курса. `wish` — пожелание человека
+/// («на трёх серверах», «через Docker»); без темы — его собственная задача.
+pub async fn plan(app: &AppHandle, course: Option<String>, topic: Option<String>, wish: &str) -> Result<Practice, String> {
+    let wish = wish.trim();
+    if topic.is_some() {
+        with(app, |p| {
+            p.course = course;
+            p.topic = topic;
+        });
     }
-    let goal_line = if goal.is_empty() { "по теме ниже — выбери живую задачу на ней".to_string() } else { format!("«{goal}»") };
+    let context = peek(app, |p| topic_material(p, true));
+    if wish.is_empty() && context.is_empty() {
+        return Err("Выберите тему курса.".into());
+    }
+    let goal_line = match (context.is_empty(), wish.is_empty()) {
+        (false, true) => "по теме урока ниже — живая задача, на которой отрабатываются её понятия".to_string(),
+        (false, false) => format!("по теме урока ниже, с пожеланием человека: «{wish}»"),
+        _ => format!("«{wish}»"),
+    };
+    let topic_rule = if context.is_empty() {
+        ""
+    } else {
+        "- Сценарий отрабатывает руками именно эту тему: каждое важное понятие урока встречается \
+         хотя бы в одном шаге, шаги идут в порядке разделов урока. Не уходи в соседние темы. \
+         concept — понятие урока, которое шаг отрабатывает, как оно названо в уроке.\n"
+    };
     let rules = format!(
         "Ты — репетитор {}: составляешь сценарий практики в терминале. Человек учится руками: \
          сам набирает команды на своём сервере Linux по SSH (терминал открыт на его компьютере), \
@@ -357,7 +405,8 @@ pub async fn plan(app: &AppHandle, goal: &str) -> Result<Practice, String> {
          \"setup\": \"что нужно заранее: сколько серверов, какая система, доступ — коротко\", \
          \"picture\": {{\"title\": \"…\", \"points\": [\"…\"], \"nodes\": [{{\"id\": \"a\", \"label\": \"…\"}}], \
          \"edges\": [{{\"from\": \"a\", \"to\": \"b\", \"label\": \"…\"}}]}}, \
-         \"steps\": [{{\"title\": \"…\", \"goal\": \"…\", \"why\": \"…\", \"check\": \"…\", \"node\": \"a\"}}]}}\n\
+         \"steps\": [{{\"title\": \"…\", \"goal\": \"…\", \"why\": \"…\", \"check\": \"…\", \"node\": \"a\", \"concept\": \"…\"}}]}}\n\
+         {topic_rule}\
          - picture — общая картина того, что строим: 3–8 блоков по 1–4 слова (компоненты, \
          серверы, службы) и стрелки — кто к кому обращается или что из чего следует; points — \
          3–5 главных мыслей, каждая до 8 слов.\n\
@@ -385,10 +434,15 @@ pub async fn plan(app: &AppHandle, goal: &str) -> Result<Practice, String> {
         p.done = false;
         p.feed.clear();
         let intro = format!(
-            "{}. В конце: {} Наверху справа — общая картина. Начнём. {}",
+            "{}. В конце: {} Начнём. {}{}",
             scenario.title,
             scenario.goal.trim_end_matches('.').to_string() + ".",
-            step_intro(p)
+            step_intro(p),
+            if p.verbose {
+                ""
+            } else {
+                " Пока всё идёт как надо, я молчу: скажу, если что-то упадёт, если спросите или нажмёте «Проверь шаг»."
+            }
         );
         note(p, "noa", "step", &intro);
         intro
@@ -408,8 +462,20 @@ struct Look {
     error: bool,
 }
 
-/// Ноа посмотрела на новое в терминале.
-async fn observe(app: &AppHandle, chunk: String, running: bool) {
+/// Зачем Ноа смотрит в терминал.
+#[derive(Clone, Copy, PartialEq)]
+enum Glance {
+    /// Новое после команды.
+    Output,
+    /// Команда идёт долго — смотрим, не дожидаясь конца.
+    Running,
+    /// Человек просит проверить шаг.
+    Check,
+}
+
+/// Ноа посмотрела в терминал.
+async fn observe(app: &AppHandle, chunk: String, glance: Glance) {
+    let running = glance == Glance::Running;
     let (material, thread) = {
         let material = peek(app, scenario_material);
         let thread = STORE.lock().unwrap_or_else(|err| err.into_inner()).thread.clone();
@@ -429,14 +495,19 @@ async fn observe(app: &AppHandle, chunk: String, running: bool) {
          если человек и так идёт верно.\n\
          - node — id блока общей картины, которого касается сделанное, или пусто.\n\
          - error — true, если команда упала или сделано не то.\n\
-         Команды в say не зачитывай — говори словами, что они делают. Без похвалы и вступлений. \
-         Не повторяй сказанное раньше. По-русски.",
+         Если сделанное — это понятие из урока, назови его так, как в уроке: так практика \
+         связывается с теорией. Команды в say не зачитывай — говори словами, что они делают. \
+         Без похвалы и вступлений. Не повторяй сказанное раньше. По-русски.",
         name(app)
     );
-    let said = format!(
-        "Новое в терминале{}:\n```\n{chunk}\n```",
-        if running { " (команда ещё выполняется)" } else { "" }
-    );
+    let said = match glance {
+        Glance::Check => format!(
+            "Проверь по терминалу, выполнен ли текущий шаг. В say — вывод: готово, или чего не \
+             хватает и как это проверить. Последнее в терминале:\n```\n{chunk}\n```"
+        ),
+        Glance::Running => format!("Новое в терминале (команда ещё выполняется):\n```\n{chunk}\n```"),
+        Glance::Output => format!("Новое в терминале:\n```\n{chunk}\n```"),
+    };
     let text = match model(app, &rules, &thread, &said, false).await {
         Ok(text) => text,
         Err(err) => {
@@ -459,6 +530,9 @@ async fn observe(app: &AppHandle, chunk: String, running: bool) {
             p.here = look.node.clone();
         }
         let mut say = look.say.trim().to_string();
+        if say.is_empty() && glance == Glance::Check && !look.done {
+            say = "Пока не вижу в терминале, что шаг сделан.".into();
+        }
         note(p, "noa", if look.error { "error" } else { "comment" }, &say);
         if look.done && !running {
             let next = advance(p);
@@ -748,7 +822,7 @@ fn terminal_tail(max: usize) -> String {
 async fn watch_loop(app: AppHandle, id: u64) {
     loop {
         tokio::time::sleep(Duration::from_millis(400)).await;
-        let watching = peek(&app, |p| p.watching);
+        let (watching, verbose) = peek(&app, |p| (p.watching, p.verbose));
         let take = {
             let mut watch = WATCH.lock().unwrap_or_else(|err| err.into_inner());
             if watch.session != id {
@@ -759,7 +833,9 @@ async fn watch_loop(app: AppHandle, id: u64) {
                 continue;
             }
             let quiet = watch.last_out.is_some_and(|at| at.elapsed() >= QUIET) && entered.elapsed() >= QUIET;
-            let long = !watch.long_noted && entered.elapsed() >= LONG;
+            // Про долгую команду — только в подробном режиме: иначе её вывод
+            // целиком дождётся конца и уйдёт модели, только если что-то упало.
+            let long = verbose && !watch.long_noted && entered.elapsed() >= LONG;
             if !quiet && !long {
                 continue;
             }
@@ -773,15 +849,16 @@ async fn watch_loop(app: AppHandle, id: u64) {
         };
         let Some((raw, running)) = take else { continue };
         let chunk = shorten(&redact(&clean(&raw)), 5000);
-        // Модель отвечает секунды. Частое — без неё: рутину (cd, ls) Ноа
-        // пропускает молча, известные ошибки разбирает сразу.
+        // Каждый взгляд модели — секунды и токены. Известные ошибки Ноа
+        // разбирает сразу и сама; к модели идёт только упавшее, а в подробном
+        // режиме — и всякая команда, кроме рутины (cd, ls).
         if running {
-            observe(&app, chunk, true).await;
+            observe(&app, chunk, Glance::Running).await;
         } else if let Some(hint) = instant(&chunk) {
             with(&app, |p| note(p, "noa", "error", hint));
             publish(&app, hint, false);
-        } else if !routine(&chunk) && chunk.trim().chars().count() >= 2 {
-            observe(&app, chunk, false).await;
+        } else if failed(&chunk) || (verbose && !routine(&chunk) && chunk.trim().chars().count() >= 2) {
+            observe(&app, chunk, Glance::Output).await;
         }
         WATCH.lock().unwrap_or_else(|err| err.into_inner()).busy = false;
     }
@@ -800,11 +877,27 @@ fn routine(chunk: &str) -> bool {
     let command = command_of(chunk);
     let word = command.split_whitespace().next().unwrap_or("");
     const PLAIN: &[&str] = &["cd", "ls", "ll", "la", "dir", "pwd", "clear", "cls", "history", "whoami", "exit", "logout", "echo"];
-    let failed = chunk.lines().skip(1).any(|l| {
-        let l = l.to_lowercase();
-        l.contains("error") || l.contains("not found") || l.contains("no such") || l.contains("denied") || l.contains("ошибк")
-    });
-    (command.is_empty() || PLAIN.contains(&word)) && !failed
+    (command.is_empty() || PLAIN.contains(&word)) && !failed(chunk)
+}
+
+/// Что-то упало: в выводе после команды — признаки ошибки.
+fn failed(chunk: &str) -> bool {
+    const MARKS: &[&str] = &[
+        "error", "failed", "fatal", "not found", "no such", "denied", "refused", "cannot", "can't",
+        "unable to", "invalid", "timed out", "exception", "traceback", "panic", "ошибк", "не удалось",
+    ];
+    chunk.lines().skip(1).any(|line| {
+        let line = line.to_lowercase();
+        // «0 errors», «error: 0» — не ошибка.
+        MARKS.iter().any(|mark| line.contains(mark)) && !line.contains("0 error") && !line.contains("no error")
+    })
+}
+
+/// «Проверь шаг»: Ноа смотрит на последнее в терминале и говорит, сделан ли
+/// текущий шаг. Сделан — переходит к следующему.
+pub async fn check(app: &AppHandle) {
+    let tail = terminal_tail(4000);
+    observe(app, tail, Glance::Check).await;
 }
 
 /// Частые ошибки — ответ сразу, без модели. Первая подходящая.
@@ -1078,6 +1171,13 @@ mod tests {
         assert!(routine("PS C:\\Users\\manda> cd projects"));
         assert!(!routine("root@node1:~# ls /nope\nls: cannot access '/nope': No such file or directory"));
         assert!(!routine("root@node1:~# kubectl get nodes\nNAME STATUS"));
+    }
+
+    #[test]
+    fn failures_are_noticed() {
+        assert!(failed("# systemctl start k3s\nJob for k3s.service failed because the control process exited"));
+        assert!(!failed("# kubectl get nodes\nNAME STATUS\nnode1 Ready"));
+        assert!(!failed("# make\nBuild finished: 0 errors"));
     }
 
     #[test]
