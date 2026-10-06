@@ -1743,6 +1743,12 @@ pub async fn learn_ask(
     crate::tutor::ask(&app, &target, &text, voice.unwrap_or(false)).await
 }
 
+/// Ошибка из окна — в журнал: в выпуске окну некуда больше её показать.
+#[tauri::command]
+pub fn window_error(page: String, text: String) {
+    log::warn!("окно {page}: {text}");
+}
+
 /* ── Практика в терминале ──────────────────────────────────────────────── */
 
 /// Открыть окно практики — из темы курса или само по себе.

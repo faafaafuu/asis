@@ -1022,6 +1022,7 @@ pub fn show_practice(app: &AppHandle) -> tauri::Result<()> {
         bring_forward(&window);
         return Ok(());
     }
+    log::info!("открываю окно практики");
     // Крупное: слева терминал на всю высоту, справа Ноа со сценарием.
     let window = WebviewWindowBuilder::new(app, crate::practice::LABEL, WebviewUrl::App("practice.html".into()))
         .initialization_script(theme_script(app))

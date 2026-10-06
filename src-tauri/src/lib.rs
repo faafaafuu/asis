@@ -330,6 +330,7 @@ pub fn run() {
             #[cfg(desktop)]
             commands::audio_decoded,
             commands::learn_overview,
+            commands::window_error,
             #[cfg(desktop)]
             commands::practice_open,
             #[cfg(desktop)]

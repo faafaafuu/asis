@@ -153,6 +153,11 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(show) = window_request(said) {
         return Some(crate::set_show_window(app, show));
     }
+    // «Открой практику» — сразу, без модели: модель принимала её за обучение.
+    #[cfg(desktop)]
+    if let Some(reply) = practice_request(app, said) {
+        return Some(reply);
+    }
     // «Привет», «ты тут?», «проверка связи» — ответ одной фразой, без модели:
     // модель на такое представлялась и предлагала помощь.
     if let Some(reply) = presence_reply(said) {
@@ -387,6 +392,17 @@ fn module_window(app: &AppHandle, program: &str) -> Option<String> {
             lower.contains(&title) || title.contains(&lower) || lower.contains(&manifest.id)
         })
         .map(|manifest| manifest.id)
+}
+
+/// «Открой практику», «давай практику в терминале» — окно практики.
+#[cfg(desktop)]
+fn practice_request(app: &AppHandle, said: &str) -> Option<String> {
+    let lower = said.to_lowercase();
+    const ASK: &[&str] = &["открой", "открыть", "запусти", "включи", "покажи", "давай", "хочу"];
+    if !lower.contains("практик") || !ASK.iter().any(|word| lower.contains(word)) {
+        return None;
+    }
+    Some(open_own(app, OwnWindow::Practice))
 }
 
 fn own_window(program: &str) -> Option<OwnWindow> {
