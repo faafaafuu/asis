@@ -603,7 +603,7 @@ async fn observe(app: &AppHandle, chunk: String, glance: Glance) {
          не делают.\n\
          {PROD}\n\
          Если сделанное — это понятие из урока, назови его так, как в уроке: так практика \
-         связывается с теорией. Команды в say не зачитывай — говори словами, что они делают. \
+         связывается с теорией. say — {SAY} Команда для ввода — только в next. \
          Без похвалы и вступлений. Не повторяй сказанное раньше. По-русски.",
         name(app)
     );
@@ -664,41 +664,68 @@ pub async fn ask(app: &AppHandle, text: &str, voice: bool) -> Result<String, Str
     });
     publish(app, "", false);
     let tail = terminal_tail(3000);
-    let length = if voice {
-        "Ответ прозвучит вслух: 2–5 коротких фраз, без разметки; команду назови словами."
-    } else {
-        "Ответ читают рядом с терминалом: до 120 слов, команды — в `обратных кавычках`."
-    };
+    // Ответ двумя видами: для глаз — с командами, для слуха — словами. Код,
+    // прочитанный вслух по буквам, не понять; понятно — что он делает и зачем.
     let rules = format!(
         "Ты — репетитор {}: ведёшь практику в терминале. Человек сам набирает команды; ты видишь \
          его терминал и отвечаешь на вопросы по ходу работы.\n\n{material}\n\
          Последнее в терминале:\n```\n{tail}\n```\n\
          Как отвечать: сразу по существу, простыми словами, с опорой на то, что сейчас в \
          терминале. Просят подсказку — сначала направление, команду — если застрял. Просят общую \
-         картину — что уже построено, где мы сейчас, что впереди и как части связаны. {length} \
-         {PROD} Без вступлений и похвалы. По-русски.",
+         картину — что уже построено, где мы сейчас, что впереди и как части связаны. \
+         {PROD} Без вступлений и похвалы.\n\
+         Ответь строго JSON, без текста вокруг: {{\"text\": \"…\", \"say\": \"…\"}}\n\
+         - text — для экрана: до 120 слов, команды и пути — в `обратных кавычках`.\n\
+         - say — то же вслух, {SAY}\n\
+         По-русски.",
         name(app)
     );
     let thread = STORE.lock().unwrap_or_else(|err| err.into_inner()).thread.clone();
-    let answer = model(app, &rules, &thread, text, false).await?;
+    let raw = model(app, &rules, &thread, text, false).await?;
+    let (shown, said) = two_ways(&raw);
     {
         let mut store = STORE.lock().unwrap_or_else(|err| err.into_inner());
-        store.thread.push(ThreadItem { q: text.to_string(), a: answer.clone() });
+        store.thread.push(ThreadItem { q: text.to_string(), a: shown.clone() });
         let excess = store.thread.len().saturating_sub(DEPTH);
         store.thread.drain(..excess);
     }
     let kind = if text.starts_with(OVERVIEW) { "overview" } else { "answer" };
-    with(app, |p| note(p, "noa", kind, &answer));
-    publish(app, &speakable(&answer), voice);
-    Ok(answer)
+    with(app, |p| note(p, "noa", kind, &shown));
+    publish(app, &said, voice);
+    Ok(if voice { said } else { shown })
+}
+
+/// Как говорить вслух — для всех ответов практики.
+const SAY: &str = "Коротко и разговорно. Никакого кода, команд, флагов и путей: \
+    словами скажи, что делает команда или код, что куда идёт и откуда берётся, и зачем это. \
+    Название программы можно — nginx, kubectl, docker. Не «введите эс-эс-аш минус и», а \
+    «подключитесь к серверу по ключу».";
+
+/// Ответ модели — {"text", "say"}: для экрана и для голоса. Не JSON — тот же
+/// текст на экран, а вслух — он же без кода.
+fn two_ways(raw: &str) -> (String, String) {
+    #[derive(Deserialize)]
+    struct Two {
+        #[serde(default)]
+        text: String,
+        #[serde(default)]
+        say: String,
+    }
+    match json_object(raw).and_then(|json| serde_json::from_str::<Two>(json).ok()) {
+        Some(two) if !two.text.trim().is_empty() => {
+            let say = if two.say.trim().is_empty() { speakable(&two.text) } else { speakable(&two.say) };
+            (two.text.trim().to_string(), say)
+        }
+        _ => (raw.trim().to_string(), speakable(raw)),
+    }
 }
 
 /// Просьба об общей картине — по ней же лента помечает ответ.
 pub const OVERVIEW: &str = "Общая картина:";
 
-/// Без разметки — для голоса.
+/// Для голоса: без кода и разметки.
 fn speakable(text: &str) -> String {
-    text.replace(['`', '*', '#'], "")
+    crate::voice::without_code(text).replace(['*', '#'], "")
 }
 
 /* ── Голос ─────────────────────────────────────────────────────────────── */
@@ -1325,6 +1352,17 @@ mod tests {
         assert_eq!(shortcut("chmod 640 /etc/app.conf"), None);
         assert_eq!(shortcut("sudo ufw allow 443/tcp"), None);
         assert_eq!(shortcut("docker run -d nginx:1.27"), None);
+    }
+
+    #[test]
+    fn answers_come_for_eyes_and_ears() {
+        let (shown, said) = two_ways(r#"{"text": "Перезапустите: `sudo systemctl restart nginx`.", "say": "Перезапустите nginx, чтобы он перечитал конфиг."}"#);
+        assert!(shown.contains("systemctl"));
+        assert_eq!(said, "Перезапустите nginx, чтобы он перечитал конфиг.");
+        // Не JSON — на экран как есть, вслух без кода.
+        let (shown, said) = two_ways("Выполните `sudo systemctl restart nginx`.");
+        assert!(shown.contains("systemctl"));
+        assert!(!said.contains("systemctl"), "{said}");
     }
 
     #[test]

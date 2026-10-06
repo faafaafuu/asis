@@ -85,12 +85,31 @@ for (const event of ["pointerdown", "touchend", "keydown"]) {
 
 /** Текст для чтения вслух: без разметки, кода и ссылок. */
 export function speakable(text) {
-  return String(text ?? "")
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/https?:\/\/\S+/g, " ")
+  const source = String(text ?? "");
+  if (looksLikeCode(source)) return "Это код. Чтобы я рассказала, что он делает, нажмите «Объяснить».";
+  // Код вслух не читается — так же, как в программе (voice::without_code):
+  // блок — «код на экране», команда — «команду на экране», имя — словом,
+  // путь — последней частью, ссылка — словом.
+  return source
+    .replace(/```[\s\S]*?```/g, " Код — на экране. ")
+    .replace(/`([^`]*)`/g, (_, code) => (/^[\p{L}\p{N}._-]{1,24}$/u.test(code) ? code : "команду на экране"))
+    .replace(/https?:\/\/\S+/g, "ссылка")
+    .replace(/(^|\s)(~?\/[^\s,;:!?()«»"']*|[^\s,;:!?()«»"'/]+(?:\/[^\s,;:!?()«»"'/]+){2,})/g, (_, lead, path) => {
+      const last = path.replace(/\/+$/, "").split("/").pop();
+      return `${lead}${last || path}`;
+    })
     .replace(/[`*_#>|]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Сам текст — код: много скобок, присваиваний и знаков, мало русских букв. */
+function looksLikeCode(text) {
+  const total = text.replace(/\s/g, "").length;
+  if (total < 20) return false;
+  const marks = (text.match(/[{}();=<>$|&[\]\\#]/g) ?? []).length;
+  const russian = (text.match(/[а-яё]/gi) ?? []).length;
+  return (marks * 100) / total >= 8 && (russian * 100) / total < 20;
 }
 
 /** Куски по предложениям: первый звучит, пока готовится следующий. */
