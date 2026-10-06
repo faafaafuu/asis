@@ -421,7 +421,7 @@ async fn observe(app: &AppHandle, chunk: String, running: bool) {
          ошибки, подсказываешь следующий шаг.\n\n{material}\n\
          Ответь строго JSON, без текста вокруг: \
          {{\"say\": \"…\", \"done\": false, \"next\": \"…\", \"node\": \"…\", \"error\": false}}\n\
-         - say — что сказать вслух, 1–3 короткие разговорные фразы: что сейчас произошло и почему \
+         - say — что сказать вслух, 1–2 короткие разговорные фразы: что сейчас произошло и почему \
          это важно для цели. Ошибка — что она значит и как поправить. Рутина без нового смысла \
          (cd, ls, clear, опечатка, которую человек сам исправил) — пустая строка.\n\
          - done — true, только если по выводу видно, что текущий шаг сценария выполнен.\n\
@@ -773,11 +773,89 @@ async fn watch_loop(app: AppHandle, id: u64) {
         };
         let Some((raw, running)) = take else { continue };
         let chunk = shorten(&redact(&clean(&raw)), 5000);
-        if chunk.trim().chars().count() >= 2 {
-            observe(&app, chunk, running).await;
+        // Модель отвечает секунды. Частое — без неё: рутину (cd, ls) Ноа
+        // пропускает молча, известные ошибки разбирает сразу.
+        if running {
+            observe(&app, chunk, true).await;
+        } else if let Some(hint) = instant(&chunk) {
+            with(&app, |p| note(p, "noa", "error", hint));
+            publish(&app, hint, false);
+        } else if !routine(&chunk) && chunk.trim().chars().count() >= 2 {
+            observe(&app, chunk, false).await;
         }
         WATCH.lock().unwrap_or_else(|err| err.into_inner()).busy = false;
     }
+}
+
+/// Команда из первой строки куска: после приглашения `$ `, `# ` или `> `.
+fn command_of(chunk: &str) -> String {
+    let first = chunk.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+    let at = ["$ ", "# ", "> "].iter().filter_map(|mark| first.rfind(mark).map(|i| i + 2)).max().unwrap_or(0);
+    first[at..].trim().to_string()
+}
+
+/// Рутина без нового смысла: походить по папкам, посмотреть, очистить экран.
+/// Ошибка в выводе — уже не рутина.
+fn routine(chunk: &str) -> bool {
+    let command = command_of(chunk);
+    let word = command.split_whitespace().next().unwrap_or("");
+    const PLAIN: &[&str] = &["cd", "ls", "ll", "la", "dir", "pwd", "clear", "cls", "history", "whoami", "exit", "logout", "echo"];
+    let failed = chunk.lines().skip(1).any(|l| {
+        let l = l.to_lowercase();
+        l.contains("error") || l.contains("not found") || l.contains("no such") || l.contains("denied") || l.contains("ошибк")
+    });
+    (command.is_empty() || PLAIN.contains(&word)) && !failed
+}
+
+/// Частые ошибки — ответ сразу, без модели. Первая подходящая.
+fn instant(chunk: &str) -> Option<&'static str> {
+    let lower = chunk.to_lowercase();
+    const KNOWN: &[(&[&str], &str)] = &[
+        (
+            &["permission denied (publickey"],
+            "Сервер не принял ключ: на нём нет вашего открытого ключа или указан не тот пользователь. Проверьте имя в ssh и ключ в ~/.ssh/authorized_keys на сервере.",
+        ),
+        (
+            &["could not open lock file", "are you root", "operation not permitted", "permission denied"],
+            "Не хватает прав: этой команде нужен root. Повторите её через sudo.",
+        ),
+        (
+            &["command not found", "is not recognized as", "не распознано как имя"],
+            "Такой команды здесь нет: опечатка или программа ещё не установлена.",
+        ),
+        (
+            &["unable to locate package", "no match for argument"],
+            "Пакет не найден: обновите список пакетов — apt update — или проверьте имя.",
+        ),
+        (
+            &["could not resolve host", "name or service not known", "temporary failure in name resolution"],
+            "Имя не находится: опечатка в адресе, или на сервере не работает DNS.",
+        ),
+        (
+            &["connection refused"],
+            "Соединение отклонено: служба на этом порту не запущена или слушает другой адрес.",
+        ),
+        (
+            &["connection timed out", "operation timed out", "no route to host"],
+            "Ответа нет: адрес недоступен — неверный IP, закрытый порт или фаервол.",
+        ),
+        (
+            &["address already in use"],
+            "Порт уже занят другой программой. Кем — покажет ss -ltnp.",
+        ),
+        (
+            &["host key verification failed", "remote host identification has changed"],
+            "Ключ сервера изменился с прошлого раза — так бывает после переустановки. Если это ваш сервер, уберите старую запись: ssh-keygen -R адрес.",
+        ),
+        (
+            &["no such file or directory"],
+            "Такого файла или папки нет: проверьте путь — pwd и ls покажут, где вы.",
+        ),
+    ];
+    KNOWN
+        .iter()
+        .find(|(marks, _)| marks.iter().any(|mark| lower.contains(mark)))
+        .map(|(_, text)| *text)
 }
 
 /// Длинный вывод — начало и конец: середина сборок и установок однообразна.
@@ -992,6 +1070,23 @@ mod tests {
         assert!(out.contains("[закрытый ключ скрыт]"));
         assert!(!out.contains("b3BlbnNzaC1rZXk"));
         assert!(out.contains("4f2a9c1e"));
+    }
+
+    #[test]
+    fn routine_commands_skip_the_model() {
+        assert!(routine("root@node1:~# ls -la\ntotal 8\ndrwx------ 2 root root 4096 ."));
+        assert!(routine("PS C:\\Users\\manda> cd projects"));
+        assert!(!routine("root@node1:~# ls /nope\nls: cannot access '/nope': No such file or directory"));
+        assert!(!routine("root@node1:~# kubectl get nodes\nNAME STATUS"));
+    }
+
+    #[test]
+    fn known_errors_answer_at_once() {
+        let lock = "root@node1:~$ apt install nginx\nE: Could not open lock file /var/lib/dpkg/lock-frontend - open (13: Permission denied)";
+        assert!(instant(lock).unwrap().contains("sudo"));
+        assert!(instant("me@pc:~$ ssh root@host\nroot@host: Permission denied (publickey).").unwrap().contains("ключ"));
+        assert!(instant("$ kubeclt get pods\nkubeclt: command not found").unwrap().contains("команды"));
+        assert_eq!(instant("$ kubectl get nodes\nnode1 Ready"), None);
     }
 
     #[test]
