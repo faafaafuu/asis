@@ -464,6 +464,49 @@ Each topic has a lesson read section by section — with **🔍 Explain in depth
     },
   },
   {
+    slug: "practice",
+    section: "howto",
+    ru: {
+      title: "Практика в терминале",
+      lead: "Тема курса — руками на своём сервере: вы работаете в терминале, Ноа смотрит и ведёт по шагам.",
+      body: `
+Практика — в программе NOAH на компьютере: окно **Практика** — слева настоящий терминал, справа Ноа. Открыть — вкладкой **🖥 Практика** в теме курса, карточкой «Практика» в модулях или голосом: «Ноа, открой практику».
+
+## Как проходит
+
+1. Выберите тему курса — у каждой своя практика. Можно дописать пожелание: «на трёх серверах», «через Docker».
+2. **Составить сценарий** — Ноа соберёт задачу на понятиях урока: 5–8 шагов в порядке разделов, у шага — понятие из урока, что сделать и как проверить, и общая картина схемой.
+3. В терминале подключитесь к серверу — \`ssh user@адрес\` — и работайте сами. Вставить — Ctrl+V или правый клик.
+4. **✓ Проверь шаг** — Ноа посмотрит в терминал и скажет, готово ли; готово — переходит к следующему. **→** — засчитать шаг без проверки.
+
+Всё как в проде: не от root, вход по ключам, фаервол, конфиги файлами, закреплённые версии. Костыли — \`chmod 777\`, выключенный фаервол, образ \`:latest\`, \`--insecure\` — Ноа замечает сразу и говорит, как правильно.
+
+## Когда Ноа говорит
+
+Каждый взгляд модели в терминал — это запрос и токены, поэтому Ноа молчит, пока всё идёт как надо. Частые ошибки — нет прав, нет команды, нет пакета, порт занят, сервер не принял ключ — она разбирает сразу, без модели. Модель подключается, если упало незнакомое, если вы спросили или нажали «Проверь шаг». **💬** — разбирать каждую команду.
+
+Вслух Ноа код не читает: говорит словами, что делает команда, что куда идёт и откуда. Команды — в ленте на экране.
+
+## Что уходит модели
+
+Вывод терминала уходит вашей модели. Пароли, токены, ключи API и закрытые ключи Ноа закрывает до отправки, **👁** выключает наблюдение совсем. Полноэкранные программы — vim, htop, less — Ноа не смотрит.
+
+Практика темы сохраняется: открыли снова — тот же шаг и та же лента. **Тема ▾** внизу окна — перейти к другой теме, у начатых видно, на каком шаге остановились. Границы терминала, панели Ноа и ленты тянутся мышью.
+`,
+    },
+    en: {
+      title: "Hands-on practice in the terminal",
+      lead: "A course topic done by hand on your own server: you work in the terminal, Noa watches and guides step by step.",
+      body: `
+Practice lives in the NOAH desktop app: the **Practice** window has a real terminal on the left and Noa on the right. Open it from the **🖥 Practice** tab of a course topic, the Practice module card or by voice.
+
+Pick a topic — each has its own practice — and press **Build a scenario**: 5–8 steps in lesson order, each tied to a lesson concept, plus a big-picture diagram. Connect to your server with \`ssh\` and work yourself. **✓ Check step** asks Noa to verify the step from the terminal. Everything is production-grade: no root, SSH keys, firewall, config files, pinned versions; shortcuts like \`chmod 777\` or \`:latest\` are flagged at once.
+
+Noa stays quiet while things go well; common errors are explained instantly without the model, the model is asked on unknown failures, questions and step checks. Terminal output goes to your model with passwords, tokens and keys masked; **👁** turns watching off.
+`,
+    },
+  },
+  {
     slug: "telegram",
     section: "howto",
     ru: {
