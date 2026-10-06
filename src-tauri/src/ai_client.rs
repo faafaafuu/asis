@@ -425,6 +425,8 @@ pub struct HttpProvider {
     model: String,
     retries: u32,
     retry_backoff_ms: u64,
+    /// Сколько ждать обычного ответа. Длинный (разбор, сценарий) ждём втрое дольше.
+    timeout_ms: u64,
     /// Язык, на котором модель обязана отвечать. См. `system_prompt`.
     language: String,
     /// Как модель представляется человеку — своё у каждого, по умолчанию «Ноа».
@@ -455,6 +457,7 @@ impl HttpProvider {
             model: config.model.clone(),
             retries: config.retries,
             retry_backoff_ms: config.retry_backoff_ms,
+            timeout_ms: config.timeout_ms,
             language: language.to_string(),
             wake_name: if wake_name.trim().is_empty() {
                 crate::config::DEFAULT_WAKE_NAME.to_string()
@@ -617,6 +620,12 @@ impl HttpProvider {
             });
         }
         let mut request = self.client.post(&self.endpoint).json(body);
+        // Длинный ответ модель пишет минуты: общий таймаут обрывал его на
+        // середине, а мост дописывал впустую.
+        let long = body.get("max_tokens").and_then(serde_json::Value::as_u64).is_some_and(|n| n > u64::from(ANSWER_LIMIT) * 2);
+        if long {
+            request = request.timeout(Duration::from_millis(self.timeout_ms * 3));
+        }
         if !self.api_key.is_empty() {
             request = request.bearer_auth(&self.api_key);
         }
