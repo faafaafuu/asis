@@ -1,0 +1,5 @@
+NoahLearn.xcodeproj/
+Info.plist
+build/
+Payload/
+*.ipa
