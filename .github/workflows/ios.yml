@@ -1,14 +1,18 @@
-# «Ноа · Обучение» для iPhone — файл .ipa без подписи.
+# Ноа для iPhone — файл .ipa без подписи.
 #
-# Полной Ноа для iOS здесь нет (см. конец release.yml): без платного аккаунта
-# Apple подписанный установщик не собрать. Это — приложение обучения: окно
-# обучения Ноа онлайн во весь экран (mobile/ios-learn). Подписывает его при
-# установке Sideloadly — Apple ID владельца телефона, бесплатный тоже годится.
+# Та же программа, что на компьютере и Android: окно обучения, практика,
+# модули. Подписанный установщик без платного аккаунта Apple не собрать
+# (см. конец release.yml), поэтому файл собирается без подписи, а
+# подписывает его при установке Sideloadly — Apple ID владельца телефона,
+# бесплатный тоже годится.
 #
-# Запуск — руками (вкладка Actions → «iPhone: обучение» → Run workflow) или
-# тегом выпуска: тогда файл ложится и в релиз.
+# Проект Xcode не хранится: его создаёт `tauri ios init`. Сборка — xcodebuild
+# с выключенной подписью; Rust собирает шаг самого проекта (xcode-script).
+#
+# Запуск — руками (Actions → «iPhone» → Run workflow) или тегом выпуска:
+# тогда файл ложится и в релиз.
 
-name: "iPhone: обучение"
+name: "iPhone"
 
 on:
   workflow_dispatch:
@@ -23,46 +27,67 @@ jobs:
   ipa:
     name: iPhone → .ipa
     runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: mobile/ios-learn
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
 
       - name: XcodeGen
         run: brew install xcodegen
 
       - name: Проект Xcode
-        run: xcodegen generate
+        run: npm run tauri -- ios init --ci
 
       - name: Сборка без подписи
+        working-directory: src-tauri/gen/apple
         run: |
+          project=$(ls -d *.xcodeproj | head -1)
+          scheme=$(xcodebuild -list -project "$project" | awk '/Schemes:/{getline; gsub(/^ +/, ""); print; exit}')
+          echo "проект $project, схема $scheme"
           xcodebuild \
-            -project NoahLearn.xcodeproj \
-            -scheme NoahLearn \
-            -configuration Release \
+            -project "$project" \
+            -scheme "$scheme" \
+            -configuration release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
 
       # .ipa — это zip с папкой Payload, в которой лежит .app.
       - name: Файл .ipa
+        working-directory: src-tauri/gen/apple
         run: |
+          app=$(find build/Build/Products -maxdepth 2 -name "*.app" -type d | head -1)
+          echo "приложение: $app"
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/NoahLearn.app Payload/
-          zip -qry NoahLearn.ipa Payload
-          ls -la NoahLearn.ipa
+          cp -R "$app" Payload/
+          zip -qry Noah_ios.ipa Payload
+          ls -la Noah_ios.ipa
 
       - uses: actions/upload-artifact@v4
         with:
-          name: noah-learning-ios
-          path: mobile/ios-learn/NoahLearn.ipa
+          name: noah-ios
+          path: src-tauri/gen/apple/Noah_ios.ipa
 
       # Релиз создаёт release.yml; если он ещё не появился — ждём, а не падаем.
       - name: В релиз
         if: startsWith(github.ref, 'refs/tags/')
+        working-directory: src-tauri/gen/apple
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
@@ -71,5 +96,5 @@ jobs:
             gh release view "$TAG" >/dev/null 2>&1 && break
             sleep 30
           done
-          cp NoahLearn.ipa "Noah_Learning_${TAG#v}_ios.ipa"
-          gh release upload "$TAG" "Noah_Learning_${TAG#v}_ios.ipa" --clobber
+          cp Noah_ios.ipa "Noah_${TAG#v}_ios.ipa"
+          gh release upload "$TAG" "Noah_${TAG#v}_ios.ipa" --clobber

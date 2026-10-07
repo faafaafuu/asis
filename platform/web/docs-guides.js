@@ -464,41 +464,6 @@ Each topic has a lesson read section by section — with **🔍 Explain in depth
     },
   },
   {
-    slug: "iphone",
-    section: "howto",
-    ru: {
-      title: "Обучение на iPhone",
-      lead: "«Ноа · Обучение» — приложение для iPhone: то же обучение, что в программе и в Ноа онлайн, во весь экран и с общим прогрессом.",
-      body: `
-В App Store приложения нет — файл ставится через [Sideloadly](https://sideloadly.io) с компьютера.
-
-## Установка
-
-1. Скачайте файл \`Noah_Learning_…_ios.ipa\` со страницы [последнего выпуска](https://github.com/faafaafuu/asis/releases/latest).
-2. Поставьте Sideloadly на компьютер (Windows или macOS) и подключите iPhone кабелем.
-3. Перетащите \`.ipa\` в окно Sideloadly, впишите свой Apple ID и нажмите **Start**. Бесплатный Apple ID подходит.
-4. На iPhone: **Настройки → Основные → VPN и управление устройством** — доверьте своему Apple ID. С iOS 16 включите ещё **Настройки → Конфиденциальность и безопасность → Режим разработчика**.
-
-С бесплатным Apple ID подпись действует 7 дней: потом снова откройте Sideloadly и нажмите **Start** — прогресс не потеряется, он хранится на сайте.
-
-## Что внутри
-
-Окно обучения Ноа онлайн: уроки, 🎙 урок с Ноа голосом, карточки, конспект, задачи и экзамены. Прогресс общий с программой на компьютере и браузером. Приложение открывает российское зеркало — с мобильного интернета оно работает, где noahlab.ru режется.
-
-Войти — **через Telegram**: приложение откроет бота, нажмите **Start** и вернитесь — вход завершится сам. Вход Google внутри приложений Google запрещает.
-
-Обновлять приложение не нужно: новое в обучении приходит с сайта. Практика в терминале — только в программе на компьютере.
-`,
-    },
-    en: {
-      title: "Learning on iPhone",
-      lead: "“Noah · Learning” for iPhone: the same learning as in the app and Noah online, full screen, with shared progress.",
-      body: `
-Not in the App Store — install the \`Noah_Learning_…_ios.ipa\` from the [latest release](https://github.com/faafaafuu/asis/releases/latest) with [Sideloadly](https://sideloadly.io): drag the file in, enter your Apple ID (a free one works), press **Start**, then trust your Apple ID in **Settings → General → VPN & Device Management** (and turn on **Developer Mode** on iOS 16+). A free Apple ID signature lasts 7 days — re-run Sideloadly; progress lives on the site. Sign in with Telegram; Google blocks sign-in inside apps.
-`,
-    },
-  },
-  {
     slug: "practice",
     section: "howto",
     ru: {

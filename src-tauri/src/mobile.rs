@@ -12,7 +12,7 @@ use tauri::{
     Wry,
 };
 
-#[cfg(target_os = "ios")]
+#[cfg(all(target_os = "ios", feature = "ios-plugin"))]
 tauri::ios_plugin_binding!(init_plugin_sufler);
 
 /// Ручка плагина: через неё Rust зовёт команды Kotlin — «скажи», «слушай».
@@ -24,8 +24,9 @@ pub fn init() -> TauriPlugin<Wry> {
         .setup(|_app, _api| {
             #[cfg(target_os = "android")]
             let handle = _api.register_android_plugin("app.sufler.plugin", "SuflerPlugin")?;
-            #[cfg(target_os = "ios")]
+            #[cfg(all(target_os = "ios", feature = "ios-plugin"))]
             let handle = _api.register_ios_plugin(init_plugin_sufler)?;
+            #[cfg(any(target_os = "android", all(target_os = "ios", feature = "ios-plugin")))]
             let _ = HANDLE.set(handle);
             Ok(())
         })

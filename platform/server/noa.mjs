@@ -195,13 +195,16 @@ export function mountNoa({ route, db, Fail, readJson }) {
     return data;
   };
 
-  route("GET", /^\/api\/noa\/bridge\/models$/, ({ user }) => {
-    bridgeUser(user);
+  // Мост — и по входу на сайт (Ноа онлайн), и по ключу площадки `noah_…`:
+  // программа на телефоне туннеля к мосту не имеет и ходит сюда как к
+  // обычной нейросети, с тем же ключом, что тянет курсы и прогресс.
+  route("GET", /^\/api\/noa\/bridge\/models$/, ({ user, tokenUser }) => {
+    bridgeUser(user ?? tokenUser);
     return bridge("/v1/models");
   });
 
-  route("POST", /^\/api\/noa\/bridge\/chat\/completions$/, async ({ req, user }) => {
-    bridgeUser(user);
+  route("POST", /^\/api\/noa\/bridge\/chat\/completions$/, async ({ req, user, tokenUser }) => {
+    bridgeUser(user ?? tokenUser);
     const { model, messages, noa_model: level } = await readJson(req);
     if (!Array.isArray(messages) || !messages.length) throw new Fail(400, "Нет сообщений.");
     // Модель Claude выбирается только у Claude; у Codex, Gemini, Qwen — своя.
