@@ -1794,6 +1794,14 @@ pub async fn practice_plan(
     crate::practice::plan(&app, course, topic, &goal).await
 }
 
+/// Экран терминала, как его нарисовал xterm: Ноа видит то же, что человек,
+/// и в редакторе тоже.
+#[cfg(desktop)]
+#[tauri::command]
+pub fn practice_screen(text: String, alt: bool) {
+    crate::practice::set_screen(&text, alt);
+}
+
 /// «Проверь шаг»: Ноа смотрит в терминал и говорит, сделан ли шаг.
 #[cfg(desktop)]
 #[tauri::command]

@@ -148,6 +148,27 @@ term.onData((data) => {
 });
 
 api?.listen("practice:out", (event) => term.write(event.payload));
+
+// Экран, как он нарисован, — Ноа. Поток вывода в редакторе (nano, vim) —
+// сплошные перерисовки, и по нему она не видела, что человек пишет; экран
+// xterm — ровно то, что видит человек. Строка с курсором помечена.
+let screenTimer = 0;
+function sendScreen() {
+  clearTimeout(screenTimer);
+  screenTimer = setTimeout(() => {
+    const buffer = term.buffer.active;
+    const lines = [];
+    for (let row = 0; row < term.rows; row++) {
+      let line = buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "";
+      if (row === buffer.cursorY && buffer.viewportY === buffer.baseY) line += "  ← курсор";
+      lines.push(line);
+    }
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    api.invoke("practice_screen", { text: lines.join("\n"), alt: buffer.type === "alternate" }).catch(() => {});
+  }, 250);
+}
+term.onWriteParsed(sendScreen);
+term.buffer.onBufferChange(sendScreen);
 api?.listen("practice:exit", () => {
   exited = true;
   term.write("\r\n\x1b[2m[оболочка закрылась — Enter, чтобы открыть новую]\x1b[0m\r\n");

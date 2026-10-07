@@ -576,6 +576,8 @@ enum Glance {
     Running,
     /// Человек просит проверить шаг.
     Check,
+    /// Человек пишет в редакторе (nano, vim): новая строка — разбор её.
+    Editor,
 }
 
 /// Ноа посмотрела в терминал.
@@ -592,8 +594,7 @@ async fn observe(app: &AppHandle, chunk: String, glance: Glance) {
          ошибки, подсказываешь следующий шаг.\n\n{material}\n\
          Ответь строго JSON, без текста вокруг: \
          {{\"say\": \"…\", \"done\": false, \"next\": \"…\", \"node\": \"…\", \"error\": false}}\n\
-         - say — что сказать вслух, 1–2 короткие разговорные фразы: что сейчас произошло и почему \
-         это важно для цели. Ошибка — что она значит и как поправить. Рутина без нового смысла \
+         - say — что сказать вслух, 1–3 короткие разговорные фразы, связно и в контексте цели: что сделано, что дальше и зачем это понадобится; ошибка — что значит и как поправить. Не пересказывай вывод. Рутина без нового смысла \
          (cd, ls, clear, опечатка, которую человек сам исправил) — пустая строка.\n\
          - done — true, только если по выводу видно, что текущий шаг сценария выполнен.\n\
          - next — следующее конкретное действие, можно с командой в `обратных кавычках`; пусто, \
@@ -611,6 +612,14 @@ async fn observe(app: &AppHandle, chunk: String, glance: Glance) {
         Glance::Check => format!(
             "Проверь по терминалу, выполнен ли текущий шаг. В say — вывод: готово, или чего не \
              хватает и как это проверить. Последнее в терминале:\n```\n{chunk}\n```"
+        ),
+        Glance::Editor => format!(
+            "Человек пишет файл в редакторе — веди его по строкам, как наставник рядом. В say — \
+             связно, в контексте цели шага, не пересказ строки: что этим сделано («отлично, \
+             версию указал»), что дальше и зачем это понадобится для общей задачи («теперь \
+             опишем сервис приложения — через него Nginx будет отдавать запросы»). Ошибка или \
+             так в проде не пишут — скажи и как правильно. В next — следующая строка или блок. \
+             Помни, что ты уже говорил о прошлых строках, не повторяйся. {chunk}"
         ),
         Glance::Running => format!("Новое в терминале (команда ещё выполняется):\n```\n{chunk}\n```"),
         Glance::Output => format!("Новое в терминале:\n```\n{chunk}\n```"),
@@ -658,12 +667,21 @@ pub async fn ask(app: &AppHandle, text: &str, voice: bool) -> Result<String, Str
     if text.is_empty() {
         return Err("Спросите что-нибудь.".into());
     }
+    // «Следи», «смотри, что я пишу» — включить сопровождение каждой строки и
+    // команды: человек просит идти рядом, а не ждать вопроса.
+    let lower = text.to_lowercase();
+    let follow = ["следи", "смотри что я", "смотри, что я", "по строкам", "по очереди помогай", "веди меня"]
+        .iter()
+        .any(|phrase| lower.contains(phrase));
     let material = with(app, |p| {
         note(p, "me", "answer", text);
+        if follow {
+            p.verbose = true;
+        }
         scenario_material(p)
     });
     publish(app, "", false);
-    let tail = terminal_tail(3000);
+    let tail = terminal_view(3000);
     // Ответ двумя видами: для глаз — с командами, для слуха — словами. Код,
     // прочитанный вслух по буквам, не понять; понятно — что он делает и зачем.
     let rules = format!(
@@ -767,6 +785,11 @@ struct Watch {
     /// Модель смотрит — следующий взгляд подождёт.
     busy: bool,
     session: u64,
+    /// Экран, как его видит человек: окно присылает его из xterm. В редакторе
+    /// (nano, vim) поток вывода — сплошные перерисовки, а экран — сам текст.
+    screen: String,
+    /// Экран при прошлом взгляде на редактор — чтобы сказать о новых строках.
+    editor_seen: String,
 }
 
 static WATCH: Mutex<Watch> = Mutex::new(Watch {
@@ -778,12 +801,16 @@ static WATCH: Mutex<Watch> = Mutex::new(Watch {
     long_noted: false,
     busy: false,
     session: 0,
+    screen: String::new(),
+    editor_seen: String::new(),
 });
 
 const MAX_FRESH: usize = 40_000;
 const MAX_REPLAY: usize = 64_000;
 /// Сервер замолчал на столько после Enter — команда, скорее всего, кончилась.
 const QUIET: Duration = Duration::from_millis(1400);
+/// В редакторе: Enter и пауза в наборе — строка написана, можно смотреть.
+const EDITOR_QUIET: Duration = Duration::from_millis(1500);
 /// Команда идёт дольше — Ноа смотрит, не дожидаясь конца.
 const LONG: Duration = Duration::from_secs(25);
 
@@ -951,27 +978,95 @@ fn terminal_tail(max: usize) -> String {
     shorten(&redact(&clean(&replay)), max)
 }
 
+/// Что сейчас в терминале — для вопросов и проверки шага: экран, как его
+/// видит человек, а в командной строке — ещё и что было до него.
+fn terminal_view(max: usize) -> String {
+    let (screen, full) = {
+        let watch = WATCH.lock().unwrap_or_else(|err| err.into_inner());
+        (redact(&watch.screen), watch.full_screen)
+    };
+    if full {
+        return format!("Открыт редактор или полноэкранная программа. Экран, как видит человек:\n{screen}");
+    }
+    let history = terminal_tail(max);
+    if screen.trim().is_empty() {
+        return history;
+    }
+    format!("Раньше:\n{}\n\nЭкран сейчас:\n{screen}", shorten(&history, max / 2))
+}
+
+/// Окно прислало экран терминала. `alt` — открыт полноэкранный режим
+/// (редактор, htop): так надёжнее, чем угадывать по управляющим кодам.
+pub fn set_screen(text: &str, alt: bool) {
+    let mut watch = WATCH.lock().unwrap_or_else(|err| err.into_inner());
+    if watch.full_screen && !alt {
+        // Вышли из редактора: его перерисовки — не вывод команды.
+        watch.fresh.clear();
+        watch.editor_seen.clear();
+    }
+    watch.full_screen = alt;
+    watch.screen = text.to_string();
+}
+
+/// Строки экрана, которых не было при прошлом взгляде.
+fn new_lines(now: &str, before: &str) -> String {
+    let seen: std::collections::HashSet<&str> = before.lines().map(str::trim_end).collect();
+    now.lines()
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty() && !seen.contains(line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Следит за терминалом: команда кончилась (сервер замолчал после Enter) или
 /// идёт долго — Ноа смотрит на новое.
 async fn watch_loop(app: AppHandle, id: u64) {
     loop {
         tokio::time::sleep(Duration::from_millis(400)).await;
         let (watching, verbose) = peek(&app, |p| (p.watching, p.verbose));
-        let take = {
+        let mut editor = None;
+        let take = 'look: {
             let mut watch = WATCH.lock().unwrap_or_else(|err| err.into_inner());
             if watch.session != id {
                 return;
             }
-            let Some(entered) = watch.entered else { continue };
-            if !watching || watch.busy || watch.full_screen {
-                continue;
+            let Some(entered) = watch.entered else { break 'look None };
+            if !watching || watch.busy {
+                break 'look None;
+            }
+            // В редакторе Ноа идёт по строкам, только когда её просили следить:
+            // каждая строка — запрос к модели. Иначе редактор не её дело —
+            // она видит его экран, когда спросят или нажмут «Проверь шаг».
+            if watch.full_screen {
+                let quiet = watch.last_out.is_some_and(|at| at.elapsed() >= EDITOR_QUIET) && entered.elapsed() >= EDITOR_QUIET;
+                if !verbose {
+                    watch.entered = None;
+                    break 'look None;
+                }
+                if !quiet {
+                    break 'look None;
+                }
+                watch.entered = None;
+                watch.fresh.clear();
+                let fresh = new_lines(&watch.screen, &watch.editor_seen);
+                if fresh.trim().is_empty() {
+                    break 'look None;
+                }
+                editor = Some(format!(
+                    "Новые строки:\n```\n{}\n```\nВесь экран редактора:\n```\n{}\n```",
+                    redact(&fresh),
+                    redact(&watch.screen)
+                ));
+                watch.editor_seen = watch.screen.clone();
+                watch.busy = true;
+                break 'look None;
             }
             let quiet = watch.last_out.is_some_and(|at| at.elapsed() >= QUIET) && entered.elapsed() >= QUIET;
             // Про долгую команду — только в подробном режиме: иначе её вывод
             // целиком дождётся конца и уйдёт модели, только если что-то упало.
             let long = verbose && !watch.long_noted && entered.elapsed() >= LONG;
             if !quiet && !long {
-                continue;
+                break 'look None;
             }
             if quiet {
                 watch.entered = None;
@@ -981,6 +1076,11 @@ async fn watch_loop(app: AppHandle, id: u64) {
             watch.busy = true;
             Some((std::mem::take(&mut watch.fresh), !quiet))
         };
+        if let Some(chunk) = editor {
+            observe(&app, chunk, Glance::Editor).await;
+            WATCH.lock().unwrap_or_else(|err| err.into_inner()).busy = false;
+            continue;
+        }
         let Some((raw, running)) = take else { continue };
         let chunk = shorten(&redact(&clean(&raw)), 5000);
         // Каждый взгляд модели — секунды и токены. Известные ошибки Ноа
@@ -1036,7 +1136,7 @@ fn failed(chunk: &str) -> bool {
 /// «Проверь шаг»: Ноа смотрит на последнее в терминале и говорит, сделан ли
 /// текущий шаг. Сделан — переходит к следующему.
 pub async fn check(app: &AppHandle) {
-    let tail = terminal_tail(4000);
+    let tail = terminal_view(4000);
     observe(app, tail, Glance::Check).await;
 }
 
@@ -1341,6 +1441,14 @@ mod tests {
         assert!(routine("PS C:\\Users\\manda> cd projects"));
         assert!(!routine("root@node1:~# ls /nope\nls: cannot access '/nope': No such file or directory"));
         assert!(!routine("root@node1:~# kubectl get nodes\nNAME STATUS"));
+    }
+
+    #[test]
+    fn editor_sees_only_new_lines() {
+        let before = "  GNU nano 7.2   docker-compose.yml\nservices:\n";
+        let now = "  GNU nano 7.2   docker-compose.yml\nservices:\n  app:\n    image: nginx:1.27\n";
+        assert_eq!(new_lines(now, before), "  app:\n    image: nginx:1.27");
+        assert_eq!(new_lines(before, before), "");
     }
 
     #[test]

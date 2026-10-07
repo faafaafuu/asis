@@ -367,6 +367,8 @@ pub fn run() {
             commands::practice_switch,
             #[cfg(desktop)]
             commands::practice_progress,
+            #[cfg(desktop)]
+            commands::practice_screen,
             commands::learn_topic,
             commands::learn_read,
             commands::learn_place,
