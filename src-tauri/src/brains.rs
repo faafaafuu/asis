@@ -232,11 +232,46 @@ fn score(brain: &Brain, wanted: &[String]) -> usize {
         .sum()
 }
 
+/// Мост через сайт: тот же мост, что на компьютере идёт туннелем, но по
+/// ключу площадки и по HTTPS. Нужен телефону — туннеля к мосту у него нет.
+/// Без ключа площадки — нет.
+pub fn site_bridge(config: &Config) -> Option<Brain> {
+    if config.platform.token.trim().is_empty() || config.platform.url.trim().is_empty() {
+        return None;
+    }
+    Some(Brain {
+        endpoint: format!("{}/api/noa/bridge/chat/completions", config.platform.url.trim_end_matches('/')),
+        // Ключ площадки в памяти зашифрован, ключ модели — открытым.
+        api_key: crate::secret::reveal(&config.platform.token),
+        model: "claude-code-bridge:free".into(),
+        proxy: String::new(),
+    })
+}
+
+/// Включает мост через сайт, если модели ещё нет — так телефон сразу
+/// отвечает после того, как в него вписали ключ площадки.
+pub fn adopt_site_bridge(config: &mut Config) -> bool {
+    let has_model = config.ai.provider == "http" && !config.ai.endpoint.trim().is_empty();
+    let Some(brain) = (!has_model).then(|| site_bridge(config)).flatten() else { return false };
+    config.ai.provider = "http".into();
+    config.ai.endpoint = brain.endpoint;
+    config.ai.api_key = brain.api_key;
+    config.ai.model = brain.model;
+    remember(config);
+    true
+}
+
 async fn candidates(app: &AppHandle) -> Vec<Brain> {
     let (mut list, base) = {
         let state = app.state::<AppState>();
         let config = state.config();
-        (config.brains.clone(), config.ai.clone())
+        let mut list = config.brains.clone();
+        if let Some(bridge) = site_bridge(&config) {
+            if !list.iter().any(|known| known.same(&bridge)) {
+                list.push(bridge);
+            }
+        }
+        (list, config.ai.clone())
     };
     // Мост умеет несколько подписок (Claude, ChatGPT через Codex, Gemini, Qwen):
     // что у него есть, он сам скажет списком. Вариант «:free» — тот, при
