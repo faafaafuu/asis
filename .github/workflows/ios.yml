@@ -76,6 +76,23 @@ jobs:
           grep -n "Rust собран заранее" project.yml
           xcodegen generate
 
+      # Описания доступа (микрофон, распознавание речи) из src-tauri/Info.ios.plist
+      # обычно вливает `tauri ios build`. Без них iOS закрывает программу при
+      # первом голосовом вопросе — вливаем сами.
+      - name: Info.plist — доступ к микрофону и речи
+        working-directory: src-tauri/gen/apple
+        run: |
+          plist=$(find . -maxdepth 2 -name Info.plist -path "*_iOS/*" | head -1)
+          echo "Info.plist: $plist"
+          for key in $(/usr/libexec/PlistBuddy -c "Print" ../../Info.ios.plist | awk '/=/{print $1}'); do
+            value=$(/usr/libexec/PlistBuddy -c "Print :$key" ../../Info.ios.plist)
+            type=string
+            [ "$value" = "false" ] || [ "$value" = "true" ] && type=bool
+            /usr/libexec/PlistBuddy -c "Delete :$key" "$plist" 2>/dev/null || true
+            /usr/libexec/PlistBuddy -c "Add :$key $type '$value'" "$plist"
+          done
+          /usr/libexec/PlistBuddy -c "Print" "$plist" | grep -E "Usage|DisplayName"
+
       - name: Сборка без подписи
         working-directory: src-tauri/gen/apple
         run: |
