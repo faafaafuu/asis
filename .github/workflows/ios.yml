@@ -84,6 +84,30 @@ jobs:
       # аккаунта Apple не собирает — подпись обязательна. Поэтому Rust
       # собирается здесь, библиотека кладётся туда, где её ждёт проект, а
       # шаг проекта заменяется пустым.
+      # Движок голоса (sherpa-onnx) — скачивается здесь, а не пакетом при
+      # сборке: кэш Rust восстанавливал собранный пакет без скачанной
+      # библиотеки, и компоновка падала («library sherpa-onnx-c-api not
+      # found»). Путь к библиотеке — SHERPA_ONNX_LIB_DIR, xcframework — рядом
+      # с проектом (его встраивает Xcode по bundle.iOS.frameworks).
+      - name: Движок голоса
+        run: |
+          set -e
+          ver=$(grep -A2 'name = "sherpa-onnx-sys"' src-tauri/Cargo.lock | awk -F'"' '/version/{print $2; exit}')
+          echo "sherpa-onnx $ver"
+          dir="$RUNNER_TEMP/sherpa"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/x.zip" "https://github.com/k2-fsa/sherpa-onnx/releases/download/xcframework/sherpa-onnx-v${ver}-ios-shared-onnxruntime-static.xcframework.zip"
+          unzip -q "$dir/x.zip" -d "$dir/x"
+          xcf=$(find "$dir/x" -type d -name "*.xcframework" | head -1)
+          echo "xcframework: $xcf"
+          bin=$(find "$xcf" -path "*ios-arm64/*" -name SherpaOnnxC -type f | head -1)
+          echo "библиотека: $bin"
+          mkdir -p "$dir/lib"
+          ln -sf "$bin" "$dir/lib/libsherpa-onnx-c-api.dylib"
+          rm -rf src-tauri/sherpa-onnx.xcframework
+          cp -R "$xcf" src-tauri/sherpa-onnx.xcframework
+          echo "SHERPA_ONNX_LIB_DIR=$dir/lib" >> "$GITHUB_ENV"
+
       - name: Rust для iPhone
         working-directory: src-tauri
         run: |
