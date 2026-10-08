@@ -59,7 +59,11 @@ jobs:
       - name: Rust для iPhone
         working-directory: src-tauri
         run: |
-          cargo build --release --lib --target aarch64-apple-ios
+          # tauri/custom-protocol — сборка выпуска: интерфейс вшит в программу.
+          # Без него Ноа на телефоне шла за интерфейсом на сервер разработки
+          # localhost:5173 и показывала только ошибку. Этот признак обычно
+          # ставит `tauri build`, которую здесь обходим ради сборки без подписи.
+          cargo build --release --lib --target aarch64-apple-ios --features tauri/custom-protocol
           mkdir -p gen/apple/Externals/arm64/release
           cp target/aarch64-apple-ios/release/libsufler_lib.a gen/apple/Externals/arm64/release/libapp.a
           ls -la gen/apple/Externals/arm64/release
