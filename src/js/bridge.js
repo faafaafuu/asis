@@ -124,7 +124,7 @@ followInsets();
 export function closePage(win) {
   if (isPhone()) {
     if (history.length > 1) history.back();
-    else location.href = "onboarding.html";
+    else location.href = /iPhone|iPad/.test(navigator.userAgent) ? "learning.html" : "onboarding.html";
     return;
   }
   win?.close();

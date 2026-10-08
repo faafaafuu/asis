@@ -173,6 +173,7 @@ pub fn run() {
             let config_dir = app.path().app_config_dir().ok();
             // Список задач лежит рядом с настройками и читается один раз.
             if let Some(dir) = config_dir.clone() {
+                module_kit::set_data_dir(dir.clone());
                 spend::load(dir.clone());
                 tasks::load(dir.clone());
                 watchlist::load(dir.clone());

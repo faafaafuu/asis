@@ -247,7 +247,8 @@ term.onData((data) => {
 let ctrlArmed = false;
 const keys = document.createElement("div");
 keys.className = "keys";
-keys.hidden = !isPhone();
+// Полоса клавиш выключена: на телефоне практика — без неё.
+keys.hidden = true;
 const KEYS = [
   ["Esc", "\x1b"],
   ["Tab", "\t"],

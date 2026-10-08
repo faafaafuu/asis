@@ -1210,7 +1210,20 @@ pub fn check(dir: &Path, manifest: &Manifest, secrets: &BTreeMap<String, String>
 }
 
 /// Путь к папке данных Ноа — без окна программы.
+/// Папка данных запущенной программы — её сообщает сама программа при старте.
+static DATA_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Запомнить папку настроек программы. Без этого на iPhone, Mac и Linux
+/// путь угадывался по HOME и не совпадал с настоящим: забор курсов и
+/// прогресса не видел ключ площадки и молча ничего не делал.
+pub fn set_data_dir(dir: PathBuf) {
+    let _ = DATA_DIR.set(dir);
+}
+
 pub fn data_dir() -> Option<PathBuf> {
+    if let Some(dir) = DATA_DIR.get() {
+        return Some(dir.clone());
+    }
     #[cfg(windows)]
     {
         std::env::var_os("APPDATA").map(|base| PathBuf::from(base).join("app.sufler.popup"))

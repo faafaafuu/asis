@@ -1309,11 +1309,17 @@ fn open_page(app: &AppHandle, page: &str) -> tauri::Result<()> {
 #[cfg(mobile)]
 fn back_home(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(ONBOARDING_LABEL) {
-        let _ = window.eval(
+        // Главный экран на iPhone — обучение, на Android — экран Ноа.
+        let script = if cfg!(target_os = "ios") {
+            r"if (!/learning\.html/.test(location.pathname)) {
+                history.length > 1 ? history.back() : (location.href = 'learning.html');
+            }"
+        } else {
             r"if (!/onboarding\.html/.test(location.pathname)) {
                 history.length > 1 ? history.back() : (location.href = 'onboarding.html');
-            }",
-        );
+            }"
+        };
+        let _ = window.eval(script);
     }
 }
 
@@ -1326,7 +1332,8 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
     let builder = WebviewWindowBuilder::new(
         app,
         ONBOARDING_LABEL,
-        WebviewUrl::App("onboarding.html".into()),
+        // На iPhone программа — только обучение: открывается сразу оно.
+        WebviewUrl::App(if cfg!(target_os = "ios") { "learning.html" } else { "onboarding.html" }.into()),
     )
     // Тема проставляется до того, как страница начнёт рисоваться.
     //

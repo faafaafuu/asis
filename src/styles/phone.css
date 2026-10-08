@@ -3,7 +3,8 @@
    во всю ширину, с панелью вкладок внизу и отступами под вырез и полоску. */
 
 :root {
-  --phone-nav-height: 58px;
+  /* Панели вкладок нет — ниже только полоска «домой». */
+  --phone-nav-height: 0px;
 }
 
 html.is-phone,
@@ -12,7 +13,7 @@ html.is-phone body {
   -webkit-text-size-adjust: 100%;
 }
 
-html.has-phone-nav body {
+html.is-phone body {
   box-sizing: border-box;
   height: 100vh;
   height: 100dvh;
@@ -135,7 +136,7 @@ html.is-phone .head__progress .bar {
 
 /* ── Практика: панель вкладок занимает низ — окно над ней ──────────────── */
 
-html.has-phone-nav .practice {
+html.is-phone .practice {
   min-height: 0;
 }
 
