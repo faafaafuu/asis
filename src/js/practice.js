@@ -7,7 +7,7 @@
 // терминала и сама решает, когда посмотреть (команда кончилась или идёт
 // долго); окно только показывает и читает их вслух.
 
-import { tauri, appWindow, applyTheme } from "./bridge.js";
+import { tauri, appWindow, applyTheme, isPhone, closePage } from "./bridge.js";
 import { Terminal } from "../vendor/xterm/xterm.js";
 import { FitAddon } from "../vendor/xterm/addon-fit.js";
 import { parseScheme, renderScheme } from "./scheme.js";
@@ -63,7 +63,9 @@ const win = appWindow();
 ui.minimize.addEventListener("click", () => win?.minimize());
 ui.close.addEventListener("click", () => {
   api?.invoke("voice_stop").catch(() => {});
-  win?.close();
+  // На телефоне окно одно — «закрыть» значит вернуться назад.
+  if (isPhone()) closePage(win);
+  else win?.close();
 });
 ui.head.addEventListener("pointerdown", (event) => {
   if (event.button !== 0 || event.target.closest("button")) return;
@@ -80,7 +82,8 @@ api?.invoke("app_version")
 const mono = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
 const term = new Terminal({
   fontFamily: `${mono ? `${mono}, ` : ""}"Cascadia Mono", Consolas, monospace`,
-  fontSize: 14,
+  // На телефоне мельче: иначе в строку влезает 30 знаков и вывод ломается.
+  fontSize: isPhone() ? 12 : 14,
   lineHeight: 1.15,
   cursorBlink: true,
   scrollback: 5000,
@@ -99,11 +102,96 @@ async function startShell() {
   exited = false;
   try {
     const replay = await api.invoke("practice_term_start", { cols: term.cols, rows: term.rows });
+    hideConnect();
     if (replay) term.write(replay);
   } catch (err) {
+    // На телефоне своей оболочки нет: терминал — это сервер по SSH.
+    if (String(err).includes("ssh:connect")) return showConnect();
     term.write(`\r\n\x1b[31mТерминал не запустился: ${err}\x1b[0m\r\n`);
   }
 }
+
+/* ── Подключение к серверу (телефон) ───────────────────────────────────── */
+
+// Форма поверх терминала: адрес, пользователь, пароль — или ключ Ноа,
+// который один раз кладут на сервер. Пароль не запоминается.
+const connectBox = document.createElement("form");
+connectBox.className = "connect";
+connectBox.hidden = true;
+connectBox.innerHTML = `
+  <h2 class="connect__title">Подключиться к серверу</h2>
+  <p class="connect__lead">Терминал практики открывается на вашем сервере: команды выполняются там, Ноа видит вывод и ведёт по шагам.</p>
+  <label>Адрес <input name="host" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="203.0.113.10 или server.example.ru" required></label>
+  <div class="connect__row">
+    <label>Пользователь <input name="user" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="root" required></label>
+    <label class="connect__port">Порт <input name="port" inputmode="numeric" value="22"></label>
+  </div>
+  <label>Пароль <input name="password" type="password" autocomplete="off" placeholder="не нужен, если сервер знает ключ Ноа"></label>
+  <details class="connect__key">
+    <summary>Вход без пароля — ключ Ноа</summary>
+    <p>Один раз добавьте эту строку на сервере в <code>~/.ssh/authorized_keys</code> — дальше Ноа входит сама.</p>
+    <textarea readonly rows="3" data-key></textarea>
+    <button type="button" class="button button--quiet" data-copy>Скопировать ключ</button>
+  </details>
+  <p class="connect__error" data-error></p>
+  <button class="button" type="submit" data-go>Подключиться</button>`;
+ui.screen.parentElement.append(connectBox);
+
+async function showConnect(reason = "") {
+  connectBox.hidden = false;
+  const error = connectBox.querySelector("[data-error]");
+  error.textContent = reason;
+  try {
+    const server = await api.invoke("practice_server");
+    const form = connectBox.elements;
+    if (server.host && !form.host.value) form.host.value = server.host;
+    if (server.user && !form.user.value) form.user.value = server.user;
+    if (server.port) form.port.value = server.port;
+    connectBox.querySelector("[data-key]").value = server.publicKey ?? "";
+  } catch (err) {
+    error.textContent = String(err);
+  }
+}
+
+function hideConnect() {
+  connectBox.hidden = true;
+}
+
+connectBox.querySelector("[data-copy]").addEventListener("click", () => {
+  const key = connectBox.querySelector("[data-key]");
+  key.select();
+  navigator.clipboard?.writeText(key.value).catch(() => document.execCommand?.("copy"));
+  connectBox.querySelector("[data-copy]").textContent = "Скопировано ✓";
+});
+
+connectBox.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = connectBox.elements;
+  const go = connectBox.querySelector("[data-go]");
+  const error = connectBox.querySelector("[data-error]");
+  go.disabled = true;
+  go.textContent = "Подключаюсь…";
+  error.textContent = "";
+  try {
+    term.reset();
+    await api.invoke("practice_connect", {
+      host: form.host.value,
+      port: Number(form.port.value) || 22,
+      user: form.user.value,
+      password: form.password.value,
+      cols: term.cols,
+      rows: term.rows,
+    });
+    form.password.value = "";
+    exited = false;
+    hideConnect();
+    term.focus();
+  } catch (err) {
+    error.textContent = String(err);
+  }
+  go.disabled = false;
+  go.textContent = "Подключиться";
+});
 
 // Копировать — Ctrl+C при выделении (без выделения это «прервать»),
 // вставить — Ctrl+V и правый клик, как в Windows Terminal.
@@ -138,14 +226,62 @@ ui.screen.addEventListener("contextmenu", (event) => {
 
 term.onData((data) => {
   if (exited) {
-    if (data.includes("\r")) {
+    if (data.includes("\r") && !isPhone()) {
       term.reset();
       startShell();
     }
     return;
   }
+  // Ctrl с полосы клавиш: следующая буква уходит управляющим знаком (Ctrl+C, Ctrl+X).
+  if (ctrlArmed && data.length === 1 && /[a-z@\[\]\\^_]/i.test(data)) {
+    data = String.fromCharCode(data.toUpperCase().charCodeAt(0) & 0x1f);
+    setCtrl(false);
+  }
   api.invoke("practice_term_write", { data }).catch(() => {});
 });
+
+/* ── Полоса клавиш (телефон) ───────────────────────────────────────────── */
+
+// На клавиатуре iPhone нет Esc, Tab, Ctrl и стрелок, а без них в терминале
+// не выйти из nano и не прервать команду.
+let ctrlArmed = false;
+const keys = document.createElement("div");
+keys.className = "keys";
+keys.hidden = !isPhone();
+const KEYS = [
+  ["Esc", "\x1b"],
+  ["Tab", "\t"],
+  ["Ctrl", null],
+  ["↑", "\x1b[A"],
+  ["↓", "\x1b[B"],
+  ["←", "\x1b[D"],
+  ["→", "\x1b[C"],
+  ["|", "|"],
+  ["~", "~"],
+  ["/", "/"],
+  ["-", "-"],
+];
+for (const [label, seq] of KEYS) {
+  const key = document.createElement("button");
+  key.type = "button";
+  key.className = "keys__key";
+  key.textContent = label;
+  // Не уводить фокус из терминала: клавиатура телефона не должна прятаться.
+  key.addEventListener("pointerdown", (event) => event.preventDefault());
+  key.addEventListener("click", () => {
+    if (seq === null) return setCtrl(!ctrlArmed);
+    if (!exited) api.invoke("practice_term_write", { data: seq }).catch(() => {});
+    term.focus();
+  });
+  if (seq === null) key.dataset.ctrl = "";
+  keys.append(key);
+}
+ui.screen.parentElement.append(keys);
+
+function setCtrl(on) {
+  ctrlArmed = on;
+  keys.querySelector("[data-ctrl]")?.classList.toggle("is-on", on);
+}
 
 api?.listen("practice:out", (event) => term.write(event.payload));
 
@@ -169,8 +305,10 @@ function sendScreen() {
 }
 term.onWriteParsed(sendScreen);
 term.buffer.onBufferChange(sendScreen);
-api?.listen("practice:exit", () => {
+api?.listen("practice:exit", (event) => {
   exited = true;
+  // Сервер отключился — снова форма подключения, с причиной.
+  if (isPhone()) return showConnect(typeof event.payload === "string" ? event.payload : "Соединение закрыто.");
   term.write("\r\n\x1b[2m[оболочка закрылась — Enter, чтобы открыть новую]\x1b[0m\r\n");
 });
 

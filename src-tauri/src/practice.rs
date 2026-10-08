@@ -16,19 +16,25 @@
 //! на пароли, токены и ключи закрывается, а глаз в окне выключает
 //! наблюдение совсем.
 
-use std::io::{Read, Write};
 use std::collections::BTreeMap;
+#[cfg(desktop)]
+use std::io::{Read, Write};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+#[cfg(desktop)]
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::ai_client::ThreadItem;
 
-/// Окно практики.
+/// Окно практики: на компьютере своё, на телефоне — то же единственное окно,
+/// в котором открываются все страницы.
+#[cfg(desktop)]
 pub const LABEL: &str = "practice";
+#[cfg(mobile)]
+pub const LABEL: &str = crate::overlay::ONBOARDING_LABEL;
 
 /* ── Сценарий и ход практики ───────────────────────────────────────────── */
 
@@ -77,6 +83,28 @@ pub struct Line {
     /// `comment`, `error`, `step`, `hint`, `overview`, `answer`.
     #[serde(default)]
     pub kind: String,
+    /// Что Ноа может сделать сама — кнопкой под репликой.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<Action>,
+}
+
+/// Действие Ноа в терминале человека: команда или файл целиком. Выполняется
+/// только по кнопке — человек видит, что будет введено.
+///
+/// Раньше Ноа знала правильный текст файла, но могла только советовать, и
+/// человек часами переписывал его руками — в YAML с ошибками в отступах.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Action {
+    /// Одна команда.
+    Run { command: String },
+    /// Файл целиком, байт в байт.
+    File {
+        path: String,
+        content: String,
+        #[serde(default)]
+        sudo: bool,
+    },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -237,13 +265,84 @@ fn publish(app: &AppHandle, say: &str, spoken: bool) {
 }
 
 fn note(p: &mut Practice, who: &str, kind: &str, text: &str) {
-    if !text.trim().is_empty() {
+    note_with(p, who, kind, text, Vec::new());
+}
+
+fn note_with(p: &mut Practice, who: &str, kind: &str, text: &str, actions: Vec<Action>) {
+    if !text.trim().is_empty() || !actions.is_empty() {
         p.feed.push(Line {
             who: who.into(),
             kind: kind.into(),
             text: text.trim().to_string(),
+            actions,
         });
     }
+}
+
+/// Действия из ответа модели — только осмысленные: пустую команду и файл
+/// без пути кнопкой не показываем.
+fn usable(actions: Vec<Action>) -> Vec<Action> {
+    actions
+        .into_iter()
+        .filter(|action| match action {
+            Action::Run { command } => !command.trim().is_empty(),
+            Action::File { path, .. } => !path.trim().is_empty(),
+        })
+        .take(4)
+        .collect()
+}
+
+/// Строка, которую программа вводит в терминал за человека.
+///
+/// Файл уходит одной командой в base64: печать по строкам ломала бы его —
+/// оболочка съедает табы автодополнением, а редактор переставляет отступы.
+/// Так файл ложится байт в байт, и YAML с отступами — ровно таким, как его
+/// написала Ноа.
+pub fn command_for(action: &Action) -> String {
+    match action {
+        Action::Run { command } => command.trim().to_string(),
+        Action::File { path, content, sudo } => {
+            let mut body = content.clone();
+            if !body.ends_with('\n') {
+                body.push('\n');
+            }
+            let data = base64(body.as_bytes());
+            let path = path.trim();
+            let quoted = format!("'{}'", path.replace('\'', r"'\''"));
+            let done = format!("echo 'Ноа: записан {}'", path.replace('\'', ""));
+            if *sudo {
+                format!(
+                    "sudo mkdir -p \"$(dirname {quoted})\" && printf %s '{data}' | base64 -d | sudo tee {quoted} >/dev/null && {done}"
+                )
+            } else {
+                format!("mkdir -p \"$(dirname {quoted})\" && printf %s '{data}' | base64 -d > {quoted} && {done}")
+            }
+        }
+    }
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        out.push(ABC[(n >> 18) as usize & 63] as char);
+        out.push(ABC[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { ABC[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { ABC[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+/// Выполнить действие Ноа: ввести его в терминал за человека.
+pub fn perform(action: &Action) -> Result<(), String> {
+    if WATCH.lock().unwrap_or_else(|err| err.into_inner()).full_screen {
+        return Err("Сначала выйдите из редактора (в nano — Ctrl+X, в vim — :q), иначе команда наберётся внутрь файла.".into());
+    }
+    let line = command_for(action);
+    log::info!("практика: Ноа выполняет за человека ({} знаков)", line.chars().count());
+    term_write(&format!("{line}\r"))
 }
 
 /// Перейти к практике темы: открыли из урока или выбрали в окне. Своя у
@@ -700,7 +799,7 @@ pub async fn ask(app: &AppHandle, text: &str, voice: bool) -> Result<String, Str
     );
     let thread = STORE.lock().unwrap_or_else(|err| err.into_inner()).thread.clone();
     let raw = model(app, &rules, &thread, text, false).await?;
-    let (shown, said) = two_ways(&raw);
+    let (shown, said, actions) = three_ways(&raw);
     {
         let mut store = STORE.lock().unwrap_or_else(|err| err.into_inner());
         store.thread.push(ThreadItem { q: text.to_string(), a: shown.clone() });
@@ -708,7 +807,7 @@ pub async fn ask(app: &AppHandle, text: &str, voice: bool) -> Result<String, Str
         store.thread.drain(..excess);
     }
     let kind = if text.starts_with(OVERVIEW) { "overview" } else { "answer" };
-    with(app, |p| note(p, "noa", kind, &shown));
+    with(app, |p| note_with(p, "noa", kind, &shown, actions));
     publish(app, &said, voice);
     Ok(if voice { said } else { shown })
 }
@@ -722,28 +821,46 @@ const SAY: &str = "Коротко и разговорно. Никакого ко
 /// Ответ модели — {"text", "say"}: для экрана и для голоса. Не JSON — тот же
 /// текст на экран, а вслух — он же без кода.
 fn two_ways(raw: &str) -> (String, String) {
+    let (shown, said, _) = three_ways(raw);
+    (shown, said)
+}
+
+/// То же и действия, которые Ноа предлагает сделать сама.
+fn three_ways(raw: &str) -> (String, String, Vec<Action>) {
     #[derive(Deserialize)]
     struct Two {
         #[serde(default)]
         text: String,
         #[serde(default)]
         say: String,
+        #[serde(default, rename = "do")]
+        actions: Vec<Action>,
     }
     match json_object(raw).and_then(|json| serde_json::from_str::<Two>(json).ok()) {
-        Some(two) if !two.text.trim().is_empty() => {
+        Some(two) if !two.text.trim().is_empty() || !two.actions.is_empty() => {
             let say = if two.say.trim().is_empty() { speakable(&two.text) } else { speakable(&two.say) };
-            (two.text.trim().to_string(), say)
+            (two.text.trim().to_string(), say, usable(two.actions))
         }
-        _ => (raw.trim().to_string(), speakable(raw)),
+        _ => (raw.trim().to_string(), speakable(raw), Vec::new()),
     }
 }
+
+/// Как Ноа делает за человека — для ответов и замечаний практики.
+const DO: &str = "do — действия, которые программа выполнит в терминале человека по одной кнопке. \
+    Клади их, когда человек просит сделать за него («создай», «исправь», «запиши», «выполни», \
+    «сделай сама») или когда исправление очевидно. Файл — целиком: \
+    {\"kind\": \"file\", \"path\": \"/полный/путь\", \"content\": \"весь текст файла\", \"sudo\": false} — \
+    точные отступы пробелами, без табов в YAML; sudo — для системных путей. Команда — \
+    {\"kind\": \"run\", \"command\": \"…\"}, одна на действие. Не говори «сделайте вручную» то, \
+    что можешь положить в do. Удаление, перезагрузку и прочее необратимое — только если человек \
+    прямо попросил. Нечего делать — пустой список.";
 
 /// Просьба об общей картине — по ней же лента помечает ответ.
 pub const OVERVIEW: &str = "Общая картина:";
 
 /// Для голоса: без кода и разметки.
 fn speakable(text: &str) -> String {
-    crate::voice::without_code(text).replace(['*', '#'], "")
+    crate::spoken::without_code(text).replace(['*', '#'], "")
 }
 
 /* ── Голос ─────────────────────────────────────────────────────────────── */
@@ -759,6 +876,7 @@ pub fn set_voice(on: bool) {
 
 /* ── Терминал ──────────────────────────────────────────────────────────── */
 
+#[cfg(desktop)]
 struct Term {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -767,6 +885,7 @@ struct Term {
     id: u64,
 }
 
+#[cfg(desktop)]
 static TERM: Mutex<Option<Term>> = Mutex::new(None);
 
 /// Что видно в терминале и чего Ноа ещё не видела.
@@ -814,6 +933,72 @@ const EDITOR_QUIET: Duration = Duration::from_millis(1500);
 /// Команда идёт дольше — Ноа смотрит, не дожидаясь конца.
 const LONG: Duration = Duration::from_secs(25);
 
+/// Новый сеанс терминала: прежний вывод забыт, старый поток чтения дальше не пишет.
+fn begin_session() -> u64 {
+    let mut watch = WATCH.lock().unwrap_or_else(|err| err.into_inner());
+    watch.session += 1;
+    watch.fresh.clear();
+    watch.replay.clear();
+    watch.entered = None;
+    watch.full_screen = false;
+    watch.session
+}
+
+/// Пришёл вывод терминала: в память для Ноа и в окно. `false` — сеанс уже
+/// сменился, этот поток пора закрывать.
+fn received(app: &AppHandle, id: u64, text: String) -> bool {
+    {
+        let mut watch = WATCH.lock().unwrap_or_else(|err| err.into_inner());
+        if watch.session != id {
+            return false;
+        }
+        for (on, off) in [("\x1b[?1049h", "\x1b[?1049l"), ("\x1b[?47h", "\x1b[?47l"), ("\x1b[?1047h", "\x1b[?1047l")] {
+            match (text.rfind(on), text.rfind(off)) {
+                (Some(a), Some(b)) => watch.full_screen = a > b,
+                (Some(_), None) => watch.full_screen = true,
+                (None, Some(_)) => watch.full_screen = false,
+                _ => {}
+            }
+        }
+        watch.fresh.push_str(&text);
+        trim_front(&mut watch.fresh, MAX_FRESH);
+        watch.replay.push_str(&text);
+        trim_front(&mut watch.replay, MAX_REPLAY);
+        watch.last_out = Some(Instant::now());
+    }
+    let _ = app.emit_to(LABEL, "practice:out", text);
+    true
+}
+
+/// Байты → текст: конец куска может разрезать букву пополам — хвост ждёт следующего.
+fn decode(carry: &mut Vec<u8>) -> String {
+    let valid = match std::str::from_utf8(carry) {
+        Ok(_) => carry.len(),
+        Err(err) if err.error_len().is_none() => err.valid_up_to(),
+        Err(_) => carry.len(),
+    };
+    let text = String::from_utf8_lossy(&carry[..valid]).into_owned();
+    carry.drain(..valid);
+    text
+}
+
+/// Человек нажал Enter — с этой минуты ждём ответа сервера.
+fn mark_enter(data: &str) {
+    if data.contains('\r') {
+        let mut watch = WATCH.lock().unwrap_or_else(|err| err.into_inner());
+        watch.entered = Some(Instant::now());
+        watch.long_noted = false;
+    }
+}
+
+/// То, что было в терминале, — окну после перезагрузки. Запрос положения
+/// курсора (ESC[6n) ConPTY шлёт один раз при запуске, и xterm на него
+/// отвечает; повтор из записи ушёл бы в оболочку мусором «^[[1;1R».
+fn replay() -> String {
+    WATCH.lock().unwrap_or_else(|err| err.into_inner()).replay.replace("\x1b[6n", "")
+}
+
+#[cfg(desktop)]
 fn shell() -> CommandBuilder {
     #[cfg(target_os = "windows")]
     {
@@ -842,16 +1027,13 @@ fn trim_front(text: &mut String, max: usize) {
 
 /// Запускает терминал. Уже идёт — отдаёт то, что в нём было, чтобы окно
 /// после перезагрузки показало прежний экран.
+#[cfg(desktop)]
 pub fn term_start(app: &AppHandle, cols: u16, rows: u16) -> Result<String, String> {
     let mut term = TERM.lock().unwrap_or_else(|err| err.into_inner());
     if let Some(running) = term.as_mut() {
         if running.child.try_wait().ok().flatten().is_none() {
             let _ = running.master.resize(size(cols, rows));
-            // Запрос положения курсора (ESC[6n) ConPTY шлёт один раз при запуске,
-            // и xterm на него отвечает. Повтор из записи вызвал бы второй ответ —
-            // он ушёл бы в оболочку мусором «^[[1;1R».
-            let replay = WATCH.lock().unwrap_or_else(|err| err.into_inner()).replay.replace("\x1b[6n", "");
-            return Ok(replay);
+            return Ok(replay());
         }
     }
     let pair = native_pty_system()
@@ -867,15 +1049,7 @@ pub fn term_start(app: &AppHandle, cols: u16, rows: u16) -> Result<String, Strin
     let mut reader = pair.master.try_clone_reader().map_err(|err| err.to_string())?;
     let writer = pair.master.take_writer().map_err(|err| err.to_string())?;
 
-    let id = {
-        let mut watch = WATCH.lock().unwrap_or_else(|err| err.into_inner());
-        watch.session += 1;
-        watch.fresh.clear();
-        watch.replay.clear();
-        watch.entered = None;
-        watch.full_screen = false;
-        watch.session
-    };
+    let id = begin_session();
     *term = Some(Term { master: pair.master, writer, child, id });
     log::info!("практика: терминал запущен ({cols}×{rows})");
 
@@ -891,37 +1065,10 @@ pub fn term_start(app: &AppHandle, cols: u16, rows: u16) -> Result<String, Strin
                     Ok(n) => n,
                 };
                 carry.extend_from_slice(&buf[..read]);
-                // Конец куска может разрезать букву пополам — хвост ждёт следующего.
-                let valid = match std::str::from_utf8(&carry) {
-                    Ok(_) => carry.len(),
-                    Err(err) if err.error_len().is_none() => err.valid_up_to(),
-                    Err(_) => carry.len(),
-                };
-                let text = String::from_utf8_lossy(&carry[..valid]).into_owned();
-                carry.drain(..valid);
-                if text.is_empty() {
-                    continue;
+                let text = decode(&mut carry);
+                if !text.is_empty() && !received(&reading, id, text) {
+                    break;
                 }
-                {
-                    let mut watch = WATCH.lock().unwrap_or_else(|err| err.into_inner());
-                    if watch.session != id {
-                        break;
-                    }
-                    for (on, off) in [("\x1b[?1049h", "\x1b[?1049l"), ("\x1b[?47h", "\x1b[?47l"), ("\x1b[?1047h", "\x1b[?1047l")] {
-                        match (text.rfind(on), text.rfind(off)) {
-                            (Some(a), Some(b)) => watch.full_screen = a > b,
-                            (Some(_), None) => watch.full_screen = true,
-                            (None, Some(_)) => watch.full_screen = false,
-                            _ => {}
-                        }
-                    }
-                    watch.fresh.push_str(&text);
-                    trim_front(&mut watch.fresh, MAX_FRESH);
-                    watch.replay.push_str(&text);
-                    trim_front(&mut watch.replay, MAX_REPLAY);
-                    watch.last_out = Some(Instant::now());
-                }
-                let _ = reading.emit_to(LABEL, "practice:out", text);
             }
             let ended = WATCH.lock().unwrap_or_else(|err| err.into_inner()).session == id;
             if ended {
@@ -936,6 +1083,7 @@ pub fn term_start(app: &AppHandle, cols: u16, rows: u16) -> Result<String, Strin
     Ok(String::new())
 }
 
+#[cfg(desktop)]
 fn size(cols: u16, rows: u16) -> PtySize {
     PtySize {
         rows: rows.max(5),
@@ -945,30 +1093,198 @@ fn size(cols: u16, rows: u16) -> PtySize {
     }
 }
 
+#[cfg(desktop)]
 pub fn term_write(data: &str) -> Result<(), String> {
     let mut term = TERM.lock().unwrap_or_else(|err| err.into_inner());
     let term = term.as_mut().ok_or("терминал не запущен")?;
     term.writer.write_all(data.as_bytes()).map_err(|err| err.to_string())?;
     let _ = term.writer.flush();
-    if data.contains('\r') {
-        let mut watch = WATCH.lock().unwrap_or_else(|err| err.into_inner());
-        watch.entered = Some(Instant::now());
-        watch.long_noted = false;
-    }
+    mark_enter(data);
     Ok(())
 }
 
+#[cfg(desktop)]
 pub fn term_resize(cols: u16, rows: u16) {
     if let Some(term) = TERM.lock().unwrap_or_else(|err| err.into_inner()).as_ref() {
         let _ = term.master.resize(size(cols, rows));
     }
 }
 
+#[cfg(desktop)]
 pub fn term_stop() {
     if let Some(mut term) = TERM.lock().unwrap_or_else(|err| err.into_inner()).take() {
         let _ = term.child.kill();
         WATCH.lock().unwrap_or_else(|err| err.into_inner()).session += 1;
         log::info!("практика: терминал закрыт (сеанс {})", term.id);
+    }
+}
+
+/* ── Терминал на телефоне: SSH к серверу ──────────────────────────────── */
+
+/// Открытый SSH-сеанс практики.
+#[cfg(mobile)]
+static REMOTE: Mutex<Option<crate::ssh::Session>> = Mutex::new(None);
+
+/// Сервер практики: куда входить и чем. Пароль не хранится.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Server {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    /// Отпечаток ключа сервера с первого входа.
+    pub known: String,
+    /// Закрытый ключ Ноа (OpenSSH). Окну не отдаётся.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub key: String,
+}
+
+fn server_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_config_dir().ok().map(|dir| dir.join("practice-server.json"))
+}
+
+fn load_server(app: &AppHandle) -> Server {
+    server_path(app)
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str::<Server>(&text).ok())
+        .map(|mut server| {
+            server.key = crate::secret::reveal(&server.key);
+            server
+        })
+        .unwrap_or_default()
+}
+
+fn save_server(app: &AppHandle, server: &Server) {
+    let mut stored = server.clone();
+    stored.key = crate::secret::protect(&server.key);
+    if let (Some(path), Ok(json)) = (server_path(app), serde_json::to_string(&stored)) {
+        if let Err(err) = std::fs::write(path, json) {
+            log::warn!("сервер практики не сохранился: {err}");
+        }
+    }
+}
+
+/// Что окну знать о сервере: адрес, пользователь и открытый ключ Ноа —
+/// его кладут в ~/.ssh/authorized_keys. Ключа нет — заводится.
+pub fn server_view(app: &AppHandle) -> Result<serde_json::Value, String> {
+    let mut server = load_server(app);
+    if server.key.is_empty() {
+        let (private, _) = crate::ssh::new_key()?;
+        server.key = private;
+        save_server(app, &server);
+    }
+    let public = crate::ssh::public_of(&server.key)?;
+    Ok(serde_json::json!({
+        "host": server.host,
+        "port": if server.port == 0 { 22 } else { server.port },
+        "user": server.user,
+        "known": server.known,
+        "publicKey": public,
+    }))
+}
+
+/// Забыть ключ сервера — после переустановки сервера он меняется.
+pub fn forget_server_key(app: &AppHandle) {
+    let mut server = load_server(app);
+    server.known.clear();
+    save_server(app, &server);
+}
+
+/// Терминал на телефоне открывается подключением к серверу: до него —
+/// «нужно подключиться», после — прежний экран.
+#[cfg(mobile)]
+pub fn term_start(_app: &AppHandle, cols: u16, rows: u16) -> Result<String, String> {
+    match REMOTE.lock().unwrap_or_else(|err| err.into_inner()).as_ref() {
+        Some(session) => {
+            session.resize(u32::from(cols), u32::from(rows));
+            Ok(replay())
+        }
+        None => Err("ssh:connect".into()),
+    }
+}
+
+/// Подключиться к серверу по SSH — ключом Ноа, а не вышло — паролем.
+#[cfg(mobile)]
+pub async fn connect(app: &AppHandle, host: String, port: u16, user: String, password: String, cols: u16, rows: u16) -> Result<(), String> {
+    let mut server = load_server(app);
+    if server.host != host.trim() {
+        server.known.clear();
+    }
+    server.host = host.trim().to_string();
+    server.port = if port == 0 { 22 } else { port };
+    server.user = user.trim().to_string();
+    if server.host.is_empty() || server.user.is_empty() {
+        return Err("Впишите адрес сервера и пользователя.".into());
+    }
+    let id = begin_session();
+    let output_app = app.clone();
+    let closed_app = app.clone();
+    let carry = std::sync::Arc::new(Mutex::new(Vec::new()));
+    let target = crate::ssh::Target {
+        host: server.host.clone(),
+        port: server.port,
+        user: server.user.clone(),
+        password,
+        key: server.key.clone(),
+        known: server.known.clone(),
+        cols: u32::from(cols),
+        rows: u32::from(rows),
+    };
+    let (session, print) = crate::ssh::open(
+        target,
+        move |bytes| {
+            let text = {
+                let mut carry = carry.lock().unwrap_or_else(|err| err.into_inner());
+                carry.extend_from_slice(&bytes);
+                decode(&mut carry)
+            };
+            if !text.is_empty() {
+                received(&output_app, id, text);
+            }
+        },
+        move |reason| {
+            let mut remote = REMOTE.lock().unwrap_or_else(|err| err.into_inner());
+            if WATCH.lock().unwrap_or_else(|err| err.into_inner()).session == id {
+                *remote = None;
+                log::info!("практика: {reason}");
+                let _ = closed_app.emit_to(LABEL, "practice:exit", reason);
+            }
+        },
+    )
+    .await?;
+    server.known = print;
+    save_server(app, &server);
+    *REMOTE.lock().unwrap_or_else(|err| err.into_inner()) = Some(session);
+    log::info!("практика: подключено к {}@{}", server.user, server.host);
+    let watching = app.clone();
+    tauri::async_runtime::spawn(async move { watch_loop(watching, id).await });
+    Ok(())
+}
+
+#[cfg(mobile)]
+pub fn term_write(data: &str) -> Result<(), String> {
+    let remote = REMOTE.lock().unwrap_or_else(|err| err.into_inner());
+    let session = remote.as_ref().ok_or("нет подключения к серверу")?;
+    if !session.write(data.as_bytes()) {
+        return Err("соединение с сервером закрыто".into());
+    }
+    mark_enter(data);
+    Ok(())
+}
+
+#[cfg(mobile)]
+pub fn term_resize(cols: u16, rows: u16) {
+    if let Some(session) = REMOTE.lock().unwrap_or_else(|err| err.into_inner()).as_ref() {
+        session.resize(u32::from(cols), u32::from(rows));
+    }
+}
+
+#[cfg(mobile)]
+pub fn term_stop() {
+    if let Some(session) = REMOTE.lock().unwrap_or_else(|err| err.into_inner()).take() {
+        session.close();
+        WATCH.lock().unwrap_or_else(|err| err.into_inner()).session += 1;
+        log::info!("практика: отключились от сервера");
     }
 }
 

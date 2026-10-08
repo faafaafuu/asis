@@ -57,6 +57,7 @@
   };
 
   const items = { "k8s/k3s": state };
+  let connected = false;
   let line = "";
   const prompt = "\x1b[32mroot@node1\x1b[0m:~# ";
   globalThis.__TAURI__ = {
@@ -64,8 +65,18 @@
       invoke: async (cmd, args = {}) => {
         switch (cmd) {
           case "practice_term_start":
+            // ?phone=1 — как на телефоне: терминал открывается подключением.
+            if (params.get("phone") && !connected) throw "ssh:connect";
             setTimeout(() => emit("practice:out", "Welcome to Ubuntu 22.04 LTS\r\n\r\n" + prompt), 50);
             return "";
+          case "practice_server":
+            return { host: "", port: 22, user: "", known: "", publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJexampleexampleexampleexampleexample noa-practice" };
+          case "practice_connect":
+            await new Promise((r) => setTimeout(r, 600));
+            if (!args.host) throw "Впишите адрес сервера и пользователя.";
+            connected = true;
+            setTimeout(() => emit("practice:out", `Welcome to Ubuntu 22.04 LTS (${args.host})\r\n\r\n` + prompt), 50);
+            return null;
           case "practice_term_write":
             if (args.data === "\r") {
               const out = line.trim() === "kubectl get nodes" ? "\r\nNAME    STATUS   ROLES                  AGE   VERSION\r\nnode1   Ready    control-plane,master   2m    v1.30.4+k3s1\r\n" : "\r\n";

@@ -154,7 +154,6 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         return Some(crate::set_show_window(app, show));
     }
     // «Открой практику» — сразу, без модели: модель принимала её за обучение.
-    #[cfg(desktop)]
     if let Some(reply) = practice_request(app, said) {
         return Some(reply);
     }
@@ -395,7 +394,6 @@ fn module_window(app: &AppHandle, program: &str) -> Option<String> {
 }
 
 /// «Открой практику», «давай практику в терминале» — окно практики.
-#[cfg(desktop)]
 fn practice_request(app: &AppHandle, said: &str) -> Option<String> {
     let lower = said.to_lowercase();
     const ASK: &[&str] = &["открой", "открыть", "запусти", "включи", "покажи", "давай", "хочу"];
@@ -439,10 +437,7 @@ fn open_own(app: &AppHandle, window: OwnWindow) -> String {
             ),
         },
         OwnWindow::Order => (crate::overlay::show_order(app), "Открываю заказ."),
-        #[cfg(desktop)]
         OwnWindow::Practice => (crate::overlay::show_practice(app), "Открываю практику."),
-        #[cfg(not(desktop))]
-        OwnWindow::Practice => (Ok(()), "Практика с терминалом — в программе на компьютере."),
     };
     match opened {
         Ok(()) => spoken.into(),

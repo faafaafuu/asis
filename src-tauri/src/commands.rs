@@ -1761,21 +1761,18 @@ pub fn window_error(page: String, text: String) {
 /// Открыть окно практики — из темы курса или само по себе.
 // Асинхронная, как open_module: окно из синхронной команды на Windows
 // оставалось белым — команда ждёт главный поток, а он ждёт команду.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn practice_open(app: AppHandle, course: Option<String>, topic: Option<String>) -> Result<(), String> {
     crate::practice::switch(&app, course, topic);
     crate::overlay::show_practice(&app).map_err(|err| err.to_string())
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_state(app: AppHandle) -> crate::practice::Practice {
     crate::practice::state(&app)
 }
 
 /// Перейти в окне к практике другой темы.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_switch(app: AppHandle, course: String, topic: String) -> crate::practice::Practice {
     crate::practice::switch(&app, Some(course), Some(topic));
@@ -1783,14 +1780,12 @@ pub fn practice_switch(app: AppHandle, course: String, topic: String) -> crate::
 }
 
 /// Практики тем: на каком шаге, пройдена ли — для выбора темы.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_progress(app: AppHandle) -> Vec<crate::practice::Progress> {
     crate::practice::progress(&app)
 }
 
 /// Составить сценарий по цели человека (или по теме, из которой открыли).
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn practice_plan(
     app: AppHandle,
@@ -1803,47 +1798,40 @@ pub async fn practice_plan(
 
 /// Экран терминала, как его нарисовал xterm: Ноа видит то же, что человек,
 /// и в редакторе тоже.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_screen(text: String, alt: bool) {
     crate::practice::set_screen(&text, alt);
 }
 
 /// «Проверь шаг»: Ноа смотрит в терминал и говорит, сделан ли шаг.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn practice_check(app: AppHandle) {
     crate::practice::check(&app).await;
 }
 
 /// Разбирать каждую команду или только ошибки и просьбы.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_verbose(app: AppHandle, on: bool) {
     crate::practice::set_verbose(&app, on);
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_reset(app: AppHandle) {
     crate::practice::reset(&app);
 }
 
 /// Шаг вперёд (сделан) или назад.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_step(app: AppHandle, delta: i32) {
     crate::practice::move_step(&app, delta);
 }
 
 /// Смотрит ли Ноа в терминал.
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_watch(app: AppHandle, on: bool) {
     crate::practice::set_watching(&app, on);
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn practice_ask(app: AppHandle, text: String) -> Result<String, String> {
     crate::practice::ask(&app, &text, false).await
@@ -1862,19 +1850,16 @@ pub async fn practice_listen(app: AppHandle, on: bool) {
     }
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_term_start(app: AppHandle, cols: u16, rows: u16) -> Result<String, String> {
     crate::practice::term_start(&app, cols, rows)
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_term_write(data: String) -> Result<(), String> {
     crate::practice::term_write(&data)
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_term_resize(cols: u16, rows: u16) {
     crate::practice::term_resize(cols, rows);
@@ -1890,16 +1875,41 @@ pub fn practice_listening() -> bool {
 
 /// Текст из буфера обмена — вставить в терминал. Через программу, а не
 /// через браузер: webview на чтение буфера спрашивает разрешение.
-#[cfg(desktop)]
 #[tauri::command]
 pub async fn practice_clipboard() -> Option<String> {
     crate::screen::clipboard_text()
 }
 
-#[cfg(desktop)]
 #[tauri::command]
 pub fn practice_term_stop() {
     crate::practice::term_stop();
+}
+
+/// Сервер практики на телефоне: адрес, пользователь и открытый ключ Ноа.
+#[tauri::command]
+pub fn practice_server(app: AppHandle) -> Result<serde_json::Value, String> {
+    crate::practice::server_view(&app)
+}
+
+/// Забыть ключ сервера — после переустановки сервера он другой.
+#[tauri::command]
+pub fn practice_forget_server_key(app: AppHandle) {
+    crate::practice::forget_server_key(&app);
+}
+
+/// Подключиться к серверу по SSH — терминал практики на телефоне.
+#[cfg(mobile)]
+#[tauri::command]
+pub async fn practice_connect(
+    app: AppHandle,
+    host: String,
+    port: u16,
+    user: String,
+    password: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    crate::practice::connect(&app, host, port, user, password, cols, rows).await
 }
 
 /// Подробный разбор раздела урока. `cached` — только готовый, без модели.

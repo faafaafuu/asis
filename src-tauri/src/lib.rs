@@ -39,8 +39,9 @@ mod shots;
 mod focus;
 mod learning;
 mod tutor;
-#[cfg(desktop)]
 mod practice;
+mod spoken;
+mod ssh;
 mod glance;
 mod local_cli;
 mod recall;
@@ -331,44 +332,31 @@ pub fn run() {
             commands::audio_decoded,
             commands::learn_overview,
             commands::window_error,
-            #[cfg(desktop)]
             commands::practice_open,
-            #[cfg(desktop)]
             commands::practice_state,
-            #[cfg(desktop)]
             commands::practice_plan,
-            #[cfg(desktop)]
             commands::practice_reset,
-            #[cfg(desktop)]
             commands::practice_step,
-            #[cfg(desktop)]
             commands::practice_watch,
-            #[cfg(desktop)]
             commands::practice_ask,
             #[cfg(desktop)]
             commands::practice_listen,
-            #[cfg(desktop)]
             commands::practice_term_start,
-            #[cfg(desktop)]
             commands::practice_term_write,
-            #[cfg(desktop)]
             commands::practice_term_resize,
-            #[cfg(desktop)]
             commands::practice_term_stop,
-            #[cfg(desktop)]
             commands::practice_clipboard,
             #[cfg(desktop)]
             commands::practice_listening,
-            #[cfg(desktop)]
             commands::practice_check,
-            #[cfg(desktop)]
             commands::practice_verbose,
-            #[cfg(desktop)]
             commands::practice_switch,
-            #[cfg(desktop)]
             commands::practice_progress,
-            #[cfg(desktop)]
             commands::practice_screen,
+            commands::practice_server,
+            commands::practice_forget_server_key,
+            #[cfg(mobile)]
+            commands::practice_connect,
             commands::learn_topic,
             commands::learn_read,
             commands::learn_place,

@@ -1288,6 +1288,12 @@ pub fn hide_tasks(app: &AppHandle) {
     }
 }
 
+/// Практика на телефоне — страница в том же окне, как и всё остальное.
+#[cfg(mobile)]
+pub fn show_practice(app: &AppHandle) -> tauri::Result<()> {
+    open_page(app, "practice.html")
+}
+
 /// На телефоне окно одно: страница модуля открывается в нём же, поверх
 /// главного экрана, а «Закрыть» и системное «назад» возвращают к нему.
 #[cfg(mobile)]

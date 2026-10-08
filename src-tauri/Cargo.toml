@@ -36,6 +36,8 @@ tokio = { version = "1", features = ["time", "rt", "sync", "macros"] }
 # это SSH к серверу человека прямо из программы. Криптография — ring: она
 # собирается и под iOS, и под Android без C-тулчейна aws-lc.
 russh = { version = "0.54", default-features = false, features = ["ring", "flate2"] }
+# rand_core — случайность для ключа Ноа (ssh.rs): системный генератор.
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 # reqwest объявлен дважды — из-за TLS, и только из-за него. Общие фичи одинаковы:
 #

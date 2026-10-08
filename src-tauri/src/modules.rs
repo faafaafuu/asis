@@ -141,11 +141,10 @@ pub fn overview(app: &AppHandle) -> Vec<ModuleCard> {
             "Пишите своему боту — отвечает тем же", false),
     ];
     // Практика — следом за обучением: тот же путь, только руками.
-    #[cfg(desktop)]
     cards.insert(
         3,
         builtin("practice", "Практика", "▤", "Задача руками в терминале: Ноа смотрит, объясняет и ведёт по шагам",
-            "свой сервер по SSH".into(), &say("открой практику"), true),
+            "терминал на вашем сервере".into(), &say("открой практику"), true),
     );
     cards.extend(crate::plugins::installed(app).into_iter().map(|manifest| ModuleCard {
         status: crate::plugins::status(&manifest.id),
@@ -168,7 +167,6 @@ pub fn open(app: &AppHandle, id: &str) -> Result<(), String> {
         "tasks" => crate::overlay::show_tasks(app),
         "watchlist" => crate::overlay::show_watchlist(app),
         "learning" => crate::overlay::show_learning(app),
-        #[cfg(desktop)]
         "practice" => crate::overlay::show_practice(app),
         "order" => crate::overlay::show_order(app),
         // Свой модуль с окном: разметку даёт он, рамку и тему — Ноа.

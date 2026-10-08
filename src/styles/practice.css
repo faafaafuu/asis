@@ -67,11 +67,177 @@
 /* ── Терминал ──────────────────────────────────────────────────────────── */
 
 .practice__term {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   background: var(--term-bg);
+}
+
+/* ── Подключение к серверу (телефон) ───────────────────────────────────── */
+
+.connect {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 16px 24px;
+  overflow-y: auto;
+  background: var(--term-bg);
+  color: #f2ece1;
+}
+.connect[hidden] {
+  display: none !important;
+}
+.connect__title {
+  margin: 0;
+  font-size: 20px;
+}
+.connect__lead,
+.connect__key p {
+  margin: 0;
+  color: rgb(242 236 225 / 0.7);
+  font-size: 14px;
+}
+.connect label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: rgb(242 236 225 / 0.75);
+}
+.connect input,
+.connect textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.06);
+  color: #f2ece1;
+  font: 16px var(--font-mono);
+}
+.connect textarea {
+  font-size: 12px;
+  resize: none;
+  word-break: break-all;
+}
+.connect__row {
+  display: flex;
+  gap: 10px;
+}
+.connect__row label {
+  flex: 1;
+}
+.connect__row .connect__port {
+  flex: 0 0 84px;
+}
+.connect__key summary {
+  cursor: pointer;
+  color: #f2c14e;
+}
+.connect__key[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.connect__error {
+  margin: 0;
+  color: #ff8a80;
+  font-size: 14px;
+}
+.connect__error:empty {
+  display: none;
+}
+
+/* Клавиши, которых нет на клавиатуре телефона. */
+.keys {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  background: #100e0b;
+}
+.keys[hidden] {
+  display: none !important;
+}
+.keys__key {
+  flex: none;
+  min-width: 44px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgb(255 255 255 / 0.18);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.06);
+  color: #f2ece1;
+  font: 14px var(--font-mono);
+}
+.keys__key.is-on {
+  border-color: #f2c14e;
+  color: #f2c14e;
+}
+
+/* ── Телефон: терминал сверху, Ноа снизу ───────────────────────────────── */
+
+html.is-phone body {
+  padding-top: var(--inset-top, 0px);
+  padding-bottom: var(--inset-bottom, 0px);
+  box-sizing: border-box;
+}
+
+@media (max-width: 760px) {
+  .practice {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 52%) minmax(0, 48%);
+  }
+  .practice__split {
+    display: none;
+  }
+  /* Панель Ноа прокручивается целиком: шаг, картина, лента; вопрос — внизу. */
+  .coach {
+    border-top: 1px solid var(--divider);
+    padding: 10px 12px 0;
+    gap: 8px;
+    overflow-y: auto;
+  }
+  .coach__body {
+    flex: none;
+    overflow: visible;
+  }
+  .coach__split {
+    display: none;
+  }
+  .coach__feed {
+    flex: none;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+  }
+  .coach__ask {
+    position: sticky;
+    bottom: 0;
+    padding: 6px 0 8px;
+    background: var(--bg-solid);
+  }
+  .coach__orb {
+    width: 80px;
+    height: 40px;
+    margin: -4px -8px -4px -10px;
+  }
+  .practice__term-hint {
+    display: none;
+  }
+  .coach__step {
+    padding: 10px 12px;
+  }
+  .coach__step-title {
+    font-size: 16px;
+    line-height: 21px;
+  }
 }
 
 .practice__term-bar {

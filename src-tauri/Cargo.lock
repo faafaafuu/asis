@@ -4680,6 +4680,7 @@ dependencies = [
  "cpal",
  "log",
  "portable-pty",
+ "rand_core 0.6.4",
  "reqwest",
  "rodio",
  "russh",
