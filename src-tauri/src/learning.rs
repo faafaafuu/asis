@@ -235,6 +235,11 @@ fn user_dir() -> Option<PathBuf> {
         .map(|dir| dir.join("courses"))
 }
 
+/// Свои курсы — созданные на этом устройстве или взятые с сайта, без встроенных.
+pub fn own_courses() -> Vec<Course> {
+    user_courses()
+}
+
 fn user_courses() -> Vec<Course> {
     let Some(dir) = user_dir() else {
         return Vec::new();

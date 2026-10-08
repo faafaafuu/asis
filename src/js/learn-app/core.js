@@ -258,6 +258,10 @@ export const nav = {
   get current() {
     return current;
   },
+  /** Сколько экранов в стеке вкладки: 1 — её главный экран. */
+  get depth() {
+    return stacks[current].length;
+  },
 };
 
 function tabBar() {

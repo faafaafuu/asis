@@ -98,8 +98,24 @@ r = await mcp(2, "course_format", {});
 expect("формат курса", /concepts/.test(r.data.result?.content?.[0]?.text ?? ""), r);
 r = await call("/api/app/hello", { method: "POST", body: { env: "selftest", courses: "Курсов нет." }, ...app });
 expect("Ноа на связи", r.status === 200, r);
-const lesson = "Урок — ".repeat(3000) + "ёж 🦔";
-const sent = mcp(3, "create_course", { course: { id: `selftest-${stamp}`, title: "Проверка", topics: [{ id: "t", lesson }] } });
+// Урок длиннее куска (6000 знаков), с эмодзи — куски режутся по UTF-16.
+const lesson = ["## Первый", "## Второй", "## Третий"].map((head) => `${head}\n\n${"Урок — ".repeat(1000)}`).join("\n\n") + " ёж 🦔";
+/** Курс, который проходит проверку формата: три раздела, шесть понятий, задача и вопрос. */
+const validCourse = (id, title) => ({
+  id,
+  title,
+  topics: [
+    {
+      id: "t",
+      title: "Тема",
+      lesson,
+      concepts: Array.from({ length: 6 }, (_, i) => ({ id: `c${i}`, term: `Понятие ${i}`, definition: `Определение понятия ${i}.` })),
+      tasks: [{ id: "t-task", kind: "open", q: "Объясните понятие 0.", points: ["что это"], reference: "Это понятие 0." }],
+      exam: [{ id: "t-exam", kind: "choice", q: "Что такое понятие 0?", options: ["Определение 0", "Другое"], answer: 0 }],
+    },
+  ],
+});
+const sent = mcp(3, "create_course", { course: validCourse(`selftest-${stamp}`, "Проверка") });
 let jobs = [];
 for (let i = 0; i < 20 && !jobs.length; i++) {
   await new Promise((resolve) => setTimeout(resolve, 300));
@@ -115,9 +131,35 @@ while (jobs[0] && text.length < size) {
   text += r.data.text;
 }
 expect("курс собран из кусков", JSON.parse(text || "{}").topics?.[0]?.lesson === lesson, text.length);
+// Курсы аккаунта — устройству напрямую, мимо очереди: список и куски.
+r = await call("/api/app/courses", app);
+const own = r.data.courses?.find((c) => c.id === `selftest-${stamp}`);
+expect("курс в списке аккаунта", own && own.size > 0, r.data);
+text = "";
+size = 1;
+while (own && text.length < size) {
+  r = await call(`/api/app/courses/${own.id}/part?at=${text.length}`, app);
+  size = r.data.size;
+  if (!r.data.text) break;
+  text += r.data.text;
+}
+expect("курс аккаунта собран из кусков", JSON.parse(text || "{}").topics?.[0]?.lesson === lesson, text.length);
+// Курс с компьютера — в аккаунт кусками.
+const upload = JSON.stringify(validCourse(`up-${stamp}`, "Выгрузка"));
+let reply = null;
+for (let at = 0; at < upload.length; at += 5000) {
+  r = await call(`/api/app/courses/up-${stamp}/part`, { method: "POST", body: { at, text: upload.slice(at, at + 5000), size: upload.length }, ...app });
+  reply = r;
+  if (r.status !== 200) break;
+}
+expect("курс выгружен в аккаунт", reply?.status === 200 && /сохранён/.test(reply.data.report ?? ""), reply);
+r = await call(`/api/app/courses/up-${stamp}/part`, { method: "POST", body: { at: 5000, text: "x", size: upload.length }, ...app });
+expect("кусок не по порядку отклонён", r.status === 409, r);
+r = await call("/api/app/courses", app);
+expect("выгруженный курс в списке", r.data.courses?.some((c) => c.id === `up-${stamp}`), r.data);
 r = await call(`/api/app/course-jobs/${jobs[0]?.id}/report`, { method: "POST", body: { ok: true, report: "Курс сохранён." }, ...app });
 r = await sent;
-expect("отчёт дошёл до нейросети", r.data.result?.content?.[0]?.text === "Курс сохранён.", r);
+expect("отчёт дошёл до нейросети", /Курс сохранён\.$/.test(r.data.result?.content?.[0]?.text ?? ""), r);
 r = await mcp(4, "course_status", { id: `selftest-${stamp}` });
 expect("статус курса", /принят/.test(r.data.result?.content?.[0]?.text ?? ""), r);
 r = await mcp(5, "list_courses", {});

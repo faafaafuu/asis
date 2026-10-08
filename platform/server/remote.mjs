@@ -278,6 +278,55 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
     return { ok: true };
   });
 
+  // Курсы аккаунта — каждому устройству напрямую. Очередь course_jobs
+  // отдаёт курс один раз на аккаунт: забрал компьютер — телефон его уже не
+  // получит. Здесь устройство само сверяет список и тянет недостающее
+  // кусками (канал до хостинга рвёт длинные ответы).
+  route("GET", /^\/api\/app\/courses$/, ({ req }) => {
+    const user = appUser(req);
+    const rows = db.prepare("SELECT course_id, length(body) AS size, updated FROM noa_courses WHERE user_id = ?").all(String(user.id));
+    return { courses: rows.map((row) => ({ id: row.course_id, size: row.size, updated: row.updated })), part: PART_CHARS };
+  });
+
+  route("GET", /^\/api\/app\/courses\/([A-Za-z0-9_-]{1,64})\/part$/, ({ req, match, url }) => {
+    const user = appUser(req);
+    const row = db.prepare("SELECT body FROM noa_courses WHERE user_id = ? AND course_id = ?").get(String(user.id), match[1]);
+    if (!row) throw new Fail(404, "Нет такого курса.");
+    const at = Math.max(0, Number(url.searchParams.get("at") ?? 0) | 0);
+    return { text: row.body.slice(at, at + PART_CHARS), size: row.body.length };
+  });
+
+  // Курс с компьютера — в аккаунт, кусками по порядку; последний кусок
+  // сохраняет курс той же проверкой, что и курс с сайта.
+  const uploads = new Map();
+  route("POST", /^\/api\/app\/courses\/([A-Za-z0-9_-]{1,64})\/part$/, async ({ req, match }) => {
+    const user = appUser(req);
+    const { at, text, size } = await readJson(req, PART_CHARS * 4 + 1000);
+    const total = Number(size) | 0;
+    if (total <= 0 || total > MAX_COURSE_CHARS) throw new Fail(400, "Курс слишком большой.");
+    const key = `${user.id}/${match[1]}`;
+    const start = Number(at) | 0;
+    if (start === 0) uploads.set(key, { text: "", size: total, at: Date.now() });
+    const upload = uploads.get(key);
+    if (!upload || upload.text.length !== start || upload.size !== total) {
+      uploads.delete(key);
+      throw new Fail(409, "Куски курса пришли не по порядку — начните заново.");
+    }
+    upload.text += String(text ?? "");
+    upload.at = Date.now();
+    for (const [other, item] of uploads) if (Date.now() - item.at > STUCK_MS) uploads.delete(other);
+    if (upload.text.length < total) return { at: upload.text.length };
+    uploads.delete(key);
+    let course;
+    try {
+      course = JSON.parse(upload.text);
+    } catch {
+      throw new Fail(400, "Курс пришёл битым.");
+    }
+    if (course?.id !== match[1]) throw new Fail(400, "id курса не совпадает с адресом.");
+    return { report: saveCourse(db, user.id, course) };
+  });
+
   route("GET", /^\/api\/app\/drafts$/, ({ req }) => {
     const user = appUser(req);
     touch(user.id, "");

@@ -1,7 +1,8 @@
 // NOAH Учёба — приложение обучения на телефоне. Подключает значки и экраны
 // и открывает вкладку «Курсы».
 
-import { start } from "./core.js";
+import { start, api, nav } from "./core.js";
+import { store } from "./store.js";
 import "./screens/courses.js";
 import "./screens/course.js";
 import "./screens/topic.js";
@@ -61,3 +62,11 @@ keepNeon();
 followKeyboard();
 await sprite();
 start(document.querySelector("main.app"));
+
+// Курс аккаунта пришёл на устройство (сверка с сайтом идёт в фоне) — экран
+// курсов перерисовывается сам, без перезапуска.
+api?.listen("learn:courses", () => {
+  store.forget();
+  // Только главный экран: урок или проверку посреди дела не перерисовываем.
+  if (nav.current === "courses" && nav.depth === 1) nav.refresh();
+});

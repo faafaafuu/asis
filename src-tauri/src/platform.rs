@@ -282,6 +282,7 @@ pub fn sync(app: &tauri::AppHandle) {
     let _ = std::thread::Builder::new().name("sufler-platform".into()).spawn(move || {
         let mut last_hello = std::time::Instant::now() - Duration::from_secs(3600);
         let mut last_progress = std::time::Instant::now() - Duration::from_secs(3600);
+        let mut last_courses = std::time::Instant::now() - Duration::from_secs(3600);
         loop {
             let (url, token) = settings();
             if !token.is_empty() {
@@ -305,6 +306,19 @@ pub fn sync(app: &tauri::AppHandle) {
                 }
                 if let Err(err) = take_courses(&url, &token) {
                     log::debug!("площадка: курсы не взяты ({err})");
+                }
+                // Сверка с курсами аккаунта — сразу после входа и раз в десять минут.
+                if last_courses.elapsed() > Duration::from_secs(600) {
+                    match account_courses(&url, &token) {
+                        Ok(changed) => {
+                            last_courses = std::time::Instant::now();
+                            if changed {
+                                use tauri::Emitter;
+                                let _ = app.emit("learn:courses", ());
+                            }
+                        }
+                        Err(err) => log::debug!("площадка: курсы аккаунта не сверены ({err})"),
+                    }
                 }
                 // Прогресс обучения — сразу после ответов и раз в две минуты,
                 // чтобы подтянуть сделанное в браузере и на телефоне.
@@ -429,12 +443,104 @@ fn take_courses(url: &str, token: &str) -> Result<(), String> {
 }
 
 fn fetch_payload(url: &str, token: &str, id: &str, size: usize) -> Result<String, String> {
+    fetch_parts(url, token, &format!("/api/app/course-jobs/{id}/part"), size)
+}
+
+/// Курсы аккаунта на этом устройстве. Очередь `course_jobs` отдаёт курс один
+/// раз на аккаунт: его забирал компьютер — и телефон, вошедший позже, не
+/// получал ничего. Здесь устройство само сверяется со списком аккаунта:
+/// недостающее и обновлённое на сайте скачивает кусками, свои курсы (на
+/// компьютере) выгружает в аккаунт. Отдаёт, появилось ли что-то новое.
+fn account_courses(url: &str, token: &str) -> Result<bool, String> {
+    let list = tauri::async_runtime::block_on(get_with(url, "/api/app/courses", token))?;
+    let account = list["courses"].as_array().cloned().unwrap_or_default();
+    let stamps_path = kit::data_dir().ok_or("папка данных не найдена")?.join("account-courses.json");
+    // Какую версию курса аккаунта устройство уже взяло: курс обновили на
+    // сайте (дописалась тема) — версия сменилась, курс скачивается заново.
+    let mut stamps: BTreeMap<String, String> = std::fs::read_to_string(&stamps_path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    let local: Vec<String> = crate::learning::courses().into_iter().map(|course| course.id).collect();
+    let mut changed = false;
+    for item in &account {
+        let id = item["id"].as_str().unwrap_or_default().to_string();
+        let updated = item["updated"].as_str().unwrap_or_default().to_string();
+        if !kit::valid_id(&id) {
+            continue;
+        }
+        let have = local.contains(&id);
+        let stale = stamps.get(&id).is_some_and(|seen| *seen != updated);
+        if have && !stale {
+            stamps.insert(id, updated);
+            continue;
+        }
+        let size = item["size"].as_u64().unwrap_or(0) as usize;
+        let outcome = fetch_parts(url, token, &format!("/api/app/courses/{id}/part"), size).and_then(|text| {
+            let course = serde_json::from_str(&text).map_err(|err| format!("Курс не разобрался: {err}"))?;
+            crate::learning::save_course(course)
+        });
+        match outcome {
+            Ok(_) => {
+                log::info!("площадка: курс аккаунта «{id}» взят");
+                stamps.insert(id, updated);
+                changed = true;
+            }
+            Err(err) => log::warn!("площадка: курс аккаунта «{id}» не взят: {err}"),
+        }
+    }
+    // Курсы, собранные на компьютере, — в аккаунт: иначе телефон и Ноа
+    // онлайн их не видят.
+    #[cfg(desktop)]
+    for course in crate::learning::own_courses() {
+        if account.iter().any(|item| item["id"].as_str() == Some(course.id.as_str())) {
+            continue;
+        }
+        match upload_course(url, token, &course) {
+            Ok(()) => log::info!("площадка: курс «{}» выгружен в аккаунт", course.id),
+            Err(err) => log::warn!("площадка: курс «{}» не выгружен: {err}", course.id),
+        }
+    }
+    if let Ok(text) = serde_json::to_string_pretty(&stamps) {
+        let _ = std::fs::write(&stamps_path, text);
+    }
+    Ok(changed)
+}
+
+/// Курс в аккаунт кусками: канал до хостинга рвёт длинные запросы.
+#[cfg(desktop)]
+fn upload_course(url: &str, token: &str, course: &crate::learning::Course) -> Result<(), String> {
+    let text = serde_json::to_string(course).map_err(|err| err.to_string())?;
+    // Сервер считает длину строки JavaScript — единицами UTF-16.
+    let size = text.encode_utf16().count();
+    let mut at = 0usize;
+    let mut chars = text.chars().peekable();
+    while chars.peek().is_some() {
+        let mut part = String::new();
+        let mut part_units = 0usize;
+        while let Some(&ch) = chars.peek() {
+            if part_units + ch.len_utf16() > 5000 {
+                break;
+            }
+            part.push(ch);
+            part_units += ch.len_utf16();
+            chars.next();
+        }
+        let path = format!("/api/app/courses/{}/part", course.id);
+        tauri::async_runtime::block_on(post(url, &path, token, &json!({ "at": at, "text": part, "size": size })))?;
+        at += part_units;
+    }
+    Ok(())
+}
+
+/// Текст кусками с адреса `path?at=…`: `{ text, size }` за запрос.
+fn fetch_parts(url: &str, token: &str, path: &str, size: usize) -> Result<String, String> {
     let mut text = String::with_capacity(size);
     // Сервер режет строку JavaScript — по единицам UTF-16, не по байтам.
     let mut at = 0usize;
     let mut size = size.max(1);
     while at < size {
-        let part = tauri::async_runtime::block_on(get_with(url, &format!("/api/app/course-jobs/{id}/part?at={at}"), token))
+        let part = tauri::async_runtime::block_on(get_with(url, &format!("{path}?at={at}"), token))
             .map_err(|err| format!("кусок курса не пришёл: {err}"))?;
         size = part["size"].as_u64().map_or(size, |n| n as usize);
         let chunk = part["text"].as_str().unwrap_or_default();
@@ -460,6 +566,20 @@ mod tests {
 
 #[cfg(test)]
 mod live {
+    /// Сверка курсов с аккаунтом против живой площадки: NOAH_TEST_URL,
+    /// NOAH_TEST_TOKEN, NOAH_TEST_DIR — папка данных (копия, не настоящая).
+    #[test]
+    #[ignore]
+    fn account_courses_sync() {
+        let var = |name| std::env::var(name).expect(name);
+        let dir = std::path::PathBuf::from(var("NOAH_TEST_DIR"));
+        crate::module_kit::set_data_dir(dir.clone());
+        crate::learning::load(dir);
+        let changed = super::account_courses(&var("NOAH_TEST_URL"), &var("NOAH_TEST_TOKEN")).expect("sync");
+        let ids: Vec<String> = crate::learning::own_courses().into_iter().map(|c| c.id).collect();
+        println!("changed={changed} own={ids:?}");
+    }
+
     /// Сборка курса из кусков против живой площадки:
     /// NOAH_TEST_URL, NOAH_TEST_TOKEN, NOAH_TEST_JOB, NOAH_TEST_SIZE.
     #[test]

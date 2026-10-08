@@ -44,7 +44,16 @@ register("courses", (screen) => {
 
     if (!courses.length) {
       const empty = el("div", "plate");
-      empty.append(label("// курсов пока нет"), el("span", "muted", "Соберите первый курс кнопкой внизу — Ноа напишет его тема за темой через ваш мост. Или войдите: подтянутся курсы аккаунта."));
+      empty.append(
+        label("// курсов пока нет"),
+        el(
+          "span",
+          "muted",
+          signed
+            ? "Курсы аккаунта подтягиваются сами — большой курс по мобильной сети идёт минуту-другую. Или соберите новый кнопкой внизу."
+            : "Соберите первый курс кнопкой внизу — Ноа напишет его тема за темой через ваш мост. Или войдите: подтянутся курсы аккаунта.",
+        ),
+      );
       content.append(empty);
     } else {
       content.append(continueCard(course));
@@ -156,7 +165,9 @@ export function signInCard() {
       const name = await call("account_login");
       if (name) prefs.set("name", name);
       status.textContent = "Вход выполнен. Подтягиваю курсы…";
-      for (let i = 0; i < 20; i++) {
+      // Курсы аккаунта приходят кусками — большой курс по мобильной сети
+      // идёт минуту-другую.
+      for (let i = 0; i < 60; i++) {
         await new Promise((resolve) => setTimeout(resolve, 3000));
         const list = await store.courses(true);
         if (list.length) break;
