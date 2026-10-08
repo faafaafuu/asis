@@ -226,6 +226,94 @@ function courseSwitch() {
   return row;
 }
 
+/**
+ * «Собрать курс» прямо в окне обучения: курс собирается на сервере через
+ * мост (как в Ноа онлайн) и приходит сюда сам — программа забирает готовые
+ * курсы с сайта. Нужен ключ площадки в настройках. В браузере кнопка своя —
+ * в Ноа онлайн.
+ */
+function courseBuilder(open = false) {
+  const box = el("details", "builder");
+  box.open = open;
+  box.append(el("summary", "builder__title", "＋ Собрать новый курс"));
+  const goal = el("textarea", "answer");
+  goal.rows = 3;
+  goal.placeholder = "О чём курс и зачем. Например: «Kubernetes с нуля до продакшена — чтобы пройти собеседование на DevOps»";
+  const quality = el("select", "builder__quality");
+  for (const [value, label] of [
+    ["sonnet", "Sonnet — точнее, около минуты на тему"],
+    ["haiku", "Haiku — бережёт лимит подписки"],
+  ]) {
+    const option = el("option", "", label);
+    option.value = value;
+    quality.append(option);
+  }
+  const status = el("p", "builder__status");
+  const go = button("Собрать курс", async () => {
+    const text = goal.value.trim();
+    if (text.length < 10) {
+      status.textContent = "Опишите курс подробнее: о чём он и для чего — хотя бы одним предложением.";
+      return;
+    }
+    go.disabled = true;
+    status.textContent = "Отправляю…";
+    try {
+      await api.invoke("learn_build", { goal: text, quality: quality.value });
+      goal.value = "";
+      watchBuilds(status, stop);
+    } catch (err) {
+      status.textContent = String(err);
+    }
+    go.disabled = false;
+  });
+  const stop = button("Остановить", async () => {
+    if (stop.dataset.id) await api.invoke("learn_build_stop", { id: stop.dataset.id }).catch(() => {});
+  }, true);
+  stop.hidden = true;
+  const row = el("div", "actions");
+  row.append(go, stop);
+  box.append(
+    el("p", "muted", "Ноа составит план и напишет курс тема за темой на сервере через ваш мост: урок, понятия, карточки, задачи, мини-экзамен. Курс появится здесь сам — по первой теме можно учиться сразу."),
+    goal,
+    quality,
+    row,
+    status,
+  );
+  watchBuilds(status, stop);
+  return box;
+}
+
+/** Ход сборки — пока окно на месте; готовая тема — сразу в списке. */
+let buildTimer = 0;
+function watchBuilds(status, stop) {
+  clearTimeout(buildTimer);
+  const tick = async () => {
+    if (!status.isConnected) return;
+    const builds = await api.invoke("learn_builds").catch(() => []);
+    const running = (Array.isArray(builds) ? builds : []).find((b) => b.status === "running");
+    const last = Array.isArray(builds) ? builds[0] : null;
+    if (running) {
+      const where = running.total ? `тема ${Math.min(running.done + 1, running.total)} из ${running.total}` : "план курса";
+      status.textContent = `Собирается${running.title ? ` «${running.title}»` : ""}: ${where}. ${running.message ?? ""}`;
+      stop.hidden = false;
+      stop.dataset.id = running.id;
+      // Готовые темы уже пришли — показать их, не дожидаясь конца.
+      const before = courses.length;
+      await refreshOverview();
+      if (courses.length !== before && view.kind === "home") renderSide();
+      buildTimer = setTimeout(tick, 10_000);
+    } else {
+      stop.hidden = true;
+      if (last && status.textContent.startsWith("Собирается")) {
+        status.textContent = last.status === "done" ? `Курс «${last.title}» собран.` : last.message ?? "";
+        await refreshOverview();
+        renderSide();
+      }
+    }
+  };
+  tick();
+}
+
 function renderHome() {
   view = { kind: "home", topic: null, step: "lesson" };
   review = null;
@@ -255,6 +343,8 @@ function renderHome() {
             "в каждой урок, задачи и мини-экзамен».",
           "Курс появится в этом окне сам. Дальше — «Ноа, погоняй меня по курсу» или «как мой прогресс».",
         ];
+    // В программе (компьютер, телефон) — сборка прямо здесь, через мост.
+    if (!inBrowser) root.append(courseBuilder(true));
     for (const text of texts) {
       steps.append(el("li", "", text));
     }
@@ -263,6 +353,7 @@ function renderHome() {
   }
   const root = page(course.title, course.description);
   root.prepend(courseSwitch());
+  if (!document.documentElement.classList.contains("is-web")) root.append(courseBuilder(false));
   if (course.building) {
     root.append(
       el(

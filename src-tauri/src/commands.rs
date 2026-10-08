@@ -1756,6 +1756,25 @@ pub fn window_error(page: String, text: String) {
     log::warn!("окно {page}: {text}");
 }
 
+/// Собрать новый курс на сервере через мост — курс придёт в окно сам.
+#[tauri::command]
+pub async fn learn_build(goal: String, quality: Option<String>) -> Result<serde_json::Value, String> {
+    let quality = quality.unwrap_or_else(|| "sonnet".into());
+    crate::platform::build_course(goal.trim(), &quality).await
+}
+
+/// Сборки курсов: идёт ли, на какой теме, чем кончилась.
+#[tauri::command]
+pub async fn learn_builds() -> Result<serde_json::Value, String> {
+    crate::platform::course_builds().await
+}
+
+/// Остановить сборку курса.
+#[tauri::command]
+pub async fn learn_build_stop(id: String) -> Result<(), String> {
+    crate::platform::stop_build(&id).await
+}
+
 /* ── Практика в терминале ──────────────────────────────────────────────── */
 
 /// Открыть окно практики — из темы курса или само по себе.

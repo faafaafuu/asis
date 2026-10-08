@@ -1619,3 +1619,38 @@ button {
   font-family: var(--font-mono);
   font-size: 11px;
 }
+
+/* ── «Собрать курс» в окне обучения ──────────────────────────────────── */
+
+.builder {
+  max-width: 640px;
+  margin: 18px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--divider);
+  border-radius: 10px;
+}
+.builder[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.builder__title {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+}
+.builder p {
+  margin: 0;
+}
+.builder__quality {
+  align-self: flex-start;
+  padding: 6px 8px;
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+.builder__status:empty {
+  display: none;
+}

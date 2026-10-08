@@ -318,8 +318,10 @@ export function mountNoa({ route, db, Fail, readJson }) {
     db.prepare("UPDATE noa_builds SET status = 'failed', message = 'Мост не настроен.' WHERE status = 'running'").run();
   }
 
-  route("POST", /^\/api\/noa\/builds$/, async ({ req, user: who }) => {
-    const user = bridgeUser(who);
+  // Сборка курса — и по входу на сайт, и по ключу площадки: её зовёт и
+  // программа (на компьютере и телефоне), курс приходит в неё сам.
+  route("POST", /^\/api\/noa\/builds$/, async ({ req, user: who, tokenUser }) => {
+    const user = bridgeUser(who ?? tokenUser);
     const { goal, model, quality } = await readJson(req);
     const text = String(goal ?? "").trim();
     if (text.length < 10) throw new Fail(400, "Опишите курс подробнее: о чём он и для чего — хотя бы одним предложением.");
@@ -336,14 +338,14 @@ export function mountNoa({ route, db, Fail, readJson }) {
     return { build: buildRow(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(id)) };
   });
 
-  route("GET", /^\/api\/noa\/builds$/, ({ user: who }) => {
-    const user = need(who);
+  route("GET", /^\/api\/noa\/builds$/, ({ user: who, tokenUser }) => {
+    const user = need(who ?? tokenUser);
     const rows = db.prepare("SELECT * FROM noa_builds WHERE user_id = ? ORDER BY created DESC LIMIT 5").all(user.id);
     return { builds: rows.map(buildRow), version: coursesVersion(user.id) };
   });
 
-  route("POST", /^\/api\/noa\/builds\/([0-9a-f-]{36})\/stop$/, ({ user: who, match }) => {
-    const user = need(who);
+  route("POST", /^\/api\/noa\/builds\/([0-9a-f-]{36})\/stop$/, ({ user: who, tokenUser, match }) => {
+    const user = need(who ?? tokenUser);
     const row = db.prepare("SELECT * FROM noa_builds WHERE id = ? AND user_id = ?").get(match[1], user.id);
     if (!row) throw new Fail(404, "Такой сборки нет.");
     const control = running.get(row.id);

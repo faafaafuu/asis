@@ -211,6 +211,34 @@ pub async fn publish(id: &str, description: &str, category: &str) -> Result<Stri
 /// Связь с площадкой: Ноа забирает черновики модулей и курсов, которые
 /// нейросеть пользователя собрала через MCP по ссылке, проверяет их, ставит
 /// прошедшие и отправляет отчёт обратно. Без ключа площадки — молчит.
+/// Собрать новый курс на сервере — через мост, как «Собрать курс» в Ноа
+/// онлайн. Курс приходит в программу сам: сайт ставит его в очередь, а
+/// `sync` забирает. `quality` — sonnet (точнее) или haiku (бережёт лимит).
+pub async fn build_course(goal: &str, quality: &str) -> Result<Value, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Err("Сначала впишите ключ площадки в настройках — по нему курс соберётся на сервере.".into());
+    }
+    let reply = post(&url, "/api/noa/builds", &token, &json!({ "goal": goal, "quality": quality })).await?;
+    Ok(reply["build"].clone())
+}
+
+/// Сборки курсов: что собирается и чем кончилось.
+pub async fn course_builds() -> Result<Value, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Ok(json!([]));
+    }
+    let reply = get_with(&url, "/api/noa/builds", &token).await?;
+    Ok(reply["builds"].clone())
+}
+
+/// Остановить сборку — готовые темы остаются.
+pub async fn stop_build(id: &str) -> Result<(), String> {
+    let (url, token) = settings();
+    post(&url, &format!("/api/noa/builds/{id}/stop"), &token, &json!({})).await.map(|_| ())
+}
+
 pub fn sync(app: &tauri::AppHandle) {
     let app = app.clone();
     let _ = std::thread::Builder::new().name("sufler-platform".into()).spawn(move || {
