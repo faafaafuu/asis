@@ -51,6 +51,27 @@ jobs:
       - name: Проект Xcode
         run: npm run tauri -- ios init --ci
 
+      # Шаг проекта «Build Rust Code» зовёт `tauri ios xcode-script`, а тот
+      # ждёт адрес, который оставляет только `tauri ios build`. Та команда без
+      # аккаунта Apple не собирает — подпись обязательна. Поэтому Rust
+      # собирается здесь, библиотека кладётся туда, где её ждёт проект, а
+      # шаг проекта заменяется пустым.
+      - name: Rust для iPhone
+        working-directory: src-tauri
+        run: |
+          cargo build --release --lib --target aarch64-apple-ios
+          mkdir -p gen/apple/Externals/arm64/release
+          cp target/aarch64-apple-ios/release/libsufler_lib.a gen/apple/Externals/arm64/release/libapp.a
+          ls -la gen/apple/Externals/arm64/release
+
+      - name: Шаг Rust в проекте — пустой
+        working-directory: src-tauri/gen/apple
+        run: |
+          grep -n "xcode-script" project.yml || true
+          sed -i '' -E 's#^( *script: ).*xcode-script.*$#\1echo "Rust собран заранее"#' project.yml
+          grep -n "Rust собран заранее" project.yml
+          xcodegen generate
+
       - name: Сборка без подписи
         working-directory: src-tauri/gen/apple
         run: |
