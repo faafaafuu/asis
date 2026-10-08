@@ -126,7 +126,7 @@ function hideNet() {
 const NETWORK = /сет|связ|недоступн|timeout|таймаут|не успел|не ответил|connection|network|error sending|отвечает|502|503|504/i;
 
 /**
- * Вызов программы. `slow` — запрос к модели или сайту: через 4 с видно
+ * Вызов программы. `slow` — запрос к модели или сайту: через 15 с видно
  * «Медленно…», сбой связи — «Нет связи · повтор через N с» и сам повтор.
  * Прочие ошибки — сразу наверх, вызывающему.
  */
@@ -134,7 +134,8 @@ export async function call(cmd, args = {}, { slow = false, retries = 4 } = {}) {
   if (!api) throw new Error("Нет связи с программой.");
   if (!slow) return api.invoke(cmd, args);
   for (let attempt = 0; ; attempt++) {
-    const timer = setTimeout(() => showNet("slow", "Медленно… Ноа ждёт ответа"), 4000);
+    // Ответ модели через мост — секунд десять: плашка — только когда дольше.
+    const timer = setTimeout(() => showNet("slow", "Медленно… Ноа ждёт ответа"), 15000);
     try {
       const result = await api.invoke(cmd, args);
       clearTimeout(timer);

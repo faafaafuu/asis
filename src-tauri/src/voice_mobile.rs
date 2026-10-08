@@ -152,6 +152,7 @@ async fn fetch_phrase(base: String, token: String, voice: String, phrase: String
 async fn noa_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(), String> {
     let (base, token) = crate::platform::settings();
     if token.is_empty() {
+        crate::platform::diag("голос Ноа: нет ключа площадки — говорит системный");
         return Err(text.to_string());
     }
     let voice = if config.silero_voice.trim().is_empty() { "xenia".to_string() } else { config.silero_voice.clone() };
@@ -163,7 +164,7 @@ async fn noa_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(),
         let audio = match task.await.map_err(|err| err.to_string()).and_then(|got| got) {
             Ok(audio) => audio,
             Err(err) => {
-                log::warn!("голос Ноа не пришёл ({err}) — говорит системный");
+                crate::platform::diag(format!("голос Ноа не пришёл с {base}: {err}"));
                 return Err(list[at..].join(" "));
             }
         };
@@ -181,7 +182,7 @@ async fn noa_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(),
         )
         .await;
         if let Err(err) = played {
-            log::warn!("фраза не проигралась ({err}) — говорит системный");
+            crate::platform::diag(format!("фраза голоса Ноа не проигралась ({} байт): {err}", audio.len()));
             return Err(list[at..].join(" "));
         }
         if READ_REQUEST.load(Ordering::SeqCst) != request {

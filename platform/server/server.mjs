@@ -916,6 +916,16 @@ async function handle(req, res) {
       return await tunnel({ req, res, url, cookies, handle, Fail, maxBody: MAX_BODY });
     }
     if (url.pathname.startsWith("/api/")) {
+      // Запросы программы (по ключу площадки) — в журнал со временем ответа:
+      // по нему видно, доходит ли телефон и что у него тормозит.
+      if (/^Bearer /i.test(String(req.headers.authorization ?? ""))) {
+        const started = Date.now();
+        const path = url.pathname.replace(/\/[0-9a-f-]{36}(?=\/|$)/g, "/…");
+        res.on("close", () => {
+          const how = res.writableFinished ? `→ ${res.statusCode}` : "оборвано клиентом";
+          console.log(`программа: ${req.method} ${path} ${how} за ${Date.now() - started} мс`);
+        });
+      }
       if (req.method !== "GET" && !sameOrigin(req)) throw new Fail(403, "Чужой источник запроса.");
       for (const r of routes) {
         const match = r.pattern.exec(url.pathname);

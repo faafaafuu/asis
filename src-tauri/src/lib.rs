@@ -631,13 +631,18 @@ async fn phone_answer(app: &tauri::AppHandle, text: String) -> Result<String, St
         return Ok(if said.is_empty() { "До связи.".into() } else { said.join(" ") });
     }
 
-    if let Some(reply) = review::answer(&app, &text) {
-        return Ok(reply);
-    }
-    if let Some(reply) = planner::handle(&app, &text).await {
-        remember_exchange(&text, &reply);
-        planner::take_handoff();
-        return Ok(reply);
+    // На iPhone программа — только обучение: распоряжения компьютера (окна,
+    // таймеры, Telegram, модели) там не нужны, а их разбор — лишний запрос к
+    // модели перед каждым ответом. Вопрос идёт сразу в мост.
+    if !cfg!(target_os = "ios") {
+        if let Some(reply) = review::answer(&app, &text) {
+            return Ok(reply);
+        }
+        if let Some(reply) = planner::handle(&app, &text).await {
+            remember_exchange(&text, &reply);
+            planner::take_handoff();
+            return Ok(reply);
+        }
     }
     if tutor::active() {
         return tutor::answer(&app, &text, true).await;
@@ -660,7 +665,16 @@ async fn phone_answer(app: &tauri::AppHandle, text: String) -> Result<String, St
         let skip = thread.0.len().saturating_sub(depth);
         thread.0[skip..].to_vec()
     };
-    let answer = match tokio::time::timeout(limit, provider.ask("", "", &history, &text)).await {
+    let started = std::time::Instant::now();
+    let asked = tokio::time::timeout(limit, provider.ask("", "", &history, &text)).await;
+    if !matches!(asked, Ok(Ok(_))) {
+        let why = match &asked {
+            Ok(Err(err)) => err.to_string(),
+            _ => format!("не успела за {} с", limit.as_secs()),
+        };
+        platform::diag(format!("ответ модели не пришёл за {} мс: {why}", started.elapsed().as_millis()));
+    }
+    let answer = match asked {
         Ok(Ok(answer)) if !answer.trim().is_empty() => answer.trim().to_string(),
         Ok(Ok(_)) => return Err("Модель ответила пустотой.".into()),
         Ok(Err(err)) => {

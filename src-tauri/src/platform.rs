@@ -25,6 +25,20 @@ pub fn settings() -> (String, String) {
     (reachable(url), token)
 }
 
+/// Строка о сбое — в журнал сервера (`/api/app/diag`), без ожидания. Журнал
+/// самого телефона не посмотреть, а голос и ответы иначе чинились вслепую.
+pub fn diag(line: impl Into<String>) {
+    let line = line.into();
+    log::info!("диагностика: {line}");
+    tauri::async_runtime::spawn(async move {
+        let (url, token) = settings();
+        if token.is_empty() {
+            return;
+        }
+        let _ = post(&url, "/api/app/diag", &token, &json!({ "lines": [line] })).await;
+    });
+}
+
 /// Мост к подпискам через сайт — с адресом и ключом площадки на сейчас.
 ///
 /// В настройках модели они запоминались один раз, при входе: новый вход на

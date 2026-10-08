@@ -278,6 +278,17 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
     return { ok: true };
   });
 
+  // Сбои программы на телефоне — в журнал сервера: журнал самого телефона
+  // не посмотреть, а без него голос и ответы чинились вслепую.
+  route("POST", /^\/api\/app\/diag$/, async ({ req }) => {
+    const user = appUser(req);
+    const { lines } = await readJson(req);
+    for (const line of (Array.isArray(lines) ? lines : []).slice(0, 20)) {
+      console.log(`телефон u${user.id}: ${String(line).replace(/\s+/g, " ").slice(0, 500)}`);
+    }
+    return { ok: true };
+  });
+
   // Курсы аккаунта — каждому устройству напрямую. Очередь course_jobs
   // отдаёт курс один раз на аккаунт: забрал компьютер — телефон его уже не
   // получит. Здесь устройство само сверяет список и тянет недостающее
