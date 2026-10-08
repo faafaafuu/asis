@@ -251,7 +251,14 @@ pub fn site_bridge(config: &Config) -> Option<Brain> {
 /// Включает мост через сайт, если модели ещё нет — так телефон сразу
 /// отвечает после того, как в него вписали ключ площадки.
 pub fn adopt_site_bridge(config: &mut Config) -> bool {
-    let has_model = config.ai.provider == "http" && !config.ai.endpoint.trim().is_empty();
+    // На iPhone программа — только обучение, выбора модели там нет: модель —
+    // всегда мост через сайт. Иначе на телефоне оставалась модель из прошлых
+    // установок (с чужим или старым ключом), и Ноа отвечала «не принял ключ».
+    let ours = config.ai.endpoint.contains("/api/noa/bridge");
+    let has_model = !cfg!(target_os = "ios") && config.ai.provider == "http" && !config.ai.endpoint.trim().is_empty() && !ours;
+    if ours && config.ai.provider == "http" && config.ai.model == "claude-code-bridge:free" {
+        return false;
+    }
     let Some(brain) = (!has_model).then(|| site_bridge(config)).flatten() else { return false };
     config.ai.provider = "http".into();
     config.ai.endpoint = brain.endpoint;

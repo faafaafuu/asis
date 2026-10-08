@@ -64,21 +64,144 @@ static SPEAKING: AtomicBool = AtomicBool::new(false);
 static READ_REQUEST: AtomicU64 = AtomicU64::new(0);
 
 /// Произносит текст и ждёт конца фразы.
+///
+/// На iPhone говорит голос Ноа — тот же Silero, что на компьютере, с сервера
+/// по фразам (`/api/noa/tts`): системный синтезатор звучал как робот. Пока
+/// звучит фраза, следующая уже качается. Нет сети или входа — говорит
+/// лучший установленный русский голос системы.
 pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<(), String> {
     let text = text.trim().to_string();
     if text.is_empty() {
         return Ok(());
     }
-    let rate = config.rate;
+    let request = READ_REQUEST.load(Ordering::SeqCst);
     SPEAKING.store(true, Ordering::SeqCst);
-    let result = crate::mobile::call_async::<serde_json::Value>(
-        "speak",
-        serde_json::json!({ "text": text, "rate": rate }),
-    )
-    .await
-    .map(|_| ());
+    let result = if cfg!(target_os = "ios") {
+        match noa_voice(config, &text, request).await {
+            Ok(()) => Ok(()),
+            Err(rest) if rest.is_empty() => Ok(()),
+            Err(rest) => system_speak(config, &rest).await,
+        }
+    } else {
+        system_speak(config, &text).await
+    };
     SPEAKING.store(false, Ordering::SeqCst);
     result
+}
+
+async fn system_speak(config: &VoiceConfig, text: &str) -> Result<(), String> {
+    crate::mobile::call_async::<serde_json::Value>("speak", serde_json::json!({ "text": text, "rate": config.rate }))
+        .await
+        .map(|_| ())
+}
+
+/// Фразы по 1–2 предложения: короткий ответ сервера приходит быстро и не
+/// рвётся каналом, а первая фраза звучит почти сразу.
+fn phrases(text: &str, limit: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    for sentence in text.split_inclusive(['.', '!', '?', '…', '\n']) {
+        let sentence = sentence.trim();
+        if sentence.is_empty() {
+            continue;
+        }
+        if !current.is_empty() && current.chars().count() + sentence.chars().count() > limit {
+            out.push(std::mem::take(&mut current));
+        }
+        // Длинное предложение — по запятым и пробелам.
+        if sentence.chars().count() > limit {
+            for word in sentence.split_inclusive([',', ';', ' ']) {
+                if !current.is_empty() && current.chars().count() + word.chars().count() > limit {
+                    out.push(std::mem::take(&mut current).trim().to_string());
+                }
+                current.push_str(word);
+            }
+            continue;
+        }
+        if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(sentence);
+    }
+    if !current.trim().is_empty() {
+        out.push(current.trim().to_string());
+    }
+    out
+}
+
+/// Фраза голосом Ноа — MP3 с сервера.
+async fn fetch_phrase(base: String, token: String, voice: String, phrase: String) -> Result<Vec<u8>, String> {
+    let client = crate::net::client_builder()
+        .timeout(std::time::Duration::from_secs(25))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let response = client
+        .post(format!("{base}/api/noa/tts"))
+        .bearer_auth(token)
+        .json(&serde_json::json!({ "text": phrase, "voice": voice, "lite": true }))
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("голос ответил {}", response.status()));
+    }
+    response.bytes().await.map(|bytes| bytes.to_vec()).map_err(|err| err.to_string())
+}
+
+/// Голосом Ноа. Ошибка — текст, который осталось сказать (пустой — перебили).
+async fn noa_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(), String> {
+    let (base, token) = crate::platform::settings();
+    if token.is_empty() {
+        return Err(text.to_string());
+    }
+    let voice = if config.silero_voice.trim().is_empty() { "xenia".to_string() } else { config.silero_voice.clone() };
+    let list = phrases(text, 180);
+    let start = |phrase: &String| tauri::async_runtime::spawn(fetch_phrase(base.clone(), token.clone(), voice.clone(), phrase.clone()));
+    let mut next = list.first().map(start);
+    for (at, _) in list.iter().enumerate() {
+        let Some(task) = next.take() else { break };
+        let audio = match task.await.map_err(|err| err.to_string()).and_then(|got| got) {
+            Ok(audio) => audio,
+            Err(err) => {
+                log::warn!("голос Ноа не пришёл ({err}) — говорит системный");
+                return Err(list[at..].join(" "));
+            }
+        };
+        if let Some(following) = list.get(at + 1) {
+            next = Some(start(following));
+        }
+        if READ_REQUEST.load(Ordering::SeqCst) != request {
+            return Err(String::new());
+        }
+        let path = std::env::temp_dir().join(format!("noa-phrase-{}.mp3", at % 2));
+        std::fs::write(&path, &audio).map_err(|err| err.to_string())?;
+        let played = crate::mobile::call_async::<serde_json::Value>(
+            "playAudio",
+            serde_json::json!({ "path": path.to_string_lossy() }),
+        )
+        .await;
+        if let Err(err) = played {
+            log::warn!("фраза не проигралась ({err}) — говорит системный");
+            return Err(list[at..].join(" "));
+        }
+        if READ_REQUEST.load(Ordering::SeqCst) != request {
+            return Err(String::new());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::phrases;
+
+    #[test]
+    fn phrases_split_by_sentences_and_length() {
+        let list = phrases("Первое. Второе предложение! Третье?", 20);
+        assert_eq!(list, ["Первое.", "Второе предложение!", "Третье?"]);
+        let long = "слово ".repeat(50);
+        assert!(phrases(&long, 40).iter().all(|p| p.chars().count() <= 46));
+    }
 }
 
 /// Слушает одну фразу и отдаёт её текстом. Пустая строка — ничего не сказали.

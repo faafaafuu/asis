@@ -20,6 +20,38 @@ let practice = null;
 /** Экран практики, если он сейчас на виду: получает события программы. */
 let view = null;
 let ctrlArmed = false;
+/**
+ * Куда подключались в этот запуск. iOS усыпляет приложение в фоне, и SSH
+ * рвётся за секунды; по возвращении практика подключается снова сама.
+ * Пароль — только в памяти, до закрытия приложения.
+ */
+let lastTarget = null;
+let reconnecting = null;
+
+/** Переподключиться к прошлому серверу. true — получилось. */
+async function reconnect() {
+  if (connected) return true;
+  if (!lastTarget) return false;
+  reconnecting ??= (async () => {
+    try {
+      await settle();
+      await api.invoke("practice_connect", { ...lastTarget, cols: term.cols, rows: term.rows });
+      connected = true;
+      term.write("\r\n\x1b[2m[снова на связи]\x1b[0m\r\n");
+      return true;
+    } catch {
+      return false;
+    } finally {
+      reconnecting = null;
+    }
+  })();
+  return reconnecting;
+}
+
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible" || connected || !lastTarget) return;
+  if (await reconnect()) view?.update();
+});
 
 function makeTerminal() {
   if (term) return;
@@ -89,8 +121,14 @@ function makeTerminal() {
   new ResizeObserver(() => refit()).observe(screen);
 
   api?.listen("practice:out", (event) => term.write(event.payload));
-  api?.listen("practice:exit", (event) => {
+  api?.listen("practice:exit", async (event) => {
     connected = false;
+    // Обрыв — сначала тихо подключиться снова; не вышло — форма с причиной.
+    if (document.visibilityState === "visible" && (await reconnect())) {
+      view?.update();
+      return;
+    }
+    if (document.visibilityState !== "visible" && lastTarget) return;
     fold();
     view?.disconnected(typeof event.payload === "string" ? event.payload : "Соединение закрыто.");
   });
@@ -407,14 +445,9 @@ register("practice", (screen, { course: courseId, topic: topicId }) => {
       try {
         await settle();
         term.reset();
-        await call("practice_connect", {
-          host: host.value.trim(),
-          port: Number(port.value) || 22,
-          user: user.value.trim(),
-          password: pass.value,
-          cols: term.cols,
-          rows: term.rows,
-        });
+        const target = { host: host.value.trim(), port: Number(port.value) || 22, user: user.value.trim(), password: pass.value };
+        await call("practice_connect", { ...target, cols: term.cols, rows: term.rows });
+        lastTarget = target;
         pass.value = "";
         connected = true;
         started = true;

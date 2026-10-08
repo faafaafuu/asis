@@ -306,6 +306,8 @@ function draw() {
     screen.append(header({ title: "Ошибка", back: stacks[current].length > 1 }), el("div", "content", String(err)));
   }
   if (!full) host.append(tabBar());
+  // Кольцо Ноа — только на экранах с вкладками: в уроке и практике свой микрофон.
+  document.body.classList.toggle("is-full", full);
 }
 
 export function start(root, first = "courses") {

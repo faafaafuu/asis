@@ -3,6 +3,8 @@
 
 import { start, api, nav } from "./core.js";
 import { store } from "./store.js";
+import { mountAssistant } from "./assistant.js";
+import { mountSuflyor } from "./suflyor.js";
 import "./screens/courses.js";
 import "./screens/course.js";
 import "./screens/topic.js";
@@ -62,6 +64,8 @@ keepNeon();
 followKeyboard();
 await sprite();
 start(document.querySelector("main.app"));
+mountAssistant();
+mountSuflyor();
 
 // Курс аккаунта пришёл на устройство (сверка с сайтом идёт в фоне) — экран
 // курсов перерисовывается сам, без перезапуска.

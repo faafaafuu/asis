@@ -273,6 +273,24 @@ pub fn run() {
             #[cfg(mobile)]
             {
                 let _ = APP.set(app.handle().clone());
+                // Вошли в аккаунт — модель телефона мост через сайт (см. adopt_site_bridge).
+                {
+                    let state = app.state::<AppState>();
+                    let adopted = {
+                        let mut config = state.config_mut();
+                        let adopted = brains::adopt_site_bridge(&mut config);
+                        if adopted {
+                            let (language, wake) = (config.ui.language.clone(), config.voice.wake_name.clone());
+                            state.rebuild_provider(&config.ai, &language, &wake);
+                        }
+                        adopted
+                    };
+                    if adopted {
+                        if let Err(err) = commands::persist(app.handle(), &state) {
+                            log::warn!("настройки не сохранились: {err}");
+                        }
+                    }
+                }
                 if let Err(err) = overlay::show_onboarding(app.handle()) {
                     log::error!("не удалось открыть окно: {err}");
                 }

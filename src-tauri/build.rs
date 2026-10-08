@@ -14,6 +14,7 @@ fn main() {
                     "integrationStatus",
                     "speak",
                     "stopSpeaking",
+                    "playAudio",
                     "listen",
                     "stopListening",
                     "cancelListening",

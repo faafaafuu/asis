@@ -181,6 +181,14 @@
       case "learn_ask":
         await network();
         return "Bridge — своя сеть с NAT: контейнеры видят друг друга, наружу — только опубликованные порты. Host — контейнер прямо в сети сервера.";
+      case "ai_explain":
+        await network();
+        return { def: `«${args.term}» — в этом абзаце это значит вот что: короткое объяснение по смыслу текста.`, simple: "", examples: [] };
+      case "ai_ask":
+        await network();
+        return `Про «${args.term}»: уточняю — ответ на «${args.question}».`;
+      case "plugin:sufler|stopListening":
+        return null;
       case "phone_ask":
         await network();
         return "Сегодня по плану тема Docker: урок прочитан наполовину, две карточки ждут повторения.";

@@ -15,7 +15,7 @@ import WebKit
 ///
 /// Ограничение платформы не обходится: дополнить меню выделения в ЧУЖИХ
 /// приложениях публичным API нельзя — только в своём окне и через «Поделиться».
-class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate {
+class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     private static let menuTitle = "Объяснить"
 
     private weak var webview: WKWebView?
@@ -24,6 +24,9 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate {
     // Голос
     private let synth = AVSpeechSynthesizer()
     private var speaking: [Invoke] = []
+    // Голос Ноа — фраза с сервера (Silero, как на компьютере), файлом MP3.
+    private var player: AVAudioPlayer?
+    private var playing: Invoke?
 
     // Распознавание
     private let audio = AVAudioEngine()
@@ -83,7 +86,7 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate {
         }
         activateAudio()
         let phrase = AVSpeechUtterance(string: text)
-        phrase.voice = AVSpeechSynthesisVoice(language: "ru-RU")
+        phrase.voice = SuflerPlugin.bestRussianVoice()
         // rate программы 1.0 — обычная речь; у iOS обычная — 0.5.
         let rate = Float(args.rate ?? 1.0) * AVSpeechUtteranceDefaultSpeechRate
         phrase.rate = min(max(rate, AVSpeechUtteranceMinimumSpeechRate), AVSpeechUtteranceMaximumSpeechRate)
@@ -91,9 +94,64 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate {
         synth.speak(phrase)
     }
 
+    /// Лучший русский голос из установленных: «улучшенный» и «высокого
+    /// качества» звучат живее голоса по умолчанию. Запасной путь — когда
+    /// голос Ноа с сервера не пришёл (нет сети).
+    static func bestRussianVoice() -> AVSpeechSynthesisVoice? {
+        let russian = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("ru") }
+        let best = russian.max { $0.quality.rawValue < $1.quality.rawValue }
+        return best ?? AVSpeechSynthesisVoice(language: "ru-RU")
+    }
+
+    class PlayArgs: Decodable {
+        let path: String
+    }
+
+    /// Проигрывает файл фразы; ответ — когда доиграла (или её перебили).
+    @objc public func playAudio(_ invoke: Invoke) throws {
+        let args = try invoke.parseArgs(PlayArgs.self)
+        let url = URL(fileURLWithPath: args.path)
+        DispatchQueue.main.async {
+            self.finishPlaying()
+            self.activateAudio()
+            do {
+                let player = try AVAudioPlayer(contentsOf: url)
+                player.delegate = self
+                self.player = player
+                self.playing = invoke
+                if !player.play() {
+                    self.finishPlaying(error: "Фраза не проигралась.")
+                }
+            } catch {
+                invoke.reject("Фраза не проигралась: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        finishPlaying()
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
+        finishPlaying(error: "Фраза не проигралась.")
+    }
+
+    private func finishPlaying(error: String? = nil) {
+        player?.stop()
+        player = nil
+        let waiting = playing
+        playing = nil
+        if let error = error {
+            waiting?.reject(error)
+        } else {
+            waiting?.resolve()
+        }
+    }
+
     @objc public func stopSpeaking(_ invoke: Invoke) {
         synth.stopSpeaking(at: .immediate)
         finishSpeaking()
+        DispatchQueue.main.async { self.finishPlaying() }
         invoke.resolve()
     }
 

@@ -2,11 +2,12 @@
 // шагом, плитки «Повторить» и «Фокус», мои курсы (и собирающийся —
 // пунктиром), закреплённая «Собрать курс».
 
-import { el, icon, button, label, progress, steps, loading, header, nav, register, prefs, plural, sheet, call, toast, voice, markdown } from "../core.js";
+import { el, icon, button, label, progress, steps, loading, header, nav, register, prefs, plural, sheet, call, toast } from "../core.js";
 import { store, currentTopic, topicCard, greeting, isDone } from "../store.js";
+import { open as openAssistant } from "../assistant.js";
 
 register("courses", (screen) => {
-  screen.append(header({ home: true, onMic: () => askNoa() }));
+  screen.append(header({ home: true, onMic: () => openAssistant() }));
   const content = el("div", "content");
   content.append(loading());
   const sticky = el("div", "sticky");
@@ -16,11 +17,13 @@ register("courses", (screen) => {
   screen.append(content, sticky);
 
   let alive = true;
+  let waitTimer = 0;
   (async () => {
-    const [courses, , builds, signed] = await Promise.all([
+    // Курсы, практика и вход — с устройства, без сети: экран рисуется сразу.
+    // Сборки на сайте — сетевой запрос, их дорисовываем, когда придут.
+    const [courses, , signed] = await Promise.all([
       store.courses(true),
       store.practice(true),
-      store.builds(true),
       call("account_status").catch(() => true),
     ]);
     if (!alive) return;
@@ -42,17 +45,27 @@ register("courses", (screen) => {
 
     if (!signed) content.append(signInCard());
 
-    if (!courses.length) {
+    if (!courses.length && signed) {
+      // Вошли, а курсов на устройстве ещё нет — они в пути с сайта.
+      // Ждём их, а не пишем «курсов нет»: курс появится сам.
+      const wait = el("div", "plate");
+      wait.append(label("// курсы аккаунта"), loading("Подтягиваю курсы с сайта…"));
+      content.append(wait);
+      let tries = 0;
+      const poll = async () => {
+        tries += 1;
+        const list = await store.courses(true);
+        if (!alive) return;
+        if (list.length) return nav.refresh();
+        if (tries < 40) waitTimer = setTimeout(poll, 3000);
+        else wait.replaceChildren(label("// курсов пока нет"), el("span", "muted", "В аккаунте курсов нет. Соберите первый кнопкой внизу — Ноа напишет его тема за темой."));
+      };
+      waitTimer = setTimeout(poll, 3000);
+    } else if (!courses.length) {
       const empty = el("div", "plate");
       empty.append(
         label("// курсов пока нет"),
-        el(
-          "span",
-          "muted",
-          signed
-            ? "Курсы аккаунта подтягиваются сами — большой курс по мобильной сети идёт минуту-другую. Или соберите новый кнопкой внизу."
-            : "Соберите первый курс кнопкой внизу — Ноа напишет его тема за темой через ваш мост. Или войдите: подтянутся курсы аккаунта.",
-        ),
+        el("span", "muted", "Соберите первый курс кнопкой внизу — Ноа напишет его тема за темой через ваш мост. Или войдите: подтянутся курсы аккаунта."),
       );
       content.append(empty);
     } else {
@@ -61,23 +74,35 @@ register("courses", (screen) => {
     }
 
     // Мои курсы — с собирающимся пунктиром.
-    const running = builds.filter((b) => b.status === "running");
-    if (courses.length || running.length) {
-      const list = el("div", "list");
+    const list = el("div", "list");
+    if (courses.length) {
       list.append(label(`// мои курсы · ${courses.length}`));
       for (const item of courses) list.append(courseCard(item));
-      for (const build of running) {
-        if (courses.some((c) => c.id === build.courseId)) continue;
-        const card = el("div", "plate plate--building");
-        const top = el("div", "course-card__top");
-        top.append(el("span", "course-card__title", build.title || "Новый курс"), el("span", "building", "собираю"));
-        card.append(top, el("span", "small muted", build.total ? `Готово ${build.done} из ${build.total} тем` : "Составляю план курса"));
-        list.append(card);
-      }
       content.append(list);
     }
+    if (!signed) return;
+    const builds = await store.builds(true);
+    if (!alive) return;
+    const running = builds.filter((b) => b.status === "running" && !courses.some((c) => c.id === b.courseId));
+    if (!running.length) return;
+    if (!list.isConnected) {
+      list.append(label(`// мои курсы · ${courses.length}`));
+      content.append(list);
+    }
+    for (const build of running) {
+      const card = el("div", "plate plate--building");
+      const top = el("div", "course-card__top");
+      top.append(el("span", "course-card__title", build.title || "Новый курс"), el("span", "building", "собираю"));
+      card.append(top, el("span", "small muted", build.total ? `Готово ${build.done} из ${build.total} тем` : "Составляю план курса"));
+      list.append(card);
+    }
   })();
-  return { cleanup: () => (alive = false) };
+  return {
+    cleanup: () => {
+      alive = false;
+      clearTimeout(waitTimer);
+    },
+  };
 });
 
 function continueCard(course) {
@@ -224,59 +249,6 @@ export function buildCourse() {
     }, "btn btn--primary btn--big");
     content.append(goal, quality, error, go);
     goal.focus();
-  });
-}
-
-/** Микрофон в шапке: вопрос Ноа голосом — ответ вслух и текстом. */
-export function askNoa() {
-  sheet("Спросить Ноа", (content) => {
-    const status = el("div", "explain__who");
-    const answer = el("div", "md md--small");
-    const mic = el("button", "btn btn--primary btn--big");
-    let busy = false;
-    const listen = async () => {
-      if (busy) return;
-      busy = true;
-      mic.disabled = true;
-      status.replaceChildren(icon("mic", 16, 2), "Слушаю — говорите");
-      try {
-        const said = await voice.listen();
-        if (!said) {
-          status.textContent = "Не расслышала — нажмите и скажите ещё раз.";
-        } else {
-          status.textContent = `Вы: ${said}`;
-          answer.replaceChildren(loading("Ноа думает…"));
-          const reply = await call("phone_ask", { text: said }, { slow: true });
-          answer.replaceChildren(...markdown(reply, "md md--small").childNodes);
-          if (voice.aloud()) voice.speak(reply);
-        }
-      } catch (err) {
-        status.textContent = String(err);
-        answer.replaceChildren();
-      }
-      busy = false;
-      mic.disabled = false;
-    };
-    mic.append(icon("mic", 18, 2.25), "Спросить голосом");
-    mic.addEventListener("click", listen);
-    const typed = el("input", "field");
-    typed.placeholder = "Или напишите вопрос — Enter";
-    typed.addEventListener("keydown", async (event) => {
-      if (event.key !== "Enter" || !typed.value.trim()) return;
-      const text = typed.value.trim();
-      typed.value = "";
-      status.textContent = `Вы: ${text}`;
-      answer.replaceChildren(loading("Ноа думает…"));
-      try {
-        const reply = await call("phone_ask", { text }, { slow: true });
-        answer.replaceChildren(...markdown(reply, "md md--small").childNodes);
-        if (voice.aloud()) voice.speak(reply);
-      } catch (err) {
-        answer.replaceChildren(el("span", "error", String(err)));
-      }
-    });
-    content.append(status, answer, typed, mic);
-    listen();
   });
 }
 

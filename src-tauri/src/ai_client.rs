@@ -619,17 +619,18 @@ impl HttpProvider {
                 AiError::Refused(502, err)
             });
         }
-        let mut request = self.client.post(&self.endpoint).json(body);
+        let (endpoint, api_key) = crate::platform::live_bridge(&self.endpoint, &self.api_key);
+        let mut request = self.client.post(&endpoint).json(body);
         // Длинный ответ модель пишет минуты: общий таймаут обрывал его на
         // середине, а мост дописывал впустую.
         let long = body.get("max_tokens").and_then(serde_json::Value::as_u64).is_some_and(|n| n > u64::from(ANSWER_LIMIT) * 2);
         if long {
             request = request.timeout(Duration::from_millis(self.timeout_ms * 3));
         }
-        if !self.api_key.is_empty() {
-            request = request.bearer_auth(&self.api_key);
+        if !api_key.is_empty() {
+            request = request.bearer_auth(&api_key);
         }
-        log::info!("запрос к модели: {}", self.endpoint);
+        log::info!("запрос к модели: {endpoint}");
         let started = std::time::Instant::now();
         let response = request.send().await.map_err(|err| {
             // Подробность нужна именно здесь: «Сбой сети» на экране одинаково выглядит
@@ -782,9 +783,10 @@ async fn fetch_models(config: &AiConfig) -> Result<Vec<serde_json::Value>, Strin
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|err| format!("HTTP-клиент не собрался: {err}"))?;
+    let (base, api_key) = crate::platform::live_bridge(base, &config.api_key);
     let mut request = client.get(format!("{base}/models"));
-    if !config.api_key.is_empty() {
-        request = request.bearer_auth(&config.api_key);
+    if !api_key.is_empty() {
+        request = request.bearer_auth(&api_key);
     }
     let response = request
         .send()

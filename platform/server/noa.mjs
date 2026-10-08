@@ -78,9 +78,9 @@ async function readRaw(req, limit, Fail) {
  * WAV → MP3 через ffmpeg. 24 кГц и 64 кбит/с: при 48 кбит/с кодер сам
  * срезал верхние частоты, и голос в браузере звучал глухо и «грязно».
  */
-function toMp3(wav) {
+function toMp3(wav, bitrate = "64k") {
   return new Promise((resolve, reject) => {
-    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-ar", "24000", "-c:a", "libmp3lame", "-b:a", "64k", "-f", "mp3", "pipe:1"]);
+    const ff = spawn("ffmpeg", ["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-ac", "1", "-ar", "24000", "-c:a", "libmp3lame", "-b:a", bitrate, "-f", "mp3", "pipe:1"]);
     const out = [];
     ff.stdout.on("data", (chunk) => out.push(chunk));
     ff.on("error", reject);
@@ -354,9 +354,11 @@ export function mountNoa({ route, db, Fail, readJson }) {
     return { ok: true };
   });
 
-  route("POST", /^\/api\/noa\/tts$/, async ({ req, res, user: who }) => {
-    const user = need(who);
-    const { text, voice, rate } = await readJson(req);
+  // Голос — и по входу на сайт, и по ключу площадки: приложение на iPhone
+  // говорит голосом Ноа отсюда, фразами.
+  route("POST", /^\/api\/noa\/tts$/, async ({ req, res, user: who, tokenUser }) => {
+    const user = need(who ?? tokenUser);
+    const { text, voice, rate, lite } = await readJson(req);
     const phrase = String(text ?? "").trim().slice(0, MAX_PHRASE);
     if (!phrase) throw new Fail(400, "Нечего читать.");
     const hour = Date.now() - 3_600_000;
@@ -376,7 +378,8 @@ export function mountNoa({ route, db, Fail, readJson }) {
     } catch {
       throw new Fail(503, "Голос сейчас недоступен.");
     }
-    const mp3 = await toMp3(wav).catch(() => null);
+    // lite — для телефона: 32 кбит/с вдвое легче, речь звучит так же.
+    const mp3 = await toMp3(wav, lite ? "32k" : "64k").catch(() => null);
     res.writeHead(200, {
       "Content-Type": mp3 ? "audio/mpeg" : "audio/wav",
       "Content-Length": (mp3 ?? wav).length,

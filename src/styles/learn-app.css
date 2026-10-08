@@ -1758,3 +1758,98 @@ canvas.noa-ring {
   color: var(--c-head);
   font-weight: 500;
 }
+
+/* ── Общие стили других окон (tokens.css) — без их отступов для телефона:
+   каркас приложения ставит отступы сам. ──────────────────────────────── */
+html.is-phone body {
+  padding: 0;
+}
+html.is-phone body::before {
+  display: none;
+}
+
+/* ── Ноа: кольцо поверх приложения и панель разговора ─────────────────── */
+
+/* Над панелью вкладок и над нижней кнопкой экрана («Собрать курс»,
+   «Начать», оценки карточек) — ничего не закрывает. */
+.orb-fab {
+  position: fixed;
+  right: 12px;
+  bottom: calc(var(--safe-bottom) + 64px + 76px);
+  z-index: 45;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 240, 255, 0.45);
+  background: radial-gradient(circle, rgba(0, 240, 255, 0.12), rgba(3, 6, 10, 0.92) 70%);
+  box-shadow: 0 0 22px -4px rgba(0, 240, 255, 0.6);
+}
+body.is-full .orb-fab,
+html.kb-open .orb-fab {
+  display: none;
+}
+.assistant {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(var(--safe-bottom) + 10px);
+  z-index: 55;
+  max-height: min(70%, 560px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--c-accent);
+  background: linear-gradient(170deg, #0c1219, #05080c);
+  box-shadow: 0 0 40px -8px rgba(0, 240, 255, 0.55);
+  animation: rise 0.18s ease-out;
+}
+html.kb-open .assistant {
+  bottom: 8px;
+}
+.assistant__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.assistant__state {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--c-accent);
+}
+.assistant[data-mode="speak"] .assistant__state {
+  color: var(--c-label);
+}
+.assistant[data-mode="listen"] .assistant__state {
+  color: var(--c-ok);
+}
+.assistant__log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.assistant__log:empty {
+  display: none;
+}
+@keyframes rise {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .assistant {
+    animation: none;
+  }
+}
+
+/* Окно суфлёра — поверх листов и кольца. */
+.popup-layer,
+.menu-layer {
+  z-index: 60;
+}

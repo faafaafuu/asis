@@ -25,6 +25,23 @@ pub fn settings() -> (String, String) {
     (reachable(url), token)
 }
 
+/// Мост к подпискам через сайт — с адресом и ключом площадки на сейчас.
+///
+/// В настройках модели они запоминались один раз, при входе: новый вход на
+/// телефоне выдаёт новый ключ, а модель ходила со старым («сервис не принял
+/// ключ»); домен noahlab.ru мобильные операторы режут — а по IP сайт
+/// отвечает. Другие адреса не трогаются.
+pub fn live_bridge(endpoint: &str, key: &str) -> (String, String) {
+    let Some(at) = endpoint.find("/api/noa/bridge") else {
+        return (endpoint.to_string(), key.to_string());
+    };
+    let (base, token) = settings();
+    if token.is_empty() {
+        return (endpoint.to_string(), key.to_string());
+    }
+    (format!("{base}{}", &endpoint[at..]), token)
+}
+
 /// Отвечает ли площадка по домену — и когда это проверяли.
 static DOMAIN_OK: std::sync::Mutex<Option<(bool, std::time::Instant)>> = std::sync::Mutex::new(None);
 
@@ -286,6 +303,19 @@ pub fn sync(app: &tauri::AppHandle) {
         loop {
             let (url, token) = settings();
             if !token.is_empty() {
+                // Сверка с курсами аккаунта — сразу после входа и раз в десять минут.
+                if last_courses.elapsed() > Duration::from_secs(600) {
+                    match account_courses(&url, &token) {
+                        Ok(changed) => {
+                            last_courses = std::time::Instant::now();
+                            if changed {
+                                use tauri::Emitter;
+                                let _ = app.emit("learn:courses", ());
+                            }
+                        }
+                        Err(err) => log::debug!("площадка: курсы аккаунта не сверены ({err})"),
+                    }
+                }
                 if last_hello.elapsed() > Duration::from_secs(240) {
                     let env = crate::mcp::environment();
                     let courses = crate::mcp::list_courses();
@@ -306,19 +336,6 @@ pub fn sync(app: &tauri::AppHandle) {
                 }
                 if let Err(err) = take_courses(&url, &token) {
                     log::debug!("площадка: курсы не взяты ({err})");
-                }
-                // Сверка с курсами аккаунта — сразу после входа и раз в десять минут.
-                if last_courses.elapsed() > Duration::from_secs(600) {
-                    match account_courses(&url, &token) {
-                        Ok(changed) => {
-                            last_courses = std::time::Instant::now();
-                            if changed {
-                                use tauri::Emitter;
-                                let _ = app.emit("learn:courses", ());
-                            }
-                        }
-                        Err(err) => log::debug!("площадка: курсы аккаунта не сверены ({err})"),
-                    }
                 }
                 // Прогресс обучения — сразу после ответов и раз в две минуты,
                 // чтобы подтянуть сделанное в браузере и на телефоне.
@@ -476,7 +493,8 @@ fn account_courses(url: &str, token: &str) -> Result<bool, String> {
             continue;
         }
         let size = item["size"].as_u64().unwrap_or(0) as usize;
-        let outcome = fetch_parts(url, token, &format!("/api/app/courses/{id}/part"), size).and_then(|text| {
+        let part = list["part"].as_u64().unwrap_or(0) as usize;
+        let outcome = fetch_parts_fast(url, token, &format!("/api/app/courses/{id}/part"), size, part).and_then(|text| {
             let course = serde_json::from_str(&text).map_err(|err| format!("Курс не разобрался: {err}"))?;
             crate::learning::save_course(course)
         });
@@ -531,6 +549,39 @@ fn upload_course(url: &str, token: &str, course: &crate::learning::Course) -> Re
         at += part_units;
     }
     Ok(())
+}
+
+/// То же, что `fetch_parts`, но куски — по шесть сразу: курс на сотни
+/// килобайт по одному куску шёл по мобильной сети полминуты. Каждый кусок —
+/// своё короткое соединение, как и прежде (длинные ответы канал рвёт).
+fn fetch_parts_fast(url: &str, token: &str, path: &str, size: usize, part: usize) -> Result<String, String> {
+    if part == 0 || size == 0 {
+        return fetch_parts(url, token, path, size);
+    }
+    let offsets: Vec<usize> = (0..size).step_by(part).collect();
+    let glued = tauri::async_runtime::block_on(async {
+        let mut texts = Vec::with_capacity(offsets.len());
+        for batch in offsets.chunks(6) {
+            let handles: Vec<_> = batch
+                .iter()
+                .map(|&at| {
+                    let (url, token, path) = (url.to_string(), token.to_string(), format!("{path}?at={at}"));
+                    tauri::async_runtime::spawn(async move { get_with(&url, &path, &token).await })
+                })
+                .collect();
+            for handle in handles {
+                let part = handle.await.map_err(|err| err.to_string())??;
+                texts.push(part["text"].as_str().unwrap_or_default().to_string());
+            }
+        }
+        Ok::<String, String>(texts.concat())
+    })
+    .map_err(|err| format!("кусок курса не пришёл: {err}"))?;
+    // Курс поменялся, пока скачивался, — по одному куску, с размером из ответов.
+    if glued.encode_utf16().count() != size {
+        return fetch_parts(url, token, path, size);
+    }
+    Ok(glued)
 }
 
 /// Текст кусками с адреса `path?at=…`: `{ text, size }` за запрос.
