@@ -29,3 +29,5 @@ Thumbs.db
 
 # Живая база модуля «Магазины»: список покупок конкретного человека.
 modules/shops/shops.json
+src/dev/handoff/
+src/dev/learn-fixtures.json

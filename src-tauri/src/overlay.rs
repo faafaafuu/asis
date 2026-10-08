@@ -985,7 +985,7 @@ pub const LEARN_LABEL: &str = "learning";
 #[cfg_attr(mobile, allow(unreachable_code))]
 pub fn show_learning(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(mobile)]
-    return open_page(app, "learning.html");
+    return open_page(app, if cfg!(target_os = "ios") { "learn.html" } else { "learning.html" });
 
     if let Some(window) = app.get_webview_window(LEARN_LABEL) {
         bring_forward(&window);
@@ -1311,8 +1311,8 @@ fn back_home(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(ONBOARDING_LABEL) {
         // Главный экран на iPhone — обучение, на Android — экран Ноа.
         let script = if cfg!(target_os = "ios") {
-            r"if (!/learning\.html/.test(location.pathname)) {
-                history.length > 1 ? history.back() : (location.href = 'learning.html');
+            r"if (!/learn\.html/.test(location.pathname)) {
+                history.length > 1 ? history.back() : (location.href = 'learn.html');
             }"
         } else {
             r"if (!/onboarding\.html/.test(location.pathname)) {
@@ -1332,8 +1332,8 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
     let builder = WebviewWindowBuilder::new(
         app,
         ONBOARDING_LABEL,
-        // На iPhone программа — только обучение: открывается сразу оно.
-        WebviewUrl::App(if cfg!(target_os = "ios") { "learning.html" } else { "onboarding.html" }.into()),
+        // На iPhone программа — только обучение: приложение «NOAH Учёба».
+        WebviewUrl::App(if cfg!(target_os = "ios") { "learn.html" } else { "onboarding.html" }.into()),
     )
     // Тема проставляется до того, как страница начнёт рисоваться.
     //

@@ -91,10 +91,13 @@ function followInsets() {
   if (!isPhone() || !api?.core?.invoke) return;
   const root = document.documentElement;
   root.classList.add("is-phone");
-  // Экраны — вкладками внизу, как в любом приложении на телефоне.
-  const nav = () => import("./phone-nav.js").then((module) => module.mountPhoneNav()).catch(() => {});
-  if (document.body) nav();
-  else addEventListener("DOMContentLoaded", nav, { once: true });
+  // Окнам компьютера — правила узкого экрана. Приложение обучения свёрстано
+  // под телефон само (learn.html), ему они не нужны.
+  if (root.dataset.app !== "learn") {
+    const nav = () => import("./phone-nav.js").then((module) => module.mountPhoneNav()).catch(() => {});
+    if (document.body) nav();
+    else addEventListener("DOMContentLoaded", nav, { once: true });
+  }
   const apply = (insets) => {
     for (const side of ["top", "bottom", "left", "right"]) {
       root.style.setProperty(`--inset-${side}`, `${Number(insets?.[side] ?? 0)}px`);
@@ -124,7 +127,7 @@ followInsets();
 export function closePage(win) {
   if (isPhone()) {
     if (history.length > 1) history.back();
-    else location.href = /iPhone|iPad/.test(navigator.userAgent) ? "learning.html" : "onboarding.html";
+    else location.href = /iPhone|iPad/.test(navigator.userAgent) ? "learn.html" : "onboarding.html";
     return;
   }
   win?.close();

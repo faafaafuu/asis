@@ -1707,4 +1707,39 @@ mod tests {
         assert!(course.is_some());
         assert_eq!(topic.map(|t| t.id).as_deref(), Some("docker"));
     }
+
+    /// Данные для проверки приложения обучения в браузере (src/dev/learn.html):
+    /// то, что отдают команды, на копии настоящей папки. Запуск —
+    /// `LEARN_FIXTURE_DIR=копия LEARN_FIXTURE_OUT=файл cargo test dump_learn_fixtures -- --ignored`.
+    #[test]
+    #[ignore]
+    fn dump_learn_fixtures() {
+        let dir = PathBuf::from(std::env::var("LEARN_FIXTURE_DIR").expect("LEARN_FIXTURE_DIR"));
+        crate::module_kit::set_data_dir(dir.clone());
+        load(dir);
+        let overview = overview();
+        let mut topics = serde_json::Map::new();
+        let mut exams = serde_json::Map::new();
+        let mut reviews = serde_json::Map::new();
+        let mut maps = serde_json::Map::new();
+        for course in &overview {
+            for topic in &course.topics {
+                let key = format!("{}/{}", course.id, topic.id);
+                topics.insert(key.clone(), serde_json::to_value(topic_view(&course.id, &topic.id).unwrap()).unwrap());
+                exams.insert(key.clone(), serde_json::to_value(exam(&course.id, &topic.id).unwrap()).unwrap());
+                reviews.insert(key, serde_json::to_value(crate::recall::queue(&course.id, Some(&topic.id)).unwrap()).unwrap());
+            }
+            exams.insert(format!("{}/final", course.id), serde_json::to_value(exam(&course.id, "final").unwrap()).unwrap());
+            reviews.insert(course.id.clone(), serde_json::to_value(crate::recall::queue(&course.id, None).unwrap()).unwrap());
+            maps.insert(course.id.clone(), serde_json::to_value(crate::recall::map(&course.id).unwrap()).unwrap());
+        }
+        let out = serde_json::json!({
+            "overview": overview,
+            "topics": topics,
+            "exams": exams,
+            "reviews": reviews,
+            "maps": maps,
+        });
+        std::fs::write(std::env::var("LEARN_FIXTURE_OUT").expect("LEARN_FIXTURE_OUT"), out.to_string()).unwrap();
+    }
 }
