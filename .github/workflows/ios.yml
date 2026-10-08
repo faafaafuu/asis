@@ -97,6 +97,9 @@ jobs:
           echo "приложение: $app"
           mkdir -p Payload
           cp -R "$app" Payload/
+          # Копия Rust-библиотеки попадает в .app из папки Externals проекта —
+          # телефону она не нужна (всё уже в бинарнике), а весит 80 МБ.
+          rm -f Payload/*.app/libapp.a
           zip -qry Noah_ios.ipa Payload
           ls -la Noah_ios.ipa
 
