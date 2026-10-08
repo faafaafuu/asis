@@ -148,7 +148,23 @@ const MARKS = { done: "✓", practice: "◑", reading: "◔", new: "·" };
 
 /* ── Боковая колонка ───────────────────────────────────────────────────── */
 
+/**
+ * Телефон: список тем не помещается сбоку — он выдвигается кнопкой «Темы»
+ * в заголовке и прячется, когда тему выбрали.
+ */
+function phoneTopics() {
+  if (!document.documentElement.classList.contains("is-phone") || document.querySelector(".phone-topics")) return;
+  const toggle = el("button", "phone-topics", "☰ Темы");
+  const side = document.querySelector(".side");
+  toggle.addEventListener("click", () => side?.classList.toggle("is-open"));
+  side?.addEventListener("click", (event) => {
+    if (event.target.closest("button")) side.classList.remove("is-open");
+  });
+  ui.head.prepend(toggle);
+}
+
 function renderSide() {
+  phoneTopics();
   ui.courseTitle.textContent = course ? course.title : "";
   ui.coursePercent.textContent = course ? `${course.percent}%` : "";
   ui.courseBar.style.width = `${course?.percent ?? 0}%`;
@@ -283,6 +299,36 @@ function courseBuilder(open = false) {
   return box;
 }
 
+/**
+ * Вход в аккаунт через Telegram — без ключа вручную. После входа курсы
+ * аккаунта приходят сами за несколько секунд: окно ждёт их и показывает.
+ */
+function accountCard() {
+  const box = el("section", "builder account");
+  box.append(el("h2", "account__title", "Войдите в аккаунт NOAH"));
+  box.append(el("p", "muted", "Подтянутся ваши курсы, прогресс и мост — то же, что у вас на компьютере и в Ноа онлайн."));
+  const status = el("p", "builder__status");
+  const go = button("Войти через Telegram", async () => {
+    go.disabled = true;
+    status.textContent = "Открываю Telegram — нажмите там Start и вернитесь сюда.";
+    try {
+      const name = await api.invoke("account_login");
+      status.textContent = `Вы вошли${name ? ` как ${name}` : ""}. Подтягиваю курсы…`;
+      for (let i = 0; i < 20 && !courses.length; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await refreshOverview();
+      }
+      if (courses.length) renderHome();
+      else status.textContent = "Вход выполнен. Курсов в аккаунте пока нет — соберите первый ниже.";
+    } catch (err) {
+      status.textContent = String(err);
+      go.disabled = false;
+    }
+  });
+  box.append(go, status);
+  return box;
+}
+
 /** Ход сборки — пока окно на месте; готовая тема — сразу в списке. */
 let buildTimer = 0;
 function watchBuilds(status, stop) {
@@ -343,6 +389,14 @@ function renderHome() {
             "в каждой урок, задачи и мини-экзамен».",
           "Курс появится в этом окне сам. Дальше — «Ноа, погоняй меня по курсу» или «как мой прогресс».",
         ];
+    // Не вошли в аккаунт — сначала вход: по нему придут курсы, прогресс и мост.
+    if (!inBrowser) {
+      const login = accountCard();
+      root.append(login);
+      api?.invoke("account_status").then((signed) => {
+        if (signed) login.remove();
+      }).catch(() => {});
+    }
     // В программе (компьютер, телефон) — сборка прямо здесь, через мост.
     if (!inBrowser) root.append(courseBuilder(true));
     for (const text of texts) {

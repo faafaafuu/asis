@@ -660,6 +660,39 @@ pub fn platform_settings(state: State<'_, AppState>) -> PlatformSettings {
     }
 }
 
+/// Вход в аккаунт через Telegram: открывает бота, ждёт Start и сохраняет
+/// выданный ключ — как если бы его вписали в «Площадку». Дальше курсы,
+/// прогресс, мост и сборка курсов работают сами. Отдаёт имя аккаунта.
+#[tauri::command]
+pub async fn account_login(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let (code, link) = crate::platform::pair_start().await?;
+    #[cfg(mobile)]
+    {
+        let _ = crate::mobile::call::<serde_json::Value>("openUrl", serde_json::json!({ "url": link }));
+    }
+    #[cfg(desktop)]
+    crate::pc::open(&link)?;
+    let (token, name) = crate::platform::pair_wait(&code).await?;
+    {
+        let mut config = state.config_mut();
+        config.platform.token = crate::secret::protect(&token);
+        #[cfg(mobile)]
+        if crate::brains::adopt_site_bridge(&mut config) {
+            let (language, wake) = (config.ui.language.clone(), config.voice.wake_name.clone());
+            state.rebuild_provider(&config.ai, &language, &wake);
+        }
+    }
+    persist(&app, &state)?;
+    log::info!("вход в аккаунт через Telegram: {name}");
+    Ok(name)
+}
+
+/// Вошёл ли человек в аккаунт (есть ли ключ площадки).
+#[tauri::command]
+pub fn account_status(state: State<'_, AppState>) -> bool {
+    !state.config().platform.token.trim().is_empty()
+}
+
 #[tauri::command]
 pub async fn save_platform_settings(
     app: AppHandle,

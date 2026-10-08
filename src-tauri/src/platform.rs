@@ -211,6 +211,44 @@ pub async fn publish(id: &str, description: &str, category: &str) -> Result<Stri
 /// Связь с площадкой: Ноа забирает черновики модулей и курсов, которые
 /// нейросеть пользователя собрала через MCP по ссылке, проверяет их, ставит
 /// прошедшие и отправляет отчёт обратно. Без ключа площадки — молчит.
+/// Вход в аккаунт через Telegram — без ключа вручную: сайт даёт ссылку на
+/// бота, человек жмёт Start, программа забирает ключ. Отдаёт код и ссылку.
+pub async fn pair_start() -> Result<(String, String), String> {
+    let (url, _) = settings();
+    let response = client()?
+        .post(format!("{url}/api/app/pair/start"))
+        .json(&json!({}))
+        .send()
+        .await
+        .map_err(|err| format!("площадка недоступна: {err}"))?;
+    let reply = read(response).await?;
+    let code = reply["code"].as_str().unwrap_or_default().to_string();
+    let link = reply["link"].as_str().unwrap_or_default().to_string();
+    if code.is_empty() || link.is_empty() {
+        return Err("Сайт не дал ссылку для входа.".into());
+    }
+    Ok((code, link))
+}
+
+/// Ждёт, пока человек нажмёт Start у бота. Отдаёт ключ и имя аккаунта.
+pub async fn pair_wait(code: &str) -> Result<(String, String), String> {
+    let (url, _) = settings();
+    let deadline = std::time::Instant::now() + Duration::from_secs(300);
+    while std::time::Instant::now() < deadline {
+        let path = format!("{url}/api/app/pair/status?code={}", urlencode(code));
+        if let Ok(response) = client()?.get(&path).send().await {
+            let reply = read(response).await?;
+            if reply["done"].as_bool() == Some(true) {
+                let token = reply["token"].as_str().unwrap_or_default().to_string();
+                let name = reply["name"].as_str().unwrap_or_default().to_string();
+                return Ok((token, name));
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    Err("Время входа вышло — нажмите «Войти через Telegram» ещё раз.".into())
+}
+
 /// Собрать новый курс на сервере — через мост, как «Собрать курс» в Ноа
 /// онлайн. Курс приходит в программу сам: сайт ставит его в очередь, а
 /// `sync` забирает. `quality` — sonnet (точнее) или haiku (бережёт лимит).

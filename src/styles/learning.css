@@ -1654,3 +1654,11 @@ button {
 .builder__status:empty {
   display: none;
 }
+
+.account {
+  border-color: var(--accent);
+}
+.account__title {
+  margin: 0;
+  font-size: 18px;
+}

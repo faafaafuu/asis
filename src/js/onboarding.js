@@ -924,6 +924,8 @@ try {
 } catch {
   /* хранилище недоступно */
 }
+// Вкладка из адреса — с панели вкладок на телефоне: «Ноа», «Ещё».
+startTab = new URLSearchParams(location.search).get("tab") ?? startTab;
 showTab(["modules", "settings", "help"].includes(startTab) ? startTab : "modules");
 // На телефоне главный экран — разговор: его вкладка появляется после того,
 // как стало известно, что это телефон (applyPlatform).

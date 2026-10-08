@@ -166,8 +166,11 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
   };
 
   /** Находит или заводит аккаунт по внешнему профилю и открывает сессию. */
-  const signIn = (req, provider, profile, trustEmail = true) => {
-    const current = sessionUser(req);
+  const signIn = (req, provider, profile, trustEmail = true) =>
+    openSession(userFor(provider, profile, sessionUser(req), trustEmail));
+
+  /** Аккаунт по входу через провайдера: найденный, текущий или новый. */
+  const userFor = (provider, profile, current = null, trustEmail = true) => {
     const linked = db.prepare("SELECT user_id FROM identities WHERE provider = ? AND subject = ?").get(provider, profile.subject);
     let userId = linked?.user_id;
     if (!userId && current) userId = current.id;
@@ -179,8 +182,36 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
       userId = Number(info.lastInsertRowid);
     }
     db.prepare("INSERT OR IGNORE INTO identities (provider, subject, user_id) VALUES (?, ?, ?)").run(provider, profile.subject, userId);
-    return openSession(userId);
+    return userId;
   };
+
+  /* ── Вход в приложение на телефоне ─────────────────────────────────────
+     Приложение не держит cookie сайта: ему нужен ключ площадки. Вход тот
+     же, что на сайте, — через бота в Telegram: приложение показывает ссылку,
+     человек жмёт Start, и приложение забирает выпущенный для него ключ. По
+     ключу дальше идут курсы, прогресс, мост и сборка курсов. */
+
+  route("POST", /^\/api\/app\/pair\/start$/, () => {
+    if (!tgBot.token || !tgBot.name) throw new Fail(404, "Вход через Telegram не настроен.");
+    const code = b64url(randomBytes(12)).replace(/[^A-Za-z0-9]/g, "").slice(0, 16);
+    tgCodes.set(code, { at: Date.now(), user: null, app: true });
+    return { code, link: `https://t.me/${tgBot.name}?start=${code}` };
+  });
+
+  route("GET", /^\/api\/app\/pair\/status$/, ({ url }) => {
+    const code = String(url.searchParams.get("code") ?? "");
+    const entry = tgCodes.get(code);
+    if (!entry?.app || Date.now() - entry.at > TG_TTL) throw new Fail(410, "Время входа вышло — нажмите «Войти через Telegram» ещё раз.");
+    if (!entry.user) return { done: false };
+    tgCodes.delete(code);
+    const userId = userFor("telegram", entry.user);
+    // Ключ телефона один: прежний, выпущенный при прошлом входе, больше не нужен.
+    db.prepare("DELETE FROM tokens WHERE user_id = ? AND label = 'Телефон'").run(userId);
+    const token = `noah_${randomBytes(24).toString("base64url")}`;
+    db.prepare("INSERT INTO tokens (user_id, label, hash) VALUES (?, ?, ?)").run(userId, "Телефон", createHash("sha256").update(token).digest("hex"));
+    const name = db.prepare("SELECT name FROM users WHERE id = ?").get(userId)?.name ?? "";
+    return { done: true, token, name };
+  });
 
   route("GET", /^\/api\/auth\/providers$/, ({ req }) => ({ providers: enabled(req) }));
 
@@ -343,6 +374,11 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
             // Кнопка — одноразовый вход: откроется в любом браузере, хоть во
             // встроенном в Telegram, и сразу вернёт туда, откуда пришли.
             markup = { inline_keyboard: [[{ text: "🌐 Вернуться в NOAH", url: `${entry.base ?? PUBLIC_URL}/auth/telegram/finish?code=${match[1]}` }]] };
+            // Вход в приложение: возвращаться не на сайт, а в приложение.
+            if (entry.app) {
+              reply = "Готово — вход выполнен. Вернитесь в приложение Ноа: курсы и прогресс подтянутся сами.";
+              markup = undefined;
+            }
           }
           await fetch(`https://api.telegram.org/bot${tgBot.token}/sendMessage`, {
             method: "POST",

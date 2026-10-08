@@ -332,6 +332,8 @@ pub fn run() {
             commands::audio_decoded,
             commands::learn_overview,
             commands::window_error,
+            commands::account_login,
+            commands::account_status,
             commands::learn_build,
             commands::learn_builds,
             commands::learn_build_stop,

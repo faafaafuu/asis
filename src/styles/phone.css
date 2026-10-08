@@ -1,0 +1,148 @@
+/* Телефон: общие правила для всех экранов приложения (phone-nav.js).
+   Окна компьютера на телефоне — экраны одного приложения: без кнопок окна,
+   во всю ширину, с панелью вкладок внизу и отступами под вырез и полоску. */
+
+:root {
+  --phone-nav-height: 58px;
+}
+
+html.is-phone,
+html.is-phone body {
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+html.has-phone-nav body {
+  box-sizing: border-box;
+  height: 100vh;
+  height: 100dvh;
+  padding-top: var(--inset-top, env(safe-area-inset-top, 0px));
+  padding-bottom: calc(var(--phone-nav-height) + var(--inset-bottom, env(safe-area-inset-bottom, 0px)));
+}
+
+/* Кнопки окна компьютера — «свернуть», «закрыть» — на телефоне не нужны. */
+html.is-phone .head__button,
+html.is-phone [data-el="minimize"],
+html.is-phone [data-el="close"] {
+  display: none !important;
+}
+
+html.is-phone .head {
+  padding: 10px 14px 8px;
+  gap: 8px;
+  flex-wrap: wrap;
+  cursor: default;
+}
+
+/* ── Панель вкладок ────────────────────────────────────────────────────── */
+
+.phone-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  display: flex;
+  height: var(--phone-nav-height);
+  padding-bottom: var(--inset-bottom, env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--divider);
+  background: var(--bg-solid);
+}
+
+.phone-nav__tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 11px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.phone-nav__icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.phone-nav__tab[aria-current="page"] {
+  color: var(--accent);
+}
+
+/* ── Обучение ──────────────────────────────────────────────────────────── */
+
+html.is-phone .layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Темы — выдвижным списком по кнопке «Темы» в заголовке. */
+html.is-phone .side {
+  display: none;
+}
+html.is-phone .side.is-open {
+  display: flex;
+  position: fixed;
+  z-index: 50;
+  top: var(--inset-top, env(safe-area-inset-top, 0px));
+  left: 0;
+  right: 0;
+  bottom: calc(var(--phone-nav-height) + var(--inset-bottom, env(safe-area-inset-bottom, 0px)));
+  padding: 14px 12px;
+  border-right: 0;
+  background: var(--bg-solid);
+  overflow-y: auto;
+}
+
+html.is-phone .main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 14px 24px;
+}
+
+/* Вкладки темы — в одну строку, листаются пальцем. */
+html.is-phone .steps,
+html.is-phone .substeps {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+html.is-phone .steps::-webkit-scrollbar,
+html.is-phone .substeps::-webkit-scrollbar {
+  display: none;
+}
+html.is-phone .step {
+  flex: none;
+}
+
+html.is-phone .head__progress .bar {
+  width: 70px;
+}
+
+.phone-topics {
+  padding: 6px 10px;
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+/* ── Практика: панель вкладок занимает низ — окно над ней ──────────────── */
+
+html.has-phone-nav .practice {
+  min-height: 0;
+}
+
+/* ── Активы, задачи, модули — во всю ширину ────────────────────────────── */
+
+html.is-phone .watch,
+html.is-phone .tasks,
+html.is-phone main {
+  max-width: 100%;
+}
