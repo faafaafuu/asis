@@ -68,7 +68,7 @@ jobs:
         working-directory: src-tauri/gen/apple
         run: |
           grep -n "xcode-script" project.yml || true
-          sed -i '' -E 's#^( *script: ).*xcode-script.*$#\1echo "Rust собран заранее"#' project.yml
+          sed -i '' -E 's#^([ -]*script: ).*xcode-script.*$#\1echo "Rust собран заранее"#' project.yml
           grep -n "Rust собран заранее" project.yml
           xcodegen generate
 
