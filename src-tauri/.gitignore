@@ -1,0 +1,4 @@
+
+# Движок голоса для iPhone — скачивается при сборке (sherpa-onnx).
+sherpa-onnx.xcframework/
+.sherpa-onnx-xcframework-version

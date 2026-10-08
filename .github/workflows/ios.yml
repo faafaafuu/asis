@@ -61,6 +61,24 @@ jobs:
           cp src-tauri/icons/ios/*.png "$set/"
           ls -la "$set"
 
+      # Голос Ирина (Piper) — в само приложение: говорит без сети, когда голос
+      # Ноа с сервера не пришёл. Модель sherpa-onnx (int8, ~20 МБ) кладётся в
+      # папку ресурсов проекта (из project.yml), в приложении она —
+      # assets/noa-voice; читает её voice_mobile.rs.
+      - name: Голос Ирина в приложение
+        working-directory: src-tauri/gen/apple
+        run: |
+          set -e
+          assets=$(awk '/- path:/{p=$3} /buildPhase: resources/{print p; exit}' project.yml)
+          echo "папка ресурсов: $assets"
+          test -n "$assets"
+          mkdir -p "$assets/noa-voice"
+          curl -fsSL -o /tmp/irina.tar.bz2 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ru_RU-irina-medium-int8.tar.bz2
+          tar -xjf /tmp/irina.tar.bz2 -C "$assets/noa-voice"
+          find "$assets/noa-voice" -maxdepth 2 | head -20
+          du -sh "$assets/noa-voice"
+
       # Шаг проекта «Build Rust Code» зовёт `tauri ios xcode-script`, а тот
       # ждёт адрес, который оставляет только `tauri ios build`. Та команда без
       # аккаунта Apple не собирает — подпись обязательна. Поэтому Rust

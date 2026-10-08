@@ -68,7 +68,8 @@ static READ_REQUEST: AtomicU64 = AtomicU64::new(0);
 /// На iPhone говорит голос Ноа — тот же Silero, что на компьютере, с сервера
 /// по фразам (`/api/noa/tts`): системный синтезатор звучал как робот. Пока
 /// звучит фраза, следующая уже качается. Нет сети или входа — говорит
-/// лучший установленный русский голос системы.
+/// голос Ирина (Piper), встроенный в приложение, — без сети; не вышло и с
+/// ним — системный.
 pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<(), String> {
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -77,16 +78,207 @@ pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result
     let request = READ_REQUEST.load(Ordering::SeqCst);
     SPEAKING.store(true, Ordering::SeqCst);
     let result = if cfg!(target_os = "ios") {
-        match noa_voice(config, &text, request).await {
+        // Сервер только что не ответил — минуту сразу Ирина, без ожидания.
+        let server = if server_down() { Err(text.clone()) } else { noa_voice(config, &text, request).await };
+        match server {
             Ok(()) => Ok(()),
             Err(rest) if rest.is_empty() => Ok(()),
-            Err(rest) => system_speak(config, &rest).await,
+            Err(rest) => match irina::speak(config, &rest, request).await {
+                Ok(()) => Ok(()),
+                Err(left) if left.is_empty() => Ok(()),
+                Err(left) => system_speak(config, &left).await,
+            },
         }
     } else {
         system_speak(config, &text).await
     };
     SPEAKING.store(false, Ordering::SeqCst);
     result
+}
+
+/// Голос Ирина (Piper) прямо в телефоне — sherpa-onnx, модель лежит в
+/// приложении (assets/noa-voice). Движок один, в своём потоке: модель
+/// грузится секунду-две, держать её — сотня мегабайт памяти, поэтому она
+/// встаёт при первой фразе и живёт, пока живо приложение.
+#[cfg(target_os = "ios")]
+mod irina {
+    use std::path::PathBuf;
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
+    use std::sync::{Mutex, OnceLock};
+
+    use super::{phrases, play, READ_REQUEST};
+    use crate::config::VoiceConfig;
+
+    struct Job {
+        text: String,
+        speed: f32,
+        path: PathBuf,
+        done: mpsc::Sender<Result<PathBuf, String>>,
+    }
+
+    static WORKER: OnceLock<Mutex<mpsc::Sender<Job>>> = OnceLock::new();
+
+    /// Папка голоса внутри приложения: Sufler.app/assets/noa-voice.
+    fn voice_dir() -> Option<PathBuf> {
+        let app = std::env::current_exe().ok()?.parent()?.to_path_buf();
+        let dir = app.join("assets").join("noa-voice");
+        dir.is_dir().then_some(dir)
+    }
+
+    /// Первый файл с расширением `ext` в папке и подпапках.
+    fn find(dir: &std::path::Path, test: &dyn Fn(&std::path::Path) -> bool) -> Option<PathBuf> {
+        for entry in std::fs::read_dir(dir).ok()?.flatten() {
+            let path = entry.path();
+            if test(&path) {
+                return Some(path);
+            }
+            if path.is_dir() {
+                if let Some(found) = find(&path, test) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    fn engine() -> Result<sherpa_onnx::OfflineTts, String> {
+        let dir = voice_dir().ok_or("голоса в приложении нет")?;
+        let model = find(&dir, &|p| p.extension().is_some_and(|ext| ext == "onnx")).ok_or("нет модели .onnx")?;
+        let tokens = find(&dir, &|p| p.file_name().is_some_and(|name| name == "tokens.txt")).ok_or("нет tokens.txt")?;
+        let data = find(&dir, &|p| p.is_dir() && p.file_name().is_some_and(|name| name == "espeak-ng-data"))
+            .ok_or("нет espeak-ng-data")?;
+        let config = sherpa_onnx::OfflineTtsConfig {
+            model: sherpa_onnx::OfflineTtsModelConfig {
+                vits: sherpa_onnx::OfflineTtsVitsModelConfig {
+                    model: Some(model.to_string_lossy().into_owned()),
+                    tokens: Some(tokens.to_string_lossy().into_owned()),
+                    data_dir: Some(data.to_string_lossy().into_owned()),
+                    noise_scale: 0.667,
+                    noise_scale_w: 0.8,
+                    length_scale: 1.0,
+                    ..Default::default()
+                },
+                num_threads: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        sherpa_onnx::OfflineTts::create(&config).ok_or_else(|| "движок голоса не запустился".to_string())
+    }
+
+    fn worker() -> mpsc::Sender<Job> {
+        WORKER
+            .get_or_init(|| {
+                let (tx, rx) = mpsc::channel::<Job>();
+                let _ = std::thread::Builder::new().name("noa-irina".into()).spawn(move || {
+                    let mut tts: Option<sherpa_onnx::OfflineTts> = None;
+                    for job in rx {
+                        if tts.is_none() {
+                            match engine() {
+                                Ok(engine) => tts = Some(engine),
+                                Err(err) => {
+                                    let _ = job.done.send(Err(err));
+                                    continue;
+                                }
+                            }
+                        }
+                        let Some(engine) = tts.as_ref() else { continue };
+                        let options = sherpa_onnx::GenerationConfig { speed: job.speed, ..Default::default() };
+                        let result = match engine.generate_with_config(&job.text, &options, None::<fn(&[f32], f32) -> bool>) {
+                            Some(audio) if audio.save(&job.path.to_string_lossy()) => Ok(job.path),
+                            Some(_) => Err("фраза не записалась".to_string()),
+                            None => Err("фраза не озвучилась".to_string()),
+                        };
+                        let _ = job.done.send(result);
+                    }
+                });
+                Mutex::new(tx)
+            })
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .clone()
+    }
+
+    /// Фраза — в WAV, в потоке движка. Ответ — через канал.
+    fn synth(text: String, speed: f32, slot: usize) -> mpsc::Receiver<Result<PathBuf, String>> {
+        let (done, wait) = mpsc::channel();
+        let path = std::env::temp_dir().join(format!("noa-irina-{slot}.wav"));
+        if worker().send(Job { text, speed, path, done: done.clone() }).is_err() {
+            let _ = done.send(Err("поток голоса не запустился".into()));
+        }
+        wait
+    }
+
+    async fn ready(wait: mpsc::Receiver<Result<PathBuf, String>>) -> Result<PathBuf, String> {
+        tauri::async_runtime::spawn_blocking(move || wait.recv().unwrap_or_else(|_| Err("поток голоса оборвался".into())))
+            .await
+            .map_err(|err| err.to_string())?
+    }
+
+    /// Говорит Ириной. Ошибка — текст, который осталось сказать (пустой — перебили).
+    pub async fn speak(config: &VoiceConfig, text: &str, request: u64) -> Result<(), String> {
+        let speed = if config.rate > 0.0 { config.rate as f32 } else { 1.0 };
+        let list = phrases(text, 220);
+        let mut next = list.first().map(|first| synth(first.clone(), speed, 0));
+        for (at, _) in list.iter().enumerate() {
+            let Some(wait) = next.take() else { break };
+            let path = match ready(wait).await {
+                Ok(path) => path,
+                Err(err) => {
+                    crate::platform::diag(format!("голос Ирина: {err}"));
+                    return Err(list[at..].join(" "));
+                }
+            };
+            if let Some(following) = list.get(at + 1) {
+                next = Some(synth(following.clone(), speed, (at + 1) % 2));
+            }
+            if READ_REQUEST.load(Ordering::SeqCst) != request {
+                return Err(String::new());
+            }
+            if let Err(err) = play(&path).await {
+                crate::platform::diag(format!("голос Ирина: фраза не проигралась: {err}"));
+                return Err(list[at..].join(" "));
+            }
+            if READ_REQUEST.load(Ordering::SeqCst) != request {
+                return Err(String::new());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Не iPhone — встроенного голоса нет.
+#[cfg(not(target_os = "ios"))]
+mod irina {
+    use crate::config::VoiceConfig;
+
+    pub async fn speak(_config: &VoiceConfig, text: &str, _request: u64) -> Result<(), String> {
+        Err(text.to_string())
+    }
+}
+
+/// Проиграть файл фразы (MP3 или WAV) — плагин телефона, ждёт конца.
+async fn play(path: &std::path::Path) -> Result<(), String> {
+    crate::mobile::call_async::<serde_json::Value>("playAudio", serde_json::json!({ "path": path.to_string_lossy() }))
+        .await
+        .map(|_| ())
+}
+
+/// До какого времени голос с сервера не пробовать: не ответил — минуту
+/// говорит встроенный, а не ждёт сервер на каждой фразе.
+static SERVER_DOWN_UNTIL: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+fn server_down() -> bool {
+    SERVER_DOWN_UNTIL
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .is_some_and(|until| std::time::Instant::now() < until)
+}
+
+fn mark_server_down() {
+    *SERVER_DOWN_UNTIL.lock().unwrap_or_else(|err| err.into_inner()) =
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
 }
 
 async fn system_speak(config: &VoiceConfig, text: &str) -> Result<(), String> {
@@ -132,7 +324,7 @@ fn phrases(text: &str, limit: usize) -> Vec<String> {
 /// Фраза голосом Ноа — MP3 с сервера.
 async fn fetch_phrase(base: String, token: String, voice: String, phrase: String) -> Result<Vec<u8>, String> {
     let client = crate::net::client_builder()
-        .timeout(std::time::Duration::from_secs(25))
+        .timeout(std::time::Duration::from_secs(8))
         .build()
         .map_err(|err| err.to_string())?;
     let response = client
@@ -164,6 +356,7 @@ async fn noa_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(),
         let audio = match task.await.map_err(|err| err.to_string()).and_then(|got| got) {
             Ok(audio) => audio,
             Err(err) => {
+                mark_server_down();
                 crate::platform::diag(format!("голос Ноа не пришёл с {base}: {err}"));
                 return Err(list[at..].join(" "));
             }

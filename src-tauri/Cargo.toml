@@ -205,3 +205,9 @@ default = []
 # не собирался ни разу, сборка iOS идёт без него — команды плагина честно
 # отвечают «плагин телефона не загружен».
 ios-plugin = []
+
+# iPhone: голос Ноа без сети — Piper (Ирина) через sherpa-onnx. Движок —
+# готовый xcframework, пакет сам скачивает его при сборке и кладёт рядом
+# (sherpa-onnx.xcframework), Xcode встраивает его по bundle.iOS.frameworks.
+[target.'cfg(target_os = "ios")'.dependencies]
+sherpa-onnx = { version = "1.13.8", default-features = false, features = ["shared"] }

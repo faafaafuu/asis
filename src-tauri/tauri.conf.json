@@ -53,6 +53,9 @@
         "installerHooks": "./windows/hooks.nsh"
       }
     },
+    "iOS": {
+      "frameworks": ["sherpa-onnx.xcframework"]
+    },
     "linux": {
       "deb": {
         "depends": []
