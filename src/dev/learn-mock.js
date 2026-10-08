@@ -87,6 +87,7 @@
   const publish = (say = "") => emit("practice:state", { practice: structuredClone(practice), say, spoken: false });
 
   let speakingUntil = 0;
+  let phoneVoice = "phone";
   const stats = { today: 25, week: 110, streak: 5, sessionsToday: 1 };
 
   async function invoke(cmd, args = {}) {
@@ -204,6 +205,9 @@
         stats.week += args.session.minutes;
         stats.sessionsToday += 1;
         return { ...stats };
+      case "phone_voice":
+        if (args.voice) phoneVoice = args.voice;
+        return phoneVoice;
       case "account_status":
         return params.get("signed") !== "0";
       case "account_login":

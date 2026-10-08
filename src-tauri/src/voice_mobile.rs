@@ -65,11 +65,11 @@ static READ_REQUEST: AtomicU64 = AtomicU64::new(0);
 
 /// Произносит текст и ждёт конца фразы.
 ///
-/// На iPhone говорит голос Ноа — тот же Silero, что на компьютере, с сервера
-/// по фразам (`/api/noa/tts`): системный синтезатор звучал как робот. Пока
-/// звучит фраза, следующая уже качается. Нет сети или входа — говорит
-/// голос Ирина (Piper), встроенный в приложение, — без сети; не вышло и с
-/// ним — системный.
+/// На iPhone по умолчанию говорит Ирина (Piper), встроенная в приложение:
+/// фраза готова за доли секунды и без сети. Голос Ноа с компьютера (Silero
+/// «xenia») — с сервера по фразам, если его выбрали в профиле
+/// (`voice.engine = "silero"`): так же звучит, но каждая фраза — секунда-пять
+/// на сервере. Не вышел один — говорит другой, не вышли оба — системный.
 pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<(), String> {
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -78,22 +78,43 @@ pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result
     let request = READ_REQUEST.load(Ordering::SeqCst);
     SPEAKING.store(true, Ordering::SeqCst);
     let result = if cfg!(target_os = "ios") {
-        // Сервер только что не ответил — минуту сразу Ирина, без ожидания.
-        let server = if server_down() { Err(text.clone()) } else { noa_voice(config, &text, request).await };
-        match server {
+        let server_first = config.engine == "silero";
+        let first = if server_first { server_voice(config, &text, request).await } else { irina::speak(config, &text, request).await };
+        match first {
             Ok(()) => Ok(()),
             Err(rest) if rest.is_empty() => Ok(()),
-            Err(rest) => match irina::speak(config, &rest, request).await {
-                Ok(()) => Ok(()),
-                Err(left) if left.is_empty() => Ok(()),
-                Err(left) => system_speak(config, &left).await,
-            },
+            Err(rest) => {
+                let second = if server_first { irina::speak(config, &rest, request).await } else { server_voice(config, &rest, request).await };
+                match second {
+                    Ok(()) => Ok(()),
+                    Err(left) if left.is_empty() => Ok(()),
+                    Err(left) => system_speak(config, &left).await,
+                }
+            }
         }
     } else {
         system_speak(config, &text).await
     };
     SPEAKING.store(false, Ordering::SeqCst);
     result
+}
+
+/// Голос с сервера — если сервер только что не ответил, минуту не пробуем.
+async fn server_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(), String> {
+    if server_down() {
+        return Err(text.to_string());
+    }
+    noa_voice(config, text, request).await
+}
+
+/// Голос на телефоне: `silero` — голос Ноа с сервера, иное — Ирина в телефоне.
+pub fn phone_voice_is_server(config: &VoiceConfig) -> bool {
+    config.engine == "silero"
+}
+
+/// Загрузить Ирину заранее: первая фраза — без секунды-двух на модель.
+pub fn warm_up() {
+    irina::warm();
 }
 
 /// Голос Ирина (Piper) прямо в телефоне — sherpa-onnx, модель лежит в
@@ -107,7 +128,7 @@ mod irina {
     use std::sync::mpsc;
     use std::sync::{Mutex, OnceLock};
 
-    use super::{phrases, play, READ_REQUEST};
+    use super::{phrases, play, quick_start, READ_REQUEST};
     use crate::config::VoiceConfig;
 
     struct Job {
@@ -200,6 +221,11 @@ mod irina {
             .clone()
     }
 
+    /// Поднять движок заранее, в его потоке: пустая короткая фраза.
+    pub fn warm() {
+        let _ = synth("Да.".into(), 1.0, 9);
+    }
+
     /// Фраза — в WAV, в потоке движка. Ответ — через канал.
     fn synth(text: String, speed: f32, slot: usize) -> mpsc::Receiver<Result<PathBuf, String>> {
         let (done, wait) = mpsc::channel();
@@ -219,7 +245,7 @@ mod irina {
     /// Говорит Ириной. Ошибка — текст, который осталось сказать (пустой — перебили).
     pub async fn speak(config: &VoiceConfig, text: &str, request: u64) -> Result<(), String> {
         let speed = if config.rate > 0.0 { config.rate as f32 } else { 1.0 };
-        let list = phrases(text, 220);
+        let list = quick_start(phrases(text, 220));
         let mut next = list.first().map(|first| synth(first.clone(), speed, 0));
         for (at, _) in list.iter().enumerate() {
             let Some(wait) = next.take() else { break };
@@ -256,6 +282,8 @@ mod irina {
     pub async fn speak(_config: &VoiceConfig, text: &str, _request: u64) -> Result<(), String> {
         Err(text.to_string())
     }
+
+    pub fn warm() {}
 }
 
 /// Проиграть файл фразы (MP3 или WAV) — плагин телефона, ждёт конца.
@@ -285,6 +313,18 @@ async fn system_speak(config: &VoiceConfig, text: &str) -> Result<(), String> {
     crate::mobile::call_async::<serde_json::Value>("speak", serde_json::json!({ "text": text, "rate": config.rate }))
         .await
         .map(|_| ())
+}
+
+/// Первая фраза — короткая: с неё начинается звук, и чем она короче, тем
+/// раньше Ноа заговорит. Длинную первую делим по запятым и пробелам.
+fn quick_start(mut list: Vec<String>) -> Vec<String> {
+    let Some(first) = list.first().cloned() else { return list };
+    if first.chars().count() <= 80 {
+        return list;
+    }
+    let head = phrases(&first, 70);
+    list.splice(0..1, head);
+    list
 }
 
 /// Фразы по 1–2 предложения: короткий ответ сервера приходит быстро и не
@@ -348,7 +388,7 @@ async fn noa_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(),
         return Err(text.to_string());
     }
     let voice = if config.silero_voice.trim().is_empty() { "xenia".to_string() } else { config.silero_voice.clone() };
-    let list = phrases(text, 180);
+    let list = quick_start(phrases(text, 180));
     let start = |phrase: &String| tauri::async_runtime::spawn(fetch_phrase(base.clone(), token.clone(), voice.clone(), phrase.clone()));
     let mut next = list.first().map(start);
     for (at, _) in list.iter().enumerate() {

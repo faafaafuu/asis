@@ -40,6 +40,13 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     /// Пауза, после которой фраза считается сказанной. Пересказ урока —
     /// с паузами на подумать, поэтому не секунда.
     private static let endOfPhrase: TimeInterval = 2.2
+    /// Пауза для этого слушания: разговору с Ноа хватает короткой — ответ
+    /// приходит быстрее; пересказу урока — длинная (по умолчанию).
+    private var phrasePause: TimeInterval = SuflerPlugin.endOfPhrase
+
+    class ListenArgs: Decodable {
+        let pause: Double?
+    }
 
     override func load(webview: WKWebView) {
         super.load(webview: webview)
@@ -174,6 +181,8 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     /// Слушает одну фразу и отдаёт её текстом. Конец — пауза в речи.
     @objc public func listen(_ invoke: Invoke) {
         cancelRecognition(resolve: "")
+        let pause = (try? invoke.parseArgs(ListenArgs.self))?.pause ?? SuflerPlugin.endOfPhrase
+        phrasePause = min(max(pause, 0.6), 5)
         listening = invoke
         SFSpeechRecognizer.requestAuthorization { status in
             DispatchQueue.main.async {
@@ -236,7 +245,7 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
                     self.heard = result.bestTranscription.formattedString
                     // Пока человек говорит — ждём; замолчал — фраза готова.
                     self.silence?.invalidate()
-                    self.silence = Timer.scheduledTimer(withTimeInterval: Self.endOfPhrase, repeats: false) { _ in
+                    self.silence = Timer.scheduledTimer(withTimeInterval: self.phrasePause, repeats: false) { _ in
                         self.finishListening(error: nil)
                     }
                     if result.isFinal { self.finishListening(error: nil) }

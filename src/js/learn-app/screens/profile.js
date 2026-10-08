@@ -92,6 +92,19 @@ register("profile", (screen) => {
         if (!on) call("voice_stop").catch(() => {});
       }),
     );
+    // Голос: Ирина в телефоне — сразу и без сети; голос с компьютера —
+    // с сервера, каждая фраза — секунда-пять.
+    const current = await call("phone_voice", {}).catch(() => null);
+    if (current) {
+      settings.append(
+        setting(
+          "Голос как на компьютере",
+          "Ксения с сервера — тот же голос, что у Ноа на ПК, но каждая фраза ждёт сервер. Выключено — Ирина прямо в телефоне: сразу и без сети.",
+          current === "server",
+          (on) => call("phone_voice", { voice: on ? "server" : "phone" }).catch((err) => toast(String(err))),
+        ),
+      );
+    }
     content.append(settings);
 
     // Курсы: собрать, идущие сборки.

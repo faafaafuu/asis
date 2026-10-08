@@ -194,9 +194,12 @@ export const voice = {
   busy() {
     return api ? api.invoke("voice_busy").catch(() => false) : Promise.resolve(false);
   },
-  /** Слушает одну фразу (системное распознавание телефона). */
-  async listen() {
-    const heard = await api.invoke("plugin:sufler|listen", { lang: "ru-RU" });
+  /**
+   * Слушает одну фразу (системное распознавание телефона). `pause` — сколько
+   * секунд тишины считать концом фразы: разговору — короче, пересказу — дольше.
+   */
+  async listen({ pause } = {}) {
+    const heard = await api.invoke("plugin:sufler|listen", { lang: "ru-RU", ...(pause ? { pause } : {}) });
     return String(heard?.text ?? "").trim();
   },
   cancel() {

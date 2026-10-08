@@ -104,7 +104,8 @@ export function open(first = "") {
       mode("listen");
       let heard = "";
       try {
-        heard = await voice.listen();
+        // Разговор: секунды тишины хватает, чтобы понять, что договорили.
+        heard = await voice.listen({ pause: 1.2 });
       } catch (err) {
         if (!alive()) return;
         say("noa", String(err));

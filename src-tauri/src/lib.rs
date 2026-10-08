@@ -273,6 +273,8 @@ pub fn run() {
             #[cfg(mobile)]
             {
                 let _ = APP.set(app.handle().clone());
+                // Голос Ирина — заранее, чтобы первая фраза не ждала загрузки модели.
+                voice::warm_up();
                 // Вошли в аккаунт — модель телефона мост через сайт (см. adopt_site_bridge).
                 {
                     let state = app.state::<AppState>();
@@ -314,6 +316,8 @@ pub fn run() {
             phone_ask,
             #[cfg(mobile)]
             phone_forget,
+            #[cfg(mobile)]
+            phone_voice,
             commands::runtime_config,
             commands::popup_ready,
             commands::pending_open,
@@ -602,6 +606,19 @@ pub(crate) fn say_then_listen(app: &tauri::AppHandle, text: String) {
 /// Путь тот же, что у голоса на компьютере: сначала распоряжения (задачи,
 /// будильники, поиск, модули), потом обсуждение урока, потом модель с
 /// памятью о разговоре.
+/// Голос на телефоне: `server` — голос Ноа с компьютера (Silero «xenia»,
+/// с сервера), `phone` — Ирина, встроенная в приложение. Без аргумента —
+/// какой сейчас.
+#[cfg(mobile)]
+#[tauri::command]
+fn phone_voice(app: tauri::AppHandle, state: tauri::State<'_, AppState>, voice: Option<String>) -> Result<String, String> {
+    if let Some(voice) = voice {
+        state.config_mut().voice.engine = if voice == "server" { "silero".into() } else { "piper".into() };
+        commands::persist(&app, &state)?;
+    }
+    Ok(if voice::phone_voice_is_server(&state.config().voice) { "server".into() } else { "phone".into() })
+}
+
 #[cfg(mobile)]
 #[tauri::command]
 async fn phone_ask(app: tauri::AppHandle, text: String) -> Result<String, String> {
