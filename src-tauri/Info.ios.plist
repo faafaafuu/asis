@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Ноа</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Ноа слушает вопросы и пересказ урока голосом.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Ноа переводит сказанное в текст, чтобы ответить.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Практика подключается к вашему серверу по SSH.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>

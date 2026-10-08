@@ -14,6 +14,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2.6", features = [] }
+# tauri-utils/build — собрать и прилинковать Swift-плагин на iPhone (build.rs).
+tauri-utils = { version = "2.9", features = ["build"] }
 
 [dependencies]
 # macos-private-api включён под прозрачное окно попапа на macOS — этого требует
