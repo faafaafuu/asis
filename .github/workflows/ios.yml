@@ -51,6 +51,16 @@ jobs:
       - name: Проект Xcode
         run: npm run tauri -- ios init --ci
 
+      # Значок — из src-tauri/icons/ios: `ios init` кладёт в проект свой набор,
+      # и знак NOAH до телефона не доходил.
+      - name: Значок приложения
+        run: |
+          set -e
+          set=$(find src-tauri/gen/apple -type d -name "AppIcon.appiconset" | head -1)
+          echo "набор значков: $set"
+          cp src-tauri/icons/ios/*.png "$set/"
+          ls -la "$set"
+
       # Шаг проекта «Build Rust Code» зовёт `tauri ios xcode-script`, а тот
       # ждёт адрес, который оставляет только `tauri ios build`. Та команда без
       # аккаунта Apple не собирает — подпись обязательна. Поэтому Rust
