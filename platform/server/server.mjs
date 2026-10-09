@@ -31,7 +31,7 @@ const WEB = normalize(join(HERE, "..", "web"));
 // и раздаются по адресу /app/.
 const APP = normalize(join(HERE, "..", "..", "src"));
 /** Что из src/ можно отдавать: страницы Ноа онлайн, их скрипты, стили, шрифты. */
-const APP_FILES = /^\/(app\.html|learning\.html|go\.js|(js|styles|assets)\/[\w./-]+)$/;
+const APP_FILES = /^\/(app\.html|learning\.html|learn\.html|go\.js|go-learn\.js|(js|styles|assets|vendor)\/[\w./-]+)$/;
 const PORT = Number(process.env.NOAH_PORT ?? 8795);
 const HOST = process.env.NOAH_HOST ?? "0.0.0.0";
 const DATA = process.env.NOAH_DATA ?? join(HERE, "..", "data");
@@ -872,7 +872,7 @@ async function handle(req, res) {
     const pageOnIp =
       req.method === "GET" &&
       /^[\d.]+(:\d+)?$/.test(String(req.headers.host ?? "")) &&
-      (url.pathname === "/" || url.pathname === "/app" || url.pathname === "/app/" || /^\/app\/[\w-]+\.html$/.test(url.pathname));
+      (url.pathname === "/" || url.pathname === "/app" || url.pathname === "/app/" || url.pathname === "/learn" || /^\/app\/[\w-]+\.html$/.test(url.pathname));
     const mirrorHost = [...MIRRORS].find((host) => !/^[\d.]+(:\d+)?$/.test(host));
     if (pageOnIp && mirrorHost) {
       const search = url.pathname.startsWith("/app") && !url.search ? `?v=${appStamp()}` : url.search;
@@ -887,9 +887,9 @@ async function handle(req, res) {
     const host = String(req.headers.host ?? "").toLowerCase();
     const viaCdn = Boolean(req.headers["x-forwarded-for"]);
     const russian = /(^|,)\s*ru\b/i.test(String(req.headers["accept-language"] ?? ""));
-    const entry = ["/", "/app", "/app/", "/noa", "/noa/"].includes(url.pathname);
+    const entry = ["/", "/app", "/app/", "/noa", "/noa/", "/learn", "/learn/"].includes(url.pathname);
     if (req.method === "GET" && entry && mirrorHost && (host === "noahlab.ru" || host === "www.noahlab.ru") && !viaCdn && russian && !url.searchParams.has("direct")) {
-      const path = url.pathname.startsWith("/app") ? "/noa" : url.pathname;
+      const path = url.pathname.startsWith("/app") ? "/noa" : url.pathname.startsWith("/learn") ? "/learn" : url.pathname;
       const search = path === "/" ? `?v=${Date.now().toString(36)}` : "";
       res.writeHead(302, { Location: `https://${mirrorHost}${path}${search}`, "Cache-Control": "no-store" });
       return res.end();
@@ -899,6 +899,15 @@ async function handle(req, res) {
     // Не 302 на адрес с меткой: CDN запомнил бы и его, с меткой того дня.
     // Страница-пересылка ставит метку сама, в браузере (src/go.js).
     // /noa — короткий адрес Ноа онлайн, которого нет в памяти CDN.
+    // /learn — приложение «NOAH Учёба» (то же, что на iPhone) в браузере:
+    // та же пересылка с меткой версии, на /app/learn.html.
+    if (req.method === "GET" && ["/learn", "/learn/"].includes(url.pathname) && !url.search) {
+      const body =
+        '<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>NOAH Учёба</title>' +
+        '<script src="/app/go-learn.js"></script></head><body></body></html>';
+      res.writeHead(200, { ...SECURITY_HEADERS, "Content-Security-Policy": APP_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(body);
+    }
     if (req.method === "GET" && ["/app", "/app/", "/noa", "/noa/"].includes(url.pathname) && !url.search) {
       const body =
         '<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Ноа онлайн — NOAH</title>' +

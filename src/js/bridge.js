@@ -39,7 +39,8 @@ function webNoa() {
     document.documentElement.dataset.theme = "noah";
   }
   const loaded = import("./web/web-api.js");
-  loaded.then((module) => module.mountDictionary()).catch(() => {});
+  // Словарь Ноа онлайн; у приложения «NOAH Учёба» свой суфлёр (learn-app/suflyor.js).
+  if (document.documentElement.dataset.app !== "learn") loaded.then((module) => module.mountDictionary()).catch(() => {});
   web = {
     invoke: (cmd, args) => loaded.then((module) => module.webApi.invoke(cmd, args)),
     listen: (event, handler) => loaded.then((module) => module.webApi.listen(event, handler)),

@@ -13,7 +13,8 @@ import { WebHost } from "../web-host.js";
 import { speak, stopSpeaking, speaking, canListen, dictate, listen } from "./voice.js";
 import { startTalk } from "./talk.js";
 import { splitScheme } from "../scheme.js";
-import { dictionaryClient, loadModel, saveModel, bridgeAvailable } from "./ai-web.js";
+import { dictionaryClient, loadModel, saveModel, bridgeAvailable, chat } from "./ai-web.js";
+import { request } from "./net.js";
 
 const listeners = new Map();
 
@@ -243,6 +244,121 @@ addEventListener("storage", async (event) => {
   if (await noa.refresh()) emit("learn:changed", {});
 });
 
+/* ── Приложение «NOAH Учёба» в браузере (learn.html) ──────────────────────
+   Те же экраны, что на iPhone; команды телефона — здесь, браузерными
+   средствами: вход — на сайте, сборки курсов — сервер, ассистент — модель
+   Ноа онлайн, микрофон — распознавание браузера. */
+
+/** JSON с сайта под входом этого браузера. */
+async function site(path, body) {
+  const response = await request(path, {
+    method: body ? "POST" : "GET",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+    credentials: "same-origin",
+    timeout: 20_000,
+    retries: body ? 0 : 1,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error ?? `Ошибка ${response.status}`);
+  return data;
+}
+
+/** Разговор с ассистентом — последние обмены, чтобы «а это?» было понятно. */
+const assistantThread = [];
+
+const ASSISTANT =
+  "Тебя зовут Ноа. Ты — помощник человека в учёбе: курсы, уроки, практика, подготовка к собеседованию. " +
+  "Отвечай по-русски, коротко и разговорно, одной-тремя фразами, без разметки и списков — ответ читают вслух. " +
+  "Не предлагай помощь в конце и не представляйся.";
+
+async function assistantAnswer(text) {
+  const model = loadModel();
+  if (!model) throw new Error("Модель не подключена — войдите на сайт или подключите её в Ноа онлайн.");
+  const messages = [{ role: "system", content: ASSISTANT }];
+  for (const item of assistantThread.slice(-6)) messages.push({ role: "user", content: item.q }, { role: "assistant", content: item.a });
+  messages.push({ role: "user", content: text });
+  const answer = String(await chat(model, messages, { maxTokens: 400 })).trim();
+  assistantThread.push({ q: text, a: answer });
+  return answer;
+}
+
+/** Слушание микрофона: отменить — «Закрыть» или новая фраза. */
+let hearing = null;
+
+/** Тихий сигнал — конец отрезка фокуса. */
+function chime() {
+  try {
+    const ctx = new AudioContext();
+    [0, 0.28].forEach((delay, at) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = at ? 880 : 660;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + delay + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + 0.9);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 1);
+    });
+    setTimeout(() => ctx.close(), 1600);
+  } catch {
+    /* без звука */
+  }
+}
+
+async function learnApp(noa, cmd, args) {
+  switch (cmd) {
+    case "account_status":
+      return Boolean(noa.user);
+    case "account_name":
+      return noa.user?.name ?? "";
+    case "account_login":
+      // Вход — на сайте (Telegram или Google), потом обратно сюда.
+      location.href = `/#/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+      return new Promise(() => {});
+    case "app_version":
+      return "веб";
+    // Какая модель отвечает в браузере: мост (вошли владельцем) или своя.
+    case "web_model": {
+      const model = loadModel();
+      return model ? { kind: model.kind, model: model.model ?? "" } : null;
+    }
+    case "learn_builds":
+      return noa.user ? ((await site("/api/noa/builds")).builds ?? []) : [];
+    case "learn_build":
+      if (!noa.user) throw new Error("Сборка курса — после входа на сайт.");
+      return site("/api/noa/builds", { goal: args.goal, quality: args.quality ?? "sonnet" });
+    case "learn_build_stop":
+      return site(`/api/noa/builds/${encodeURIComponent(args.id)}/stop`, {});
+    case "ai_explain":
+      return dictionaryClient().explain(args.term, args.context);
+    case "ai_ask":
+      return dictionaryClient().ask(args.term, args.context, args.thread ?? [], args.question);
+    case "phone_ask":
+      return assistantAnswer(String(args.text ?? ""));
+    case "plugin:sufler|listen": {
+      hearing?.abort();
+      hearing = new AbortController();
+      const text = await listen({ signal: hearing.signal, ...(args.pause ? { pause: args.pause * 1000 } : {}) });
+      return { text: String(text ?? "") };
+    }
+    case "plugin:sufler|cancelListening":
+    case "plugin:sufler|stopListening":
+      hearing?.abort();
+      return null;
+    case "plugin:sufler|chime":
+      chime();
+      return null;
+    // Практика — в программе на компьютере и в приложении на iPhone: в
+    // браузере своего терминала нет.
+    case "practice_progress":
+      return [];
+    default:
+      return undefined;
+  }
+}
+
 /** Курс, открытый по ссылке `?course=`, — первым: окно берёт первый. */
 const wanted = new URLSearchParams(location.search).get("course");
 
@@ -250,6 +366,8 @@ async function run(cmd, args = {}) {
   const noa = await openNoa();
   ensureModel(noa.user);
   const l = noa.learning;
+  const own = await learnApp(noa, cmd, args);
+  if (own !== undefined) return own;
   switch (cmd) {
     case "runtime_config":
       return { theme: localStorage.getItem("noa.theme") || "noah", language: "ru" };

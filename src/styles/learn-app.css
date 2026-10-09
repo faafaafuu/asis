@@ -1853,3 +1853,62 @@ html.kb-open .assistant {
 .menu-layer {
   z-index: 60;
 }
+
+/* ── Браузер на компьютере: приложение — колонкой шириной с телефон ──────
+   Макет под 390 пт; растянутый на монитор, он разваливался бы. Колонка по
+   центру, по бокам — фон; листы, кольцо Ноа и подсказки — в её границах. */
+:root {
+  --col: 520px;
+  --col-gap: max(0px, calc((100vw - var(--col)) / 2));
+}
+html {
+  background: #04060a;
+}
+.app {
+  left: var(--col-gap);
+  right: var(--col-gap);
+}
+.sheet {
+  left: var(--col-gap);
+  right: var(--col-gap);
+}
+.net {
+  left: calc(var(--col-gap) + 12px);
+  right: calc(var(--col-gap) + 12px);
+}
+.toast {
+  left: calc(var(--col-gap) + 16px);
+  right: calc(var(--col-gap) + 16px);
+}
+.orb-fab {
+  right: calc(var(--col-gap) + 12px);
+}
+.assistant {
+  left: calc(var(--col-gap) + 10px);
+  right: calc(var(--col-gap) + 10px);
+}
+@media (min-width: 600px) {
+  .app {
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    box-shadow: 0 0 60px -20px rgba(0, 240, 255, 0.25);
+  }
+  body {
+    background: radial-gradient(900px 500px at 20% -10%, rgba(0, 240, 255, 0.06), transparent),
+      radial-gradient(800px 500px at 90% 110%, rgba(255, 60, 200, 0.05), transparent), #04060a;
+  }
+}
+a.btn {
+  text-decoration: none;
+}
+
+/* Под кольцом Ноа — запас: последняя карточка прокручивается из-под него. */
+body:not(.is-full) .content {
+  padding-bottom: 88px;
+}
+
+/* Полоска Ноа онлайн «Модель не подключена» — в приложении это строка в
+   «Профиле», а не полоса над всем окном. */
+.model-missing {
+  display: none !important;
+}

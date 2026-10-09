@@ -2,7 +2,7 @@
 // шагом, плитки «Повторить» и «Фокус», мои курсы (и собирающийся —
 // пунктиром), закреплённая «Собрать курс».
 
-import { el, icon, button, label, progress, steps, loading, header, nav, register, prefs, plural, sheet, call, toast } from "../core.js";
+import { el, icon, button, label, progress, steps, loading, header, nav, register, prefs, plural, sheet, call, toast, isWeb } from "../core.js";
 import { store, currentTopic, topicCard, greeting, isDone } from "../store.js";
 import { open as openAssistant } from "../assistant.js";
 
@@ -185,7 +185,7 @@ export function signInCard() {
   const status = el("span", "small muted");
   const go = button("", async () => {
     go.disabled = true;
-    status.textContent = "Открываю Telegram — нажмите там Start и вернитесь сюда.";
+    status.textContent = isWeb ? "Открываю вход на сайте…" : "Открываю Telegram — нажмите там Start и вернитесь сюда.";
     try {
       const name = await call("account_login");
       if (name) prefs.set("name", name);
@@ -203,7 +203,8 @@ export function signInCard() {
       go.disabled = false;
     }
   }, "btn btn--primary");
-  go.append(icon("user", 16, 2.25), "Войти через Telegram");
+  // В браузере — вход сайта (Telegram или Google), на телефоне — бот Telegram.
+  go.append(icon("user", 16, 2.25), isWeb ? "Войти" : "Войти через Telegram");
   card.append(go, status);
   return card;
 }

@@ -1,6 +1,6 @@
 // Профиль — аккаунт, итоги занятий, настройки голоса, сборки курсов и версия.
 
-import { el, icon, label, header, nav, register, call, prefs, toast, plural, loading } from "../core.js";
+import { el, icon, label, header, nav, register, call, prefs, toast, plural, loading, isWeb } from "../core.js";
 import { store } from "../store.js";
 import { signInCard, buildCourse } from "./courses.js";
 
@@ -103,6 +103,17 @@ register("profile", (screen) => {
           current === "server",
           (on) => call("phone_voice", { voice: on ? "server" : "phone" }).catch((err) => toast(String(err))),
         ),
+      );
+    }
+    // В браузере модель — своя у Ноа онлайн: мост (если вошли владельцем)
+    // или подключённая в её настройках.
+    if (isWeb) {
+      const model = await call("web_model").catch(() => null);
+      settings.append(label("// модель"));
+      settings.append(
+        model
+          ? link("Модель подключена", model.kind === "bridge" ? "Мост к подписке — как в программе" : model.model || model.kind, "check", () => (location.href = "/app/#settings"))
+          : link("Подключить модель", "Без неё не работают ответы Ноа, проверка и разборы", "plus", () => (location.href = "/app/#settings")),
       );
     }
     content.append(settings);

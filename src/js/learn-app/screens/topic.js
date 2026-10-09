@@ -2,7 +2,7 @@
 // окна обучения в программе), пояснение режима, чипы понятий и закреплённая
 // кнопка «Продолжить …» — в тот режим, где человек сейчас.
 
-import { el, icon, label, loading, header, nav, register, iconButton, plural, sections, markdown } from "../core.js";
+import { el, icon, label, loading, header, nav, register, iconButton, plural, sections, markdown, isWeb, sheet } from "../core.js";
 import { store, topicCard } from "../store.js";
 
 const MODES = [
@@ -46,7 +46,7 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
     const parts = sections(topic.lesson);
     const status = {
       lesson: card.read ? `${plural(parts.length, "раздел", "раздела", "разделов")} · пройдено` : `${plural(parts.length, "раздел", "раздела", "разделов")}`,
-      practice: own ? (own.done ? "пройдена" : `шаг ${own.step + 1} из ${own.total}`) : "задача на сервере",
+      practice: isWeb ? "в приложении" : own ? (own.done ? "пройдена" : `шаг ${own.step + 1} из ${own.total}`) : "задача на сервере",
       material: plural(topic.concepts?.length ?? 0, "понятие", "понятия", "понятий"),
       cards: `${card.conceptsMature} из ${card.conceptsTotal}`,
       sheet: view.cheatsheet ? "1 страница" : "собирается из понятий",
@@ -104,7 +104,10 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
   function open(mode) {
     const params = { course: courseId, topic: topicId };
     if (mode === "lesson") nav.push("lesson", params);
-    else if (mode === "practice") nav.push("practice", params);
+    else if (mode === "practice") {
+      if (isWeb) practiceElsewhere();
+      else nav.push("practice", params);
+    }
     else if (mode === "material") nav.push("material", params);
     else if (mode === "cards") nav.push("review-topic", params);
     else if (mode === "sheet") nav.push("sheet", params);
@@ -113,6 +116,24 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
 
   return { cleanup: () => (alive = false) };
 });
+
+/** Практика в браузере: терминала здесь нет — она в программе и на iPhone. */
+function practiceElsewhere() {
+  sheet("Практика", (box) => {
+    box.append(
+      el(
+        "span",
+        "muted",
+        "Практика — живая задача в терминале вашего сервера: Ноа видит вывод и ведёт по шагам. В браузере своего терминала нет, поэтому она — в приложении NOAH на iPhone и в программе на компьютере. Прогресс общий: шаг, сделанный там, виден здесь.",
+      ),
+    );
+    const go = el("a", "btn btn--secondary", "Скачать программу NOAH");
+    go.href = "/download";
+    go.target = "_blank";
+    go.rel = "noopener";
+    box.append(go);
+  });
+}
 
 /* ── Материал — понятия темы ───────────────────────────────────────────── */
 
