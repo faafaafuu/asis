@@ -2063,3 +2063,19 @@ html.kb-open .tkeys {
   color: var(--c-bad);
   font-weight: 500;
 }
+
+/* Живое окошко терминала на экране практики: печатать можно и в нём;
+   на весь экран — «Развернуть». На 20% выше прежней ленты. */
+.term__live {
+  display: flex;
+  flex-direction: column;
+}
+.term__live .fullterm__screen {
+  flex: none;
+  height: 124px;
+  padding: 4px 4px 2px 8px;
+}
+.term__live .tkeys {
+  border-top: 1px solid rgba(0, 240, 255, 0.12);
+  padding-bottom: 6px;
+}

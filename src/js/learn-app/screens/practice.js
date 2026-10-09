@@ -20,6 +20,10 @@ let practice = null;
 let view = null;
 /** Полоса клавиш терминала (termkeys.js). */
 let keys = null;
+/** Экран xterm: живёт то в окошке на экране практики, то на весь экран. */
+let screenEl = null;
+/** Окошко терминала на открытом экране практики. */
+let inlineHost = null;
 /** Команда проверки текущего шага — для кнопки на полосе клавиш. */
 let stepCheck = "";
 /**
@@ -83,6 +87,7 @@ async function makeTerminal() {
   down.addEventListener("click", () => fold());
   head.append(down, el("span", "grow"), el("span", "small dim", "Опасные команды Ноа переспросит"));
   const screen = el("div", "fullterm__screen");
+  screenEl = screen;
   keys = keyBar({ term, write, step: () => stepCheck });
   layer.append(head, screen, keys.el);
   document.body.append(layer);
@@ -192,15 +197,21 @@ function lastLines(count = 5) {
   return lines;
 }
 
+/** На весь экран — по кнопке «Развернуть». */
 function unfold() {
+  layer.append(screenEl, keys.el);
   layer.classList.add("is-open");
   refit();
   setTimeout(() => term.focus(), 80);
 }
 
+/** Обратно в окошко на экране практики — печатать можно и там. */
 function fold() {
   layer?.classList.remove("is-open");
-  term?.blur();
+  if (inlineHost?.isConnected && screenEl) {
+    inlineHost.append(screenEl, keys.el);
+    refit();
+  } else term?.blur();
 }
 
 /** Ждёт, пока терминал разложится: замер раньше даёт пару колонок. */
@@ -323,7 +334,7 @@ register("practice", (screen, { course: courseId, topic: topicId }) => {
 
   view = {
     update: () => alive && paint(),
-    tail: () => alive && paintTail(),
+    tail: () => {},
     disconnected: (reason) => alive && connectForm(reason),
   };
 
@@ -616,15 +627,22 @@ register("practice", (screen, { course: courseId, topic: topicId }) => {
     return node;
   }
 
+  // Живое окошко терминала: печатать можно прямо здесь, на весь экран —
+  // по «Развернуть».
+  const live = el("div", "term__live");
+  live.addEventListener("focusin", () => setTimeout(() => termBox.scrollIntoView({ block: "nearest", behavior: "smooth" }), 350));
   function paintTerm() {
     const head = el("div", "term__head");
     const open = el("button", "btn btn--plain");
     open.append(icon("keyboard", 16, 2.25), "Развернуть");
     open.addEventListener("click", () => unfold());
     head.append(el("span", connected ? "term__dot" : "term__dot is-off"), el("span", "term__who", who), open);
-    termBox.replaceChildren(head, tail);
-    tail.onclick = () => unfold();
-    paintTail();
+    termBox.replaceChildren(head, live);
+    inlineHost = live;
+    if (screenEl && !layer.classList.contains("is-open") && screenEl.parentElement !== live) {
+      live.append(screenEl, keys.el);
+      refit();
+    }
   }
 
   function paintTail() {
@@ -699,7 +717,11 @@ register("practice", (screen, { course: courseId, topic: topicId }) => {
       alive = false;
       view = null;
       clearInterval(poll);
-      fold();
+      // Экран практики ушёл — терминал ждёт следующего открытия в своём слое.
+      inlineHost = null;
+      layer?.classList.remove("is-open");
+      if (screenEl) layer?.append(screenEl, keys.el);
+      term?.blur();
       voice.stop();
       store.practice(true).catch(() => {});
     },
