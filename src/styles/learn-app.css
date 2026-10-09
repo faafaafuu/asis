@@ -1989,3 +1989,77 @@ body:not(.is-full) .content {
   margin: 0;
   padding-left: 18px;
 }
+
+/* ── Плашка клавиш терминала ───────────────────────────────────────────
+   Одна строка над клавиатурой телефона: самое частое, листается вбок. */
+.tkeys {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  padding-bottom: calc(6px + var(--safe-bottom));
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  border-top: 1px solid var(--line);
+  background: #070b10;
+}
+.tkeys::-webkit-scrollbar {
+  display: none;
+}
+.tkeys__extra {
+  display: contents;
+}
+.tkey {
+  flex: none;
+  min-width: 44px;
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  background: rgba(0, 240, 255, 0.05);
+  font-size: 14px;
+  color: var(--c-head);
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.tkey:active {
+  background: rgba(0, 240, 255, 0.2);
+}
+.tkey--mod {
+  color: var(--c-accent);
+  font-size: 13px;
+}
+.tkey--mod[aria-pressed="true"] {
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+}
+.tkey--editor {
+  border-color: rgba(125, 252, 198, 0.55);
+  background: rgba(125, 252, 198, 0.08);
+  color: var(--c-ok);
+  font-size: 13px;
+}
+.tkey--check {
+  border-color: rgba(255, 70, 200, 0.45);
+  background: rgba(255, 70, 200, 0.07);
+  color: #ffb8ec;
+  font-size: 12.5px;
+  max-width: 70vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fullterm.is-open .fullterm__screen {
+  padding-bottom: 4px;
+}
+html.kb-open .tkeys {
+  padding-bottom: 6px;
+}
+
+/* Кнопка опасного действия — «Выполнить» опасную команду. */
+.btn--danger {
+  border: 1px solid rgba(255, 80, 120, 0.7);
+  background: rgba(255, 80, 120, 0.15);
+  color: var(--c-bad);
+  font-weight: 500;
+}

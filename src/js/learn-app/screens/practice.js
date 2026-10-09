@@ -4,8 +4,9 @@
 // Терминал на телефоне — сервер по SSH; сессия живёт, пока жива программа,
 // и переживает уход с экрана.
 
-import { el, icon, label, loading, nav, register, iconButton, steps, call, api, voice, ring, prefs, toast, inline } from "../core.js";
+import { el, icon, label, loading, nav, register, iconButton, steps, call, api, voice, ring, prefs, toast, inline, sheet } from "../core.js";
 import { store, topicCard } from "../store.js";
+import { keyBar, danger, typedLine, confirmDanger } from "../termkeys.js";
 
 /* ── Терминал: один на всё приложение ──────────────────────────────────── */
 
@@ -17,7 +18,10 @@ let connected = false;
 let practice = null;
 /** Экран практики, если он сейчас на виду: получает события программы. */
 let view = null;
-let ctrlArmed = false;
+/** Полоса клавиш терминала (termkeys.js). */
+let keys = null;
+/** Команда проверки текущего шага — для кнопки на полосе клавиш. */
+let stepCheck = "";
 /**
  * Куда подключались в этот запуск. iOS усыпляет приложение в фоне, и SSH
  * рвётся за секунды; по возвращении практика подключается снова сама.
@@ -77,38 +81,31 @@ async function makeTerminal() {
   down.append(icon("chevron-right", 18, 2.25), "Свернуть");
   down.firstChild.style.transform = "rotate(90deg)";
   down.addEventListener("click", () => fold());
-  const keys = el("span", "fullterm__keys");
-  // На клавиатуре iPhone нет Esc, Tab и Ctrl — без них не выйти из nano
-  // и не прервать команду. Три клавиши в шапке, не отдельной полосой.
-  for (const [name, seq] of [["Esc", "\x1b"], ["Tab", "\t"], ["Ctrl", null]]) {
-    const key = el("button", "fullterm__key", name);
-    key.addEventListener("pointerdown", (event) => event.preventDefault());
-    key.addEventListener("click", () => {
-      if (seq === null) {
-        ctrlArmed = !ctrlArmed;
-        key.setAttribute("aria-pressed", String(ctrlArmed));
-      } else write(seq);
-      term.focus();
-    });
-    keys.append(key);
-  }
-  head.append(down, el("span", "grow"), keys);
+  head.append(down, el("span", "grow"), el("span", "small dim", "Опасные команды Ноа переспросит"));
   const screen = el("div", "fullterm__screen");
-  layer.append(head, screen);
+  keys = keyBar({ term, write, step: () => stepCheck });
+  layer.append(head, screen, keys.el);
   document.body.append(layer);
   term.open(screen);
 
   term.onData((data) => {
-    if (ctrlArmed && data.length === 1 && /[a-z@[\]\\^_]/i.test(data)) {
-      data = String.fromCharCode(data.toUpperCase().charCodeAt(0) & 0x1f);
-      ctrlArmed = false;
-      keys.querySelector("[aria-pressed='true']")?.setAttribute("aria-pressed", "false");
+    data = keys.withCtrl(data);
+    // Enter — сначала проверить строку: опасное (rm -rf /, mkfs, остановка
+    // SSH…) выполняется только после «Выполнить».
+    if (data === "\r") {
+      const line = typedLine(term);
+      const why = danger(line);
+      if (why) return confirmDanger(line.trim(), why, () => write("\r"));
     }
     write(data);
   });
+  let keysTimer = 0;
   term.onWriteParsed(() => {
     sendScreen();
     view?.tail();
+    // Открыли nano или vim — на полосе их кнопки.
+    clearTimeout(keysTimer);
+    keysTimer = setTimeout(() => keys.refresh(), 300);
   });
   term.buffer.onBufferChange(sendScreen);
 
@@ -258,7 +255,8 @@ register("practice", (screen, { course: courseId, topic: topicId }) => {
   }, 20);
   speaker.setAttribute("aria-pressed", String(voice.aloud()));
   const bar = el("header", "pbar");
-  bar.append(iconButton("arrow-left", "Назад", () => nav.back()), orb, text, speaker);
+  const more = iconButton("more", "Сервер и безопасность", () => serverMenu(), 20);
+  bar.append(iconButton("arrow-left", "Назад", () => nav.back()), orb, text, speaker, more);
   const segs = el("div", "pbar-steps");
   const content = el("div", "content");
   content.style.cssText = "padding:12px 16px;gap:10px";
@@ -390,6 +388,97 @@ register("practice", (screen, { course: courseId, topic: topicId }) => {
 
   /* ── Подключение к серверу ─────────────────────────────────────────── */
 
+  /**
+   * Сервер и безопасность: смотрит ли Ноа терминал, вход по ключу вместо
+   * пароля, сменить или забыть сервер. И что защищено само.
+   */
+  function serverMenu() {
+    sheet("Сервер и безопасность", async (box, close) => {
+      const watch = el("button", "setting");
+      const watchText = el("span", "setting__text");
+      watchText.append(
+        el("span", "setting__name", "Ноа смотрит терминал"),
+        el("span", "setting__hint", "Выключите — вывод перестанет уходить модели; Ноа ответит только на ваши вопросы"),
+      );
+      const toggle = el("span", "switch");
+      toggle.setAttribute("aria-checked", String(practice?.watching !== false));
+      watch.append(watchText, toggle);
+      watch.addEventListener("click", () => {
+        const on = toggle.getAttribute("aria-checked") !== "true";
+        toggle.setAttribute("aria-checked", String(on));
+        api.invoke("practice_watch", { on }).catch((err) => toast(String(err)));
+      });
+      box.append(watch);
+
+      // Вход без пароля: ключ Ноа — в authorized_keys сервера. Команда
+      // видна в терминале целиком; выполняется по вашему нажатию.
+      const server = await call("practice_server").catch(() => null);
+      const publicKey = String(server?.publicKey ?? "").trim();
+      if (publicKey) {
+        const keyRow = el("button", "setting");
+        const keyText = el("span", "setting__text");
+        keyText.append(
+          el("span", "setting__name", "Вход без пароля — ключ Ноа"),
+          el("span", "setting__hint", connected ? "Добавить ключ на этот сервер: дальше пароль не нужен" : "Сначала подключитесь к серверу"),
+        );
+        keyRow.append(icon("key", 20, 2), keyText);
+        keyRow.firstChild.style.color = "var(--c-accent)";
+        keyRow.disabled = !connected;
+        keyRow.addEventListener("click", () => {
+          const quoted = publicKey.replace(/'/g, "");
+          const command =
+            "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && " +
+            `(grep -qxF '${quoted}' ~/.ssh/authorized_keys || echo '${quoted}' >> ~/.ssh/authorized_keys) && echo 'Ключ Ноа добавлен — вход без пароля'`;
+          write(`${command}\r`);
+          close();
+          unfold();
+          toast("Ключ добавляется — следующий вход без пароля");
+        });
+        box.append(keyRow);
+      }
+
+      const swap = el("button", "setting");
+      const swapText = el("span", "setting__text");
+      swapText.append(el("span", "setting__name", "Другой сервер"), el("span", "setting__hint", "Отключиться и войти на другой"));
+      swap.append(icon("refresh", 20, 2), swapText);
+      swap.firstChild.style.color = "var(--c-accent)";
+      swap.addEventListener("click", async () => {
+        close();
+        lastTarget = null;
+        connected = false;
+        await api.invoke("practice_term_stop").catch(() => {});
+        connectForm();
+      });
+      box.append(swap);
+
+      const forget = el("button", "setting");
+      const forgetText = el("span", "setting__text");
+      forgetText.append(
+        el("span", "setting__name", "Забыть ключ сервера"),
+        el("span", "setting__hint", "После переустановки сервера его ключ другой — Ноа иначе не пустит, подозревая подмену"),
+      );
+      forget.append(icon("trash", 20, 2), forgetText);
+      forget.firstChild.style.color = "var(--c-bad)";
+      forget.addEventListener("click", async () => {
+        await api.invoke("practice_forget_server_key").catch(() => {});
+        toast("Ключ сервера забыт — при следующем входе запомнится новый");
+        close();
+      });
+      box.append(forget);
+
+      const note = el("div", "note");
+      note.append(
+        label("// что защищено"),
+        el(
+          "span",
+          "",
+          "Пароль от сервера не сохраняется — только в памяти до закрытия приложения. Ключ сервера запоминается при первом входе: сменился — Ноа предупредит о подмене. Перед отправкой модели пароли, токены и приватные ключи в выводе закрываются. Опасные команды (rm -rf /, mkfs, остановка SSH, ufw enable…) Ноа переспросит перед Enter.",
+        ),
+      );
+      box.append(note);
+    });
+  }
+
   async function connectForm(reason = "") {
     dock.hidden = true;
     segs.replaceChildren();
@@ -484,6 +573,9 @@ register("practice", (screen, { course: courseId, topic: topicId }) => {
 
   function paintStep(scenario) {
     const step = scenario.steps[practice.step];
+    // Команда проверки шага — на плашке клавиш, одним касанием.
+    stepCheck = practice.done ? "" : (/`([^`]+)`/.exec(step?.check ?? "")?.[1] ?? "").trim();
+    keys?.refresh();
     const box = el("div", "step-card");
     if (practice.done || !step) {
       box.append(label("// сценарий пройден"), el("span", "step-card__title", scenario.title));

@@ -251,6 +251,11 @@
       case "plugin:sufler|listen":
         await wait(1200);
         return { text: "Чем сеть bridge отличается от host?" };
+      case "plugin:sufler|clipboard":
+        return { text: "docker compose ps" };
+      case "practice_term_stop":
+      case "practice_forget_server_key":
+        return null;
       case "plugin:sufler|insets":
         return { top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 };
       case "plugin:sufler|cancelListening":
