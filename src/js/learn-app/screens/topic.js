@@ -2,7 +2,7 @@
 // окна обучения в программе), пояснение режима, чипы понятий и закреплённая
 // кнопка «Продолжить …» — в тот режим, где человек сейчас.
 
-import { el, icon, label, loading, header, nav, register, iconButton, plural, sections, markdown, isWeb, sheet } from "../core.js";
+import { el, icon, label, loading, header, nav, register, iconButton, plural, sections, markdown, isWeb, sheet, prefs } from "../core.js";
 import { store, topicCard } from "../store.js";
 
 const MODES = [
@@ -12,6 +12,8 @@ const MODES = [
   { id: "cards", name: "Карточки", icon: "cards", about: "Карточки по расписанию: вспомнили — вернутся через дни, забыли — сегодня же." },
   { id: "sheet", name: "Конспект", icon: "note", about: "Вся тема на одну страницу — для быстрого повторения перед практикой или собеседованием." },
   { id: "check", name: "Проверить себя", icon: "target", about: "Мини-экзамен по теме: варианты и ответы своими словами. Ноа разбирает каждый ответ." },
+  { id: "drill", name: "Наизусть", icon: "flame", about: "Понятия темы до автоматизма: запомнить, вспомнить пропуски, рассказать по памяти — пока не вспомните дважды подряд." },
+  { id: "interview", name: "Собеседование", icon: "user", about: "Мок-интервью: Ноа задаёт вопросы вслух, слушает ответ, уточняет и разбирает, чего не хватило." },
 ];
 
 register("topic", (screen, { course: courseId, topic: topicId }) => {
@@ -44,6 +46,8 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
     const topic = view.topic;
     const own = store.practiceOf(courseId, topicId);
     const parts = sections(topic.lesson);
+    const drilled = prefs.get("drilled", []).includes(`${courseId}/${topicId}`);
+    const interviewed = prefsInterview(courseId, topicId);
     const status = {
       lesson: card.read ? `${plural(parts.length, "раздел", "раздела", "разделов")} · пройдено` : `${plural(parts.length, "раздел", "раздела", "разделов")}`,
       practice: isWeb ? "в приложении" : own ? (own.done ? "пройдена" : `шаг ${own.step + 1} из ${own.total}`) : "задача на сервере",
@@ -52,15 +56,31 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
       sheet: view.cheatsheet ? "1 страница" : "собирается из понятий",
       // Вопросы экзамена приходят отдельно (learn_exam), без ответов.
       check: card.examBest != null ? `лучший ${card.examBest}%` : `порог ${course.topicPass}%`,
+      drill: drilled ? "выучено · повторить" : "6 понятий за подход",
+      interview: interviewed ? `прошлый раз ${interviewed.score}%` : "мок-интервью по теме",
     };
     const done = {
+      drill: drilled,
+      interview: interviewed && interviewed.score >= 70,
       lesson: card.read,
       practice: own?.done,
       cards: card.conceptsTotal > 0 && card.conceptsMature >= card.conceptsTotal,
       check: card.examBest != null && card.examBest >= course.topicPass,
     };
     // Где человек сейчас: начатая практика, иначе непрочитанный урок, иначе проверка.
-    const active = own && !own.done ? "practice" : !card.read ? "lesson" : card.examBest == null ? "check" : "cards";
+    // Порядок темы: урок → наизусть → проверка → собеседование → карточки.
+    const active =
+      own && !own.done
+        ? "practice"
+        : !card.read
+          ? "lesson"
+          : !drilled
+            ? "drill"
+            : card.examBest == null
+              ? "check"
+              : !interviewed
+                ? "interview"
+                : "cards";
 
     content.replaceChildren();
     const head = el("div", "course-head");
@@ -95,6 +115,8 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
       lesson: (card.step === "lesson" || card.step === "talk") && card.section > 0 ? `Продолжить урок · раздел ${card.section + 1}` : "Начать урок с Ноа",
       check: "Проверить себя",
       cards: "Повторить карточки",
+      drill: "Выучить наизусть",
+      interview: "Пройти собеседование",
     }[active];
     cta.append(icon("play", 20, 2.25), text);
     cta.addEventListener("click", () => open(active));
@@ -111,11 +133,18 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
     else if (mode === "material") nav.push("material", params);
     else if (mode === "cards") nav.push("review-topic", params);
     else if (mode === "sheet") nav.push("sheet", params);
+    else if (mode === "drill") nav.push("drill", params);
+    else if (mode === "interview") nav.push("interview", params);
     else nav.push("check", { course: courseId, scope: topicId });
   }
 
   return { cleanup: () => (alive = false) };
 });
+
+/** Последнее собеседование именно по этой теме. */
+function prefsInterview(courseId, topicId) {
+  return prefs.get("interviews", []).filter((item) => item.course === courseId && item.topic === topicId).at(-1) ?? null;
+}
 
 /** Практика в браузере: терминала здесь нет — она в программе и на iPhone. */
 function practiceElsewhere() {

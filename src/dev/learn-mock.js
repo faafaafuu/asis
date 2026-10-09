@@ -205,6 +205,29 @@
         stats.week += args.session.minutes;
         stats.sessionsToday += 1;
         return { ...stats };
+      case "learn_concepts": {
+        const view = d.topics[`${args.course}/${args.topic}`];
+        return (view?.topic?.concepts ?? []).map((c) => ({ ...c, level: "new", links: [] }));
+      }
+      case "learn_coach": {
+        await network();
+        const rules = String(args.rules);
+        if (rules.includes("Составь")) {
+          return JSON.stringify([
+            { q: "Чем контейнер отличается от виртуальной машины и когда что выбрать?", topic: "docker", points: ["общее ядро", "изоляция namespaces/cgroups", "старт и вес", "безопасность"] },
+            { q: "Контейнер web не видит db по имени. Что проверите по шагам?", topic: "docker", points: ["одна пользовательская сеть", "имя сервиса", "docker network inspect"] },
+            { q: "Зачем multi-stage сборка и что попадает в финальный образ?", topic: "docker", points: ["без компиляторов", "меньше образ", "меньше поверхность атаки"] },
+          ]);
+        }
+        if (rules.includes("наизусть")) return '{"score": 72, "missing": ["не сказали про лимиты ресурсов"], "say": "Почти: суть есть, не хватило лимитов."}';
+        const answer = String(args.said);
+        const followed = answer.split("Кандидат:").length > 2;
+        return JSON.stringify(
+          followed
+            ? { score: 78, good: "Назвали общую сеть и имена сервисов.", missing: ["не проверили DNS внутри контейнера"], followup: "", ideal: "Сначала `docker network inspect` — в одной ли сети; потом имя сервиса из compose; потом `getent hosts db` изнутри.", say: "Хорошо, засчитываю." }
+            : { score: 55, good: "Упомянули сеть.", missing: ["какая сеть", "как проверить"], followup: "А как убедиться, что оба контейнера в одной сети?", ideal: "Пользовательская сеть bridge, имя сервиса, inspect.", say: "Неплохо, уточню." },
+        );
+      }
       case "phone_voice":
         if (args.voice) phoneVoice = args.voice;
         return phoneVoice;

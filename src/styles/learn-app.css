@@ -1912,3 +1912,80 @@ body:not(.is-full) .content {
 .model-missing {
   display: none !important;
 }
+
+/* ── Наизусть ──────────────────────────────────────────────────────────── */
+
+.drill {
+  gap: 12px;
+}
+.drill__head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.drill__term {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 28px;
+  text-transform: uppercase;
+  color: var(--c-head);
+}
+.drill__def {
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--c-body);
+}
+.drill__gap {
+  display: inline;
+  padding: 0 4px;
+  margin: 0 1px;
+  border-bottom: 1px dashed var(--c-accent);
+  background: rgba(0, 240, 255, 0.08);
+  color: var(--c-accent);
+  font: inherit;
+  letter-spacing: 0.1em;
+}
+.drill__gap.is-open {
+  letter-spacing: normal;
+  border-bottom-style: solid;
+  color: var(--c-head);
+}
+.drill__grades {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* ── Собеседование ─────────────────────────────────────────────────────── */
+
+.interview__score.is-pass {
+  border-color: rgba(125, 252, 198, 0.6);
+}
+.interview__score.is-pass .score {
+  color: var(--c-ok);
+}
+.interview__score.is-weak {
+  border-color: rgba(255, 80, 120, 0.55);
+}
+.interview__score.is-weak .score {
+  color: var(--c-bad);
+}
+.interview-card {
+  gap: 6px;
+}
+.interview-card__title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--c-head);
+}
+.row__mark:not(:empty) {
+  font-variant-numeric: tabular-nums;
+}
+/* Список в «Не хватило» — во всю ширину рамки. */
+.warn > ul {
+  align-self: stretch;
+  margin: 0;
+  padding-left: 18px;
+}

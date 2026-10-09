@@ -77,6 +77,10 @@ register("course", (screen, { course: courseId }) => {
       if (course.finalUnlocked) nav.push("check", { course: course.id, scope: "final" });
     });
     body.append(final);
+    const interview = el("button", "final is-open");
+    interview.append(icon("user", 20, 2), el("span", "grow", "Собеседование по курсу"), el("span", "small dim", "мок-интервью"));
+    interview.addEventListener("click", () => nav.push("interview", { course: course.id }));
+    body.append(interview);
   }
 
   async function paintMap() {

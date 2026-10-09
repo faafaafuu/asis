@@ -1783,6 +1783,34 @@ pub async fn learn_ask(
     crate::tutor::ask(&app, &target, &text, voice.unwrap_or(false)).await
 }
 
+/// Тренировка в приложении обучения — «Наизусть» и «Собеседование»: модель
+/// по указаниям экрана (интервьюер, проверяющий), с историей разговора.
+/// Логика тренировок — в окне (learn-app), одна для телефона и браузера;
+/// здесь только вызов модели.
+#[tauri::command]
+pub async fn learn_coach(
+    state: State<'_, AppState>,
+    rules: String,
+    thread: Vec<ThreadItem>,
+    said: String,
+    long: Option<bool>,
+) -> Result<String, String> {
+    let provider = state.provider();
+    let fallback = state.error_text();
+    let limit = state.config().ai.call_limit();
+    let long = long.unwrap_or(false);
+    guarded(
+        "тренировка",
+        async move {
+            let recent = &thread[thread.len().saturating_sub(10)..];
+            provider.converse(&rules, recent, &said, long).await
+        },
+        fallback,
+        limit,
+    )
+    .await
+}
+
 /// Ошибка из окна — в журнал: в выпуске окну некуда больше её показать.
 #[tauri::command]
 pub fn window_error(page: String, text: String) {

@@ -337,6 +337,15 @@ async function learnApp(noa, cmd, args) {
       return dictionaryClient().ask(args.term, args.context, args.thread ?? [], args.question);
     case "phone_ask":
       return assistantAnswer(String(args.text ?? ""));
+    // Тренировки «Наизусть» и «Собеседование»: модель по указаниям экрана.
+    case "learn_coach": {
+      const model = loadModel();
+      if (!model) throw new Error("Модель не подключена — войдите на сайт или подключите её в Ноа онлайн.");
+      const messages = [{ role: "system", content: String(args.rules ?? "") }];
+      for (const item of (args.thread ?? []).slice(-10)) messages.push({ role: "user", content: item.q }, { role: "assistant", content: item.a });
+      messages.push({ role: "user", content: String(args.said ?? "") });
+      return String(await chat(model, messages, { maxTokens: args.long ? 2500 : 900, timeoutMs: 180_000 }));
+    }
     case "plugin:sufler|listen": {
       hearing?.abort();
       hearing = new AbortController();

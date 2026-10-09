@@ -5,6 +5,7 @@
 import { el, icon, button, label, progress, steps, loading, header, nav, register, prefs, plural, sheet, call, toast, isWeb } from "../core.js";
 import { store, currentTopic, topicCard, greeting, isDone } from "../store.js";
 import { open as openAssistant } from "../assistant.js";
+import { lastInterview } from "./interview.js";
 
 register("courses", (screen) => {
   screen.append(header({ home: true, onMic: () => openAssistant() }));
@@ -71,6 +72,7 @@ register("courses", (screen) => {
     } else {
       content.append(continueCard(course));
       content.append(tiles(course));
+      content.append(interviewCard(course));
     }
 
     // Мои курсы — с собирающимся пунктиром.
@@ -150,7 +152,8 @@ function tiles(course) {
   const focus = el("button", "plate");
   const head2 = el("span", "tile__head");
   head2.append(icon("timer", 20, 2), label("Фокус"));
-  const minutes = prefs.get("focusLength", 25);
+  // В настройке — номер длины отрезка (15 / 25 / 50), не минуты.
+  const minutes = [15, 25, 50][prefs.get("focusLength", 1)] ?? 25;
   const value = el("span", "tile__value", minutes);
   value.append(el("small", "", " мин"));
   const today = course?.focus?.sessionsToday ?? 0;
@@ -158,6 +161,21 @@ function tiles(course) {
   focus.addEventListener("click", () => nav.tab("focus", true));
   row.append(review, focus);
   return row;
+}
+
+/** Собеседование по курсу — мок-интервью, с прошлым баллом. */
+function interviewCard(course) {
+  const card = el("button", "plate interview-card");
+  const head = el("span", "tile__head");
+  head.append(icon("user", 20, 2), label("Собеседование"));
+  const last = lastInterview(course.id);
+  card.append(
+    head,
+    el("span", "interview-card__title", last ? `Прошлый раз — ${last.score}%` : "Мок-интервью по курсу"),
+    el("span", "small muted", "Ноа задаёт вопросы вслух, уточняет и разбирает, чего не хватило"),
+  );
+  card.addEventListener("click", () => nav.push("interview", { course: course.id }));
+  return card;
 }
 
 function courseCard(course) {
