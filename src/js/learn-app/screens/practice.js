@@ -5,8 +5,6 @@
 // и переживает уход с экрана.
 
 import { el, icon, label, loading, nav, register, iconButton, steps, call, api, voice, ring, prefs, toast, inline } from "../core.js";
-import { Terminal } from "../../../vendor/xterm/xterm.js";
-import { FitAddon } from "../../../vendor/xterm/addon-fit.js";
 import { store, topicCard } from "../store.js";
 
 /* ── Терминал: один на всё приложение ──────────────────────────────────── */
@@ -53,7 +51,14 @@ document.addEventListener("visibilitychange", async () => {
   if (await reconnect()) view?.update();
 });
 
-function makeTerminal() {
+/** Терминал (xterm) грузится, только когда открыли практику: это самый
+ *  тяжёлый файл приложения, а нужен он одному экрану. */
+let xterm = null;
+
+async function makeTerminal() {
+  if (term) return;
+  xterm ??= Promise.all([import("../../../vendor/xterm/xterm.js"), import("../../../vendor/xterm/addon-fit.js")]);
+  const [{ Terminal }, { FitAddon }] = await xterm;
   if (term) return;
   term = new Terminal({
     fontFamily: '"JetBrains Mono", ui-monospace, monospace',
@@ -237,7 +242,7 @@ async function startShell() {
 /* ── Экран ─────────────────────────────────────────────────────────────── */
 
 register("practice", (screen, { course: courseId, topic: topicId }) => {
-  makeTerminal();
+  const ready = makeTerminal();
   const course = store.course(courseId);
   const card = topicCard(course, topicId);
 
@@ -326,6 +331,7 @@ register("practice", (screen, { course: courseId, topic: topicId }) => {
 
   (async () => {
     try {
+      await ready;
       if (courseId && topicId) practice = await call("practice_switch", { course: courseId, topic: topicId });
       else practice = await call("practice_state");
       const server = await call("practice_server").catch(() => null);

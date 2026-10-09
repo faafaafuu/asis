@@ -4,8 +4,53 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#060809" />
     <link rel="icon" href="data:," />
     <title>NOAH Учёба</title>
+    <!-- Все модули и шрифты — заранее и разом. Без этого браузер узнавал о
+         модуле, только загрузив тот, что его импортирует: семь шагов цепочкой,
+         и через зеркало страница открывалась пять секунд. -->
+    <link rel="modulepreload" href="./js/learn-app/main.js" />
+    <link rel="modulepreload" href="./js/learn-app/core.js" />
+    <link rel="modulepreload" href="./js/learn-app/store.js" />
+    <link rel="modulepreload" href="./js/learn-app/assistant.js" />
+    <link rel="modulepreload" href="./js/learn-app/suflyor.js" />
+    <link rel="modulepreload" href="./js/learn-app/screens/courses.js" />
+    <link rel="modulepreload" href="./js/learn-app/screens/course.js" />
+    <link rel="modulepreload" href="./js/learn-app/screens/topic.js" />
+    <link rel="modulepreload" href="./js/learn-app/screens/lesson.js" />
+    <link rel="modulepreload" href="./js/learn-app/screens/review.js" />
+    <link rel="modulepreload" href="./js/learn-app/screens/check.js" />
+    <link rel="modulepreload" href="./js/learn-app/screens/practice.js" />
+    <link rel="modulepreload" href="./js/learn-app/screens/focus.js" />
+    <link rel="modulepreload" href="./js/learn-app/screens/profile.js" />
+    <link rel="modulepreload" href="./js/bridge.js" />
+    <link rel="modulepreload" href="./js/web-host.js" />
+    <link rel="modulepreload" href="./js/popup-view.js" />
+    <link rel="modulepreload" href="./js/menu-view.js" />
+    <link rel="modulepreload" href="./js/position.js" />
+    <link rel="modulepreload" href="./js/rich-text.js" />
+    <link rel="modulepreload" href="./js/icons.js" />
+    <link rel="modulepreload" href="./js/term.js" />
+    <link rel="modulepreload" href="./js/ai-client.js" />
+    <link rel="modulepreload" href="./js/scheme.js" />
+    <link rel="modulepreload" href="./js/orb.js" />
+    <link rel="modulepreload" href="./js/web/web-api.js" />
+    <link rel="modulepreload" href="./js/web/noa-store.js" />
+    <link rel="modulepreload" href="./js/web/learn-core.js" />
+    <link rel="modulepreload" href="./js/web/early.js" />
+    <link rel="modulepreload" href="./js/web/ai-web.js" />
+    <link rel="modulepreload" href="./js/web/voice.js" />
+    <link rel="modulepreload" href="./js/web/talk.js" />
+    <link rel="modulepreload" href="./js/web/net.js" />
+    <link rel="modulepreload" href="./js/web/tunnel.js" />
+    <link rel="preload" href="./styles/noah/icons.svg" as="fetch" crossorigin />
+    <link rel="preload" href="./assets/fonts/jetbrains-mono-400-normal-cyrillic.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="./assets/fonts/jetbrains-mono-400-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="./assets/fonts/jetbrains-mono-500-normal-cyrillic.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="./assets/fonts/exo-2-700-normal-cyrillic.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="./assets/fonts/exo-2-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="./assets/fonts/rajdhani-700-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="./styles/fonts.css" />
     <link rel="stylesheet" href="./styles/noah/core.css" />
     <link rel="stylesheet" href="./styles/noah/theme-neon.css" />
