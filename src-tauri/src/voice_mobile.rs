@@ -363,21 +363,20 @@ fn phrases(text: &str, limit: usize) -> Vec<String> {
 
 /// Фраза голосом Ноа — MP3 с сервера.
 async fn fetch_phrase(base: String, token: String, voice: String, phrase: String) -> Result<Vec<u8>, String> {
-    let client = crate::net::client_builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|err| err.to_string())?;
-    let response = client
-        .post(format!("{base}/api/noa/tts"))
-        .bearer_auth(token)
-        .json(&serde_json::json!({ "text": phrase, "voice": voice, "lite": true }))
-        .send()
-        .await
-        .map_err(|err| err.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("голос ответил {}", response.status()));
+    // Через зеркало запись — туннелем (platform::site_call): это пара коротких
+    // запросов, поэтому ждём чуть дольше, чем прямой.
+    let body = serde_json::json!({ "text": phrase, "voice": voice, "lite": true });
+    let sent = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        crate::platform::site_call(&base, "POST", "/api/noa/tts", &token, Some(&body)),
+    )
+    .await
+    .map_err(|_| "голос не успел".to_string())??;
+    let (status, data) = sent;
+    if !(200..300).contains(&status) {
+        return Err(format!("голос ответил {status}"));
     }
-    response.bytes().await.map(|bytes| bytes.to_vec()).map_err(|err| err.to_string())
+    Ok(data)
 }
 
 /// Голосом Ноа. Ошибка — текст, который осталось сказать (пустой — перебили).

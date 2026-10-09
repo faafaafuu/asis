@@ -620,10 +620,41 @@ impl HttpProvider {
             });
         }
         let (endpoint, api_key) = crate::platform::live_bridge(&self.endpoint, &self.api_key);
-        let mut request = self.client.post(&endpoint).json(body);
         // Длинный ответ модель пишет минуты: общий таймаут обрывал его на
         // середине, а мост дописывал впустую.
         let long = body.get("max_tokens").and_then(serde_json::Value::as_u64).is_some_and(|n| n > u64::from(ANSWER_LIMIT) * 2);
+        // iPhone: мост — через зеркало сайта, туннелем (platform::site_call):
+        // длинный запрос напрямую мобильная сеть обрывала.
+        if let Some(path) = endpoint.strip_prefix(crate::platform::MIRROR_URL) {
+            let wait = Duration::from_millis(if long { self.timeout_ms * 3 } else { self.timeout_ms });
+            log::info!("запрос к модели через зеркало: {path}");
+            let started = std::time::Instant::now();
+            let sent = tokio::time::timeout(wait, crate::platform::site_call(crate::platform::MIRROR_URL, "POST", path, &api_key, Some(body))).await;
+            let (status, data) = match sent {
+                Err(_) => return Err(AiError::Timeout),
+                Ok(Err(err)) => {
+                    log::warn!("запрос к модели не удался: {err}");
+                    crate::platform::diag(format!("модель через зеркало: {err}"));
+                    return Err(AiError::Network);
+                }
+                Ok(Ok(pair)) => pair,
+            };
+            if !(200..300).contains(&status) {
+                let value: serde_json::Value = serde_json::from_slice(&data).unwrap_or_default();
+                let message = value["error"]["message"]
+                    .as_str()
+                    .or(value["error"].as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| String::from_utf8_lossy(&data).chars().take(200).collect());
+                log::warn!("отказ сервиса {status}: {message}");
+                return Err(AiError::Refused(status, message.trim().to_string()));
+            }
+            let value: serde_json::Value = serde_json::from_slice(&data).map_err(|_| AiError::Parse)?;
+            log::info!("ответ модели получен за {} мс", started.elapsed().as_millis());
+            crate::usage::record(&value);
+            return Ok(value);
+        }
+        let mut request = self.client.post(&endpoint).json(body);
         if long {
             request = request.timeout(Duration::from_millis(self.timeout_ms * 3));
         }

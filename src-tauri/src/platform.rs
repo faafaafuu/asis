@@ -22,7 +22,175 @@ pub fn settings() -> (String, String) {
     let url = config["platform"]["url"].as_str().unwrap_or_default().trim().trim_end_matches('/').to_string();
     let token = crate::secret::reveal(config["platform"]["token"].as_str().unwrap_or_default());
     let url = if url.is_empty() || url == crate::config::OLD_PLATFORM_URL { DEFAULT_PLATFORM_URL.to_string() } else { url };
+    // iPhone — через зеркало: прямой путь режется на длинных запросах.
+    if use_mirror() && url == DEFAULT_PLATFORM_URL {
+        return (MIRROR_URL.to_string(), token);
+    }
     (reachable(url), token)
+}
+
+/* ── Зеркало и туннель (iPhone) ──────────────────────────────────────────
+   Мобильные операторы в России режут соединение с зарубежным сервером на
+   16–32 КБ: короткий вопрос доходил, а сценарий практики (урок в запросе)
+   обрывался — «модель не ответила». Российское зеркало (CDN) длинное
+   пропускает, но только GET: на POST отвечает 405. Поэтому на iPhone всё
+   идёт через зеркало, а запись — GET-туннелем, как у Ноа онлайн в
+   браузере (src/js/web/tunnel.js, platform/server/tunnel.mjs): тело кусками
+   в адресе, затем «выполнить», долгий ответ — короткими запросами. */
+
+/// Зеркало сайта для России.
+pub const MIRROR_URL: &str = "https://m.noahlab.ru";
+
+/// Всё — через зеркало: на iPhone (мобильная сеть).
+fn use_mirror() -> bool {
+    cfg!(target_os = "ios")
+}
+
+/// Байт тела на один кусок: в base64 это ~4 КБ адреса — в пределах CDN.
+const TUNNEL_PART: usize = 3000;
+
+/// Метка туннеля: сервер сверяет её в cookie и в адресе (защита от чужих
+/// сайтов в браузере; программе — просто постоянная случайная строка).
+fn tunnel_mark() -> &'static str {
+    static MARK: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    MARK.get_or_init(random_hex)
+}
+
+fn random_hex() -> String {
+    use rand_core::RngCore;
+    let mut bytes = [0u8; 16];
+    rand_core::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn base64url(bytes: &[u8]) -> String {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(bytes.len() * 4 / 3 + 4);
+    for chunk in bytes.chunks(3) {
+        let n = (u32::from(chunk[0]) << 16) | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8) | u32::from(*chunk.get(2).unwrap_or(&0));
+        out.push(ABC[(n >> 18) as usize & 63] as char);
+        out.push(ABC[(n >> 12) as usize & 63] as char);
+        if chunk.len() > 1 {
+            out.push(ABC[(n >> 6) as usize & 63] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(ABC[n as usize & 63] as char);
+        }
+    }
+    out
+}
+
+/// Запрос к своему сайту: `(статус, тело)`. Через зеркало запись идёт
+/// туннелем, чтение — обычным GET; иначе — обычный запрос.
+pub async fn site_call(url: &str, method: &str, path: &str, token: &str, body: Option<&Value>) -> Result<(u16, Vec<u8>), String> {
+    let bytes = body.map(|value| serde_json::to_vec(value).unwrap_or_default()).unwrap_or_default();
+    if url == MIRROR_URL && method != "GET" {
+        return tunnel(path, method, token, &bytes).await;
+    }
+    let client = client()?;
+    let mut request = if method == "GET" { client.get(format!("{url}{path}")) } else { client.post(format!("{url}{path}")) };
+    if !token.is_empty() {
+        request = request.bearer_auth(token);
+    }
+    if body.is_some() {
+        request = request.header("Content-Type", "application/json").body(bytes);
+    }
+    let response = request.send().await.map_err(|err| format!("площадка недоступна: {err}"))?;
+    let status = response.status().as_u16();
+    let data = response.bytes().await.map_err(|err| format!("ответ не дошёл: {err}"))?;
+    Ok((status, data.to_vec()))
+}
+
+/// Запись через GET-туннель зеркала. Ответ — тот же, что дал бы POST.
+async fn tunnel(path: &str, method: &str, token: &str, body: &[u8]) -> Result<(u16, Vec<u8>), String> {
+    let client = crate::net::client_builder()
+        .timeout(Duration::from_secs(25))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let mark = tunnel_mark();
+    let id = random_hex();
+    let cookie = format!("noah_t={mark}");
+    let get = |address: String| {
+        let mut request = client.get(address).header("Cookie", cookie.clone());
+        if !token.is_empty() {
+            request = request.bearer_auth(token);
+        }
+        request
+    };
+    let mut go = vec![
+        ("k", mark.to_string()),
+        ("id", id.clone()),
+        ("m", method.to_string()),
+        ("p", path.to_string()),
+        ("t", "application/json".to_string()),
+    ];
+    if body.len() <= TUNNEL_PART {
+        go.push(("d", base64url(body)));
+    } else {
+        let parts: Vec<&[u8]> = body.chunks(TUNNEL_PART).collect();
+        // Куски — по четыре сразу: каждый — своё короткое соединение.
+        for (batch_at, batch) in parts.chunks(4).enumerate() {
+            let handles: Vec<_> = batch
+                .iter()
+                .enumerate()
+                .map(|(offset, part)| {
+                    let index = batch_at * 4 + offset;
+                    let request = get(format!("{MIRROR_URL}/api/tunnel/part?k={mark}&id={id}&i={index}&d={}", base64url(part)));
+                    tauri::async_runtime::spawn(async move { request.send().await })
+                })
+                .collect();
+            for handle in handles {
+                let response = handle
+                    .await
+                    .map_err(|err| err.to_string())?
+                    .map_err(|err| format!("кусок запроса не ушёл: {err}"))?;
+                if !response.status().is_success() {
+                    let status = response.status().as_u16();
+                    let data = response.bytes().await.unwrap_or_default();
+                    return Ok((status, data.to_vec()));
+                }
+            }
+        }
+        go.push(("n", parts.len().to_string()));
+    }
+    let query: String = go
+        .iter()
+        .map(|(key, value)| format!("{key}={}", urlencode(value)))
+        .collect::<Vec<_>>()
+        .join("&");
+    let mut response = get(format!("{MIRROR_URL}/api/tunnel/go?{query}"))
+        .send()
+        .await
+        .map_err(|err| format!("площадка недоступна: {err}"))?;
+    // «Ещё работаю» (202): долгий ответ (модель) — короткими запросами.
+    let mut failures = 0;
+    loop {
+        let status = response.status().as_u16();
+        let pending_header = response.headers().get("X-Noah-Pending").is_some_and(|v| v == "1");
+        let data = response.bytes().await.map_err(|err| format!("ответ не дошёл: {err}"))?.to_vec();
+        let pending = status == 202
+            && (pending_header || serde_json::from_slice::<Value>(&data).ok().is_some_and(|v| v["tunnel"] == "pending"));
+        if !pending {
+            return Ok((status, data));
+        }
+        loop {
+            match get(format!("{MIRROR_URL}/api/tunnel/wait?k={mark}&id={id}")).send().await {
+                Ok(next) => {
+                    response = next;
+                    failures = 0;
+                    break;
+                }
+                // Сбой сети посреди ожидания работу не губит — она идёт на сервере.
+                Err(err) => {
+                    failures += 1;
+                    if failures > 5 {
+                        return Err(format!("ответ не дошёл: {err}"));
+                    }
+                    tokio::time::sleep(Duration::from_secs(failures)).await;
+                }
+            }
+        }
+    }
 }
 
 /// Строка о сбое — в журнал сервера (`/api/app/diag`), без ожидания. Журнал
@@ -124,14 +292,18 @@ pub async fn get(url: &str, path: &str) -> Result<Value, String> {
 }
 
 async fn post(url: &str, path: &str, token: &str, body: &Value) -> Result<Value, String> {
-    let response = client()?
-        .post(format!("{url}{path}"))
-        .bearer_auth(token)
-        .json(body)
-        .send()
-        .await
-        .map_err(|err| format!("площадка недоступна: {err}"))?;
-    read(response).await
+    let (status, data) = site_call(url, "POST", path, token, Some(body)).await?;
+    read_bytes(status, &data)
+}
+
+/// Ответ сайта из `(статус, тело)` — как `read`.
+fn read_bytes(status: u16, data: &[u8]) -> Result<Value, String> {
+    let body: Value = serde_json::from_slice(data).unwrap_or_default();
+    if (200..300).contains(&status) {
+        Ok(body)
+    } else {
+        Err(body["error"].as_str().map(str::to_string).unwrap_or_else(|| format!("площадка ответила {status}")))
+    }
 }
 
 /// Кто владеет ключом — для кнопки «Проверить» в настройках.
@@ -246,13 +418,7 @@ pub async fn publish(id: &str, description: &str, category: &str) -> Result<Stri
 /// бота, человек жмёт Start, программа забирает ключ. Отдаёт код и ссылку.
 pub async fn pair_start() -> Result<(String, String), String> {
     let (url, _) = settings();
-    let response = client()?
-        .post(format!("{url}/api/app/pair/start"))
-        .json(&json!({}))
-        .send()
-        .await
-        .map_err(|err| format!("площадка недоступна: {err}"))?;
-    let reply = read(response).await?;
+    let reply = post(&url, "/api/app/pair/start", "", &json!({})).await?;
     let code = reply["code"].as_str().unwrap_or_default().to_string();
     let link = reply["link"].as_str().unwrap_or_default().to_string();
     if code.is_empty() || link.is_empty() {
@@ -631,6 +797,23 @@ mod tests {
 
 #[cfg(test)]
 mod live {
+    /// Туннель через зеркало против настоящего сайта: маленький запрос и
+    /// большое тело (напрямую мобильная сеть его обрывала).
+    #[test]
+    #[ignore]
+    fn tunnel_through_mirror() {
+        tauri::async_runtime::block_on(async {
+            let small = super::site_call(super::MIRROR_URL, "POST", "/api/app/diag", "noah_tunneltest000000000000", Some(&serde_json::json!({ "lines": [] })))
+                .await
+                .expect("small");
+            println!("small: {} {}", small.0, String::from_utf8_lossy(&small.1));
+            let big = serde_json::json!({ "email": "nobody@example.invalid", "password": "x".repeat(80_000) });
+            let started = std::time::Instant::now();
+            let reply = super::site_call(super::MIRROR_URL, "POST", "/api/auth/login", "", Some(&big)).await.expect("big");
+            println!("big: {} {} за {} мс", reply.0, String::from_utf8_lossy(&reply.1), started.elapsed().as_millis());
+        });
+    }
+
     /// Сверка курсов с аккаунтом против живой площадки: NOAH_TEST_URL,
     /// NOAH_TEST_TOKEN, NOAH_TEST_DIR — папка данных (копия, не настоящая).
     #[test]
