@@ -2119,3 +2119,28 @@ html.kb-open .tkeys {
 .setting--danger .setting__name {
   color: var(--c-bad);
 }
+
+/* Собеседование разговором: кольцо Ноа, лента вопросов и ответов. */
+.talk__stage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--plate-line);
+  background: var(--plate-bg);
+}
+.talk__status {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--c-accent);
+}
+.talk__feed {
+  gap: 8px;
+}
+.talk__score {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  font-size: 12px;
+}

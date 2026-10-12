@@ -4,7 +4,7 @@
 // вопрос, как на живом собеседовании. После каждого — балл, что сказано
 // верно, чего не хватило, образцовый ответ. В конце — итог и что повторить.
 
-import { el, icon, label, loading, nav, register, iconButton, call, voice, toast, prefs, steps, markdown } from "../core.js";
+import { el, icon, label, loading, nav, register, iconButton, call, voice, toast, prefs, steps, markdown, ring } from "../core.js";
 import { store, topicCard } from "../store.js";
 import { coachJson } from "../coach.js";
 
@@ -55,6 +55,8 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   let level = prefs.get("interviewLevel", "middle");
   let count = prefs.get("interviewCount", 8);
   let aloud = prefs.get("interviewAloud", true);
+  /** Разговором: Ноа спрашивает голосом и сама слушает — без кнопок. */
+  let talk = prefs.get("interviewTalk", true);
   let questions = [];
   let results = [];
   let at = 0;
@@ -105,6 +107,18 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
       );
       if (card) content.append(el("span", "small dim", card.title));
     }
+    content.append(
+      label("// формат"),
+      seg(
+        [
+          { id: "talk", name: "Разговором" },
+          { id: "buttons", name: "С кнопками" },
+        ],
+        talk ? "talk" : "buttons",
+        (id) => (talk = id === "talk"),
+      ),
+      el("span", "small dim", "Разговором — как на звонке: Ноа спрашивает, слушает, уточняет и идёт дальше сама. «Дальше» — пропустить, «повтори» — ещё раз, «стоп» — итог."),
+    );
     content.append(label("// уровень"), seg(LEVELS, level, (id) => (level = id)));
     content.append(
       label("// вопросов"),
@@ -175,6 +189,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     prefs.set("interviewLevel", level);
     prefs.set("interviewCount", count);
     prefs.set("interviewAloud", aloud);
+    prefs.set("interviewTalk", talk);
     dock.replaceChildren();
     content.replaceChildren(loading("Ноа готовит вопросы…"));
     try {
@@ -199,7 +214,8 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     if (!alive) return;
     results = [];
     at = 0;
-    ask();
+    if (talk) conversation();
+    else ask();
   }
 
   function paintProgress() {
@@ -262,6 +278,186 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     dock.replaceChildren(mic, skip, send);
   }
 
+  /** Оценка ответа моделью: балл, что верно, чего не хватило, уточнение. */
+  async function judge(q, result) {
+    const rules =
+      `Ты — репетитор и интервьюер на техническом собеседовании уровня ${level}. Оцени ответ кандидата строго, как на реальном ` +
+      "собеседовании: суть и точность важнее объёма. Ответь только JSON: " +
+      '{"score": 0-100, "good": "что сказано верно, одной фразой", "missing": ["чего не хватило, кратко"], ' +
+      '"followup": "один уточняющий вопрос, если ответ неполный, иначе пусто", "ideal": "образцовый ответ в 2–4 предложениях", ' +
+      '"say": "короткая реакция интервьюера вслух, одна фраза"}';
+    const dialog = result.answers.map((item) => `Интервьюер: ${item.asked}\nКандидат: ${item.said}`).join("\n");
+    return coachJson(rules, `Вопрос: ${q.q}\nКлючевые пункты: ${(q.points ?? []).join("; ")}\n\n${dialog}`);
+  }
+
+  /* ── Разговором ─────────────────────────────────────────────────────
+     Как на звонке: Ноа задаёт вопрос голосом и сама слушает ответ — конец
+     ответа по паузе; неполный — уточняет; коротко говорит, засчитан ли, и
+     сама переходит к следующему. Голосом же: «дальше» / «не знаю» —
+     пропустить, «повтори» — ещё раз вопрос, «стоп» — к итогу. Можно и
+     написать — поле внизу. */
+
+  const SKIP = Symbol("skip");
+  const REPEAT = Symbol("repeat");
+  const STOP = Symbol("stop");
+
+  function command(text) {
+    const said = String(text).trim().toLowerCase().replace(/[.!?,]/g, "");
+    if (/^(дальше|пропусти|пропустить|следующий|не знаю|я не знаю|без понятия)$/.test(said)) return SKIP;
+    if (/^(повтори|повторите|ещё раз|еще раз|повтори вопрос)$/.test(said)) return REPEAT;
+    if (/^(стоп|хватит|закончим|закончить|достаточно|итог)$/.test(said)) return STOP;
+    return null;
+  }
+
+  function conversation() {
+    voice.stop();
+    const orb = ring("look", 56);
+    const status = el("span", "talk__status", "Ноа готовится");
+    const stage = el("div", "talk__stage");
+    stage.append(orb, status);
+    const feed = el("div", "list talk__feed");
+    content.replaceChildren(stage, feed);
+
+    const typed = el("input", "ask");
+    typed.placeholder = "Или напишите ответ — Enter";
+    typed.enterKeyHint = "send";
+    const pause = el("button", "btn btn--secondary");
+    pause.style.cssText = "height:44px;padding:0 12px";
+    pause.textContent = "Пауза";
+    const stop = el("button", "btn btn--plain", "Итог");
+    stop.style.cssText = "height:44px;padding:0 10px";
+    dock.replaceChildren(typed, pause, stop);
+
+    let paused = false;
+    let resume = null;
+    /** Ответ, которого ждём: голос или поле ввода — что раньше. */
+    let waiting = null;
+    let current = null;
+    let stopped = false;
+
+    const mode = (name, text) => {
+      orb.dataset.ring = name;
+      status.textContent = text;
+    };
+    const line = (who, text, extra = "") => {
+      const node = el("div", who === "me" ? "say say--me" : who === "bad" ? "say say--bad" : who === "good" ? "say say--good" : "say");
+      node.textContent = text;
+      if (extra) node.append(el("span", "talk__score", extra));
+      feed.append(node);
+      content.scrollTop = content.scrollHeight;
+    };
+    const speak = async (text) => {
+      if (!text || !alive || stopped) return;
+      mode("speak", "Ноа говорит");
+      await voice.speak(text);
+    };
+    const finish = (value) => {
+      const done = waiting;
+      waiting = null;
+      done?.(value);
+    };
+
+    typed.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || !typed.value.trim() || !waiting) return;
+      const text = typed.value.trim();
+      typed.value = "";
+      typed.blur();
+      voice.cancel();
+      finish(command(text) ?? text);
+    });
+    pause.addEventListener("click", () => {
+      paused = !paused;
+      pause.textContent = paused ? "Продолжить" : "Пауза";
+      if (paused) {
+        voice.stop();
+        voice.cancel();
+        mode("look", "Пауза — нажмите «Продолжить»");
+      } else resume?.();
+    });
+    stop.addEventListener("click", () => {
+      stopped = true;
+      voice.stop();
+      voice.cancel();
+      finish(STOP);
+    });
+
+    /** Слушать ответ: текст, команда или STOP. Тишина — ещё раз, третий раз — «дальше». */
+    const hear = async () => {
+      for (let quiet = 0; alive && !stopped; ) {
+        if (paused) await new Promise((done) => (resume = done));
+        if (!alive || stopped) return STOP;
+        mode("listen", "Слушаю — отвечайте");
+        const answer = new Promise((done) => (waiting = done));
+        // Свой билет у каждого слушания: запоздалый ответ прошлого не
+        // засчитывается тишиной в этом.
+        const ticket = {};
+        current = ticket;
+        voice
+          .listen({ pause: 2.8 })
+          .then((text) => current === ticket && finish(text))
+          .catch(() => current === ticket && finish(""));
+        const got = await answer;
+        if (got === STOP || stopped) return STOP;
+        if (paused) continue;
+        if (typeof got === "symbol") return got;
+        const text = String(got ?? "").trim();
+        if (text) return command(text) ?? text;
+        quiet += 1;
+        if (quiet >= 3) return SKIP;
+        await speak("Не расслышала. Повторите — или скажите «дальше».");
+      }
+      return STOP;
+    };
+
+    (async () => {
+      for (; at < questions.length && alive && !stopped; at += 1) {
+        paintProgress();
+        const q = questions[at];
+        const result = { q: q.q, topic: q.topic, answers: [] };
+        results[at] = result;
+        line("noa", q.q);
+        await speak(q.q);
+        let asked = q.q;
+        for (let round = 0; round < 2 && alive && !stopped; round += 1) {
+          const said = await hear();
+          if (said === STOP || !alive) break;
+          if (said === REPEAT) {
+            await speak(asked);
+            round -= 1;
+            continue;
+          }
+          const answer = said === SKIP ? "" : said;
+          line("me", answer || "Не знаю — дальше");
+          result.answers.push({ asked, said: answer || "(не знаю)" });
+          mode("look", "Ноа оценивает ответ…");
+          let verdict = null;
+          try {
+            verdict = await judge(q, result);
+          } catch (err) {
+            line("bad", String(err));
+          }
+          if (!verdict || !alive) break;
+          result.verdict = verdict;
+          result.score = Math.max(0, Math.min(100, Math.round(Number(verdict.score) || 0)));
+          // Неполный ответ — одно уточнение, как на живом собеседовании.
+          const followup = String(verdict.followup ?? "").trim();
+          if (round === 0 && answer && result.score < PASS && followup) {
+            asked = followup;
+            line("noa", `${verdict.say ? `${verdict.say} ` : ""}${followup}`);
+            await speak(`${verdict.say ?? ""} ${followup}`);
+            continue;
+          }
+          const missing = (verdict.missing ?? []).filter(Boolean).slice(0, 2).join(", ");
+          const spoken = `${verdict.say ?? ""}${result.score < PASS && missing ? ` Не хватило: ${missing}.` : ""}`.trim();
+          line(result.score >= PASS ? "good" : "bad", spoken || (result.score >= PASS ? "Засчитано." : "Слабо."), `${result.score}%`);
+          await speak(spoken);
+          break;
+        }
+      }
+      if (alive) report();
+    })();
+  }
+
   /** Оценка ответа; на неполный — одно уточнение, как на живом собеседовании. */
   async function grade(q, followup, answer) {
     voice.stop();
@@ -273,14 +469,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     content.append(loading("Ноа оценивает ответ…"));
     let verdict;
     try {
-      const rules =
-        `Ты — репетитор и интервьюер на техническом собеседовании уровня ${level}. Оцени ответ кандидата строго, как на реальном ` +
-        "собеседовании: суть и точность важнее объёма. Ответь только JSON: " +
-        '{"score": 0-100, "good": "что сказано верно, одной фразой", "missing": ["чего не хватило, кратко"], ' +
-        '"followup": "один уточняющий вопрос, если ответ неполный, иначе пусто", "ideal": "образцовый ответ в 2–4 предложениях", ' +
-        '"say": "короткая реакция интервьюера вслух, одна фраза"}';
-      const dialog = result.answers.map((item) => `Интервьюер: ${item.asked}\nКандидат: ${item.said}`).join("\n");
-      verdict = await coachJson(rules, `Вопрос: ${q.q}\nКлючевые пункты: ${(q.points ?? []).join("; ")}\n\n${dialog}`);
+      verdict = await judge(q, result);
     } catch (err) {
       if (!alive) return;
       content.lastChild?.remove();
@@ -347,7 +536,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     at = questions.length;
     progressRow.replaceChildren(steps(questions.length, questions.length, -1, { ok: true, thin: true }));
     meta.textContent = "итог";
-    const scored = results.filter(Boolean);
+    const scored = results.filter((r) => r && r.score != null);
     const total = scored.length ? Math.round(scored.reduce((sum, r) => sum + (r.score ?? 0), 0) / scored.length) : 0;
     const all = history();
     all.push({ at: Date.now(), course: courseId, topic: scope, level, n: scored.length, score: total });
