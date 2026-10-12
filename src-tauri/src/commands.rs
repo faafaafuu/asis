@@ -1783,6 +1783,13 @@ pub async fn learn_ask(
     crate::tutor::ask(&app, &target, &text, voice.unwrap_or(false)).await
 }
 
+/// Удалить курс — из аккаунта и с устройства; другие устройства уберут его
+/// при сверке (platform::account_courses).
+#[tauri::command]
+pub async fn learn_course_remove(course: String) -> Result<(), String> {
+    crate::platform::remove_course(&course).await
+}
+
 /// Тренировка в приложении обучения — «Наизусть» и «Собеседование»: модель
 /// по указаниям экрана (интервьюер, проверяющий), с историей разговора.
 /// Логика тренировок — в окне (learn-app), одна для телефона и браузера;

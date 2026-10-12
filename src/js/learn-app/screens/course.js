@@ -1,7 +1,7 @@
 // 02 Курс — заголовок и прогресс, сегменты «Темы / Карта / Шпаргалка»,
 // темы строками (✓ пройдена, ▸ текущая, номер — впереди), финальный экзамен.
 
-import { el, icon, label, progress, loading, header, nav, register, call, iconButton, plural, markdown } from "../core.js";
+import { el, icon, label, progress, loading, header, nav, register, call, iconButton, plural, markdown, toast, prefs } from "../core.js";
 import { store, topicPercent, isDone, currentTopic } from "../store.js";
 
 register("course", (screen, { course: courseId }) => {
@@ -124,13 +124,49 @@ register("course", (screen, { course: courseId }) => {
   return {};
 });
 
-// «Ещё» на экране курса: описание курса.
+// «Ещё» на экране курса: описание курса и удаление.
 register("topics-more", (screen, { course: courseId }) => {
   const course = store.course(courseId);
   screen.append(header({ title: course?.title ?? "Курс" }));
   const content = el("div", "content");
   content.append(label("// о курсе"));
   content.append(markdown(course?.description || "Описания у курса нет.", "md md--small"));
+
+  // Удаление — вторым касанием: курс собирается долго, а промахнуться легко.
+  // Курс уходит из аккаунта и со всех устройств; файл остаётся в
+  // courses/.removed, прогресс — в аккаунте.
+  content.append(label("// удалить"));
+  const remove = el("button", "setting setting--danger");
+  const text = el("span", "setting__text");
+  const name = el("span", "setting__name", "Удалить курс");
+  const hint = el("span", "setting__hint", "Уберётся с телефона, из программы и с сайта. Прогресс сохранится — курс можно собрать заново.");
+  text.append(name, hint);
+  remove.append(icon("trash", 20, 2), text);
+  remove.addEventListener("click", async () => {
+    if (!remove.dataset.sure) {
+      remove.dataset.sure = "1";
+      name.textContent = "Точно удалить? Нажмите ещё раз";
+      setTimeout(() => {
+        delete remove.dataset.sure;
+        name.textContent = "Удалить курс";
+      }, 4000);
+      return;
+    }
+    remove.disabled = true;
+    name.textContent = "Удаляю…";
+    try {
+      await call("learn_course_remove", { course: courseId }, { slow: true });
+      store.forget();
+      if (prefs.get("course") === courseId) prefs.set("course", null);
+      toast("Курс удалён");
+      nav.home();
+    } catch (err) {
+      remove.disabled = false;
+      name.textContent = "Удалить курс";
+      toast(String(err));
+    }
+  });
+  content.append(remove);
   screen.append(content);
   return {};
 });

@@ -92,6 +92,14 @@ function toMp3(wav, bitrate = "64k") {
 
 export function mountNoa({ route, db, Fail, readJson }) {
   db.exec(`
+    -- Удалённые курсы аккаунта: по этой отметке другие устройства убирают
+    -- курс у себя и не выгружают его снова.
+    CREATE TABLE IF NOT EXISTS noa_removed (
+      user_id TEXT NOT NULL,
+      course_id TEXT NOT NULL,
+      at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, course_id)
+    );
     CREATE TABLE IF NOT EXISTS noa_courses (
       user_id TEXT NOT NULL,
       course_id TEXT NOT NULL,
@@ -169,7 +177,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
 
   route("DELETE", /^\/api\/noa\/courses\/([A-Za-z0-9_-]{1,64})$/, ({ user: who, match }) => {
     const user = need(who);
-    db.prepare("DELETE FROM noa_courses WHERE user_id = ? AND course_id = ?").run(user.id, match[1]);
+    removeCourse(db, user.id, match[1]);
     return { ok: true };
   });
 
@@ -474,6 +482,13 @@ function queueForApp(db, userId, courseId, body) {
  * человек на сайте, и нейросеть, собравшая курс по MCP. Ошибка — исключение
  * со списком того, что исправить.
  */
+/** Удаляет курс из аккаунта и оставляет отметку для других устройств. */
+export function removeCourse(db, owner, courseId) {
+  const userId = String(owner);
+  db.prepare("DELETE FROM noa_courses WHERE user_id = ? AND course_id = ?").run(userId, courseId);
+  db.prepare("INSERT INTO noa_removed (user_id, course_id) VALUES (?, ?) ON CONFLICT(user_id, course_id) DO UPDATE SET at = datetime('now')").run(userId, courseId);
+}
+
 export function saveCourse(db, owner, raw, { forApp = false } = {}) {
   const userId = String(owner);
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("course — объект курса по course_format.");
@@ -487,6 +502,8 @@ export function saveCourse(db, owner, raw, { forApp = false } = {}) {
   db.prepare(
     "INSERT INTO noa_courses (user_id, course_id, body) VALUES (?, ?, ?) ON CONFLICT(user_id, course_id) DO UPDATE SET body = excluded.body, updated = datetime('now')",
   ).run(userId, course.id, body);
+  // Курс собрали заново — отметка об удалении больше не действует.
+  db.prepare("DELETE FROM noa_removed WHERE user_id = ? AND course_id = ?").run(userId, course.id);
   if (forApp) queueForApp(db, userId, course.id, body);
   const concepts = course.topics.reduce((sum, t) => sum + t.concepts.length, 0);
   const questions = course.topics.reduce((sum, t) => sum + t.tasks.length + t.exam.length, 0) + course.final.length;

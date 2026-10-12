@@ -658,8 +658,19 @@ fn account_courses(url: &str, token: &str) -> Result<bool, String> {
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
-    let local: Vec<String> = crate::learning::courses().into_iter().map(|course| course.id).collect();
+    // Удалённые на каком-нибудь устройстве — убрать и здесь.
+    let removed: Vec<String> = list["removed"]
+        .as_array()
+        .map(|items| items.iter().filter_map(|id| id.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
     let mut changed = false;
+    for id in &removed {
+        if kit::valid_id(id) && crate::learning::shelve_course(id).unwrap_or(false) {
+            stamps.remove(id);
+            changed = true;
+        }
+    }
+    let local: Vec<String> = crate::learning::courses().into_iter().map(|course| course.id).collect();
     for item in &account {
         let id = item["id"].as_str().unwrap_or_default().to_string();
         let updated = item["updated"].as_str().unwrap_or_default().to_string();
@@ -691,7 +702,7 @@ fn account_courses(url: &str, token: &str) -> Result<bool, String> {
     // онлайн их не видят.
     #[cfg(desktop)]
     for course in crate::learning::own_courses() {
-        if account.iter().any(|item| item["id"].as_str() == Some(course.id.as_str())) {
+        if account.iter().any(|item| item["id"].as_str() == Some(course.id.as_str())) || removed.contains(&course.id) {
             continue;
         }
         match upload_course(url, token, &course) {
@@ -703,6 +714,31 @@ fn account_courses(url: &str, token: &str) -> Result<bool, String> {
         let _ = std::fs::write(&stamps_path, text);
     }
     Ok(changed)
+}
+
+/// Удалить курс: из аккаунта (с отметкой — другие устройства уберут его
+/// у себя) и с этого устройства (в `courses/.removed`).
+pub async fn remove_course(course_id: &str) -> Result<(), String> {
+    if !kit::valid_id(course_id) {
+        return Err("Такого курса нет.".into());
+    }
+    let (url, token) = settings();
+    if !token.is_empty() {
+        post(&url, &format!("/api/app/courses/{course_id}/remove"), &token, &json!({}))
+            .await
+            .map_err(|err| format!("Курс не удалился из аккаунта: {err}"))?;
+    }
+    crate::learning::shelve_course(course_id)?;
+    if let Some(path) = kit::data_dir().map(|dir| dir.join("account-courses.json")) {
+        let mut stamps: BTreeMap<String, String> = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        if stamps.remove(course_id).is_some() {
+            let _ = std::fs::write(&path, serde_json::to_string_pretty(&stamps).unwrap_or_default());
+        }
+    }
+    Ok(())
 }
 
 /// Курс в аккаунт кусками: канал до хостинга рвёт длинные запросы.
@@ -797,6 +833,24 @@ mod tests {
 
 #[cfg(test)]
 mod live {
+    /// Удаление курса против живой площадки: NOAH_TEST_URL, NOAH_TEST_TOKEN,
+    /// NOAH_TEST_DIR, NOAH_TEST_COURSE.
+    #[test]
+    #[ignore]
+    fn course_remove() {
+        let var = |name| std::env::var(name).expect(name);
+        let dir = std::path::PathBuf::from(var("NOAH_TEST_DIR"));
+        crate::module_kit::set_data_dir(dir.clone());
+        crate::learning::load(dir);
+        let url = var("NOAH_TEST_URL");
+        let token = var("NOAH_TEST_TOKEN");
+        let course = var("NOAH_TEST_COURSE");
+        tauri::async_runtime::block_on(async {
+            super::post(&url, &format!("/api/app/courses/{course}/remove"), &token, &serde_json::json!({})).await.expect("remove");
+        });
+        println!("removed on server");
+    }
+
     /// Туннель через зеркало против настоящего сайта: маленький запрос и
     /// большое тело (напрямую мобильная сеть его обрывала).
     #[test]

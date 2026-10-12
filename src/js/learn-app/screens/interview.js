@@ -87,9 +87,8 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
         "Ноа ведёт собеседование как живой интервьюер: вопросы на понимание, сравнение и кейсы, уточняет, если ответ неполный. Отвечайте голосом — как на настоящем собеседовании.",
       ),
     );
-    const last = lastInterview(courseId);
-    if (last) box.append(el("span", "small dim", `Прошлый раз: ${last.score}% · ${last.n} вопросов · ${new Date(last.at).toLocaleDateString("ru-RU")}`));
     content.replaceChildren(box);
+    paintHistory();
 
     if (topicId) {
       content.append(label("// о чём"));
@@ -131,6 +130,43 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     go.append(icon("play", 20, 2.25), "Начать собеседование");
     go.addEventListener("click", start);
     dock.replaceChildren(go);
+  }
+
+  /** Прошлые собеседования по курсу — каждое можно удалить. */
+  function paintHistory() {
+    const mine = history().filter((item) => item.course === courseId);
+    if (!mine.length) return;
+    const block = el("div", "list interview-history");
+    block.append(label(`// прошлые собеседования · ${mine.length}`));
+    for (const item of mine.slice(-8).reverse()) {
+      const row = el("div", "interview-history__row");
+      const topic = item.topic ? topicCard(course, item.topic)?.title : "весь курс";
+      row.append(
+        el("span", `interview-history__score ${item.score >= PASS ? "is-pass" : ""}`, `${item.score}%`),
+        el("span", "interview-history__text", `${new Date(item.at).toLocaleDateString("ru-RU")} · ${item.level} · ${topic ?? ""}`),
+      );
+      const drop = iconButton("close", "Удалить", () => {
+        prefs.set("interviews", history().filter((one) => one.at !== item.at));
+        block.remove();
+        paintHistory();
+      }, 18);
+      row.append(drop);
+      block.append(row);
+    }
+    const clear = el("button", "btn btn--plain", "Очистить историю");
+    clear.style.cssText = "height:36px;padding:0;align-self:flex-start;font-size:12.5px";
+    clear.addEventListener("click", () => {
+      if (!clear.dataset.sure) {
+        clear.dataset.sure = "1";
+        clear.textContent = "Точно очистить? Нажмите ещё раз";
+        return;
+      }
+      prefs.set("interviews", history().filter((one) => one.course !== courseId));
+      block.remove();
+    });
+    block.append(clear);
+    // Над настройками: сразу видно, как менялся балл.
+    content.children[0]?.after(block);
   }
 
   /* ── Вопросы ────────────────────────────────────────────────────────── */

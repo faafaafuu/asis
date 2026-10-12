@@ -2079,3 +2079,43 @@ html.kb-open .tkeys {
   border-top: 1px solid rgba(0, 240, 255, 0.12);
   padding-bottom: 6px;
 }
+
+/* История собеседований и удаление курса. */
+.interview-history {
+  gap: 6px;
+}
+.interview-history__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 0 0 12px;
+  border: 1px solid var(--plate-line);
+  background: var(--plate-bg);
+}
+.interview-history__score {
+  min-width: 44px;
+  font-weight: 500;
+  color: var(--c-bad);
+}
+.interview-history__score.is-pass {
+  color: var(--c-ok);
+}
+.interview-history__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--c-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.setting--danger {
+  border-color: rgba(255, 80, 120, 0.45);
+}
+.setting--danger svg {
+  color: var(--c-bad);
+}
+.setting--danger .setting__name {
+  color: var(--c-bad);
+}

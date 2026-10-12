@@ -12,7 +12,7 @@
 // Курс забирается кусками по несколько килобайт: с части каналов длинный
 // TCP-ответ до зарубежного сервера обрывается на первых десятках килобайт.
 
-import { saveCourse, saveTopic, readProgress, writeProgress, queueMissingForApp } from "./noa.mjs";
+import { saveCourse, saveTopic, readProgress, writeProgress, queueMissingForApp, removeCourse } from "./noa.mjs";
 import { randomUUID } from "node:crypto";
 import { authChallenge } from "./mcpauth.mjs";
 import { existsSync, readFileSync } from "node:fs";
@@ -296,7 +296,20 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
   route("GET", /^\/api\/app\/courses$/, ({ req }) => {
     const user = appUser(req);
     const rows = db.prepare("SELECT course_id, length(body) AS size, updated FROM noa_courses WHERE user_id = ?").all(String(user.id));
-    return { courses: rows.map((row) => ({ id: row.course_id, size: row.size, updated: row.updated })), part: PART_CHARS };
+    const removed = db.prepare("SELECT course_id FROM noa_removed WHERE user_id = ?").all(String(user.id));
+    return {
+      courses: rows.map((row) => ({ id: row.course_id, size: row.size, updated: row.updated })),
+      // Удалённые на любом устройстве: убрать у себя и не выгружать снова.
+      removed: removed.map((row) => row.course_id),
+      part: PART_CHARS,
+    };
+  });
+
+  // Удалить курс из аккаунта — с телефона или программы.
+  route("POST", /^\/api\/app\/courses\/([A-Za-z0-9_-]{1,64})\/remove$/, ({ req, match }) => {
+    const user = appUser(req);
+    removeCourse(db, user.id, match[1]);
+    return { ok: true };
   });
 
   route("GET", /^\/api\/app\/courses\/([A-Za-z0-9_-]{1,64})\/part$/, ({ req, match, url }) => {

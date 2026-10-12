@@ -253,6 +253,9 @@
         return { text: "Чем сеть bridge отличается от host?" };
       case "plugin:sufler|clipboard":
         return { text: "docker compose ps" };
+      case "learn_course_remove":
+        d.overview = d.overview.filter((c) => c.id !== args.course);
+        return null;
       case "practice_term_stop":
       case "practice_forget_server_key":
         return null;

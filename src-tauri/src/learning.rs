@@ -558,6 +558,21 @@ pub fn delete_course(course_id: &str) -> Result<String, String> {
     Ok(format!("Курс «{course_id}» удалён."))
 }
 
+/// Убирает свой курс в `courses/.removed` — не стирает: удалили по ошибке
+/// или на другом устройстве — файл можно вернуть. Прогресс остаётся.
+pub fn shelve_course(course_id: &str) -> Result<bool, String> {
+    let dir = user_dir().ok_or("папка курсов не найдена")?;
+    let path = dir.join(format!("{course_id}.json"));
+    if !path.exists() {
+        return Ok(false);
+    }
+    let shelf = dir.join(".removed");
+    std::fs::create_dir_all(&shelf).map_err(|err| err.to_string())?;
+    std::fs::rename(&path, shelf.join(format!("{course_id}.json"))).map_err(|err| err.to_string())?;
+    log::info!("свой курс «{course_id}» убран в courses/.removed");
+    Ok(true)
+}
+
 /// Формат курса — для клиентов MCP, которые собирают курсы.
 /// Как составить курс — для нейросети, которая его собирает (`course_format`).
 ///

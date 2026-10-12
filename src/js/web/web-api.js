@@ -363,6 +363,11 @@ async function learnApp(noa, cmd, args) {
     // браузере своего терминала нет.
     case "practice_progress":
       return [];
+    // Удалить курс: из аккаунта и браузера (убранный можно вернуть в Ноа онлайн).
+    case "learn_course_remove":
+      await noa.removeCourse(String(args.course));
+      emit("learn:changed", {});
+      return null;
     default:
       return undefined;
   }
