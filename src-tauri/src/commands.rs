@@ -1790,6 +1790,14 @@ pub async fn learn_course_remove(course: String) -> Result<(), String> {
     crate::platform::remove_course(&course).await
 }
 
+/// Сверить курсы с аккаунтом сейчас («потянуть вниз»); true — пришло новое.
+#[tauri::command]
+pub async fn learn_sync() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(crate::platform::sync_courses_now)
+        .await
+        .map_err(|err| err.to_string())?
+}
+
 /// Тренировка в приложении обучения — «Наизусть» и «Собеседование»: модель
 /// по указаниям экрана (интервьюер, проверяющий), с историей разговора.
 /// Логика тренировок — в окне (learn-app), одна для телефона и браузера;

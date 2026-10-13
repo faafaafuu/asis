@@ -1,8 +1,45 @@
 // 02 Курс — заголовок и прогресс, сегменты «Темы / Карта / Шпаргалка»,
 // темы строками (✓ пройдена, ▸ текущая, номер — впереди), финальный экзамен.
 
-import { el, icon, label, progress, loading, header, nav, register, call, iconButton, plural, markdown, toast, prefs } from "../core.js";
+import { el, icon, label, progress, loading, header, nav, register, call, iconButton, plural, markdown, toast, prefs, isWeb } from "../core.js";
 import { store, topicPercent, isDone, currentTopic } from "../store.js";
+import { pressMenu, confirmAction } from "../gestures.js";
+
+/**
+ * Удалить курс — после подтверждения снизу: курс собирается долго, а
+ * промахнуться легко. Курс уходит из аккаунта и со всех устройств; файл
+ * остаётся в courses/.removed, прогресс — в аккаунте. true — удалён.
+ */
+export async function removeCourse(course) {
+  const sure = await confirmAction({
+    title: `Удалить курс «${course.title}»?`,
+    text: "Уберётся с телефона, из программы и с сайта. Прогресс сохранится — курс можно собрать заново.",
+    ok: "Удалить курс",
+  });
+  if (!sure) return false;
+  try {
+    await call("learn_course_remove", { course: course.id }, { slow: true });
+  } catch (err) {
+    toast(String(err));
+    return false;
+  }
+  store.forget();
+  if (prefs.get("course") === course.id) prefs.set("course", null);
+  toast("Курс удалён");
+  return true;
+}
+
+/** Чем заняться по теме — меню по удержанию её строки или карточки. */
+export function topicActions(course, topic) {
+  const params = { course: course.id, topic: topic.id };
+  return [
+    { text: "Урок", icon: "learn", run: () => nav.push("lesson", params) },
+    { text: "Наизусть", icon: "cards", run: () => nav.push("drill", params) },
+    { text: "Проверка", icon: "target", run: () => nav.push("check", { course: course.id, scope: topic.id }) },
+    { text: "Собеседование по теме", icon: "user", run: () => nav.push("interview", params) },
+    ...(isWeb ? [] : [{ text: "Практика в терминале", icon: "keyboard", run: () => nav.push("practice", params) }]),
+  ];
+}
 
 register("course", (screen, { course: courseId }) => {
   const course = store.course(courseId);
@@ -61,6 +98,7 @@ register("course", (screen, { course: courseId }) => {
       text.append(el("span", "row__title", `${i + 1}. ${topic.title}`), bar);
       row.append(mark, text, el("span", "row__pct", topic.status === "new" ? "—" : `${pct}%`));
       row.addEventListener("click", () => nav.push("topic", { course: course.id, topic: topic.id }));
+      pressMenu(row, () => [{ text: "Открыть тему", icon: "chevron-right", run: () => nav.push("topic", { course: course.id, topic: topic.id }) }, ...topicActions(course, topic)]);
       rows.append(row);
     });
     body.append(rows);
@@ -132,9 +170,6 @@ register("topics-more", (screen, { course: courseId }) => {
   content.append(label("// о курсе"));
   content.append(markdown(course?.description || "Описания у курса нет.", "md md--small"));
 
-  // Удаление — вторым касанием: курс собирается долго, а промахнуться легко.
-  // Курс уходит из аккаунта и со всех устройств; файл остаётся в
-  // courses/.removed, прогресс — в аккаунте.
   content.append(label("// удалить"));
   const remove = el("button", "setting setting--danger");
   const text = el("span", "setting__text");
@@ -143,28 +178,10 @@ register("topics-more", (screen, { course: courseId }) => {
   text.append(name, hint);
   remove.append(icon("trash", 20, 2), text);
   remove.addEventListener("click", async () => {
-    if (!remove.dataset.sure) {
-      remove.dataset.sure = "1";
-      name.textContent = "Точно удалить? Нажмите ещё раз";
-      setTimeout(() => {
-        delete remove.dataset.sure;
-        name.textContent = "Удалить курс";
-      }, 4000);
-      return;
-    }
+    if (!course) return;
     remove.disabled = true;
-    name.textContent = "Удаляю…";
-    try {
-      await call("learn_course_remove", { course: courseId }, { slow: true });
-      store.forget();
-      if (prefs.get("course") === courseId) prefs.set("course", null);
-      toast("Курс удалён");
-      nav.home();
-    } catch (err) {
-      remove.disabled = false;
-      name.textContent = "Удалить курс";
-      toast(String(err));
-    }
+    if (await removeCourse(course)) nav.home();
+    else remove.disabled = false;
   });
   content.append(remove);
   screen.append(content);

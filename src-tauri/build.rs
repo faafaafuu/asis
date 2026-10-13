@@ -19,6 +19,7 @@ fn main() {
                     "stopListening",
                     "cancelListening",
                     "chime",
+                    "haptic",
                     "allowNotifications",
                     "notify",
                     "schedule",

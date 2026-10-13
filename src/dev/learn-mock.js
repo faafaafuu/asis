@@ -253,6 +253,9 @@
         return { text: "Чем сеть bridge отличается от host?" };
       case "plugin:sufler|clipboard":
         return { text: "docker compose ps" };
+      case "learn_sync":
+        await wait(900);
+        return false;
       case "learn_course_remove":
         d.overview = d.overview.filter((c) => c.id !== args.course);
         return null;
@@ -261,6 +264,7 @@
         return null;
       case "plugin:sufler|insets":
         return { top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 };
+      case "plugin:sufler|haptic":
       case "plugin:sufler|cancelListening":
       case "plugin:sufler|chime":
       case "plugin:sufler|barStyle":

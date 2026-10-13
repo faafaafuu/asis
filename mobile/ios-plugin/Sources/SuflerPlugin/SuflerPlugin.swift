@@ -308,6 +308,36 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
         invoke.resolve()
     }
 
+    class HapticArgs: Decodable {
+        let style: String?
+    }
+
+    /// Отклик вибромотором: касание, меню по удержанию, удаление.
+    @objc public func haptic(_ invoke: Invoke) {
+        let style = (try? invoke.parseArgs(HapticArgs.self))?.style ?? "light"
+        DispatchQueue.main.async {
+            switch style {
+            case "select":
+                UISelectionFeedbackGenerator().selectionChanged()
+            case "success":
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            case "warning":
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            case "error":
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            case "medium":
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            case "heavy":
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            case "rigid":
+                UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+            default:
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
+            invoke.resolve()
+        }
+    }
+
     /// Отступы под вырез, строку состояния и полоску «домой».
     @objc public func insets(_ invoke: Invoke) {
         DispatchQueue.main.async {

@@ -364,6 +364,9 @@ async function learnApp(noa, cmd, args) {
     case "practice_progress":
       return [];
     // Удалить курс: из аккаунта и браузера (убранный можно вернуть в Ноа онлайн).
+    // «Потянуть вниз» на экране курсов: свежая версия курсов аккаунта.
+    case "learn_sync":
+      return noa.refresh();
     case "learn_course_remove":
       await noa.removeCourse(String(args.course));
       emit("learn:changed", {});

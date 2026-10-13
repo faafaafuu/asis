@@ -209,6 +209,34 @@ export const voice = {
   },
 };
 
+/* ── Отклик ────────────────────────────────────────────────────────────── */
+
+/**
+ * Отклик вибромотором: `light` — касание, `select` — переключение,
+ * `medium` — меню по удержанию, `warning` / `success` — удаление, готово.
+ * На iPhone — Taptic Engine через плагин; в браузере — где он умеет.
+ */
+export function haptic(style = "light") {
+  if (!isWeb) {
+    api?.invoke("plugin:sufler|haptic", { style })?.catch?.(() => {});
+    return;
+  }
+  try {
+    navigator.vibrate?.(style === "light" || style === "select" ? 8 : 18);
+  } catch {
+    /* без отклика */
+  }
+}
+
+/** Движение выключено в настройках телефона — переходы без анимации. */
+export const still = () => Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+
+/** Кривая и длительность переходов — как у системных экранов iPhone. */
+export const EASE = "cubic-bezier(0.2, 0.85, 0.25, 1)";
+const SLIDE = 340;
+/** Насколько уезжает нижний экран, пока сверху въезжает новый. */
+const PARALLAX = 28;
+
 /* ── Навигация ─────────────────────────────────────────────────────────── */
 
 const TABS = [
@@ -219,9 +247,16 @@ const TABS = [
 ];
 
 const screens = {};
+// Запись стека: экран и его параметры; `snap` — как выглядел экран, когда с
+// него ушли дальше (живой узел без обработчиков): он лежит под верхним при
+// свайпе назад и закрывает свежую отрисовку, пока та грузится.
 const stacks = Object.fromEntries(TABS.map((tab) => [tab.id, [{ name: tab.root, params: {} }]]));
 let current = "courses";
 let host = null;
+/** Сцена: тут живут экраны, в переходе — два сразу. Вкладки — под ней. */
+let stage = null;
+let tabs = null;
+let screenEl = null;
 let teardown = null;
 let badge = 0;
 
@@ -229,37 +264,88 @@ export function register(name, render) {
   screens[name] = render;
 }
 
+/**
+ * В браузере переходы — записи истории: «назад» браузера, свайп Safari от
+ * края и кнопка «назад» Android ведут по экранам, а не уводят с сайта.
+ */
+const pages = {
+  depth: 0,
+  ignore: 0,
+  push() {
+    if (!isWeb) return;
+    this.depth += 1;
+    window.history.pushState({ learn: this.depth }, "");
+  },
+  back() {
+    if (!isWeb || !this.depth) return;
+    this.depth -= 1;
+    this.ignore += 1;
+    window.history.back();
+  },
+  reset() {
+    if (!isWeb || !this.depth) return;
+    this.ignore += 1;
+    window.history.go(-this.depth);
+    this.depth = 0;
+  },
+};
+if (isWeb) {
+  window.addEventListener("popstate", () => {
+    if (pages.ignore) {
+      pages.ignore -= 1;
+      return;
+    }
+    pages.depth = Math.max(0, pages.depth - 1);
+    // Браузер уже показал свой переход — без второго.
+    if (stacks[current].length > 1) {
+      stacks[current].pop();
+      draw("none");
+    }
+  });
+}
+
 export const nav = {
   push(name, params = {}) {
     stacks[current].push({ name, params });
-    draw();
+    pages.push();
+    draw("push");
   },
   replace(name, params = {}) {
     stacks[current][stacks[current].length - 1] = { name, params };
-    draw();
+    draw("fade");
   },
   back() {
-    if (stacks[current].length > 1) stacks[current].pop();
-    draw();
+    if (stacks[current].length < 2) return draw("none");
+    stacks[current].pop();
+    pages.back();
+    draw("pop");
   },
   /** К корню вкладки — например, после конца экзамена. */
   home() {
+    const deeper = stacks[current].length > 1;
     stacks[current].length = 1;
-    draw();
+    pages.reset();
+    draw(deeper ? "pop" : "none");
   },
   tab(id, reset = false) {
+    const same = id === current;
+    const deeper = stacks[id].length > 1;
     current = id;
     if (reset) stacks[id].length = 1;
-    draw();
+    pages.reset();
+    if (!same) haptic("select");
+    draw(same ? (reset && deeper ? "pop" : "none") : "fade");
   },
   refresh() {
-    draw();
+    draw("none");
   },
   setBadge(n) {
     badge = n;
-    document.querySelector(".tab[data-tab='review'] .tab__count")?.replaceChildren(String(n));
-    const count = document.querySelector(".tab[data-tab='review'] .tab__count");
-    if (count) count.hidden = !n;
+    const count = tabs?.querySelector(".tab[data-tab='review'] .tab__count");
+    if (count) {
+      count.textContent = String(n);
+      count.hidden = !n;
+    }
   },
   get current() {
     return current;
@@ -276,7 +362,6 @@ function tabBar() {
   for (const tab of TABS) {
     const item = el("button", "tab");
     item.dataset.tab = tab.id;
-    if (tab.id === current) item.setAttribute("aria-current", "page");
     item.append(icon(tab.icon), tab.label);
     if (tab.id === "review") {
       const count = el("span", "tab__count", badge);
@@ -291,7 +376,69 @@ function tabBar() {
   return bar;
 }
 
-function draw() {
+const scrollOf = (screen) => screen?.querySelector(".content")?.scrollTop ?? 0;
+const scrollTo = (screen, top) => {
+  const box = screen?.querySelector(".content");
+  if (box && top) box.scrollTop = top;
+};
+
+/** Экран вне потока: уходящий, подложка или крышка поверх свежего. */
+function lift(screen, z) {
+  screen.classList.add("screen--off");
+  screen.style.zIndex = String(z);
+}
+
+/** Анимация, после которой стиль остаётся конечным, а сама она снимается. */
+function play(node, frames, duration, easing = EASE) {
+  const run = node.animate(frames, { duration, easing, fill: "forwards" });
+  return run.finished.then(
+    () => {
+      const last = frames[frames.length - 1];
+      for (const [key, value] of Object.entries(last)) if (key !== "offset") node.style[key] = value;
+      run.cancel();
+    },
+    () => {},
+  );
+}
+
+/**
+ * Свежий экран дорисован — данные пришли (нет «Загружаю…») или прошло
+ * полсекунды: тогда снимается крышка и возвращается прокрутка.
+ */
+function whenReady(screen, done) {
+  const from = performance.now();
+  const tick = () => {
+    if (!screen.isConnected || !screen.querySelector(".loading") || performance.now() - from > 450) return done();
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+function uncover(screen, cover, scroll) {
+  if (!cover) return;
+  whenReady(screen, () => {
+    scrollTo(screen, scroll);
+    if (!cover.isConnected) return;
+    if (still()) return cover.remove();
+    play(cover, [{ opacity: getComputedStyle(cover).opacity }, { opacity: 0 }], 140, "ease-out").then(() => {
+      cover.remove();
+      cover.style.opacity = "";
+    });
+  });
+}
+
+/**
+ * Рисует верхний экран вкладки. `motion` — как он появляется: `push` —
+ * въезжает справа поверх прежнего, `pop` — прежний уезжает вправо и
+ * открывает этот, `swiped` — то же, но экран уже утащен пальцем, `fade` —
+ * смена вкладки, `none` — перерисовка на месте (без мигания «Загружаю…»).
+ */
+function draw(motion = "none") {
+  const old = screenEl;
+  const scroll = scrollOf(old);
+  // Недоигравший переход — сразу в конец.
+  for (const node of [...stage.children]) if (node !== old) node.remove();
+  for (const run of old?.getAnimations?.() ?? []) run.cancel();
   try {
     teardown?.();
   } catch {
@@ -299,26 +446,219 @@ function draw() {
   }
   teardown = null;
   voice.stop();
-  const top = stacks[current][stacks[current].length - 1];
+
+  const stack = stacks[current];
+  const top = stack[stack.length - 1];
+  if (motion === "push" && old && stack.length > 1) Object.assign(stack[stack.length - 2], { snap: old, scroll });
+  let cover = null;
+  let restore = 0;
+  if ((motion === "pop" || motion === "swiped") && top.snap) {
+    cover = top.snap;
+    restore = top.scroll ?? 0;
+  } else if (motion === "none" && old) {
+    cover = old;
+    restore = scroll;
+  }
+  top.snap = null;
+
+  if (old && old !== cover) lift(old, motion === "push" ? 1 : 3);
+  if (cover) {
+    lift(cover, 2);
+    cover.style.transform = "";
+    cover.style.opacity = "";
+    if (!cover.isConnected) {
+      stage.append(cover);
+      scrollTo(cover, restore);
+    }
+  }
+
   const render = screens[top.name];
   const screen = el("section", "screen");
-  host.replaceChildren(screen);
+  screenEl = screen;
+  stage.prepend(screen);
   let full = false;
   try {
     const view = render(screen, top.params) ?? {};
     full = Boolean(view.full);
     teardown = view.cleanup ?? null;
   } catch (err) {
-    screen.append(header({ title: "Ошибка", back: stacks[current].length > 1 }), el("div", "content", String(err)));
+    screen.append(header({ title: "Ошибка", back: stack.length > 1 }), el("div", "content", String(err)));
   }
-  if (!full) host.append(tabBar());
+  tabs.hidden = full;
+  for (const item of tabs.querySelectorAll(".tab")) {
+    if (item.dataset.tab === current) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
+  }
   // Кольцо Ноа — только на экранах с вкладками: в уроке и практике свой микрофон.
   document.body.classList.toggle("is-full", full);
+
+  const drop = () => old?.remove();
+  if (!old || still() || motion === "swiped") {
+    drop();
+    if (cover && cover !== old) uncover(screen, cover, restore);
+    else cover?.remove();
+    return;
+  }
+  if (motion === "none") return uncover(screen, cover, restore);
+  if (motion === "fade") {
+    drop();
+    play(screen, [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], 200, "ease-out");
+    return;
+  }
+  if (motion === "push") {
+    screen.style.zIndex = "2";
+    screen.classList.add("screen--front");
+    play(old, [{ transform: "none", opacity: 1 }, { transform: `translateX(-${PARALLAX}%)`, opacity: 0.35 }], SLIDE).then(drop);
+    play(screen, [{ transform: "translateX(100%)" }, { transform: "none" }], SLIDE).then(() => {
+      screen.classList.remove("screen--front");
+      screen.style.zIndex = "";
+    });
+    return;
+  }
+  // pop: прежний уезжает вправо, под ним — подложка, она же крышка.
+  old.classList.add("screen--front");
+  play(old, [{ transform: "none" }, { transform: "translateX(100%)" }], SLIDE - 40).then(drop);
+  const under = cover ?? screen;
+  play(under, [{ transform: `translateX(-${PARALLAX}%)`, opacity: 0.35 }, { transform: "none", opacity: 1 }], SLIDE - 40).then(() => {
+    under.style.transform = "";
+    under.style.opacity = "";
+    if (cover) uncover(screen, cover, restore);
+  });
+}
+
+/* ── Свайп от левого края — назад, как в приложениях iPhone ──────────────
+   Экран идёт за пальцем, под ним — прежний (его снимок). Отпустили дальше
+   трети ширины или смахнули быстро — назад; иначе экран возвращается. В
+   браузере этот жест — у самого Safari (записи истории выше). */
+
+const EDGE = 30;
+
+function swipeBack() {
+  let drag = null;
+  const backButton = () =>
+    screenEl?.querySelector(':scope > header [aria-label="Назад"], :scope > header [aria-label="Закрыть"]') ?? null;
+
+  stage.addEventListener(
+    "touchstart",
+    (event) => {
+      drag = null;
+      if (event.touches.length !== 1 || stacks[current].length < 2) return;
+      if (document.querySelector(".sheet, .ctx, .act")) return;
+      const touch = event.touches[0];
+      const box = stage.getBoundingClientRect();
+      if (touch.clientX - box.left > EDGE) return;
+      const back = backButton();
+      if (!back) return;
+      drag = { x: touch.clientX, y: touch.clientY, on: false, width: box.width, back, dx: 0, trail: [] };
+    },
+    { passive: true },
+  );
+
+  stage.addEventListener(
+    "touchmove",
+    (event) => {
+      if (!drag) return;
+      const touch = event.touches[0];
+      const dx = touch.clientX - drag.x;
+      const dy = touch.clientY - drag.y;
+      if (!drag.on) {
+        if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) {
+          drag = null;
+          return;
+        }
+        if (dx < 8) return;
+        begin(drag);
+      }
+      event.preventDefault();
+      drag.dx = Math.max(0, dx);
+      drag.trail.push([event.timeStamp, touch.clientX]);
+      if (drag.trail.length > 6) drag.trail.shift();
+      follow(drag);
+    },
+    { passive: false },
+  );
+
+  const end = (cancelled) => {
+    const done = drag;
+    drag = null;
+    if (done?.on) release(done, cancelled);
+  };
+  stage.addEventListener("touchend", () => end(false));
+  stage.addEventListener("touchcancel", () => end(true));
+
+  function begin(state) {
+    state.on = true;
+    state.screen = screenEl;
+    for (const run of screenEl.getAnimations()) run.cancel();
+    const below = stacks[current][stacks[current].length - 2];
+    state.under = below?.snap ?? null;
+    if (state.under) {
+      lift(state.under, 1);
+      stage.append(state.under);
+      scrollTo(state.under, below.scroll);
+    }
+    screenEl.style.zIndex = "2";
+    screenEl.classList.add("screen--front");
+    // Поле ввода под пальцем — клавиатура убирается сразу.
+    document.activeElement?.blur?.();
+  }
+
+  function follow(state) {
+    const k = state.dx / state.width;
+    state.screen.style.transform = `translateX(${state.dx}px)`;
+    if (state.under) {
+      state.under.style.transform = `translateX(${-PARALLAX * (1 - k)}%)`;
+      state.under.style.opacity = String(0.35 + 0.65 * k);
+    }
+  }
+
+  function release(state, cancelled) {
+    const first = state.trail[0];
+    const last = state.trail[state.trail.length - 1];
+    const speed = first && last && last[0] > first[0] ? (last[1] - first[1]) / (last[0] - first[0]) : 0;
+    const go = !cancelled && (state.dx > state.width * 0.35 || (speed > 0.45 && state.dx > 24));
+    const left = go ? 1 - state.dx / state.width : state.dx / state.width;
+    const time = Math.max(140, Math.round(280 * left));
+    const custom = state.back.dataset.back === "custom";
+    const screen = state.screen;
+    const under = state.under;
+    if (go && !custom) {
+      play(screen, [{ transform: screen.style.transform }, { transform: "translateX(100%)" }], time);
+      const finish = () => {
+        if (screenEl !== screen) return;
+        stacks[current].pop();
+        pages.back();
+        draw("swiped");
+      };
+      if (under) play(under, [{ transform: under.style.transform, opacity: under.style.opacity }, { transform: "none", opacity: 1 }], time).then(finish);
+      else setTimeout(finish, time);
+      return;
+    }
+    // Не дотянули (или у экрана свой «назад» — он спросит сам): на место.
+    play(screen, [{ transform: screen.style.transform }, { transform: "none" }], time).then(() => {
+      screen.style.transform = "";
+      screen.style.zIndex = "";
+      screen.classList.remove("screen--front");
+      if (go && custom) state.back.click();
+    });
+    if (under)
+      play(under, [{ transform: under.style.transform, opacity: under.style.opacity }, { transform: `translateX(-${PARALLAX}%)`, opacity: 0.35 }], time).then(() => {
+        under.remove();
+        under.style.transform = "";
+        under.style.opacity = "";
+      });
+  }
 }
 
 export function start(root, first = "courses") {
   host = root;
   current = first;
+  stage = el("div", "stage");
+  tabs = tabBar();
+  host.replaceChildren(stage, tabs);
+  // :active на iPhone срабатывает, только если странице нужны касания.
+  document.addEventListener("touchstart", () => {}, { passive: true });
+  if (!isWeb) swipeBack();
   draw();
 }
 
@@ -349,7 +689,12 @@ export function header({ home = false, big = "", meta = null, title = "", back =
     }
     return bar;
   }
-  if (back || close) bar.append(iconButton(close ? "close" : "arrow-left", close ? "Закрыть" : "Назад", onBack ?? (() => nav.back())));
+  if (back || close) {
+    const btn = iconButton(close ? "close" : "arrow-left", close ? "Закрыть" : "Назад", onBack ?? (() => nav.back()));
+    // Свайп от края делает то же; свой «назад» (спросить, выйти ли) — жмётся.
+    btn.dataset.back = onBack ? "custom" : "nav";
+    bar.append(btn);
+  }
   bar.append(el("span", "bar__title", title));
   if (right) bar.append(right);
   return bar;
@@ -357,22 +702,82 @@ export function header({ home = false, big = "", meta = null, title = "", back =
 
 /* ── Лист поверх экрана ────────────────────────────────────────────────── */
 
+/**
+ * Лист снизу: выезжает, закрывается крестиком, тапом мимо или смахиванием
+ * вниз — за ручку, шапку или содержимое, прокрученное к началу.
+ */
 export function sheet(title, fill) {
   const layer = el("div", "sheet");
   const body = el("div", "sheet__body");
   const head = el("div", "sheet__head");
+  let closed = false;
   const close = () => {
-    layer.remove();
+    if (closed) return;
+    closed = true;
     voice.stop();
+    layer.style.pointerEvents = "none";
+    if (still()) return layer.remove();
+    const from = getComputedStyle(body).transform;
+    play(body, [{ transform: from === "none" ? "translateY(0)" : from }, { transform: "translateY(105%)" }], 220, "cubic-bezier(0.4, 0, 1, 1)");
+    play(layer, [{ backgroundColor: getComputedStyle(layer).backgroundColor }, { backgroundColor: "rgba(2, 4, 7, 0)" }], 220, "ease-in").then(() => layer.remove());
   };
   head.append(el("span", "sheet__title", title), iconButton("close", "Закрыть", close));
   const content = el("div", "sheet__content");
-  body.append(head, content);
+  body.append(el("span", "sheet__grab"), head, content);
   layer.append(body);
   layer.addEventListener("click", (event) => {
     if (event.target === layer) close();
   });
   document.body.append(layer);
+  if (!still()) {
+    play(body, [{ transform: "translateY(100%)" }, { transform: "translateY(0)" }], 320).then(() => (body.style.transform = ""));
+    play(layer, [{ backgroundColor: "rgba(2, 4, 7, 0)" }, { backgroundColor: "rgba(2, 4, 7, 0.72)" }], 220, "ease-out").then(() => (layer.style.backgroundColor = ""));
+  }
+
+  let drag = null;
+  body.addEventListener(
+    "touchstart",
+    (event) => {
+      drag = null;
+      if (event.touches.length !== 1 || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName)) return;
+      // Из содержимого — только когда оно у начала: иначе это прокрутка.
+      if (content.contains(event.target) && content.scrollTop > 0) return;
+      drag = { y: event.touches[0].clientY, dy: 0, on: false, trail: [] };
+    },
+    { passive: true },
+  );
+  body.addEventListener(
+    "touchmove",
+    (event) => {
+      if (!drag) return;
+      const y = event.touches[0].clientY;
+      const dy = y - drag.y;
+      if (!drag.on) {
+        if (dy < -4) return (drag = null);
+        if (dy < 8) return;
+        drag.on = true;
+      }
+      event.preventDefault();
+      drag.dy = Math.max(0, dy - 8);
+      drag.trail.push([event.timeStamp, y]);
+      if (drag.trail.length > 6) drag.trail.shift();
+      body.style.transform = `translateY(${drag.dy}px)`;
+      layer.style.backgroundColor = `rgba(2, 4, 7, ${0.72 * Math.max(0, 1 - drag.dy / body.offsetHeight)})`;
+    },
+    { passive: false },
+  );
+  body.addEventListener("touchend", () => {
+    const done = drag;
+    drag = null;
+    if (!done?.on) return;
+    const first = done.trail[0];
+    const last = done.trail[done.trail.length - 1];
+    const speed = first && last && last[0] > first[0] ? (last[1] - first[1]) / (last[0] - first[0]) : 0;
+    if (done.dy > body.offsetHeight * 0.3 || speed > 0.5) return close();
+    play(body, [{ transform: body.style.transform }, { transform: "translateY(0)" }], 240).then(() => (body.style.transform = ""));
+    play(layer, [{ backgroundColor: layer.style.backgroundColor }, { backgroundColor: "rgba(2, 4, 7, 0.72)" }], 240).then(() => (layer.style.backgroundColor = ""));
+  });
+
   fill(content, close);
   return close;
 }

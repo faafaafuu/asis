@@ -2144,3 +2144,255 @@ html.kb-open .tkeys {
   border: 1px solid currentColor;
   font-size: 12px;
 }
+
+/* ── Переходы и жесты ──────────────────────────────────────────────────────
+   Сцена держит экраны: в переходе их два — новый въезжает справа поверх
+   прежнего, назад — уезжает вправо. Свайп от левого края — назад. */
+
+.stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.screen {
+  position: relative;
+  background: linear-gradient(165deg, #0b0f16 0%, #060809 60%, #0a0710 100%);
+}
+.screen--off {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.screen--front {
+  box-shadow: -14px 0 32px -8px rgba(0, 0, 0, 0.75), -1px 0 0 rgba(0, 240, 255, 0.14);
+}
+
+/* Отклик на нажатие: карточка чуть проседает, значок — гаснет. */
+button.plate,
+.row,
+.final,
+.setting,
+.btn {
+  transition: transform 0.14s ease, opacity 0.14s ease;
+}
+button.plate:active,
+.row:active,
+.final:active,
+.setting:active {
+  transform: scale(0.985);
+}
+.btn:not(:disabled):active {
+  transform: scale(0.97);
+}
+.icon-btn,
+.tab {
+  transition: opacity 0.12s ease;
+}
+.icon-btn:active,
+.tab:active {
+  opacity: 0.55;
+}
+.pressable {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pressable.is-holding {
+  transform: scale(0.965);
+  transition: transform 0.42s ease;
+}
+
+/* Смахнуть строку: действия раскрываются справа на ширину смахивания. */
+.swipe {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.swipe > .swipe__front {
+  position: relative;
+  z-index: 1;
+}
+.swipe__actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 0;
+  display: flex;
+  overflow: hidden;
+}
+.swipe__act {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--c-head);
+  background: rgba(0, 240, 255, 0.18);
+}
+.swipe__act.is-danger {
+  background: #b81d45;
+  color: #fff;
+}
+.swipe.is-armed .swipe__act.is-danger {
+  background: #e0245a;
+}
+
+/* Меню по удержанию: экран размыт, карточка приподнята, действия под ней. */
+.ctx {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+}
+.ctx__shade {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 4, 7, 0.55);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+}
+.ctx__ghost {
+  position: fixed !important;
+  margin: 0 !important;
+  z-index: 1;
+  pointer-events: none;
+  background: #0a1118 !important;
+  box-shadow: 0 0 0 1px var(--c-accent), 0 18px 50px -10px rgba(0, 0, 0, 0.85), 0 0 30px -6px rgba(0, 240, 255, 0.55) !important;
+}
+.ctx__menu {
+  position: fixed;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  background: rgba(10, 16, 22, 0.97);
+  box-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.9), 0 0 24px -8px rgba(0, 240, 255, 0.45);
+}
+.ctx__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  padding: 0 14px;
+  text-align: left;
+  font-size: 14px;
+  color: var(--c-head);
+}
+.ctx__item + .ctx__item {
+  border-top: 1px solid var(--line);
+}
+.ctx__item:active {
+  background: rgba(0, 240, 255, 0.08);
+}
+.ctx__item.is-danger {
+  color: #ff6b8e;
+}
+
+/* Подтверждение — лист действий снизу. */
+.act {
+  position: fixed;
+  left: var(--col-gap);
+  right: var(--col-gap);
+  top: var(--vvtop, 0px);
+  height: var(--vvh, 100%);
+  z-index: 85;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0 10px calc(10px + var(--safe-bottom));
+  background: rgba(2, 4, 7, 0.6);
+}
+.act__box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.act__group {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  background: rgba(10, 16, 22, 0.97);
+}
+.act__head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px 12px;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+}
+.act__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-head);
+}
+.act__text {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--c-muted);
+}
+.act__btn {
+  min-height: 54px;
+  font-size: 16px;
+  color: var(--c-accent);
+}
+.act__btn.is-danger {
+  color: #ff6b8e;
+  font-weight: 500;
+}
+.act__cancel {
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  background: #0c141b;
+  color: var(--c-head);
+  font-weight: 600;
+}
+.act__btn:active {
+  background: rgba(0, 240, 255, 0.08);
+}
+
+/* Лист снизу — ручка: за неё (и за шапку) лист смахивают вниз. */
+.sheet__grab {
+  flex: none;
+  display: block;
+  width: 40px;
+  height: 4px;
+  margin: 8px auto 0;
+  border-radius: 2px;
+  background: rgba(159, 221, 230, 0.35);
+}
+
+/* Потянуть вниз — обновить. */
+.ptr {
+  flex: none;
+  height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  opacity: 0;
+  font-size: 12px;
+  color: var(--c-muted);
+}
+.ptr__spin {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(0, 240, 255, 0.25);
+  border-top-color: var(--c-accent);
+  border-radius: 50%;
+}
+.ptr.is-armed {
+  color: var(--c-accent);
+}
+.ptr.is-busy .ptr__spin {
+  animation: spin 0.8s linear infinite;
+}

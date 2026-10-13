@@ -474,6 +474,16 @@ pub async fn stop_build(id: &str) -> Result<(), String> {
     post(&url, &format!("/api/noa/builds/{id}/stop"), &token, &json!({})).await.map(|_| ())
 }
 
+/// Сверка с курсами аккаунта сейчас — «потянуть вниз» на экране курсов.
+/// Отдаёт, появилось ли что-то новое.
+pub fn sync_courses_now() -> Result<bool, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Ok(false);
+    }
+    account_courses(&url, &token)
+}
+
 pub fn sync(app: &tauri::AppHandle) {
     let app = app.clone();
     let _ = std::thread::Builder::new().name("sufler-platform".into()).spawn(move || {
@@ -649,6 +659,9 @@ fn fetch_payload(url: &str, token: &str, id: &str, size: usize) -> Result<String
 /// недостающее и обновлённое на сайте скачивает кусками, свои курсы (на
 /// компьютере) выгружает в аккаунт. Отдаёт, появилось ли что-то новое.
 fn account_courses(url: &str, token: &str) -> Result<bool, String> {
+    // Фоновая сверка и «потянуть вниз» — по одной: обе пишут курсы и отметки.
+    static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = ONE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let list = tauri::async_runtime::block_on(get_with(url, "/api/app/courses", token))?;
     let account = list["courses"].as_array().cloned().unwrap_or_default();
     let stamps_path = kit::data_dir().ok_or("папка данных не найдена")?.join("account-courses.json");

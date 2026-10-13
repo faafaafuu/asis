@@ -6,6 +6,8 @@ import { el, icon, button, label, progress, steps, loading, header, nav, registe
 import { store, currentTopic, topicCard, greeting, isDone } from "../store.js";
 import { open as openAssistant } from "../assistant.js";
 import { lastInterview } from "./interview.js";
+import { removeCourse, topicActions } from "./course.js";
+import { swipeRow, pressMenu, collapse, pullToRefresh } from "../gestures.js";
 
 register("courses", (screen) => {
   screen.append(header({ home: true, onMic: () => openAssistant() }));
@@ -16,6 +18,19 @@ register("courses", (screen) => {
   build.append(icon("plus", 20, 2), "Собрать курс");
   sticky.append(build);
   screen.append(content, sticky);
+  // Потянуть вниз — сверить курсы с аккаунтом. Большой курс по мобильной
+  // сети качается долго: кольцо крутится до 6 с, курс дорисуется сам.
+  pullToRefresh(content, async () => {
+    const sync = call("learn_sync").catch(() => false);
+    sync.then((changed) => {
+      if (!changed) return;
+      store.forget();
+      if (nav.current === "courses" && nav.depth === 1) nav.refresh();
+    });
+    await Promise.race([sync, new Promise((done) => setTimeout(done, 6000))]);
+    store.forget();
+    nav.refresh();
+  });
 
   let alive = true;
   let waitTimer = 0;
@@ -130,7 +145,7 @@ function continueCard(course) {
   go.append(icon("play", 16, 2.5), "Дальше");
   foot.append(go);
   card.append(foot);
-  // Тап — сразу в текущий шаг.
+  // Тап — сразу в текущий шаг; удержание — выбрать, чем заняться.
   card.addEventListener("click", () => {
     if (!topic) return nav.push("course", { course: course.id });
     store.rememberCourse(course.id);
@@ -138,6 +153,12 @@ function continueCard(course) {
     else if (!topic.read) nav.push("lesson", { course: course.id, topic: topic.id });
     else nav.push("topic", { course: course.id, topic: topic.id });
   });
+  if (topic)
+    pressMenu(card, () => [
+      { text: "Открыть тему", icon: "chevron-right", run: () => nav.push("topic", { course: course.id, topic: topic.id }) },
+      ...topicActions(course, topic),
+      { text: "Весь курс", icon: "learn", run: () => nav.push("course", { course: course.id }) },
+    ]);
   return card;
 }
 
@@ -188,11 +209,25 @@ function courseCard(course) {
     progress(course.percent),
     el("span", "small dim", `${done} из ${course.topics.length} тем · финальный экзамен ${course.finalUnlocked ? "открыт" : "закрыт"}`),
   );
-  card.addEventListener("click", () => {
+  const open = () => {
     store.rememberCourse(course.id);
     nav.push("course", { course: course.id });
-  });
-  return card;
+  };
+  card.addEventListener("click", open);
+  // Смахнуть влево — «Удалить»; удержать — меню курса.
+  const row = swipeRow(card, [{ text: "Удалить", icon: "trash", danger: true, run: () => drop() }]);
+  const drop = async () => {
+    if (!(await removeCourse(course))) return row.close();
+    await collapse(row);
+    nav.refresh();
+  };
+  pressMenu(card, () => [
+    { text: "Открыть курс", icon: "chevron-right", run: open },
+    { text: "Собеседование", icon: "user", run: () => nav.push("interview", { course: course.id }) },
+    ...(course.finalUnlocked ? [{ text: "Финальный экзамен", icon: "target", run: () => nav.push("check", { course: course.id, scope: "final" }) }] : []),
+    { text: "Удалить курс", icon: "trash", danger: true, run: () => drop() },
+  ]);
+  return row;
 }
 
 /** Вход в аккаунт через Telegram — без ключа вручную. */

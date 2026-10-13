@@ -7,6 +7,7 @@
 import { el, icon, label, loading, nav, register, iconButton, call, voice, toast, prefs, steps, markdown, ring } from "../core.js";
 import { store, topicCard } from "../store.js";
 import { coachJson } from "../coach.js";
+import { swipeRow, pressMenu, collapse, confirmAction } from "../gestures.js";
 
 const LEVELS = [
   { id: "junior", name: "Junior" },
@@ -146,12 +147,22 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     dock.replaceChildren(go);
   }
 
-  /** Прошлые собеседования по курсу — каждое можно удалить. */
+  /** Прошлые собеседования по курсу — смахнуть влево или удержать — удалить. */
   function paintHistory() {
     const mine = history().filter((item) => item.course === courseId);
     if (!mine.length) return;
     const block = el("div", "list interview-history");
-    block.append(label(`// прошлые собеседования · ${mine.length}`));
+    const head = label(`// прошлые собеседования · ${mine.length}`);
+    block.append(head);
+    let shown = Math.min(mine.length, 8);
+    const forget = async (item, wrap) => {
+      prefs.set("interviews", history().filter((one) => one.at !== item.at));
+      await collapse(wrap);
+      shown -= 1;
+      const left = history().filter((one) => one.course === courseId).length;
+      if (!left || !shown) collapse(block);
+      else head.textContent = `// прошлые собеседования · ${left}`;
+    };
     for (const item of mine.slice(-8).reverse()) {
       const row = el("div", "interview-history__row");
       const topic = item.topic ? topicCard(course, item.topic)?.title : "весь курс";
@@ -159,24 +170,18 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
         el("span", `interview-history__score ${item.score >= PASS ? "is-pass" : ""}`, `${item.score}%`),
         el("span", "interview-history__text", `${new Date(item.at).toLocaleDateString("ru-RU")} · ${item.level} · ${topic ?? ""}`),
       );
-      const drop = iconButton("close", "Удалить", () => {
-        prefs.set("interviews", history().filter((one) => one.at !== item.at));
-        block.remove();
-        paintHistory();
-      }, 18);
-      row.append(drop);
-      block.append(row);
+      const wrap = swipeRow(row, [{ text: "Удалить", icon: "trash", danger: true, run: () => forget(item, wrap) }]);
+      pressMenu(row, () => [{ text: "Удалить из истории", icon: "trash", danger: true, run: () => forget(item, wrap) }]);
+      block.append(wrap);
     }
+    block.append(el("span", "small dim", "Смахните строку влево или удержите — удалить."));
     const clear = el("button", "btn btn--plain", "Очистить историю");
     clear.style.cssText = "height:36px;padding:0;align-self:flex-start;font-size:12.5px";
-    clear.addEventListener("click", () => {
-      if (!clear.dataset.sure) {
-        clear.dataset.sure = "1";
-        clear.textContent = "Точно очистить? Нажмите ещё раз";
-        return;
-      }
+    clear.addEventListener("click", async () => {
+      const sure = await confirmAction({ title: "Очистить историю собеседований?", text: "Баллы прошлых собеседований по этому курсу пропадут.", ok: "Очистить" });
+      if (!sure) return;
       prefs.set("interviews", history().filter((one) => one.course !== courseId));
-      block.remove();
+      collapse(block);
     });
     block.append(clear);
     // Над настройками: сразу видно, как менялся балл.
