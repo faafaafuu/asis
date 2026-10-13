@@ -31,6 +31,8 @@ fn main() {
                     "barStyle",
                     "registerListener",
                     "removeListener",
+                    // Так её зовёт PluginListener.unregister() из @tauri-apps/api.
+                    "remove_listener",
                 ])
                 .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
         ),
