@@ -4,8 +4,8 @@
 // (зажать микрофон), прочитать вслух. Объясняет модель программы
 // (ai_explain / ai_ask) — через мост сайта.
 
-import { WebHost, anchorFromRange } from "../web-host.js";
-import { api, voice } from "./core.js";
+import { WebHost } from "../web-host.js";
+import { api, voice, isWeb } from "./core.js";
 
 /** Абзац вокруг выделения — чтобы слово объяснялось в своём смысле. */
 function selectionContext() {
@@ -62,16 +62,25 @@ export function mountSuflyor() {
   };
   const showAt = host.showAt.bind(host);
   host.showAt = (anchor, term, context = "") => showAt(anchor, term, context || selectionContext());
-
-  // Пункт «Объяснить» в системном меню выделения iPhone (плагин) — то же окно.
-  globalThis.__TAURI__?.core?.addPluginListener?.("sufler", "selection", (event) => {
-    const text = String(event?.text ?? "").trim();
-    const sel = getSelection();
-    if (!text || !sel?.rangeCount) return;
-    host.hideMenu();
-    host.range = sel.getRangeAt(0).cloneRange();
-    const anchor = anchorFromRange(host.range);
-    if (anchor) host.showAt(anchor, text);
-  })?.catch?.(() => {});
+  quietSystemMenu();
   return host;
+}
+
+/**
+ * Системное меню выделения iPhone («Скопировать», «Перевести»…) плагин
+ * выключает: над текстом — меню суфлёра. В поле ввода оно нужно (вставить,
+ * вырезать) — окно сообщает, когда фокус в поле.
+ */
+function quietSystemMenu() {
+  if (isWeb) return;
+  const editable = (node) => Boolean(node?.matches?.("input, textarea, select, [contenteditable]:not([contenteditable='false'])"));
+  let editing = false;
+  const tell = () => {
+    const now = editable(document.activeElement);
+    if (now === editing) return;
+    editing = now;
+    api.invoke("plugin:sufler|systemMenu", { editing: now }).catch(() => {});
+  };
+  document.addEventListener("focusin", tell);
+  document.addEventListener("focusout", () => setTimeout(tell, 0));
 }

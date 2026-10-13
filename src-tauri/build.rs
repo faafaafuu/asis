@@ -20,6 +20,7 @@ fn main() {
                     "cancelListening",
                     "chime",
                     "haptic",
+                    "systemMenu",
                     "allowNotifications",
                     "notify",
                     "schedule",

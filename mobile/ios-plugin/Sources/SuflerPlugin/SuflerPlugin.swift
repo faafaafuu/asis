@@ -1,12 +1,14 @@
 import AVFoundation
 import AudioToolbox
+import ObjectiveC
 import Speech
 import Tauri
 import UIKit
 import WebKit
 
 /// Плагин Tauri для iOS: голос Ноа (синтез и распознавание речи), отступы
-/// экрана, сигнал и пункт «Объяснить» в меню выделения нашего окна.
+/// экрана, сигнал, отклик вибромотором; системное меню выделения в окне
+/// выключено — над текстом своё меню (SystemEditMenu).
 ///
 /// Голос — системный: AVSpeechSynthesizer говорит, SFSpeechRecognizer слушает,
 /// оба по-русски. Команды — те же, что у плагина Android (SuflerPlugin.kt),
@@ -16,8 +18,6 @@ import WebKit
 /// Ограничение платформы не обходится: дополнить меню выделения в ЧУЖИХ
 /// приложениях публичным API нельзя — только в своём окне и через «Поделиться».
 class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
-    private static let menuTitle = "Объяснить"
-
     private weak var webview: WKWebView?
     private var pending: String?
 
@@ -52,7 +52,7 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
         super.load(webview: webview)
         self.webview = webview
         synth.delegate = self
-        attachEditMenu(to: webview)
+        SystemEditMenu.install()
         pending = SharedSelectionStore.take()
     }
 
@@ -377,34 +377,50 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
         }
     }
 
-    // MARK: - Меню выделения в своём окне
+    // MARK: - Меню выделения
 
-    private func attachEditMenu(to webview: WKWebView) {
-        if #available(iOS 16.0, *) {
-            webview.addInteraction(UIEditMenuInteraction(delegate: self))
-        }
+    class SystemMenuArgs: Decodable {
+        let editing: Bool
     }
 
-    fileprivate func emitSelection(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        trigger("selection", data: ["text": trimmed])
+    /// Окно сообщает, в поле ли ввода фокус: там системное меню нужно целиком.
+    @objc public func systemMenu(_ invoke: Invoke) {
+        let editing = (try? invoke.parseArgs(SystemMenuArgs.self))?.editing ?? false
+        DispatchQueue.main.async {
+            SystemEditMenu.editing = editing
+            invoke.resolve()
+        }
     }
 }
 
-@available(iOS 16.0, *)
-extension SuflerPlugin: UIEditMenuInteractionDelegate {
-    func editMenuInteraction(
-        _ interaction: UIEditMenuInteraction,
-        menuFor configuration: UIEditMenuConfiguration,
-        suggestedActions: [UIMenuElement]
-    ) -> UIMenu? {
-        let explain = UIAction(title: SuflerPlugin.menuTitle) { [weak self] _ in
-            self?.webview?.evaluateJavaScript("window.getSelection().toString()") { value, _ in
-                if let text = value as? String { self?.emitSelection(text) }
-            }
+/// Системное меню выделения («Скопировать», «Перевести», «Найти»…) в окне
+/// приложения выключено: над выделенным текстом окно рисует своё —
+/// «Копировать», «Прочитать», «Объяснить». В поле ввода — как обычно; вне
+/// поля остаётся только «Вставить». Меню WebKit спрашивает у своего вида
+/// (WKContentView), какие действия доступны, — ответ подменяется здесь.
+enum SystemEditMenu {
+    /// Фокус в поле ввода — меню целиком.
+    static var editing = false
+    private static var installed = false
+    private static let paste: Set<String> = ["paste:", "pasteAndMatchStyle:"]
+
+    static func install() {
+        guard !installed, let view = NSClassFromString("WKContentView") else { return }
+        let selector = #selector(UIResponder.canPerformAction(_:withSender:))
+        guard let method = class_getInstanceMethod(view, selector) else { return }
+        installed = true
+        typealias Can = @convention(c) (AnyObject, Selector, Selector, AnyObject?) -> Bool
+        let original = unsafeBitCast(method_getImplementation(method), to: Can.self)
+        let filtered: @convention(block) (AnyObject, Selector, AnyObject?) -> Bool = { this, action, sender in
+            let allowed = SystemEditMenu.editing || SystemEditMenu.paste.contains(NSStringFromSelector(action))
+            guard allowed else { return false }
+            return original(this, selector, action, sender)
         }
-        return UIMenu(children: suggestedActions + [explain])
+        let imp = imp_implementationWithBlock(filtered)
+        // Свой метод у WKContentView — подменяется; унаследованный — добавляется классу.
+        if !class_addMethod(view, selector, imp, method_getTypeEncoding(method)) {
+            method_setImplementation(method, imp)
+        }
     }
 }
 
