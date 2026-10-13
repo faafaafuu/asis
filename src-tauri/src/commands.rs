@@ -924,6 +924,7 @@ pub async fn voice_speak(
     state: State<'_, AppState>,
     text: String,
     request: Option<u64>,
+    pace: Option<f32>,
 ) -> Result<(), String> {
     // Просьбу по пробелу успели оборвать или сменить новой — не читаем.
     if let Some(request) = request {
@@ -936,7 +937,11 @@ pub async fn voice_speak(
             return Ok(());
         }
     }
-    let config = state.config().voice.clone();
+    let mut config = state.config().voice.clone();
+    // Темп для этой фразы — от настройки голоса: собеседованию чуть медленнее.
+    if let Some(pace) = pace.filter(|pace| (0.5..=1.5).contains(pace)) {
+        config.rate = if config.rate > 0.0 { config.rate } else { 1.0 } * pace;
+    }
     if !config.enabled {
         crate::voice::read_done();
         log::info!("просили озвучить, но голос выключен в настройках");

@@ -4,9 +4,9 @@
 // вопрос, как на живом собеседовании. После каждого — балл, что сказано
 // верно, чего не хватило, образцовый ответ. В конце — итог и что повторить.
 
-import { el, icon, label, loading, nav, register, iconButton, call, voice, toast, prefs, steps, markdown, ring } from "../core.js";
+import { el, icon, label, loading, nav, register, iconButton, call, voice, toast, prefs, steps, markdown, ring, api } from "../core.js";
 import { store, topicCard } from "../store.js";
-import { coachJson } from "../coach.js";
+import { coach, coachJson, parseJson } from "../coach.js";
 import { swipeRow, pressMenu, collapse, confirmAction } from "../gestures.js";
 
 const LEVELS = [
@@ -58,6 +58,8 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   let questions = [];
   let results = [];
   let at = 0;
+  /** Снять подписку на распознаваемую речь (разговором). */
+  let unhear = null;
 
   const seg = (options, current, pick) => {
     const box = el("div", "seg");
@@ -115,7 +117,11 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
         talk ? "talk" : "buttons",
         (id) => (talk = id === "talk"),
       ),
-      el("span", "small dim", "Разговором — как на звонке: Ноа спрашивает, слушает, уточняет и идёт дальше сама. «Дальше» — пропустить, «повтори» — ещё раз, «стоп» — итог."),
+      el(
+        "span",
+        "small dim",
+        "Разговором — как на созвоне с наставником: Ноа спрашивает и дослушивает (паузы на подумать можно), переспросить тоже можно. Неполный ответ разбираете вместе по шагам, пока не станет понятно. Закончил отвечать — «вот как-то так». «Повтори», «пропустим», «стоп» — голосом.",
+      ),
     );
     content.append(label("// уровень"), seg(LEVELS, level, (id) => (level = id)));
     content.append(
@@ -293,49 +299,125 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   }
 
   /* ── Разговором ─────────────────────────────────────────────────────
-     Как на звонке: Ноа задаёт вопрос голосом и сама слушает ответ — конец
-     ответа по паузе; неполный — уточняет; коротко говорит, засчитан ли, и
-     сама переходит к следующему. Голосом же: «дальше» / «не знаю» —
-     пропустить, «повтори» — ещё раз вопрос, «стоп» — к итогу. Можно и
-     написать — поле внизу. */
+     Живой разговор с интервьюером-наставником. Ноа задаёт вопрос и
+     слушает, не перебивая: паузы на подумать — не конец ответа. Ответ
+     закончен, когда человек сам так скажет («вот как-то так», «я
+     закончил») или нажмёт «Я закончил»; замолчал надолго — Ноа мягко
+     спросит, всё ли. Сначала можно переспросить. Неполный ответ — не
+     «неправильно, дальше», а разбор по шагу: наводящий вопрос, маленькое
+     объяснение, «скажи своими словами». Вопрос закрыт, когда суть понята, —
+     тогда следующий. «Повтори» — ещё раз, «пропустим» — суть коротко и
+     дальше, «стоп» — итог. Кольцо — перебить Ноа и ответить. */
 
   const SKIP = Symbol("skip");
   const REPEAT = Symbol("repeat");
   const STOP = Symbol("stop");
+  const DONE = Symbol("done");
+
+  /** Без регистра, «ё» и знаков — для сравнения фраз. */
+  const plain = (text) =>
+    String(text ?? "")
+      .toLowerCase()
+      .replace(/ё/g, "е")
+      .replace(/[^a-zа-я0-9]+/g, " ")
+      .trim();
+
+  /** Конец ответа словами — так заканчивают на живом собеседовании. */
+  const ENDINGS = ["как то так", "вот так вот", "вот и все", "это все", "у меня все", "я все", "на этом все", "я закончил", "я закончила", "закончил", "закончила", "ответ готов", "вот мой ответ"];
+  /** Начала коротких встречных вопросов — их отдаём сразу, конца ответа не ждём. */
+  const ASKS = ["что значит", "что имеется в виду", "что ты имеешь в виду", "что вы имеете в виду", "в смысле", "уточни", "уточните", "можно уточнить", "не понял", "не поняла", "непонятно", "не понятно", "переформулируй", "поясни", "что такое", "можешь пояснить", "можете пояснить"];
+  /** «Это всё?» — «да, всё». */
+  const YES = /^(да|ага|угу|все|да все|закончил|закончила|да закончил|да закончила|это все|готово|да готово)$/;
+
+  const ended = (text) => {
+    const said = plain(text);
+    return !/не закончила?$/.test(said) && ENDINGS.some((end) => said.endsWith(end));
+  };
+  const asking = (text) => {
+    const said = plain(text);
+    return said.split(" ").length <= 14 && ASKS.some((start) => said.startsWith(start) || said.startsWith(`а ${start}`));
+  };
 
   function command(text) {
-    const said = String(text).trim().toLowerCase().replace(/[.!?,]/g, "");
-    if (/^(дальше|пропусти|пропустить|следующий|не знаю|я не знаю|без понятия)$/.test(said)) return SKIP;
-    if (/^(повтори|повторите|ещё раз|еще раз|повтори вопрос)$/.test(said)) return REPEAT;
-    if (/^(стоп|хватит|закончим|закончить|достаточно|итог)$/.test(said)) return STOP;
+    const said = plain(text);
+    if (/^(пропусти|пропустим|пропустить|следующий вопрос|давай дальше|дальше)$/.test(said)) return SKIP;
+    if (/^(повтори|повторите|еще раз|повтори вопрос|повторите вопрос)$/.test(said)) return REPEAT;
+    if (/^(стоп|хватит|закончим|закончим собеседование|достаточно|итог)$/.test(said)) return STOP;
     return null;
+  }
+
+  /** Указания интервьюеру-наставнику на один вопрос. */
+  const mentorRules = (q) =>
+    `Ты — Ноа, интервьюер и наставник на тренировочном техническом собеседовании уровня ${level}` +
+    `${course?.title ? ` по курсу «${course.title}»` : ""}. Ты задал вопрос: «${q.q}». ` +
+    `Хороший ответ раскрывает: ${(q.points ?? []).join("; ") || "суть, пример, подводные камни"}.\n` +
+    "Цель — не оценить и бежать дальше, а чтобы человек понял, запомнил и потом прошёл настоящее собеседование. " +
+    "Говоришь вслух, как живой человек на созвоне: просто, тепло, на «ты», без канцелярита. За раз — 1–3 коротких предложения, " +
+    "без списков и разметки, термины — простыми словами. Никогда не вываливай всё сразу.\n" +
+    "Как вести разговор:\n" +
+    "— Переспрашивает или уточняет вопрос — коротко поясни, что имеешь в виду, ответ не подсказывай, предложи отвечать.\n" +
+    "— Ответ полный и верный — коротко похвали, добавь одну важную деталь, если её не было, и закрой вопрос.\n" +
+    "— Ответ неполный или с ошибкой — не говори «неправильно» и не читай лекцию. Скажи, что верно, и задай ОДИН наводящий вопрос к самому важному пробелу.\n" +
+    "— Не знает или запутался — объясняй по маленькому шагу: одна мысль простыми словами и пример из жизни, потом спроси, понятно ли, или попроси сказать своими словами.\n" +
+    "— Просит пропустить — скажи суть в 2–3 простых предложениях и закрой вопрос.\n" +
+    "— Закрывай вопрос (done: true), когда человек сам своими словами сказал суть или ты объяснил и он подтвердил, что понял. " +
+    "В последней реплике по вопросу — короткий итог: что главное запомнить. К следующему вопросу сам не переходи — это сделает приложение.\n" +
+    'Ответь только JSON: {"say": "что сказать вслух", "done": false, ' +
+    '"score": null или 0–100 — как оценили бы ПЕРВЫЙ ответ по существу на реальном собеседовании (ставь один раз, когда человек впервые ответил; ' +
+    'если вопрос закрываешь, а балла ещё не было — поставь его сейчас), ' +
+    '"gaps": ["чего не хватало в ответе, кратко"], "note": "при done — главное по вопросу одной фразой"}';
+
+  /** Реплика наставника на сказанное; `thread` — разговор по этому вопросу. */
+  async function mentor(q, thread, said) {
+    const rules = mentorRules(q);
+    let raw = await coach(rules, said, { thread });
+    try {
+      return { reply: parseJson(raw), raw };
+    } catch {
+      raw = await coach(`${rules}\nСТРОГО: только JSON, без слов вокруг.`, said, { thread });
+      return { reply: parseJson(raw), raw };
+    }
   }
 
   function conversation() {
     voice.stop();
     const orb = ring("look", 56);
-    const status = el("span", "talk__status", "Ноа готовится");
+    const orbBtn = el("button", "talk__orb");
+    orbBtn.title = "Перебить и ответить";
+    orbBtn.append(orb);
+    const status = el("span", "talk__status grow", "Ноа готовится");
+    const pause = el("button", "btn btn--plain talk__tool", "Пауза");
+    const stop = el("button", "btn btn--plain talk__tool", "Итог");
     const stage = el("div", "talk__stage");
-    stage.append(orb, status);
+    stage.append(orbBtn, status, pause, stop);
+    const hint = el(
+      "span",
+      "small dim talk__hint",
+      "Отвечай спокойно — паузы на подумать не страшны. Можно сначала переспросить. Закончил — скажи «вот как-то так» или нажми «Я закончил».",
+    );
     const feed = el("div", "list talk__feed");
-    content.replaceChildren(stage, feed);
+    content.replaceChildren(stage, hint, feed);
 
     const typed = el("input", "ask");
-    typed.placeholder = "Или напишите ответ — Enter";
+    typed.placeholder = "Или напиши — Enter";
     typed.enterKeyHint = "send";
-    const pause = el("button", "btn btn--secondary");
-    pause.style.cssText = "height:44px;padding:0 12px";
-    pause.textContent = "Пауза";
-    const stop = el("button", "btn btn--plain", "Итог");
-    stop.style.cssText = "height:44px;padding:0 10px";
-    dock.replaceChildren(typed, pause, stop);
+    const finishBtn = el("button", "btn btn--primary");
+    finishBtn.style.cssText = "height:44px;padding:0 14px;white-space:nowrap";
+    finishBtn.textContent = "Я закончил";
+    finishBtn.hidden = true;
+    dock.replaceChildren(typed, finishBtn);
 
     let paused = false;
     let resume = null;
-    /** Ответ, которого ждём: голос или поле ввода — что раньше. */
+    let stopped = false;
+    /** Кусок речи, которого ждём: голос, набранное, кнопка — что раньше. */
     let waiting = null;
     let current = null;
-    let stopped = false;
+    /** «Я закончил» нажато, пока микрофон слушал: дослушанный кусок — последний. */
+    let wantDone = false;
+    /** Пузырь со своей речью — заполняется по мере распознавания. */
+    let live = null;
+    let heardBefore = "";
 
     const mode = (name, text) => {
       orb.dataset.ring = name;
@@ -347,11 +429,13 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
       if (extra) node.append(el("span", "talk__score", extra));
       feed.append(node);
       content.scrollTop = content.scrollHeight;
+      return node;
     };
     const speak = async (text) => {
       if (!text || !alive || stopped) return;
-      mode("speak", "Ноа говорит");
-      await voice.speak(text);
+      mode("speak", "Ноа говорит · кольцо — перебить");
+      // Чуть медленнее обычного: на слух разбор должен успевать доходить.
+      await voice.speak(text, { pace: 0.92 });
     };
     const finish = (value) => {
       const done = waiting;
@@ -359,21 +443,43 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
       done?.(value);
     };
 
+    // Слова появляются в пузыре по мере речи — видно, что Ноа слышит.
+    globalThis.__TAURI__?.core
+      ?.addPluginListener?.("sufler", "hearing", (event) => {
+        if (!live || !alive) return;
+        const now = String(event?.text ?? "").trim();
+        live.textContent = [heardBefore, now].filter(Boolean).join(" ") || "…";
+        content.scrollTop = content.scrollHeight;
+      })
+      ?.then?.((handle) => (unhear = () => handle?.unregister?.()))
+      ?.catch?.(() => {});
+
+    orbBtn.addEventListener("click", () => {
+      if (orb.dataset.ring === "speak") voice.stop();
+    });
     typed.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" || !typed.value.trim() || !waiting) return;
       const text = typed.value.trim();
       typed.value = "";
       typed.blur();
+      current = null;
       voice.cancel();
-      finish(command(text) ?? text);
+      finish({ typed: text });
+    });
+    finishBtn.addEventListener("click", () => {
+      if (!waiting) return;
+      wantDone = true;
+      // Микрофон отдаёт то, что успел расслышать; не ответил — просто «закончил».
+      api?.invoke("plugin:sufler|stopListening").catch(() => {});
+      setTimeout(() => waiting && wantDone && ((current = null), finish(DONE)), 1500);
     });
     pause.addEventListener("click", () => {
       paused = !paused;
-      pause.textContent = paused ? "Продолжить" : "Пауза";
+      pause.textContent = paused ? "Дальше" : "Пауза";
       if (paused) {
         voice.stop();
         voice.cancel();
-        mode("look", "Пауза — нажмите «Продолжить»");
+        mode("look", "Пауза");
       } else resume?.();
     });
     stop.addEventListener("click", () => {
@@ -383,77 +489,167 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
       finish(STOP);
     });
 
-    /** Слушать ответ: текст, команда или STOP. Тишина — ещё раз, третий раз — «дальше». */
-    const hear = async () => {
-      for (let quiet = 0; alive && !stopped; ) {
-        if (paused) await new Promise((done) => (resume = done));
-        if (!alive || stopped) return STOP;
-        mode("listen", "Слушаю — отвечайте");
-        const answer = new Promise((done) => (waiting = done));
-        // Свой билет у каждого слушания: запоздалый ответ прошлого не
-        // засчитывается тишиной в этом.
-        const ticket = {};
-        current = ticket;
-        voice
-          .listen({ pause: 2.8 })
-          .then((text) => current === ticket && finish(text))
-          .catch(() => current === ticket && finish(""));
-        const got = await answer;
-        if (got === STOP || stopped) return STOP;
+    /** Кусок речи до паузы на подумать: текст, набранное, «Я закончил» или STOP. */
+    const segment = () => {
+      const answer = new Promise((done) => (waiting = done));
+      // Свой билет у каждого слушания: запоздалый ответ прошлого не
+      // засчитывается в этом.
+      const ticket = {};
+      current = ticket;
+      voice
+        .listen({ pause: 6, idle: 9, limit: 120, ends: ENDINGS, asks: ASKS })
+        .then((text) => current === ticket && finish(text))
+        .catch(() => current === ticket && finish(""));
+      return answer;
+    };
+
+    /** Реплика человека целиком: куски речи копятся, пока он не закончит. */
+    const hearTurn = async () => {
+      const parts = [];
+      let quiet = 0;
+      let checked = false;
+      let fails = 0;
+      wantDone = false;
+      const bubble = () => {
+        if (!live) live = line("me", "");
+        live.classList.add("is-live");
+        live.textContent = parts.join(" ") || "…";
+        content.scrollTop = content.scrollHeight;
+      };
+      const done = (value) => {
+        finishBtn.hidden = true;
+        if (live) {
+          if (parts.length) live.classList.remove("is-live");
+          else live.remove();
+        }
+        live = null;
+        heardBefore = "";
+        return value;
+      };
+      while (alive && !stopped) {
+        if (paused) await new Promise((go) => (resume = go));
+        if (!alive || stopped) break;
+        mode("listen", parts.length ? "Слушаю…" : "Слушаю — отвечай или переспроси");
+        finishBtn.hidden = false;
+        heardBefore = parts.join(" ");
+        bubble();
+        const from = Date.now();
+        const got = await segment();
+        if (got === STOP || stopped) return done(STOP);
         if (paused) continue;
-        if (typeof got === "symbol") return got;
+        if (got === DONE) {
+          wantDone = false;
+          if (parts.length) return done(parts.join(" "));
+          continue;
+        }
+        if (got && typeof got === "object") {
+          parts.push(got.typed);
+          bubble();
+          const cmd = parts.length === 1 ? command(got.typed) : null;
+          if (cmd) parts.length = 0;
+          return done(cmd ?? parts.join(" "));
+        }
         const text = String(got ?? "").trim();
-        if (text) return command(text) ?? text;
+        if (text) {
+          quiet = 0;
+          fails = 0;
+          if (checked && YES.test(plain(text))) return done(parts.join(" "));
+          checked = false;
+          parts.push(text);
+          bubble();
+          const cmd = parts.length === 1 ? command(text) : null;
+          if (cmd) {
+            parts.length = 0;
+            return done(cmd);
+          }
+          if (wantDone || ended(parts.join(" ")) || (parts.length === 1 && asking(text))) return done(parts.join(" "));
+          // Пауза на подумать — слушаем дальше.
+          continue;
+        }
+        if (wantDone) {
+          wantDone = false;
+          if (parts.length) return done(parts.join(" "));
+          continue;
+        }
+        // Микрофон отказал сразу (нет доступа) — не крутимся впустую.
+        if (Date.now() - from < 1500) {
+          fails += 1;
+          if (fails >= 3) {
+            mode("look", "Микрофон не отвечает — напиши ответ внизу");
+            const got2 = await new Promise((go) => (waiting = go));
+            if (got2 === STOP) return done(STOP);
+            if (got2 && typeof got2 === "object") {
+              parts.push(got2.typed);
+              return done(command(got2.typed) ?? parts.join(" "));
+            }
+            if (got2 === DONE && parts.length) return done(parts.join(" "));
+            continue;
+          }
+          await new Promise((go) => setTimeout(go, 1500));
+          continue;
+        }
         quiet += 1;
-        if (quiet >= 3) return SKIP;
-        await speak("Не расслышала. Повторите — или скажите «дальше».");
+        if (parts.length && !checked) {
+          checked = true;
+          await speak("Это всё, или ещё добавишь?");
+        } else if (parts.length && checked) {
+          return done(parts.join(" "));
+        } else if (quiet === 2) {
+          await speak("Не тороплю. Можно подумать вслух или переспросить.");
+        }
       }
-      return STOP;
+      return done(STOP);
     };
 
     (async () => {
       for (; at < questions.length && alive && !stopped; at += 1) {
         paintProgress();
         const q = questions[at];
-        const result = { q: q.q, topic: q.topic, answers: [] };
+        const result = { q: q.q, topic: q.topic, answers: [], gaps: [] };
         results[at] = result;
+        const thread = [];
         line("noa", q.q);
-        await speak(q.q);
-        let asked = q.q;
-        for (let round = 0; round < 2 && alive && !stopped; round += 1) {
-          const said = await hear();
-          if (said === STOP || !alive) break;
+        await speak(`${at === 0 ? "Начнём." : "Следующий вопрос."} ${q.q}`);
+        let last = q.q;
+        while (alive && !stopped) {
+          let said = await hearTurn();
+          if (said === STOP || !alive || stopped) break;
           if (said === REPEAT) {
-            await speak(asked);
-            round -= 1;
+            await speak(last);
             continue;
           }
-          const answer = said === SKIP ? "" : said;
-          line("me", answer || "Не знаю — дальше");
-          result.answers.push({ asked, said: answer || "(не знаю)" });
-          mode("look", "Ноа оценивает ответ…");
-          let verdict = null;
+          if (said === SKIP) {
+            line("me", "Давай пропустим");
+            said = "Давай пропустим этот вопрос.";
+          }
+          result.answers.push({ asked: last, said });
+          mode("look", "Ноа думает…");
+          let reply;
           try {
-            verdict = await judge(q, result);
+            const turn = await mentor(q, thread, said);
+            reply = turn.reply;
+            thread.push({ q: said, a: turn.raw });
           } catch (err) {
-            line("bad", String(err));
-          }
-          if (!verdict || !alive) break;
-          result.verdict = verdict;
-          result.score = Math.max(0, Math.min(100, Math.round(Number(verdict.score) || 0)));
-          // Неполный ответ — одно уточнение, как на живом собеседовании.
-          const followup = String(verdict.followup ?? "").trim();
-          if (round === 0 && answer && result.score < PASS && followup) {
-            asked = followup;
-            line("noa", `${verdict.say ? `${verdict.say} ` : ""}${followup}`);
-            await speak(`${verdict.say ?? ""} ${followup}`);
+            if (!alive) break;
+            line("bad", `${String(err)} Скажи ещё раз — или «Итог».`);
             continue;
           }
-          const missing = (verdict.missing ?? []).filter(Boolean).slice(0, 2).join(", ");
-          const spoken = `${verdict.say ?? ""}${result.score < PASS && missing ? ` Не хватило: ${missing}.` : ""}`.trim();
-          line(result.score >= PASS ? "good" : "bad", spoken || (result.score >= PASS ? "Засчитано." : "Слабо."), `${result.score}%`);
-          await speak(spoken);
-          break;
+          if (!alive) break;
+          const score = Number(reply.score);
+          if (reply.score != null && result.score == null && Number.isFinite(score)) result.score = Math.max(0, Math.min(100, Math.round(score)));
+          for (const gap of reply.gaps ?? []) if (gap && !result.gaps.includes(gap)) result.gaps.push(gap);
+          const say = String(reply.say ?? "").trim() || (reply.done ? "Хорошо, с этим разобрались." : "Расскажи чуть подробнее?");
+          line("noa", say);
+          await speak(say);
+          last = say;
+          // Разбор затянулся — закрываем, чтобы не ходить по кругу.
+          if (reply.done || thread.length >= 14) {
+            result.note = String(reply.note ?? "").trim();
+            if (result.score == null) result.score = 0;
+            result.verdict = { good: "", missing: result.gaps, ideal: result.note };
+            line(result.score >= PASS ? "good" : "bad", result.note ? `Главное: ${result.note}` : "Вопрос разобрали.", `${result.score}%`);
+            break;
+          }
         }
       }
       if (alive) report();
@@ -610,6 +806,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
       alive = false;
       voice.stop();
       voice.cancel();
+      unhear?.();
     },
   };
 });

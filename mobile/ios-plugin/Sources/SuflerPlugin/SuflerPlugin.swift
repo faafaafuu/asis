@@ -44,8 +44,20 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     /// приходит быстрее; пересказу урока — длинная (по умолчанию).
     private var phrasePause: TimeInterval = SuflerPlugin.endOfPhrase
 
+    /// Сколько ждать, пока заговорят, и сколько слушать всего.
+    private var idlePause: TimeInterval = 12
+    private var listenLimit: TimeInterval = 60
+    /// Концовки ответа («вот как-то так») и начала коротких встречных
+    /// вопросов: их фраза отдаётся сразу, без долгой паузы на подумать.
+    private var endings: [String] = []
+    private var openers: [String] = []
+
     class ListenArgs: Decodable {
         let pause: Double?
+        let idle: Double?
+        let limit: Double?
+        let ends: [String]?
+        let asks: [String]?
     }
 
     override func load(webview: WKWebView) {
@@ -181,8 +193,12 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     /// Слушает одну фразу и отдаёт её текстом. Конец — пауза в речи.
     @objc public func listen(_ invoke: Invoke) {
         cancelRecognition(resolve: "")
-        let pause = (try? invoke.parseArgs(ListenArgs.self))?.pause ?? SuflerPlugin.endOfPhrase
-        phrasePause = min(max(pause, 0.6), 5)
+        let args = try? invoke.parseArgs(ListenArgs.self)
+        phrasePause = min(max(args?.pause ?? SuflerPlugin.endOfPhrase, 0.6), 15)
+        idlePause = min(max(args?.idle ?? 12, 3), 30)
+        listenLimit = min(max(args?.limit ?? 60, 10), 300)
+        endings = (args?.ends ?? []).map(SuflerPlugin.plain).filter { !$0.isEmpty }
+        openers = (args?.asks ?? []).map(SuflerPlugin.plain).filter { !$0.isEmpty }
         listening = invoke
         SFSpeechRecognizer.requestAuthorization { status in
             DispatchQueue.main.async {
@@ -243,9 +259,11 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
                 guard let self else { return }
                 if let result {
                     self.heard = result.bestTranscription.formattedString
+                    // Окно показывает речь по ходу — видно, что слышно.
+                    self.trigger("hearing", data: ["text": self.heard])
                     // Пока человек говорит — ждём; замолчал — фраза готова.
                     self.silence?.invalidate()
-                    self.silence = Timer.scheduledTimer(withTimeInterval: self.phrasePause, repeats: false) { _ in
+                    self.silence = Timer.scheduledTimer(withTimeInterval: self.pauseAfter(self.heard), repeats: false) { _ in
                         self.finishListening(error: nil)
                     }
                     if result.isFinal { self.finishListening(error: nil) }
@@ -254,13 +272,30 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
                 }
             }
         }
-        // Совсем молчат — через 12 с отдать пустое; одна фраза — не дольше минуты.
-        silence = Timer.scheduledTimer(withTimeInterval: 12, repeats: false) { [weak self] _ in
+        // Совсем молчат — отдать пустое; одна фраза — не дольше предела.
+        silence = Timer.scheduledTimer(withTimeInterval: idlePause, repeats: false) { [weak self] _ in
             self?.finishListening(error: nil)
         }
-        cap = Timer.scheduledTimer(withTimeInterval: 60, repeats: false) { [weak self] _ in
+        cap = Timer.scheduledTimer(withTimeInterval: listenLimit, repeats: false) { [weak self] _ in
             self?.finishListening(error: nil)
         }
+    }
+
+    /// Пауза, после которой фраза готова: сказал концовку — секунда, короткий
+    /// встречный вопрос — две, иначе — пауза на подумать.
+    private func pauseAfter(_ text: String) -> TimeInterval {
+        let said = SuflerPlugin.plain(text)
+        if endings.contains(where: { said.hasSuffix($0) }) { return min(phrasePause, 1.0) }
+        let short = said.split(separator: " ").count <= 14
+        if short, openers.contains(where: { said.hasPrefix($0) || said.hasPrefix("а " + $0) }) { return min(phrasePause, 1.8) }
+        return phrasePause
+    }
+
+    /// Без регистра, «ё» и знаков — для сравнения фраз.
+    static func plain(_ text: String) -> String {
+        let lowered = text.lowercased().replacingOccurrences(of: "ё", with: "е")
+        let kept = lowered.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
+        return String(kept).split(separator: " ").joined(separator: " ")
     }
 
     private func finishListening(error: String?) {

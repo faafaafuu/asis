@@ -2129,6 +2129,26 @@ html.kb-open .tkeys {
 .talk__feed {
   gap: 8px;
 }
+.talk__orb {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+.talk__tool {
+  flex: none;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.talk__hint {
+  line-height: 17px;
+}
+/* Своя речь, пока говоришь: пунктир — ещё слушаю. */
+.say--me.is-live {
+  border: 1px dashed rgba(0, 240, 255, 0.35);
+  color: var(--c-soft);
+}
 .talk__score {
   display: inline-block;
   margin-left: 8px;

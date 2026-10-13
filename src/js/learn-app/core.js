@@ -182,10 +182,11 @@ export const voice = {
   aloud() {
     return prefs.get("aloud", true);
   },
-  async speak(text) {
+  /** `pace` — темп относительно настройки голоса: 0.9 — чуть медленнее. */
+  async speak(text, { pace } = {}) {
     if (!text?.trim()) return;
     try {
-      await api.invoke("voice_speak", { text });
+      await api.invoke("voice_speak", { text, ...(pace ? { pace } : {}) });
     } catch {
       /* голос выключен — молчим */
     }
@@ -199,9 +200,12 @@ export const voice = {
   /**
    * Слушает одну фразу (системное распознавание телефона). `pause` — сколько
    * секунд тишины считать концом фразы: разговору — короче, пересказу — дольше.
+   * Для долгих ответов: `idle` — сколько ждать, пока заговорят, `limit` —
+   * сколько слушать всего, `ends` — концовки («вот как-то так»): сказал —
+   * фраза отдаётся сразу; `asks` — начала коротких встречных вопросов.
    */
-  async listen({ pause } = {}) {
-    const heard = await api.invoke("plugin:sufler|listen", { lang: "ru-RU", ...(pause ? { pause } : {}) });
+  async listen({ pause, ...more } = {}) {
+    const heard = await api.invoke("plugin:sufler|listen", { lang: "ru-RU", ...(pause ? { pause } : {}), ...more });
     return String(heard?.text ?? "").trim();
   },
   cancel() {
