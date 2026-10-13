@@ -31,6 +31,7 @@ fn main() {
                     "barStyle",
                     "registerListener",
                     "removeListener",
+                    "remove_listener",
                 ])
                 .default_permission(tauri_build::DefaultPermissionRule::AllowAllCommands),
         ),

@@ -225,7 +225,7 @@
           const said = String(args.said);
           if (/имеется в виду|уточни/i.test(said)) return JSON.stringify({ say: "Имею в виду: что общего у них под капотом и что разное. Отвечай, как понимаешь.", done: false, score: null, gaps: [] });
           if (turn < 2) return JSON.stringify({ say: "Про общее ядро — верно. А как контейнер отделён от соседей, если ядро одно?", done: false, score: turn ? null : 55, gaps: ["изоляция namespaces/cgroups"] });
-          return JSON.stringify({ say: "Да, именно: namespaces отделяют, cgroups ограничивают. Запомни это — дальше пойдём.", done: true, score: null, gaps: [], note: "Контейнер — процесс на общем ядре, отделён namespaces и ограничен cgroups." });
+          return JSON.stringify({ say: "Да, именно: namespaces отделяют, cgroups ограничивают. Запомни это — дальше пойдём.", done: true, score: 70, gaps: [], note: "Контейнер — процесс на общем ядре, отделён namespaces и ограничен cgroups." });
         }
         const answer = String(args.said);
         const followed = answer.split("Кандидат:").length > 2;

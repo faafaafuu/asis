@@ -90,6 +90,8 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
       ),
     );
     content.replaceChildren(box);
+    const saved = savedSession();
+    if (saved) content.append(resumeCard(saved));
     paintHistory();
 
     if (topicId) {
@@ -203,9 +205,12 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     try {
       const text = await material(course, scope);
       const rules =
-        `Ты — репетитор и интервьюер на техническом собеседовании уровня ${level}. ` +
-        `Составь ${count} вопросов по материалу ниже — такие, какие задают живые интервьюеры: на понимание, «чем отличается», ` +
-        "«что будет, если», практические кейсы и поиск неисправностей. Не проси пересказать определение. От простого к сложному, " +
+        `Ты — интервьюер на реальном техническом собеседовании уровня ${level}. ` +
+        `Составь ${count} вопросов по материалу ниже — ровно такие, какие на самом деле задают на собеседованиях на эту работу: ` +
+        "на понимание, «чем отличается», «что будет, если», «как бы ты это сделал/починил на работе». " +
+        "Вопрос — 1–2 коротких предложения, понятных с первого раза, как спросил бы живой человек. " +
+        "Только жизненные ситуации, с которыми инженер реально сталкивается. Никаких выдуманных условий: без конкретных IP-адресов, " +
+        "номеров портов и AS, надуманных схем, загадок и подвохов. Не проси пересказать определение. От простого к сложному, " +
         "разные темы вперемешку. Ответь только JSON-массивом: " +
         '[{"q": "вопрос", "topic": "id темы", "points": ["ключевой пункт хорошего ответа", "… 3–5 пунктов"]}]';
       const list = await coachJson(rules, text, { long: true });
@@ -222,8 +227,49 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     if (!alive) return;
     results = [];
     at = 0;
+    saveSession(0);
     if (talk) conversation();
     else ask();
+  }
+
+  /* ── Незаконченное собеседование ─────────────────────────────────────
+     Каждый разобранный вопрос сохраняется: вышли посреди — при следующем
+     заходе «Продолжить» с того же места, а не заново. */
+
+  const SESSION = "interviewSession";
+  const saveSession = (next) =>
+    prefs.set(SESSION, { course: courseId, scope, level, talk, questions, results, at: next, when: Date.now() });
+  const savedSession = () => {
+    const saved = prefs.get(SESSION);
+    return saved?.course === courseId && saved.questions?.length && saved.at < saved.questions.length ? saved : null;
+  };
+
+  function resumeCard(saved) {
+    const box = el("div", "plate plate--active");
+    const done = (saved.results ?? []).filter((r) => r?.score != null).length;
+    box.append(
+      label("// незаконченное собеседование"),
+      el("span", "continue__title", `Вопрос ${saved.at + 1} из ${saved.questions.length}`),
+      el("span", "continue__lead", `Разобрано ${done} · ${saved.level} · ${new Date(saved.when).toLocaleDateString("ru-RU")}`),
+    );
+    const row = el("div", "continue__foot");
+    const fresh = el("button", "btn btn--plain", "Заново");
+    fresh.addEventListener("click", () => {
+      prefs.set(SESSION, null);
+      setup();
+    });
+    const go = el("button", "btn btn--primary");
+    go.append(icon("play", 16, 2.5), "Продолжить");
+    go.addEventListener("click", () => {
+      ({ questions, results, at, level, talk } = saved);
+      scope = saved.scope ?? null;
+      results = results ?? [];
+      if (talk) conversation();
+      else ask();
+    });
+    row.append(fresh, go);
+    box.append(row);
+    return box;
   }
 
   function paintProgress() {
@@ -326,8 +372,6 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   const ENDINGS = ["как то так", "вот так вот", "вот и все", "это все", "у меня все", "я все", "на этом все", "я закончил", "я закончила", "закончил", "закончила", "ответ готов", "вот мой ответ"];
   /** Начала коротких встречных вопросов — их отдаём сразу, конца ответа не ждём. */
   const ASKS = ["что значит", "что имеется в виду", "что ты имеешь в виду", "что вы имеете в виду", "в смысле", "уточни", "уточните", "можно уточнить", "не понял", "не поняла", "непонятно", "не понятно", "переформулируй", "поясни", "что такое", "можешь пояснить", "можете пояснить"];
-  /** «Это всё?» — «да, всё». */
-  const YES = /^(да|ага|угу|все|да все|закончил|закончила|да закончил|да закончила|это все|готово|да готово)$/;
 
   const ended = (text) => {
     const said = plain(text);
@@ -351,21 +395,26 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     `Ты — Ноа, интервьюер и наставник на тренировочном техническом собеседовании уровня ${level}` +
     `${course?.title ? ` по курсу «${course.title}»` : ""}. Ты задал вопрос: «${q.q}». ` +
     `Хороший ответ раскрывает: ${(q.points ?? []).join("; ") || "суть, пример, подводные камни"}.\n` +
-    "Цель — не оценить и бежать дальше, а чтобы человек понял, запомнил и потом прошёл настоящее собеседование. " +
-    "Говоришь вслух, как живой человек на созвоне: просто, тепло, на «ты», без канцелярита. За раз — 1–3 коротких предложения, " +
-    "без списков и разметки, термины — простыми словами. Никогда не вываливай всё сразу.\n" +
+    "Цель — чтобы человек понял, запомнил и прошёл настоящее собеседование. Говоришь вслух, как живой человек на созвоне: " +
+    "просто, тепло, на «ты». СТРОГО: не больше 2 коротких предложений (до 35 слов) и не больше одного вопроса за раз. " +
+    "Без списков, разметки и лекций.\n" +
+    "Человек отвечает голосом: речь распознаётся с ошибками (MTV вместо MTU, слова слитно), говорит просто, коряво, разговорно. " +
+    "Засчитывай СУТЬ, сказанную своими словами, в любой момент разговора; не придирайся к терминам и формулировкам.\n" +
     "Как вести разговор:\n" +
-    "— Переспрашивает или уточняет вопрос — коротко поясни, что имеешь в виду, ответ не подсказывай, предложи отвечать.\n" +
-    "— Ответ полный и верный — коротко похвали, добавь одну важную деталь, если её не было, и закрой вопрос.\n" +
-    "— Ответ неполный или с ошибкой — не говори «неправильно» и не читай лекцию. Скажи, что верно, и задай ОДИН наводящий вопрос к самому важному пробелу.\n" +
-    "— Не знает или запутался — объясняй по маленькому шагу: одна мысль простыми словами и пример из жизни, потом спроси, понятно ли, или попроси сказать своими словами.\n" +
-    "— Просит пропустить — скажи суть в 2–3 простых предложениях и закрой вопрос.\n" +
-    "— Закрывай вопрос (done: true), когда человек сам своими словами сказал суть или ты объяснил и он подтвердил, что понял. " +
-    "В последней реплике по вопросу — короткий итог: что главное запомнить. К следующему вопросу сам не переходи — это сделает приложение.\n" +
+    "— Переспрашивает — поясни вопрос одной фразой, ответ не подсказывай.\n" +
+    "— Суть сказана (даже простыми словами) — подтверди, назови это правильным термином, если его не было, и закрой вопрос. " +
+    "Не объясняй заново то, что человек уже сказал, и не придумывай примеров.\n" +
+    "— Суть сказана частично — скажи, что верно, и задай ОДИН наводящий вопрос к главному пробелу.\n" +
+    "— Не знает или запутался — одна мысль простыми словами на обычном рабочем примере, потом спроси, понятно ли.\n" +
+    "— После двух наводящих вопросов суть так и не прозвучала — коротко скажи её сам и закрой.\n" +
+    "— Просит пропустить — суть в двух предложениях и закрой.\n" +
+    "— Раздражён или ругается — не извиняйся длинно: коротко согласись и двигайся дальше.\n" +
+    "Никаких выдуманных ситуаций, IP-адресов, номеров портов и абсурдных примеров. Баллы вслух не называй. " +
+    "К следующему вопросу сам не переходи — это сделает приложение.\n" +
     'Ответь только JSON: {"say": "что сказать вслух", "done": false, ' +
-    '"score": null или 0–100 — как оценили бы ПЕРВЫЙ ответ по существу на реальном собеседовании (ставь один раз, когда человек впервые ответил; ' +
-    'если вопрос закрываешь, а балла ещё не было — поставь его сейчас), ' +
-    '"gaps": ["чего не хватало в ответе, кратко"], "note": "при done — главное по вопросу одной фразой"}';
+    '"score": при done — 0–100, насколько человек САМ показал понимание сути за весь разговор ' +
+    "(85–100 — сказал суть сразу, 60–84 — с подсказкой, ниже — суть пришлось говорить за него); иначе null, " +
+    '"gaps": ["чего ему не хватило, кратко"], "note": "при done — главное по вопросу одной фразой"}';
 
   /** Реплика наставника на сказанное; `thread` — разговор по этому вопросу. */
   async function mentor(q, thread, said) {
@@ -393,7 +442,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     const hint = el(
       "span",
       "small dim talk__hint",
-      "Отвечай спокойно — паузы на подумать не страшны. Можно сначала переспросить. Закончил — скажи «вот как-то так» или нажми «Я закончил».",
+      "Отвечай спокойно — короткие паузы не страшны, можно сначала переспросить. Закончил — скажи «вот как-то так», нажми «Я закончил» или просто помолчи несколько секунд.",
     );
     const feed = el("div", "list talk__feed");
     content.replaceChildren(stage, hint, feed);
@@ -451,7 +500,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
         live.textContent = [heardBefore, now].filter(Boolean).join(" ") || "…";
         content.scrollTop = content.scrollHeight;
       })
-      ?.then?.((handle) => (unhear = () => handle?.unregister?.()))
+      ?.then?.((handle) => (unhear = () => Promise.resolve(handle?.unregister?.()).catch(() => {})))
       ?.catch?.(() => {});
 
     orbBtn.addEventListener("click", () => {
@@ -490,14 +539,14 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     });
 
     /** Кусок речи до паузы на подумать: текст, набранное, «Я закончил» или STOP. */
-    const segment = () => {
+    const segment = (idle) => {
       const answer = new Promise((done) => (waiting = done));
       // Свой билет у каждого слушания: запоздалый ответ прошлого не
       // засчитывается в этом.
       const ticket = {};
       current = ticket;
       voice
-        .listen({ pause: 6, idle: 9, limit: 120, ends: ENDINGS, asks: ASKS })
+        .listen({ pause: 3.5, idle, limit: 120, ends: ENDINGS, asks: ASKS })
         .then((text) => current === ticket && finish(text))
         .catch(() => current === ticket && finish(""));
       return answer;
@@ -507,7 +556,6 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     const hearTurn = async () => {
       const parts = [];
       let quiet = 0;
-      let checked = false;
       let fails = 0;
       wantDone = false;
       const bubble = () => {
@@ -534,7 +582,8 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
         heardBefore = parts.join(" ");
         bubble();
         const from = Date.now();
-        const got = await segment();
+        // Уже что-то сказал — после паузы ждём продолжения недолго; ещё молчит — дольше.
+        const got = await segment(parts.length ? 3.5 : 12);
         if (got === STOP || stopped) return done(STOP);
         if (paused) continue;
         if (got === DONE) {
@@ -553,8 +602,6 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
         if (text) {
           quiet = 0;
           fails = 0;
-          if (checked && YES.test(plain(text))) return done(parts.join(" "));
-          checked = false;
           parts.push(text);
           bubble();
           const cmd = parts.length === 1 ? command(text) : null;
@@ -589,12 +636,9 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
           continue;
         }
         quiet += 1;
-        if (parts.length && !checked) {
-          checked = true;
-          await speak("Это всё, или ещё добавишь?");
-        } else if (parts.length && checked) {
-          return done(parts.join(" "));
-        } else if (quiet === 2) {
+        // Сказал и замолчал — ответ принят (паузы на подумать уже позади).
+        if (parts.length) return done(parts.join(" "));
+        if (quiet === 2) {
           await speak("Не тороплю. Можно подумать вслух или переспросить.");
         }
       }
@@ -628,26 +672,30 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
           try {
             const turn = await mentor(q, thread, said);
             reply = turn.reply;
-            thread.push({ q: said, a: turn.raw });
+            // В памяти разговора — только сказанное: короче запрос, быстрее ответ.
+            thread.push({ q: said, a: JSON.stringify({ say: reply.say ?? "", done: Boolean(reply.done) }) });
+            if (thread.length > 8) thread.shift();
           } catch (err) {
             if (!alive) break;
             line("bad", `${String(err)} Скажи ещё раз — или «Итог».`);
             continue;
           }
           if (!alive) break;
+          // Балл — итог по вопросу: ставится при закрытии (раньше — запасной).
           const score = Number(reply.score);
-          if (reply.score != null && result.score == null && Number.isFinite(score)) result.score = Math.max(0, Math.min(100, Math.round(score)));
+          if (reply.score != null && Number.isFinite(score) && (reply.done || result.score == null)) result.score = Math.max(0, Math.min(100, Math.round(score)));
           for (const gap of reply.gaps ?? []) if (gap && !result.gaps.includes(gap)) result.gaps.push(gap);
           const say = String(reply.say ?? "").trim() || (reply.done ? "Хорошо, с этим разобрались." : "Расскажи чуть подробнее?");
           line("noa", say);
           await speak(say);
           last = say;
           // Разбор затянулся — закрываем, чтобы не ходить по кругу.
-          if (reply.done || thread.length >= 14) {
+          if (reply.done || result.answers.length >= 8) {
             result.note = String(reply.note ?? "").trim();
             if (result.score == null) result.score = 0;
             result.verdict = { good: "", missing: result.gaps, ideal: result.note };
             line(result.score >= PASS ? "good" : "bad", result.note ? `Главное: ${result.note}` : "Вопрос разобрали.", `${result.score}%`);
+            if (at + 1 < questions.length) saveSession(at + 1);
             break;
           }
         }
@@ -694,6 +742,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   }
 
   function feedback(result) {
+    if (at + 1 < questions.length) saveSession(at + 1);
     const v = result.verdict ?? {};
     content.replaceChildren();
     const head = el("div", `plate interview__score ${result.score >= PASS ? "is-pass" : "is-weak"}`);
@@ -736,8 +785,9 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     meta.textContent = "итог";
     const scored = results.filter((r) => r && r.score != null);
     const total = scored.length ? Math.round(scored.reduce((sum, r) => sum + (r.score ?? 0), 0) / scored.length) : 0;
+    prefs.set(SESSION, null);
     const all = history();
-    all.push({ at: Date.now(), course: courseId, topic: scope, level, n: scored.length, score: total });
+    if (scored.length) all.push({ at: Date.now(), course: courseId, topic: scope, level, n: scored.length, score: total });
     prefs.set("interviews", all.slice(-50));
 
     content.replaceChildren();
