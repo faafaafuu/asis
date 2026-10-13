@@ -266,6 +266,7 @@
         return { top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 };
       case "plugin:sufler|haptic":
       case "plugin:sufler|systemMenu":
+      case "learn_diag":
       case "plugin:sufler|cancelListening":
       case "plugin:sufler|chime":
       case "plugin:sufler|barStyle":

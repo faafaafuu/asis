@@ -35,9 +35,6 @@ async function material(course, topicId) {
 /** История собеседований — балл по времени: виден рост. */
 const history = () => prefs.get("interviews", []);
 
-export function lastInterview(courseId) {
-  return history().filter((item) => item.course === courseId).at(-1) ?? null;
-}
 
 register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   const course = store.course(courseId);

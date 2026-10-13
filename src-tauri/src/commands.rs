@@ -1790,6 +1790,12 @@ pub async fn learn_course_remove(course: String) -> Result<(), String> {
     crate::platform::remove_course(&course).await
 }
 
+/// Строка из окна телефона в журнал сервера — что сработало на устройстве.
+#[tauri::command]
+pub fn learn_diag(line: String) {
+    crate::platform::diag(line.chars().take(400).collect::<String>());
+}
+
 /// Сверить курсы с аккаунтом сейчас («потянуть вниз»); true — пришло новое.
 #[tauri::command]
 pub async fn learn_sync() -> Result<bool, String> {

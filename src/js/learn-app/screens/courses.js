@@ -5,7 +5,6 @@
 import { el, icon, button, label, progress, steps, loading, header, nav, register, prefs, plural, sheet, call, toast, isWeb } from "../core.js";
 import { store, currentTopic, topicCard, greeting, isDone } from "../store.js";
 import { open as openAssistant } from "../assistant.js";
-import { lastInterview } from "./interview.js";
 import { removeCourse, topicActions } from "./course.js";
 import { swipeRow, pressMenu, collapse, pullToRefresh } from "../gestures.js";
 
@@ -87,7 +86,6 @@ register("courses", (screen) => {
     } else {
       content.append(continueCard(course));
       content.append(tiles(course));
-      content.append(interviewCard(course));
     }
 
     // Мои курсы — с собирающимся пунктиром.
@@ -182,21 +180,6 @@ function tiles(course) {
   focus.addEventListener("click", () => nav.tab("focus", true));
   row.append(review, focus);
   return row;
-}
-
-/** Собеседование по курсу — мок-интервью, с прошлым баллом. */
-function interviewCard(course) {
-  const card = el("button", "plate interview-card");
-  const head = el("span", "tile__head");
-  head.append(icon("user", 20, 2), label("Собеседование"));
-  const last = lastInterview(course.id);
-  card.append(
-    head,
-    el("span", "interview-card__title", last ? `Прошлый раз — ${last.score}%` : "Мок-интервью по курсу"),
-    el("span", "small muted", "Ноа задаёт вопросы вслух, уточняет и разбирает, чего не хватило"),
-  );
-  card.addEventListener("click", () => nav.push("interview", { course: course.id }));
-  return card;
 }
 
 function courseCard(course) {

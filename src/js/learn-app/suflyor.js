@@ -73,14 +73,26 @@ export function mountSuflyor() {
  */
 function quietSystemMenu() {
   if (isWeb) return;
-  const editable = (node) => Boolean(node?.matches?.("input, textarea, select, [contenteditable]:not([contenteditable='false'])"));
-  let editing = false;
+  const editable = (node) =>
+    Boolean(node?.isConnected && node.matches?.("input, textarea, select, [contenteditable]:not([contenteditable='false'])"));
+  let editing = null;
   const tell = () => {
     const now = editable(document.activeElement);
     if (now === editing) return;
+    const first = editing === null;
     editing = now;
-    api.invoke("plugin:sufler|systemMenu", { editing: now }).catch(() => {});
+    api
+      .invoke("plugin:sufler|systemMenu", { editing: now })
+      .then((answer) => {
+        // Один раз за запуск — что подменилось: меню собирается по-разному в разных iOS.
+        if (first) api.invoke("learn_diag", { line: `меню выделения: ${answer?.hooked || "не подменено"}` }).catch(() => {});
+      })
+      .catch(() => {});
   };
+  tell();
   document.addEventListener("focusin", tell);
   document.addEventListener("focusout", () => setTimeout(tell, 0));
+  // Поле ушло со страницы в фокусе (закрыли лист) — focusout не приходит.
+  document.addEventListener("selectionchange", tell);
+  document.addEventListener("touchstart", tell, { passive: true, capture: true });
 }

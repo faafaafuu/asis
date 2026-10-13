@@ -1972,14 +1972,6 @@ body:not(.is-full) .content {
 .interview__score.is-weak .score {
   color: var(--c-bad);
 }
-.interview-card {
-  gap: 6px;
-}
-.interview-card__title {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--c-head);
-}
 .row__mark:not(:empty) {
   font-variant-numeric: tabular-nums;
 }

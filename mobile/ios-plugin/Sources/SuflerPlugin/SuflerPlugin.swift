@@ -52,7 +52,7 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
         super.load(webview: webview)
         self.webview = webview
         synth.delegate = self
-        SystemEditMenu.install()
+        SystemEditMenu.install(on: webview)
         pending = SharedSelectionStore.take()
     }
 
@@ -384,43 +384,107 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     }
 
     /// Окно сообщает, в поле ли ввода фокус: там системное меню нужно целиком.
+    /// Отвечает, что подменено, — для журнала.
     @objc public func systemMenu(_ invoke: Invoke) {
         let editing = (try? invoke.parseArgs(SystemMenuArgs.self))?.editing ?? false
         DispatchQueue.main.async {
             SystemEditMenu.editing = editing
-            invoke.resolve()
+            invoke.resolve(["hooked": SystemEditMenu.hooked.joined(separator: " ")])
         }
     }
 }
 
 /// Системное меню выделения («Скопировать», «Перевести», «Найти»…) в окне
 /// приложения выключено: над выделенным текстом окно рисует своё —
-/// «Копировать», «Прочитать», «Объяснить». В поле ввода — как обычно; вне
-/// поля остаётся только «Вставить». Меню WebKit спрашивает у своего вида
-/// (WKContentView), какие действия доступны, — ответ подменяется здесь.
+/// «Копировать», «Прочитать», «Объяснить». В поле ввода — как обычно.
+///
+/// Публичного выключателя у WKWebView нет, а собирают меню в разных версиях
+/// iOS разные места — глушатся все: какие действия доступны
+/// (canPerformAction), из чего строится меню (buildMenu), какое меню
+/// показать (делегат UIEditMenuInteraction и UITextInput с iOS 17).
+/// Что подменилось — `hooked`, окно пишет это в журнал сервера.
 enum SystemEditMenu {
     /// Фокус в поле ввода — меню целиком.
     static var editing = false
+    static var hooked: [String] = []
     private static var installed = false
-    private static let paste: Set<String> = ["paste:", "pasteAndMatchStyle:"]
 
-    static func install() {
-        guard !installed, let view = NSClassFromString("WKContentView") else { return }
-        let selector = #selector(UIResponder.canPerformAction(_:withSender:))
-        guard let method = class_getInstanceMethod(view, selector) else { return }
+    static func install(on webview: WKWebView) {
+        guard !installed else { return }
         installed = true
-        typealias Can = @convention(c) (AnyObject, Selector, Selector, AnyObject?) -> Bool
-        let original = unsafeBitCast(method_getImplementation(method), to: Can.self)
-        let filtered: @convention(block) (AnyObject, Selector, AnyObject?) -> Bool = { this, action, sender in
-            let allowed = SystemEditMenu.editing || SystemEditMenu.paste.contains(NSStringFromSelector(action))
-            guard allowed else { return false }
-            return original(this, selector, action, sender)
+        let content: AnyClass? = NSClassFromString("WKContentView")
+        let own: AnyClass? = object_getClass(webview)
+        for cls in [content, own].compactMap({ $0 }) {
+            hookCanPerform(cls)
+            hookBuildMenu(cls)
         }
-        let imp = imp_implementationWithBlock(filtered)
-        // Свой метод у WKContentView — подменяется; унаследованный — добавляется классу.
-        if !class_addMethod(view, selector, imp, method_getTypeEncoding(method)) {
+        if let content {
+            hookMenu(content, "editMenuInteraction:menuForConfiguration:suggestedActions:")
+            hookTextMenu(content, "editMenuForTextRange:suggestedActions:")
+        }
+    }
+
+    private static func swap(_ cls: AnyClass, _ selector: Selector, _ block: Any) -> IMP? {
+        guard let method = class_getInstanceMethod(cls, selector) else { return nil }
+        let original = method_getImplementation(method)
+        let imp = imp_implementationWithBlock(block)
+        // Свой метод у класса — подменяется; унаследованный — добавляется классу.
+        if !class_addMethod(cls, selector, imp, method_getTypeEncoding(method)) {
             method_setImplementation(method, imp)
         }
+        hooked.append("\(NSStringFromClass(cls)).\(NSStringFromSelector(selector))")
+        return original
+    }
+
+    private static func hookCanPerform(_ cls: AnyClass) {
+        let selector = #selector(UIResponder.canPerformAction(_:withSender:))
+        typealias Can = @convention(c) (AnyObject, Selector, Selector, AnyObject?) -> Bool
+        var original: Can?
+        let block: @convention(block) (AnyObject, Selector, AnyObject?) -> Bool = { this, action, sender in
+            guard SystemEditMenu.editing, let original else { return false }
+            return original(this, selector, action, sender)
+        }
+        if let imp = swap(cls, selector, block) { original = unsafeBitCast(imp, to: Can.self) }
+    }
+
+    private static func hookBuildMenu(_ cls: AnyClass) {
+        let selector = #selector(UIResponder.buildMenu(with:))
+        typealias Build = @convention(c) (AnyObject, Selector, AnyObject) -> Void
+        var original: Build?
+        let block: @convention(block) (AnyObject, AnyObject) -> Void = { this, builder in
+            original?(this, selector, builder)
+            guard !SystemEditMenu.editing, let builder = builder as? UIMenuBuilder, builder.system == .context else { return }
+            let menus: [UIMenu.Identifier] = [
+                .standardEdit, .replace, .share, .lookup, .learn, .find, .format, .font, .textStyle,
+                .spelling, .substitutions, .transformations, .speech, .writingDirection, .alignment,
+            ]
+            for menu in menus { builder.remove(menu: menu) }
+        }
+        if let imp = swap(cls, selector, block) { original = unsafeBitCast(imp, to: Build.self) }
+    }
+
+    /// Делегат меню выделения WebKit: вне поля ввода — пустое меню, его не показывают.
+    private static func hookMenu(_ cls: AnyClass, _ name: String) {
+        let selector = NSSelectorFromString(name)
+        typealias Menu = @convention(c) (AnyObject, Selector, AnyObject, AnyObject, AnyObject) -> AnyObject?
+        var original: Menu?
+        let block: @convention(block) (AnyObject, AnyObject, AnyObject, AnyObject) -> AnyObject? = { this, interaction, configuration, actions in
+            guard SystemEditMenu.editing, let original else { return UIMenu(children: []) }
+            return original(this, selector, interaction, configuration, actions)
+        }
+        if let imp = swap(cls, selector, block) { original = unsafeBitCast(imp, to: Menu.self) }
+    }
+
+    /// Меню выделения текста (UITextInput, iOS 17+).
+    private static func hookTextMenu(_ cls: AnyClass, _ name: String) {
+        let selector = NSSelectorFromString(name)
+        typealias Menu = @convention(c) (AnyObject, Selector, AnyObject, AnyObject) -> AnyObject?
+        var original: Menu?
+        let block: @convention(block) (AnyObject, AnyObject, AnyObject) -> AnyObject? = { this, range, actions in
+            guard SystemEditMenu.editing, let original else { return UIMenu(children: []) }
+            return original(this, selector, range, actions)
+        }
+        if let imp = swap(cls, selector, block) { original = unsafeBitCast(imp, to: Menu.self) }
     }
 }
 
