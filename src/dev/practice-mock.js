@@ -37,13 +37,13 @@
     ],
   };
   let state = {
-    course: "k8s",
+    course: params.get("terminal") ? null : "k8s",
     scenario: params.get("empty") ? null : scenario,
     step: 1,
     done: false,
     here: "server",
     watching: true,
-    topic: "k3s",
+    topic: params.get("terminal") ? null : "k3s",
     feed: params.get("empty")
       ? []
       : [

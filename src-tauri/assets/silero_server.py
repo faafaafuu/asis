@@ -109,13 +109,40 @@ def chunks(text: str, limit: int = 800):
         yield part
 
 
+def marked(part: str, rate: float) -> str:
+    """Разметка для живой интонации: предложения — <s>, между абзацами — пауза.
+
+    Без неё модель читала текст сплошным потоком, ровно: интонация не
+    опускалась в конце предложения и не начиналась заново в следующем.
+    <p> внутри <prosody> модель v5 не разбирает — абзац отмечается паузой.
+    """
+    paragraphs = []
+    for paragraph in re.split(r"\n\s*\n|\n", part):
+        sentences = [s for s in re.split(r"(?<=[.!?…])\s+", paragraph.strip()) if s]
+        if sentences:
+            paragraphs.append("".join(f"<s>{escape(s)}</s>" for s in sentences))
+    body = '<break time="350ms"/>'.join(paragraphs) or escape(part)
+    return f'<speak><prosody rate="{rate_word(rate)}">{body}</prosody></speak>'
+
+
+def tts(ssml: str, speaker: str):
+    """Ударения и «ё» — моделью: неверное ударение сильнее всего выдаёт робота.
+    Старые модели этих настроек не знают — тогда без них."""
+    try:
+        return model.apply_tts(
+            ssml_text=ssml, speaker=speaker, sample_rate=SAMPLE_RATE,
+            put_accent=True, put_yo=True, put_stress_homo=True, put_yo_homo=True,
+        )
+    except TypeError:
+        return model.apply_tts(ssml_text=ssml, speaker=speaker, sample_rate=SAMPLE_RATE)
+
+
 def synthesize(text: str, speaker: str, rate: float) -> bytes:
     speaker = speaker if speaker in SPEAKERS else "xenia"
     pieces = []
     with lock:
         for part in chunks(speakable(text)):
-            ssml = f'<speak><prosody rate="{rate_word(rate)}">{escape(part)}</prosody></speak>'
-            pieces.append(model.apply_tts(ssml_text=ssml, speaker=speaker, sample_rate=SAMPLE_RATE))
+            pieces.append(tts(marked(part, rate), speaker))
     if not pieces:
         raise ValueError("пустой текст")
     audio = torch.cat(pieces)

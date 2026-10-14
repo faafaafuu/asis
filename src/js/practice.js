@@ -378,8 +378,6 @@ let courses = null;
 let progress = new Map();
 /** Выбор темы поверх идущего сценария — «Тема ▾». */
 let picking = false;
-/** К теме курса переходили сами — второй раз не пробуем, даже если не вышло. */
-let autoOpened = false;
 
 const STATUS_MARK = { done: "✓", practice: "◐", reading: "◔", new: "" };
 
@@ -413,19 +411,6 @@ function setup(root) {
     box.append(el("p", "", "Загружаю курсы…"));
     loadTopics().then(() => render());
     return;
-  }
-  // Курсы есть, а практика ни к какой теме не привязана — сразу к теме, на
-  // которой человек остановился в курсе.
-  if (courses.length && !practice?.topic && !practice?.task && !picking && !autoOpened) {
-    autoOpened = true;
-    // Курс, где человек остановился, — иначе первый.
-    const course = courses.find((c) => c.current) ?? courses[0];
-    const topic = course.current ?? course.topics[0]?.id;
-    if (topic) {
-      box.append(el("p", "", "Открываю тему…"));
-      openTopic(course.id, topic);
-      return;
-    }
   }
   box.append(el("h2", "", "Практика по теме"));
   box.append(
@@ -481,7 +466,7 @@ function setup(root) {
         picking = false;
         render();
       });
-      box.append(taskStart(), back);
+      box.append(back);
       return;
     }
     wish.placeholder = "Пожелание, если есть: «на трёх серверах», «через Docker»…";
@@ -500,7 +485,7 @@ function setup(root) {
   });
   box.append(wish, go);
   if (error) box.append(el("p", "setup__error", error));
-  if (courses.length) box.append(taskStart());
+
   box.append(
     el(
       "p",
@@ -544,6 +529,30 @@ async function startTask(text) {
   term.focus();
 }
 
+/**
+ * Терминал без задачи: по желанию — одной строкой, что делаем. С задачей Ноа
+ * держит её в голове и ведёт к результату; без неё — просто отвечает.
+ */
+function taskLine() {
+  const box = el("section", "coach__task-line");
+  const area = el("textarea", "answer");
+  area.rows = 1;
+  area.placeholder = "Что делаем? Необязательно — например: поднять мониторинг через Helm";
+  const go = button("Запомнить", () => startTask(area.value), true);
+  area.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      startTask(area.value);
+    }
+  });
+  box.append(
+    el("p", "coach__step-why", "Работайте в терминале — Ноа видит его. Спрашивайте как обычно, голосом 🎙 или текстом; команду из ответа можно выполнить кнопкой или словом «выполни»."),
+    area,
+    go,
+  );
+  return box;
+}
+
 /** Вид своей задачи: сверху — задача, дальше лента и вопрос. */
 function taskCard() {
   const card = el("section", "coach__step");
@@ -551,9 +560,16 @@ function taskCard() {
   const done = practice.history?.length ?? 0;
   if (done) card.append(el("p", "coach__step-why", `Команд в журнале: ${done} — Ноа помнит, что уже сделано и что упало.`));
   const actions = el("div", "coach__actions");
+  const other = button("✕ Другая задача", async () => {
+    await api.invoke("practice_task", { task: "" }).catch(() => {});
+    practice = await api.invoke("practice_state").catch(() => practice);
+    render();
+  }, true);
+  other.title = "Снять задачу — журнал и лента начнутся заново";
   actions.append(
     button("💡 Что дальше?", () => ask("Что делать дальше по задаче? Коротко и командой, если можно."), true),
     button("🗺 Где мы", () => ask("Общая картина: что уже сделано по задаче, что осталось и как части связаны?"), true),
+    other,
   );
   card.append(actions);
   return card;
@@ -707,7 +723,8 @@ const mic = el("button", "icon-toggle coach__mic", "🎙");
 // 🎙 — Ноа слушает всё время, пока окно открыто: зовут по имени — «Ноа,
 // глянь, что за ошибка». Выбор помнится до следующего открытия.
 const ALWAYS = "noa.practiceAlways";
-mic.addEventListener("click", () => setAlways(!listening));
+// Ноа ждёт имя (разговор затих) — нажатие снова включает живой разговор, а не выключает.
+mic.addEventListener("click", () => setAlways(listening && hearing === "wake" ? true : !listening));
 function setAlways(on) {
   listening = on;
   try {
@@ -789,19 +806,12 @@ function render() {
   // длинная схема не должна уводить их за край окна.
   const body = el("div", "coach__body");
   root.append(body);
-  if (!scenario && !picking && practice?.task) {
-    ui.title.textContent = "Задача · Практика";
-    body.append(taskCard());
+  // «Терминал» — модуль: терминал и Ноа-напарник, без тем, сценариев и
+  // шагов. Практика по теме открывается из обучения — у неё тема есть.
+  if (!practice?.topic && !picking) {
+    ui.title.textContent = "Терминал";
+    body.append(practice?.task ? taskCard() : taskLine());
     root.append(feedSplit, feed, askRow);
-    const foot = el("div", "coach__foot");
-    const other = el("button", "link", "Другая задача или тема ▾");
-    other.addEventListener("click", () => {
-      picking = true;
-      courses = null;
-      render();
-    });
-    foot.append(other);
-    root.append(foot);
     paintFeed();
     paintStatus();
     return;
@@ -880,12 +890,15 @@ api?.listen("practice:state", (event) => {
 
 // Кольцо — по тому, что происходит: говорит, слушает, думает, смотрит.
 let speaking = false;
+/** Как Ноа слушает: «talk» — всё подряд, «wake» — ждёт имя. */
+let hearing = "";
 setInterval(async () => {
   const [busy, heard] = await Promise.all([
     api.invoke("voice_busy").catch(() => false),
     api.invoke("practice_listening").catch(() => false),
   ]);
   speaking = Boolean(busy);
+  hearing = typeof heard === "string" ? heard : heard ? "talk" : "";
   if (listening && !heard) {
     // Разговор без рук кончился сам — минута тишины или «спасибо».
     listening = false;
@@ -900,14 +913,19 @@ function paintStatus() {
   status.textContent = {
     speaking: "Ноа говорит",
     thinking: "Ноа думает…",
-    listening: "Слушаю — зовите «Ноа, …»",
+    listening: hearing === "wake" ? "Жду «Ноа, …» — или нажмите 🎙" : "Слушаю — говорите",
     idle: practice?.watching ? "Ноа смотрит терминал" : "Ноа не смотрит",
   }[mode];
-  sub.textContent = practice?.scenario
-    ? practice.done
-      ? "Сценарий пройден"
-      : `Шаг ${practice.step + 1} из ${practice.scenario.steps.length}`
-    : "Сценария пока нет";
+  // В «Терминале» — задача, если есть; в практике по теме — шаг сценария.
+  sub.textContent = !practice?.topic
+    ? practice?.task
+      ? `Задача: ${practice.task}`
+      : "Терминал"
+    : practice?.scenario
+      ? practice.done
+        ? "Сценарий пройден"
+        : `Шаг ${practice.step + 1} из ${practice.scenario.steps.length}`
+      : "Сценария пока нет";
 }
 
 // Esc вне терминала — «замолчи». В терминале Esc нужен самому терминалу (vim).

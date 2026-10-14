@@ -156,17 +156,50 @@ pub async fn ai_ask(
     let fallback = state.error_text();
     let limit = state.config().ai.call_limit();
     let what = format!("вопрос про «{term}»");
+    // Окно, открытое голосом, — продолжение голосового разговора: ему нужна
+    // та же память. Иначе ответ про маршрут, данный голосом, окно не знало, и
+    // «сколько ехать?» следующей фразой было для модели вопросом с нуля.
+    #[cfg(desktop)]
+    let voiced = term.trim().is_empty() || crate::overlay::by_voice();
+    #[cfg(not(desktop))]
+    let voiced = false;
+    let mut history = if voiced {
+        crate::voice_history(crate::config::is_local(&state.config().ai.endpoint))
+    } else {
+        Vec::new()
+    };
+    for item in &thread {
+        if !history.iter().any(|known| known.q == item.q && known.a == item.a) {
+            history.push(item.clone());
+        }
+    }
+    let asked = question.clone();
+    // Ответ мог начать готовиться ещё во время разбора фразы — тогда он почти готов.
+    #[cfg(desktop)]
+    let prepared = if voiced { crate::take_prepared(&question) } else { None };
     let answer = guarded(
         &what,
         async move {
-            // Окно шлёт всю переписку; модели — последние шесть обменов.
-            let recent = &thread[thread.len().saturating_sub(6)..];
+            #[cfg(desktop)]
+            if let Some(job) = prepared {
+                if let Ok(result) = job.await {
+                    return result;
+                }
+            }
+            // Модели — последние восемь обменов.
+            let recent = &history[history.len().saturating_sub(8)..];
             provider.ask(&term, &context, recent, &question).await
         },
         fallback,
         limit,
     )
     .await;
+    // И обратно: сказанное в окне голосом — в общую память разговора.
+    if voiced {
+        if let Ok(reply) = &answer {
+            crate::remember_exchange(&asked, reply);
+        }
+    }
 
     #[cfg(desktop)]
     crate::overlay::touch_popup();
@@ -1877,7 +1910,12 @@ pub async fn learn_build_stop(id: String) -> Result<(), String> {
 // оставалось белым — команда ждёт главный поток, а он ждёт команду.
 #[tauri::command]
 pub async fn practice_open(app: AppHandle, course: Option<String>, topic: Option<String>) -> Result<(), String> {
-    crate::practice::switch(&app, course, topic);
+    // Без темы — модуль «Терминал»; с темой — практика по ней из обучения.
+    if topic.is_some() {
+        crate::practice::switch(&app, course, topic);
+    } else {
+        crate::practice::switch_free(&app);
+    }
     crate::overlay::show_practice(&app).map_err(|err| err.to_string())
 }
 
@@ -1963,9 +2001,15 @@ pub fn practice_task(app: AppHandle, task: String) {
 pub async fn practice_always(app: AppHandle, on: bool) {
     crate::practice::set_always(on);
     if on {
-        crate::start_wake(&app);
-    } else if !app.state::<AppState>().config().voice.wake_word {
-        crate::stop_wake();
+        // Сразу живой разговор — имя не нужно: нажал и говори. Замолчал
+        // надолго — Ноа ждёт имя («Ноа, …»), пока окно открыто.
+        crate::voice::stop();
+        crate::start_conversation_by_hand(&app);
+    } else {
+        crate::stop_conversation(&app);
+        if !app.state::<AppState>().config().voice.wake_word {
+            crate::stop_wake();
+        }
     }
 }
 
@@ -2007,8 +2051,15 @@ pub fn practice_term_resize(cols: u16, rows: u16) {
 /// после минуты тишины или прощания, — и кнопка микрофона должна это видеть.
 #[cfg(desktop)]
 #[tauri::command]
-pub fn practice_listening() -> bool {
-    crate::practice::always() || (crate::practice::voice_on() && crate::in_conversation())
+pub fn practice_listening() -> &'static str {
+    // «talk» — слушает всё подряд, «wake» — ждёт имя, пусто — не слушает.
+    if crate::in_conversation() && crate::practice::voice_on() {
+        "talk"
+    } else if crate::practice::always() {
+        "wake"
+    } else {
+        ""
+    }
 }
 
 /// Текст из буфера обмена — вставить в терминал. Через программу, а не

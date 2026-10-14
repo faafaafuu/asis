@@ -769,3 +769,18 @@ html.is-phone body {
   margin: 0;
   font-size: 17px;
 }
+
+/* «Терминал»: задача по желанию — одной строкой. */
+.coach__task-line {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.coach__task-line .answer {
+  min-height: 42px;
+}
+
+.coach__task-line .button {
+  align-self: flex-start;
+}

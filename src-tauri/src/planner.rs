@@ -171,12 +171,6 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(reply) = timer_request(app, said, Local::now()) {
         return Some(reply);
     }
-    // Практика в терминале: «как открыть порт» — вопрос о сервере, а не
-    // просьба открыть программу.
-    #[cfg(desktop)]
-    if crate::practice::voice_on() {
-        return None;
-    }
     // Обсуждают урок: сказанное — вопрос по нему, а не распоряжение. Опрос и
     // карточки, начатые из обсуждения, своё слышат — они проверяются первыми.
     if crate::tutor::active() {
@@ -251,12 +245,22 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         return None;
     }
 
+    // Пока модель разбирает, распоряжение ли это, ответ на фразу как на вопрос
+    // уже готовится: разбор чаще всего говорит «chat», и тогда ответ ждёт
+    // готовым — одно ожидание вместо двух подряд.
+    #[cfg(desktop)]
+    crate::prepare_answer(app, said);
+
     let open = open_tasks();
     match read_intent(app, said, &open).await {
         Intent::Chat => None,
         // Смотрят на окно — «что тут написано» и «где эта выставка» про него,
         // а не про буфер обмена и не про поиск в интернете.
         Intent::Screen { .. } if crate::glance::active() => None,
+        // В окне терминала Ноа видит его экран сама — «посмотри ошибку» не
+        // снимок экрана, а вопрос о терминале.
+        #[cfg(desktop)]
+        Intent::Screen { .. } if crate::practice::voice_on() => None,
         Intent::Lookup { .. } if crate::glance::refers_to_window(said) => None,
         Intent::Add {
             title,
@@ -397,7 +401,17 @@ fn module_window(app: &AppHandle, program: &str) -> Option<String> {
 fn practice_request(app: &AppHandle, said: &str) -> Option<String> {
     let lower = said.to_lowercase();
     const ASK: &[&str] = &["открой", "открыть", "запусти", "включи", "покажи", "давай", "хочу"];
-    if !lower.contains("практик") || !ASK.iter().any(|word| lower.contains(word)) {
+    if !ASK.iter().any(|word| lower.contains(word)) {
+        return None;
+    }
+    // «Открой свой терминал», «терминал Ноа» — модуль «Терминал»; просто
+    // «открой терминал» — Windows Terminal, его открывает поиск программ.
+    let terminal = lower.contains("терминал") && ["свой", "твой", "ноа", "модуль"].iter().any(|w| lower.contains(w));
+    if terminal {
+        crate::practice::switch_free(app);
+        return Some(open_own(app, OwnWindow::Practice).replace("практику", "терминал"));
+    }
+    if !lower.contains("практик") {
         return None;
     }
     Some(open_own(app, OwnWindow::Practice))
@@ -2602,6 +2616,7 @@ fn intent_rules(app: &AppHandle, open: &[Task]) -> String {
             order_line(),
             crate::screen::clipboard_line(),
             crate::glance::context_line(),
+            crate::recent_line(),
         ]
         .join(" "),
     )

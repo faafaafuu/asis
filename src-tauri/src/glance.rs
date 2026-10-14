@@ -170,7 +170,7 @@ pub async fn answer(app: &AppHandle, said: &str) -> Result<String, String> {
 }
 
 /// Последние `limit` знаков, с начала строки.
-fn tail(text: &str, limit: usize) -> String {
+pub(crate) fn tail(text: &str, limit: usize) -> String {
     let count = text.chars().count();
     if count <= limit {
         return text.trim().to_string();
@@ -210,7 +210,7 @@ fn read(_handle: isize) -> Result<(String, String, &'static str), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn title(handle: isize) -> String {
+pub(crate) fn title(handle: isize) -> String {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::GetWindowTextW;
 
@@ -223,7 +223,7 @@ fn title(handle: isize) -> String {
 /// Видимый текст окна через TextPattern: у элемента в фокусе или у его
 /// ближайших предков — документа, терминала, поля.
 #[cfg(target_os = "windows")]
-fn visible_text(handle: isize) -> String {
+pub(crate) fn visible_text(handle: isize) -> String {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
     use windows::Win32::UI::Accessibility::{

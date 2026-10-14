@@ -167,7 +167,7 @@ if (api) {
 
   /** Показывает содержимое по данным из Rust. */
   function applyOpen(payload) {
-    const { term, context, theme, errorText, dialogue, speak, quiet, answer } = payload ?? {};
+    const { term, context, theme, errorText, dialogue, speak, quiet, answer, label } = payload ?? {};
     // Новый вопрос — новое окно: размер снова определяет содержимое. Rust к
     // этому моменту уже забыл про ручную геометрию, и разметка должна забыть
     // тоже, иначе окно осталось бы растянутым под ответ в две строки.
@@ -178,7 +178,7 @@ if (api) {
     // Готовый текст показываем как есть, ничего не спрашивая.
     if (answer) {
       // Весть о версии — «Весть», остальное — напоминание о деле.
-      view.announce(answer, { kind: /^Вышла версия/.test(answer) ? "news" : "reminder" });
+      view.announce(answer, { kind: /^Вышла версия/.test(answer) ? "news" : "reminder", label: label ?? "" });
       return;
     }
     view.open({ term: term ?? "", context: context ?? "", speak: Boolean(speak), quiet: Boolean(quiet) });

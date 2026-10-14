@@ -338,7 +338,7 @@ pub fn command_for(action: &Action) -> String {
     }
 }
 
-fn base64(bytes: &[u8]) -> String {
+pub(crate) fn base64(bytes: &[u8]) -> String {
     const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -382,6 +382,26 @@ pub fn switch(app: &AppHandle, course: Option<String>, topic: Option<String>) {
         save(app, &store.saved);
     }
     log::info!("практика: тема {key}");
+    publish(app, "", false);
+}
+
+/// Модуль «Терминал»: окно без темы — терминал и Ноа-напарник. Практика по
+/// теме открывается из обучения и в терминал не лезет.
+pub fn switch_free(app: &AppHandle) {
+    {
+        let mut store = STORE.lock().unwrap_or_else(|err| err.into_inner());
+        load(&mut store, app);
+        if store.saved.current.is_empty() {
+            return;
+        }
+        let like = store.saved.items.get(&store.saved.current).cloned();
+        store.saved.items.entry(String::new()).or_insert_with(|| blank(None, None, like.as_ref()));
+        store.saved.current = String::new();
+        store.thread.clear();
+        store.offered.clear();
+        save(app, &store.saved);
+    }
+    log::info!("практика: режим терминала");
     publish(app, "", false);
 }
 
@@ -692,7 +712,7 @@ struct Look {
 
 /// Практика — как в настоящей эксплуатации, а не учебное упрощение: этому
 /// правилу следуют и сценарий, и замечания, и ответы.
-const PROD: &str = "Всё — как в продакшене у настоящей команды, без учебных упрощений и \
+pub(crate) const PROD: &str = "Всё — как в продакшене у настоящей команды, без учебных упрощений и \
     костылей: официальные способы установки и пакеты, закреплённые версии; работа от \
     пользователя с sudo, а не от root; вход по SSH-ключам; фаервол включён, открыто только \
     нужное; секреты не в командах и не в git; настройка файлами (манифесты YAML, конфиги, \
@@ -723,9 +743,9 @@ async fn observe(app: &AppHandle, chunk: String, glance: Glance) {
         (material, thread)
     };
     let rules = format!(
-        "Ты — репетитор {}: ведёшь практику в терминале. Человек сам набирает команды, ты видишь \
-         его терминал и идёшь рядом: объясняешь, что он сделал и что ответил сервер, замечаешь \
-         ошибки, подсказываешь следующий шаг.\n\n{material}\n\
+        "Ты — помощник по окну терминала, тебя зовут {}: голосовой помощник человека, не Claude. \
+         Человек сам набирает команды, ты видишь его терминал и идёшь рядом: объясняешь, что он \
+         сделал и что ответил сервер, замечаешь ошибки, подсказываешь следующий шаг.\n\n{material}\n\
          Ответь строго JSON, без текста вокруг: \
          {{\"say\": \"…\", \"done\": false, \"next\": \"…\", \"node\": \"…\", \"error\": false, \"do\": []}}\n\
          - say — что сказать вслух, 1–3 короткие разговорные фразы, связно и в контексте цели: что сделано, что дальше и зачем это понадобится; ошибка — что значит и как поправить. Не пересказывай вывод. Рутина без нового смысла \
@@ -828,8 +848,12 @@ pub async fn ask(app: &AppHandle, text: &str, voice: bool) -> Result<String, Str
     // Ответ двумя видами: для глаз — с командами, для слуха — словами. Код,
     // прочитанный вслух по буквам, не понять; понятно — что он делает и зачем.
     let rules = format!(
-        "Ты — репетитор {}: ведёшь практику в терминале. Человек сам набирает команды; ты видишь \
-         его терминал и отвечаешь на вопросы по ходу работы.\n\n{material}\n\
+        "Ты — помощник по окну терминала, тебя зовут {0}: голосовой помощник человека на его \
+         компьютере. Ты {0} — не Claude, не «языковая модель» и не «ИИ-ассистент»; о себе \
+         говори как {0}. Терминал — то, что ты сейчас видишь, а не граница: просят о другом — \
+         узнать, объяснить, посчитать, посоветовать — помогай как обычно, не отказывай и не \
+         переводи разговор на терминал. Человек сам набирает команды; ты видишь его терминал и \
+         помогаешь по ходу работы.\n\n{material}\n\
          Последнее в терминале:\n```\n{tail}\n```\n\
          Как отвечать: сразу по существу, простыми словами, с опорой на то, что сейчас в \
          терминале. Просят подсказку — сначала направление, команду — если застрял. Просят общую \
@@ -944,7 +968,7 @@ pub fn act(app: &AppHandle, line: usize, index: usize, paste: bool) -> Result<()
 }
 
 /// Как говорить вслух — для всех ответов практики.
-const SAY: &str = "Коротко и разговорно. Никакого кода, команд, флагов и путей: \
+pub(crate) const SAY: &str = "Коротко и разговорно. Никакого кода, команд, флагов и путей: \
     словами скажи, что делает команда или код, что куда идёт и откуда берётся, и зачем это. \
     Название программы можно — nginx, kubectl, docker. Не «введите эс-эс-аш минус и», а \
     «подключитесь к серверу по ключу».";
@@ -957,27 +981,54 @@ fn two_ways(raw: &str) -> (String, String) {
 }
 
 /// То же и действия, которые Ноа предлагает сделать сама.
-fn three_ways(raw: &str) -> (String, String, Vec<Action>) {
-    #[derive(Deserialize)]
-    struct Two {
-        #[serde(default)]
-        text: String,
-        #[serde(default)]
-        say: String,
-        #[serde(default, rename = "do")]
-        actions: Vec<Action>,
+pub(crate) fn three_ways(raw: &str) -> (String, String, Vec<Action>) {
+    let Some(value) = json_object(raw).and_then(lenient_json) else {
+        return (raw.trim().to_string(), speakable(raw), Vec::new());
+    };
+    let field = |key: &str| value.get(key).and_then(serde_json::Value::as_str).unwrap_or("").trim().to_string();
+    let text = field("text");
+    let say = field("say");
+    // Действия — каждое отдельно: одно кривое не должно ронять весь ответ.
+    let actions: Vec<Action> = value
+        .get("do")
+        .and_then(serde_json::Value::as_array)
+        .map(|list| list.iter().filter_map(|item| serde_json::from_value(item.clone()).ok()).collect())
+        .unwrap_or_default();
+    if text.is_empty() && say.is_empty() && actions.is_empty() {
+        return (raw.trim().to_string(), speakable(raw), Vec::new());
     }
-    match json_object(raw).and_then(|json| serde_json::from_str::<Two>(json).ok()) {
-        Some(two) if !two.text.trim().is_empty() || !two.actions.is_empty() => {
-            let say = if two.say.trim().is_empty() { speakable(&two.text) } else { speakable(&two.say) };
-            (two.text.trim().to_string(), say, usable(two.actions))
+    let shown = if text.is_empty() { say.clone() } else { text };
+    let said = if say.is_empty() { speakable(&shown) } else { speakable(&say) };
+    (shown, said, usable(actions))
+}
+
+/// JSON от модели — терпимо. Пути Windows вроде `C:\Users` модель пишет с
+/// одиночными обратными слэшами, и строгий разбор отвергал весь ответ: вслух
+/// звучал сырой JSON. Такие слэши удваиваются, и разбор пробуется ещё раз.
+fn lenient_json(json: &str) -> Option<serde_json::Value> {
+    if let Ok(value) = serde_json::from_str(json) {
+        return Some(value);
+    }
+    let mut fixed = String::with_capacity(json.len() + 16);
+    let mut chars = json.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.peek() {
+                Some('"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u') => {
+                    fixed.push(ch);
+                    fixed.push(chars.next().unwrap_or_default());
+                }
+                _ => fixed.push_str("\\\\"),
+            }
+        } else {
+            fixed.push(ch);
         }
-        _ => (raw.trim().to_string(), speakable(raw), Vec::new()),
     }
+    serde_json::from_str(&fixed).ok()
 }
 
 /// Как Ноа делает за человека — для ответов и замечаний практики.
-const DO: &str = "do — действия, которые программа выполнит в терминале человека по одной кнопке. \
+pub(crate) const DO: &str = "do — действия, которые программа выполнит в терминале человека по одной кнопке. \
     Клади их, когда человек просит сделать за него («создай», «исправь», «запиши», «выполни», \
     «сделай сама») или когда исправление очевидно. Файл — целиком: \
     {\"kind\": \"file\", \"path\": \"/полный/путь\", \"content\": \"весь текст файла\", \"sudo\": false} — \
@@ -998,8 +1049,53 @@ fn speakable(text: &str) -> String {
 
 /// Спрашивают голосом: фразы разговора без рук идут сюда.
 pub fn voice_on() -> bool {
-    let store = STORE.lock().unwrap_or_else(|err| err.into_inner());
-    store.voice || store.always
+    {
+        let store = STORE.lock().unwrap_or_else(|err| err.into_inner());
+        if store.voice || store.always {
+            return true;
+        }
+    }
+    window_up()
+}
+
+/// Окно практики — его HWND. Проверять окно приходится и из главного
+/// потока (команды окна), а запросы к окну через Tauri идут как раз через
+/// главный поток: оттуда они ждали бы сами себя. Windows отвечает сразу.
+static WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// Окно практики открыто: запомнить его, чтобы голос знал о нём.
+pub fn attach(window: &tauri::WebviewWindow) {
+    #[cfg(target_os = "windows")]
+    if let Ok(hwnd) = window.hwnd() {
+        WINDOW.store(hwnd.0 as isize, std::sync::atomic::Ordering::SeqCst);
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+}
+
+/// Окно практики на экране — не свёрнуто. Тогда сказанное Ноа — про
+/// терминал: вопрос уходит практике, где она его видит, а не общему
+/// разговору, который о терминале ничего не знает.
+fn window_up() -> bool {
+    let hwnd = WINDOW.load(std::sync::atomic::Ordering::SeqCst);
+    if hwnd == 0 {
+        return false;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindow, IsWindowVisible};
+        let hwnd = HWND(hwnd as *mut core::ffi::c_void);
+        // SAFETY: только спрашивает систему о состоянии окна по его номеру.
+        unsafe { IsWindow(Some(hwnd)).as_bool() && IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() }
+    }
+    #[cfg(not(target_os = "windows"))]
+    false
+}
+
+/// Окно закрыли — голос о нём больше не знает.
+pub fn detach() {
+    WINDOW.store(0, std::sync::atomic::Ordering::SeqCst);
 }
 
 pub fn set_voice(on: bool) {
@@ -1639,7 +1735,7 @@ fn routine(chunk: &str) -> bool {
 }
 
 /// Что-то упало: в выводе после команды — признаки ошибки.
-fn failed(chunk: &str) -> bool {
+pub(crate) fn failed(chunk: &str) -> bool {
     const MARKS: &[&str] = &[
         "error", "failed", "fatal", "not found", "no such", "denied", "refused", "cannot", "can't",
         "unable to", "invalid", "timed out", "exception", "traceback", "panic", "ошибк", "не удалось",
@@ -1959,6 +2055,17 @@ mod tests {
         assert!(routine("PS C:\\Users\\manda> cd projects"));
         assert!(!routine("root@node1:~# ls /nope\nls: cannot access '/nope': No such file or directory"));
         assert!(!routine("root@node1:~# kubectl get nodes\nNAME STATUS"));
+    }
+
+    #[test]
+    fn replies_survive_windows_paths_and_bad_actions() {
+        let raw = r#"{"text": "Вы в папке C:\Users\manda, там `dir` покажет файлы.", "say": "Вы в своей папке.", "do": [{"kind": "run", "command": "dir"}, {"kind": "что-то"}]}"#;
+        let (shown, said, actions) = three_ways(raw);
+        assert!(shown.contains(r"C:\Users\manda"), "{shown}");
+        assert_eq!(said, "Вы в своей папке.");
+        assert_eq!(actions, vec![Action::Run { command: "dir".into() }]);
+        let (_, said, _) = three_ways("```json\n{\"say\": \"Привет\"}\n```");
+        assert_eq!(said, "Привет");
     }
 
     #[test]

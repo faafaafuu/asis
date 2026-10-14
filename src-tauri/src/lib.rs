@@ -2956,7 +2956,16 @@ fn answer_without_window(app: &tauri::AppHandle, question: &str) {
         speak_with_hud(app, answer, true);
         return;
     }
+    // Ответ мог начать готовиться ещё во время разбора фразы.
+    let prepared = take_prepared(question);
     let asked = tauri::async_runtime::block_on(async {
+        if let Some(job) = prepared {
+            if let Ok(result) = tokio::time::timeout(limit, job).await.map(|joined| joined.map_err(|_| ai_client::AiError::Network)) {
+                if let Ok(result) = result {
+                    return Ok(result);
+                }
+            }
+        }
         tokio::time::timeout(limit, provider.ask("", "", &history, question)).await
     });
     let answer = match asked {
@@ -2990,7 +2999,7 @@ pub(crate) fn last_exchange() -> Option<(String, String)> {
 }
 
 /// Кладёт вопрос и ответ в историю разговора (см. `VOICE_THREAD`).
-fn remember_exchange(question: &str, answer: &str) {
+pub(crate) fn remember_exchange(question: &str, answer: &str) {
     let mut thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
     if thread.1.is_some_and(|at| at.elapsed() > THREAD_TTL) {
         thread.0.clear();
@@ -3002,6 +3011,88 @@ fn remember_exchange(question: &str, answer: &str) {
     let excess = thread.0.len().saturating_sub(THREAD_KEEP);
     thread.0.drain(..excess);
     thread.1 = Some(std::time::Instant::now());
+}
+
+/// Строка обстановки для разбора фраз: о чём только что говорили. Без неё
+/// «а сколько ехать?» после вопроса про дисконт-центр разбиралось с нуля —
+/// откуда и куда, разбор не знал.
+pub(crate) fn recent_line() -> String {
+    let recent = voice_history(false);
+    let last: Vec<_> = recent.iter().rev().take(2).collect();
+    if last.is_empty() {
+        return String::new();
+    }
+    let said = last
+        .iter()
+        .rev()
+        .map(|item| {
+            let a: String = item.a.chars().take(200).collect();
+            format!("человек: «{}» — ответ: «{a}»", item.q)
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!(
+        "Только что говорили: {said}. Уточнение («а сколько ехать?», «а на метро?», «а завтра?») — \
+         о том же: в query пиши запрос полностью — что, откуда и куда, когда."
+    )
+}
+
+/// Недавний разговор голосом — для окна ответа: оно спрашивает модель само,
+/// и без этой истории каждая голосовая фраза звучала для модели первой —
+/// «сколько ехать?» после маршрута превращалось в «откуда ехать?».
+pub(crate) fn voice_history(local: bool) -> Vec<ai_client::ThreadItem> {
+    let thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
+    if thread.1.is_none_or(|at| at.elapsed() > THREAD_TTL) {
+        return Vec::new();
+    }
+    let depth = if local { 3 } else { 12 };
+    thread.0[thread.0.len().saturating_sub(depth)..].to_vec()
+}
+
+/// Ответ, который начали готовить заранее, пока шёл разбор фразы.
+#[cfg(desktop)]
+type Prepared = tauri::async_runtime::JoinHandle<Result<String, ai_client::AiError>>;
+
+#[cfg(desktop)]
+static PREPARED: std::sync::Mutex<Option<(String, std::time::Instant, Prepared)>> = std::sync::Mutex::new(None);
+
+/// Начать готовить ответ на фразу как на обычный вопрос — с той же
+/// историей, с какой его задали бы потом.
+#[cfg(desktop)]
+pub(crate) fn prepare_answer(app: &tauri::AppHandle, said: &str) {
+    let (provider, local) = {
+        let state = app.state::<AppState>();
+        let local = crate::config::is_local(&state.config().ai.endpoint);
+        (state.provider(), local)
+    };
+    // Своя модель на компьютере одна: два запроса сразу только мешали бы друг другу.
+    if local {
+        return;
+    }
+    let history = voice_history(false);
+    let question = said.to_string();
+    let job = tauri::async_runtime::spawn(async move { provider.ask("", "", &history, &question).await });
+    let old = PREPARED
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
+        .replace((said.trim().to_string(), std::time::Instant::now(), job));
+    if let Some((_, _, old)) = old {
+        old.abort();
+    }
+}
+
+/// Готовый (или почти) ответ на этот вопрос, если его начали заранее.
+#[cfg(desktop)]
+pub(crate) fn take_prepared(question: &str) -> Option<Prepared> {
+    let mut guard = PREPARED.lock().unwrap_or_else(|err| err.into_inner());
+    let fits = guard
+        .as_ref()
+        .is_some_and(|(said, at, _)| said == question.trim() && at.elapsed() < std::time::Duration::from_secs(90));
+    if fits {
+        guard.take().map(|(_, _, job)| job)
+    } else {
+        None
+    }
 }
 
 /// Сколько обменов хранится; модели отдаётся не больше `thread_depth`.

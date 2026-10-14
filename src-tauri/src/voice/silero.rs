@@ -337,17 +337,69 @@ pub async fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Resul
     let started = tauri::async_runtime::spawn_blocking(move || ensure_server(&starter)).await;
     let outcome = async {
         started.map_err(|err| err.to_string())??;
-        let wav = request(voice, rate, text).await?;
-        if GENERATION.load(Ordering::SeqCst) != generation {
-            return Ok(());
+        // По кускам: первое предложение звучит почти сразу, а следующее
+        // синтезируется, пока звучит предыдущее, — звук встаёт в очередь сам.
+        // Целиком длинный ответ сначала долго молчал, а потом читался лекцией.
+        for piece in pieces(text) {
+            let wav = request(voice, rate, &piece).await?;
+            if GENERATION.load(Ordering::SeqCst) != generation {
+                return Ok(());
+            }
+            let (samples, hz) = super::azure::decode_wav(&wav)?;
+            super::audio::play(samples, hz);
         }
-        let (samples, hz) = super::azure::decode_wav(&wav)?;
-        super::audio::play(samples, hz);
         Ok(())
     }
     .await;
     done(generation);
     outcome
+}
+
+/// Куски для озвучки: первый — одно предложение (чтобы начать сразу),
+/// дальше — по нескольку предложений, до ~300 знаков, по границам фраз.
+fn pieces(text: &str) -> Vec<String> {
+    let mut sentences = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        current.push(ch);
+        if matches!(ch, '.' | '!' | '?' | '…' | '\n') && current.trim().chars().count() > 1 {
+            sentences.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.trim().is_empty() {
+        sentences.push(current);
+    }
+    let mut out: Vec<String> = Vec::new();
+    for sentence in sentences {
+        let sentence = sentence.trim();
+        if sentence.is_empty() {
+            continue;
+        }
+        let grouped = out.len() > 1;
+        match out.last_mut() {
+            Some(last) if grouped && last.chars().count() + sentence.chars().count() < 300 => {
+                last.push(' ');
+                last.push_str(sentence);
+            }
+            _ => out.push(sentence.to_string()),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pieces;
+
+    #[test]
+    fn first_sentence_goes_alone_then_groups() {
+        let text = "Первое. Второе предложение. Третье! Четвёртое?";
+        let parts = pieces(text);
+        assert_eq!(parts[0], "Первое.");
+        assert_eq!(parts[1], "Второе предложение. Третье! Четвёртое?");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(pieces("Без точки в конце"), vec!["Без точки в конце".to_string()]);
+    }
 }
 
 /// Отменяет фразу, которая ещё синтезируется.

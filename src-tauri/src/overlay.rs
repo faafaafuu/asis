@@ -52,6 +52,10 @@ pub struct OpenPayload {
     /// написано. Пустое поле означает обычное открытие с вопросом.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answer: Option<String>,
+    /// Подпись над готовым текстом: «Напоминание», «Терминал». Пусто — по виду
+    /// текста.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// Создаёт окно попапа, если его ещё нет. Окно рождается скрытым: первым делом его
@@ -138,6 +142,7 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
         speak: false,
         quiet: true,
         answer: None,
+        label: None,
     };
     state.set_selection(selection);
 
@@ -478,6 +483,7 @@ pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
         speak: true,
         quiet: false,
         answer: None,
+        label: None,
     };
     state.set_selection(Selection {
         text: question,
@@ -504,6 +510,11 @@ pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
 /// вместо ответа. Отдельного окна ему не нужно — напоминание живёт секунды,
 /// а человек уже знает, как это окно закрывается.
 pub fn show_for_reminder(app: &AppHandle, text: String) -> tauri::Result<()> {
+    show_note(app, text, None)
+}
+
+/// Готовый текст в окне ответа с подписью — напоминание, ответ про терминал.
+pub fn show_note(app: &AppHandle, text: String, label: Option<&str>) -> tauri::Result<()> {
     touch_popup();
     #[cfg(desktop)]
     {
@@ -531,6 +542,7 @@ pub fn show_for_reminder(app: &AppHandle, text: String) -> tauri::Result<()> {
         quiet: false,
         // Напоминание — готовый текст: спрашивать про него модель нечего.
         answer: Some(text.clone()),
+        label: label.map(str::to_string),
     };
     state.set_selection(Selection {
         text,
@@ -754,6 +766,12 @@ pub fn popup_idle() -> Option<std::time::Duration> {
 /// искать его глазами.
 #[cfg(desktop)]
 static BY_VOICE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Окно ответа открыто голосом — его вопросы часть голосового разговора.
+#[cfg(desktop)]
+pub fn by_voice() -> bool {
+    BY_VOICE.load(std::sync::atomic::Ordering::Relaxed)
+}
 
 /// Сколько раз попап открывали. Служит окну именем: по нему видно, то ли это
 /// окно, о котором шла речь, или его успели закрыть и открыть заново.
@@ -1041,9 +1059,11 @@ pub fn show_practice(app: &AppHandle) -> tauri::Result<()> {
         .center()
         .build()?;
     // Окно закрыли — оболочка и голос практики уходят вместе с ним.
+    crate::practice::attach(&window);
     let closing = app.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Destroyed = event {
+            crate::practice::detach();
             crate::practice::term_stop();
             crate::practice::set_voice(false);
             // «Слушать всё время» — только пока окно открыто.
