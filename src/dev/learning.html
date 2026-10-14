@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-theme="system">
+<html lang="ru" data-theme="neon">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -12,14 +12,38 @@
     <script>
       // Витрина лобби курсов: подменные курсы, без программы и сайта.
       const courses = [
-        { id: "devops", title: "DevOps с нуля", description: "Linux, сети, Docker, Kubernetes — до уровня собеседования.", percent: 62, topicPass: 70, finalUnlocked: false, finalBest: null, current: "docker", mastery: { total: 0 }, focus: {}, topics: [
-          { id: "linux", title: "Linux", status: "done", read: true, tasksDone: 4, tasksTotal: 4, examBest: 88, mistakes: 0, conceptsTotal: 0, conceptsMature: 0, summary: "" },
-          { id: "docker", title: "Docker", status: "done", read: false, tasksDone: 0, tasksTotal: 6, examBest: 90, mistakes: 0, conceptsTotal: 0, conceptsMature: 0, summary: "" } ] },
-        { id: "en", title: "Английский для поездок", description: "", percent: 10, topicPass: 70, finalUnlocked: false, finalBest: null, current: null, mastery: { total: 0 }, focus: {}, topics: [
+        { id: "devops", title: "DevOps и инфраструктура блокчейн-нод", description: "От Linux, сетей и Kubernetes до эксплуатации нод Ethereum, Bitcoin, Tron и Solana, RPC-платформ, мониторинга и инцидентов.", percent: 17, topicPass: 70, finalPass: 75, finalUnlocked: false, finalBest: null, current: "t7",
+          mastery: { total: 288, new: 180, learning: 40, young: 38, mature: 30, due: 14, newLeft: 10 }, focus: { today: 25, week: 140, streak: 4, sessionsToday: 1 },
+          topics: [
+            { id: "t0", title: "Linux: процессы и права", status: "done", read: true, tasksDone: 6, tasksTotal: 6, examBest: 80, mistakes: 0, conceptsTotal: 12, conceptsMature: 8, summary: "" },
+            { id: "t1", title: "Сети: как устроен интернет", status: "done", read: false, tasksDone: 0, tasksTotal: 6, examBest: 81, mistakes: 0, conceptsTotal: 12, conceptsMature: 8, summary: "" },
+            { id: "t2", title: "DNS, TCP/UDP, HTTP", status: "done", read: true, tasksDone: 0, tasksTotal: 6, examBest: 82, mistakes: 0, conceptsTotal: 12, conceptsMature: 8, summary: "" },
+            { id: "t3", title: "Балансировка и прокси", status: "done", read: false, tasksDone: 6, tasksTotal: 6, examBest: 83, mistakes: 1, conceptsTotal: 12, conceptsMature: 8, summary: "" },
+            { id: "t4", title: "Bash, Python для автоматизации", status: "done", read: true, tasksDone: 0, tasksTotal: 6, examBest: 84, mistakes: 0, conceptsTotal: 12, conceptsMature: 8, summary: "" },
+            { id: "t5", title: "Git", status: "done", read: false, tasksDone: 0, tasksTotal: 6, examBest: 85, mistakes: 0, conceptsTotal: 12, conceptsMature: 8, summary: "" },
+            { id: "t6", title: "Docker", status: "done", read: true, tasksDone: 6, tasksTotal: 6, examBest: 86, mistakes: 0, conceptsTotal: 12, conceptsMature: 8, summary: "" },
+            { id: "t7", title: "Kubernetes: архитектура", status: "reading", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t8", title: "Kubernetes: контроллеры", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t9", title: "Helm", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t10", title: "CI/CD", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t11", title: "Мониторинг: Prometheus", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t12", title: "Логи: Loki", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t13", title: "Terraform", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t14", title: "Ansible", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t15", title: "Безопасность", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t16", title: "Ethereum-нода", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t17", title: "Bitcoin-нода", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t18", title: "Tron и Solana", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t19", title: "RPC-платформа", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t20", title: "Хранилища", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t21", title: "Бэкапы", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t22", title: "Инциденты", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" },
+            { id: "t23", title: "Собеседование", status: "new", read: false, tasksDone: 0, tasksTotal: 6, examBest: null, mistakes: 0, conceptsTotal: 12, conceptsMature: 0, summary: "" } ] },
+        { id: "en", title: "Английский для поездок", description: "", percent: 10, topicPass: 70, finalUnlocked: false, finalBest: null, current: null, mastery: { total: 0 }, focus: { today: 0, week: 0, streak: 0 }, topics: [
           { id: "air", title: "Аэропорт", status: "new", read: false, tasksDone: 0, tasksTotal: 3, examBest: null, mistakes: 0, conceptsTotal: 0, conceptsMature: 0, summary: "" } ] },
       ];
       globalThis.__TAURI__ = {
-        core: { invoke: async (cmd) => ({ learn_overview: courses, learn_builds: [], app_version: "1.15.0", runtime_config: { theme: "noah" } })[cmd] ?? null },
+        core: { invoke: async (cmd) => ({ learn_overview: courses, learn_builds: [], app_version: "1.15.0", runtime_config: { theme: new URLSearchParams(location.search).get("theme") ?? "neon" } })[cmd] ?? null },
         event: { listen: async () => () => {} },
         window: { getCurrentWindow: () => null },
       };

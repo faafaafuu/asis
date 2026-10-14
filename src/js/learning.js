@@ -257,35 +257,6 @@ function page(title, lead = "") {
 }
 
 /**
- * Курсов несколько — строка переключения над обзором. Курсы собирает
- * нейросеть по разным темам (сети, электрика, английский), и до этой строки
- * окно показывало только первый: до остальных было не добраться.
- */
-function courseSwitch() {
-  const row = el("div", "course-switch");
-  if (courses.length < 2) return row;
-  row.append(el("span", "course-switch__label", "Ваши курсы"));
-  for (const other of courses) {
-    const chip = el("button", "course-switch__item", other.title);
-    chip.type = "button";
-    chip.setAttribute("aria-pressed", String(other.id === course.id));
-    chip.title = `${other.title} — пройдено ${other.percent}%`;
-    chip.addEventListener("click", () => {
-      if (busy || other.id === course.id) return;
-      course = other;
-      try {
-        localStorage.setItem("noa.lastCourse", other.id);
-      } catch {
-        /* не запомнится — откроется первый */
-      }
-      renderHome();
-    });
-    row.append(chip);
-  }
-  return row;
-}
-
-/**
  * «Собрать курс» прямо в окне обучения: курс собирается на сервере через
  * мост (как в Ноа онлайн) и приходит сюда сам — программа забирает готовые
  * курсы с сайта. Нужен ключ площадки в настройках. В браузере кнопка своя —
@@ -495,12 +466,12 @@ function renderHome() {
     root.append(steps);
     return;
   }
-  const root = page(course.title, course.description);
-  root.prepend(courseSwitch());
-  const more = el("button", "link-more", "☰ Все курсы и новый курс →");
-  more.type = "button";
-  more.addEventListener("click", () => !busy && renderLobby());
-  root.append(more);
+  // Главная курса: сверху — что делать сейчас, крупно и одной кнопкой;
+  // дальше — путь по темам, сегодняшнее, слабые места и карта. Справка о том,
+  // как устроен курс, свёрнута: её читают один раз.
+  const root = page("", "");
+  root.replaceChildren();
+  root.append(courseHero());
   if (course.building) {
     root.append(
       el(
@@ -510,45 +481,37 @@ function renderHome() {
       ),
     );
   }
-  root.append(renderToday());
-  const done = course.topics.filter((t) => t.status === "done").length;
-  const mistakes = course.topics.reduce((sum, t) => sum + t.mistakes, 0);
-  const cards = el("div", "cards");
-  const card = (value, label) => {
-    const node = el("div", "card");
-    node.append(el("div", "card__value", value), el("div", "card__label", label));
-    return node;
-  };
-  cards.append(
-    card(`${course.percent}%`, "пройдено"),
-    card(`${done}/${course.topics.length}`, "тем сдано"),
-    card(course.finalBest != null ? `${course.finalBest}%` : "—", "финальный экзамен"),
-    card(String(mistakes), "ошибок на повторение"),
-  );
-  root.append(cards);
+  root.append(coursePath());
+  root.append(todayTiles());
+
+  const weak = course.topics.filter((t) => t.mistakes > 0);
+  if (weak.length) {
+    const box = el("section", "home-block");
+    box.append(el("h3", "home-block__title", "Слабые места"));
+    const list = el("div", "chips-row");
+    for (const topic of weak) {
+      const link = el("button", "chip-link", `${topic.title} · ошибок ${topic.mistakes}`);
+      link.type = "button";
+      link.addEventListener("click", () => openTopic(topic.id, "mistakes"));
+      list.append(link);
+    }
+    box.append(list);
+    root.append(box);
+  }
+
   if (course.mastery?.total) {
-    root.append(el("h3", "", "Карта курса"));
-    root.append(el("p", "muted", "Темы и связи между ними. Цвет — насколько тема держится в памяти; щёлкните тему, чтобы открыть её."));
+    const box = el("section", "home-block");
+    box.append(el("h3", "home-block__title", "Карта курса"));
+    box.append(el("p", "muted", "Темы и связи между ними. Цвет — насколько тема держится в памяти; щёлкните тему, чтобы открыть её."));
     const holder = el("div", "map-holder");
-    root.append(holder);
+    box.append(holder);
+    root.append(box);
     drawCourseMap(holder);
   }
 
-  const next =
-    course.topics.find((t) => t.id === course.current && t.status !== "done") ??
-    course.topics.find((t) => t.status !== "done");
-  const actions = el("div", "actions");
-  if (next) {
-    actions.append(
-      button(`Продолжить: ${next.title}`, () => resumeTopic(next.id), true),
-    );
-  } else {
-    actions.append(button("К финальному экзамену", () => openFinal()));
-  }
-  root.append(actions);
-
-  root.append(el("h3", "", "Как устроено"));
-  const how = el("ul", "list");
+  const how = el("details", "home-how");
+  how.append(el("summary", "", "Как устроен курс"));
+  const list = el("ul", "list");
   for (const text of [
     "В каждой теме: урок кусками → понятия → повторение → задачи → мини-экзамен. Экзамен сдан от " +
       `${course.topicPass}% — тема засчитана.`,
@@ -562,23 +525,157 @@ function renderHome() {
     "Ошибки копятся во вкладке «Ошибки» каждой темы — повторяйте, пока не исчезнут.",
     "Голосом: «Ноа, давай повторим», «погоняй меня по курсу», «как мой прогресс».",
   ]) {
-    how.append(el("li", "", text));
+    list.append(el("li", "", text));
   }
+  how.append(list);
   root.append(how);
+}
 
-  const weak = course.topics.filter((t) => t.mistakes > 0);
-  if (weak.length) {
-    root.append(el("h3", "", "Слабые места"));
-    const list = el("ul", "list");
-    for (const topic of weak) {
-      const item = el("li");
-      const link = el("button", "button button--quiet", `${topic.title}: ошибок ${topic.mistakes}`);
-      link.addEventListener("click", () => openTopic(topic.id, "mistakes"));
-      item.append(link);
-      list.append(item);
-    }
-    root.append(list);
+/** Тема, с которой продолжать: где остановились, иначе первая несданная. */
+function nextTopic() {
+  return (
+    course.topics.find((t) => t.id === course.current && t.status !== "done") ??
+    course.topics.find((t) => t.status !== "done") ??
+    null
+  );
+}
+
+/**
+ * Главный блок: курс, прогресс и одна большая кнопка «Продолжить» — с темой
+ * и местом в ней. Рядом — урок с Ноа и практика по этой же теме.
+ */
+function courseHero() {
+  const hero = el("section", "hero");
+  const top = el("div", "hero__top");
+  const titles = el("div", "hero__titles");
+  titles.append(el("h2", "hero__title", course.title));
+  if (course.description) titles.append(el("p", "hero__lead", course.description));
+  const all = el("button", "link-more hero__all", "☰ Все курсы");
+  all.type = "button";
+  all.title = "Другие курсы и сборка нового";
+  all.addEventListener("click", () => !busy && renderLobby());
+  top.append(titles, all);
+  hero.append(top);
+
+  const done = course.topics.filter((t) => t.status === "done").length;
+  const progress = el("div", "hero__progress");
+  const bar = el("span", "bar hero__bar");
+  const fill = el("span", "bar__fill");
+  fill.style.width = `${course.percent}%`;
+  bar.append(fill);
+  progress.append(
+    el("span", "hero__percent", `${course.percent}%`),
+    bar,
+    el("span", "hero__meta", `сдано тем ${done} из ${course.topics.length}${course.finalBest != null ? ` · финал ${course.finalBest}%` : ""}`),
+  );
+  hero.append(progress);
+
+  const next = nextTopic();
+  const actions = el("div", "hero__actions");
+  if (next) {
+    const place = placeOf(next.id);
+    const where = next.read || next.status !== "new" ? "продолжить" : "начать";
+    const go = el("button", "hero__go");
+    go.type = "button";
+    go.append(
+      el("span", "hero__go-label", `▶ ${where[0].toUpperCase()}${where.slice(1)}`),
+      el("span", "hero__go-topic", `${course.topics.indexOf(next) + 1}. ${next.title}`),
+      el("span", "hero__go-where", place.section ? `раздел ${place.section + 1}` : "с начала"),
+    );
+    go.addEventListener("click", () => !busy && resumeTopic(next.id));
+    actions.append(go);
+    const side = el("div", "hero__side");
+    side.append(
+      button("🎙 Урок с Ноа", () => !busy && openTopic(next.id, "talk"), true),
+      button("🖥 Практика", () => !busy && openTopic(next.id, "practice"), true),
+    );
+    actions.append(side);
+  } else {
+    const go = el("button", "hero__go");
+    go.type = "button";
+    go.append(el("span", "hero__go-label", "▶ Финальный экзамен"), el("span", "hero__go-topic", "Все темы сданы"));
+    go.addEventListener("click", () => !busy && openFinal());
+    actions.append(go);
   }
+  hero.append(actions);
+  return hero;
+}
+
+/**
+ * Путь курса: все темы по порядку отрезками. Сданные — заполнены, текущая —
+ * подсвечена, остальные — тихо. С одного взгляда видно, где ты и сколько
+ * осталось; щелчок — открыть тему.
+ */
+function coursePath() {
+  const box = el("section", "home-block");
+  const next = nextTopic();
+  const head = el("div", "home-block__head");
+  head.append(el("h3", "home-block__title", "Путь курса"));
+  if (next) head.append(el("span", "muted", `Дальше: ${next.title}`));
+  box.append(head);
+  const path = el("div", "path");
+  course.topics.forEach((topic, at) => {
+    const step = el("button", `path__step path__step--${topic.status}${next && topic.id === next.id ? " is-now" : ""}`);
+    step.type = "button";
+    step.title = `${at + 1}. ${topic.title} — ${topicPercent(topic)}%`;
+    step.setAttribute("aria-label", step.title);
+    const fill = el("span", "path__fill");
+    fill.style.height = `${Math.max(8, topicPercent(topic))}%`;
+    step.append(fill);
+    step.addEventListener("click", () => !busy && resumeTopic(topic.id));
+    path.append(step);
+  });
+  box.append(path);
+  const legend = el("div", "path__legend");
+  legend.append(
+    el("span", "legend legend--done", "сдано"),
+    el("span", "legend legend--now", "сейчас"),
+    el("span", "legend legend--rest", "впереди"),
+  );
+  box.append(legend);
+  return box;
+}
+
+/** «Сегодня»: две плитки рядом — повторение карточек и фокус. */
+function todayTiles() {
+  const row = el("section", "tiles");
+  const m = course.mastery ?? { total: 0 };
+
+  const review = el("div", "tile");
+  review.append(el("div", "tile__label", "Повторение"));
+  if (m.total) {
+    const count = m.due + m.newLeft;
+    review.append(el("div", "tile__value", String(count)), el("div", "tile__sub", count ? "карточек на сегодня" : "на сегодня всё"));
+    review.append(masteryBar(m));
+    const legend = el("div", "mastery__legend");
+    legend.append(
+      el("span", "legend legend--mature", `уверенно ${m.mature}`),
+      el("span", "legend legend--young", `держится ${m.young}`),
+      el("span", "legend legend--learning", `учится ${m.learning}`),
+      el("span", "legend legend--new", `новых ${m.new}`),
+    );
+    review.append(legend);
+    const go = button(count ? "🃏 Повторить сейчас" : "Повторено — завтра ещё", () => startReview(null), !count);
+    go.disabled = !count;
+    review.append(go);
+  } else {
+    review.append(el("p", "muted", "В курсе нет понятий — повторять нечего."));
+  }
+
+  const f = course.focus ?? { today: 0, week: 0, streak: 0 };
+  const focusTile = el("div", "tile");
+  focusTile.append(el("div", "tile__label", "Фокус"));
+  focusTile.append(el("div", "tile__value", `${f.today} мин`), el("div", "tile__sub", "сегодня"));
+  const stats = el("div", "tile__stats");
+  stats.append(
+    el("span", "", `${f.week} мин за неделю`),
+    el("span", "", `${f.streak} ${f.streak === 1 ? "день" : f.streak >= 2 && f.streak <= 4 ? "дня" : "дней"} подряд`),
+  );
+  focusTile.append(stats);
+  if (!focus) focusTile.append(button("🎯 Фокус-сессия", openFocusSetup, true));
+
+  row.append(review, focusTile);
+  return row;
 }
 
 /**
@@ -1470,44 +1567,6 @@ function masteryBar(m) {
   return bar;
 }
 
-/** Блок «Сегодня» на главной: что повторить и насколько курс держится. */
-function renderToday() {
-  const m = course.mastery ?? { total: 0 };
-  const box = el("section", "today");
-  if (!m.total) {
-    box.append(el("p", "muted", "В этом курсе нет понятий — повторять нечего. Попросите нейросеть пересобрать курс по новому формату."));
-    box.append(focusStrip());
-    return box;
-  }
-  const count = m.due + m.newLeft;
-  const head = el("div", "today__head");
-  const numbers = el("div", "today__numbers");
-  numbers.append(el("div", "today__value", String(count)), el("div", "today__label", count ? "карточек на сегодня" : "на сегодня всё"));
-  head.append(numbers);
-  const go = button(count ? `Повторить сейчас` : "Повторено — загляните завтра", () => startReview(null));
-  go.disabled = !count;
-  head.append(go);
-  box.append(head);
-  box.append(masteryBar(m));
-  const legend = el("div", "mastery__legend");
-  legend.append(
-    el("span", "legend legend--mature", `уверенно ${m.mature}`),
-    el("span", "legend legend--young", `держится ${m.young}`),
-    el("span", "legend legend--learning", `учится ${m.learning}`),
-    el("span", "legend legend--new", `новых ${m.new}`),
-  );
-  box.append(legend);
-  box.append(
-    el(
-      "p",
-      "muted",
-      `К повторению: ${m.due}, новых на сегодня: ${m.newLeft}. Новые берутся из прочитанных тем — сначала урок, потом карточки.`,
-    ),
-  );
-  box.append(focusStrip());
-  return box;
-}
-
 async function startReview(topicId) {
   if (!api) return;
   let queue = [];
@@ -2018,24 +2077,6 @@ function layer(...children) {
 function closeLayer() {
   ui.focusLayer.hidden = true;
   ui.focusLayer.replaceChildren();
-}
-
-/** Строка фокуса в блоке «Сегодня»: минуты, серия и кнопка начать. */
-function focusStrip() {
-  const f = course?.focus ?? { today: 0, week: 0, streak: 0 };
-  const strip = el("div", "focus-strip");
-  const stat = (value, label) => {
-    const node = el("span");
-    node.append(el("strong", "", value), document.createTextNode(` ${label}`));
-    return node;
-  };
-  strip.append(
-    stat(`${f.today} мин`, "фокуса сегодня"),
-    stat(`${f.week} мин`, "за неделю"),
-    stat(String(f.streak), f.streak === 1 ? "день подряд" : "дней подряд"),
-  );
-  if (!focus) strip.append(button("🎯 Фокус-сессия", openFocusSetup, true));
-  return strip;
 }
 
 /** Подготовка: длина отрезка, цель, минута на то, чтобы убрать отвлечения. */

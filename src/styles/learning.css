@@ -1740,3 +1740,324 @@ button {
 .link-more:hover {
   text-decoration: underline;
 }
+
+/* ── Главная курса ─────────────────────────────────────────────────────────
+   Сверху — главный блок: что делать сейчас, одной большой кнопкой. Ниже —
+   путь по темам, «Сегодня» плитками, слабые места и карта. Справка свёрнута. */
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0 0 22px;
+  padding: 22px 24px;
+  border: 1px solid var(--divider);
+  border-radius: 14px;
+  background:
+    radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%),
+    color-mix(in srgb, var(--accent) 3%, var(--bg-solid));
+}
+
+.hero__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.hero__titles {
+  min-width: 0;
+}
+
+.hero__title {
+  margin: 0 0 6px;
+  font-family: var(--font-term);
+  font-size: 30px;
+  line-height: 1.15;
+}
+
+.hero__lead {
+  margin: 0;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hero__all {
+  flex: none;
+  margin: 4px 0 0;
+}
+
+.hero__progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.hero__percent {
+  font-family: var(--font-term);
+  font-size: 34px;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.hero__bar {
+  flex: 1;
+  width: auto;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.hero__meta {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 12px;
+}
+
+/* Главная кнопка — крупная, во всю ширину блока действий. */
+.hero__go {
+  flex: 1 1 320px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "label where" "topic topic";
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 14px 18px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--bg-solid);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--accent) 30%, transparent);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.hero__go:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.hero__go-label {
+  grid-area: label;
+  font-weight: 700;
+  font-size: 15px;
+}
+.hero__go-where {
+  grid-area: where;
+  justify-self: end;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  opacity: 0.8;
+}
+.hero__go-topic {
+  grid-area: topic;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.hero__side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 1 200px;
+}
+.hero__side .button {
+  flex: 1;
+}
+
+/* Блоки ниже главного. */
+.home-block {
+  margin: 0 0 22px;
+}
+
+.home-block__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.home-block__title {
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label);
+}
+.home-block__head .home-block__title {
+  margin: 0;
+}
+
+/* Путь курса: тема — столбик, заполненный на её процент. */
+.path {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 46px;
+}
+
+.path__step {
+  position: relative;
+  flex: 1;
+  height: 100%;
+  min-width: 6px;
+  padding: 0;
+  border: 1px solid var(--divider);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  overflow: hidden;
+  cursor: pointer;
+}
+.path__step:hover {
+  border-color: var(--accent);
+}
+.path__fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.path__step--done .path__fill {
+  background: var(--good);
+}
+.path__step.is-now {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.path__step.is-now .path__fill {
+  background: var(--accent);
+}
+
+.path__legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}
+.legend--done::before { background: var(--good); }
+.legend--now::before { background: var(--accent); }
+.legend--rest::before { background: var(--divider); }
+
+/* «Сегодня» — две плитки рядом. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 0 0 22px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px 18px;
+  border: 1px solid var(--divider);
+  border-radius: 12px;
+}
+.tile .mastery {
+  align-self: stretch;
+  margin-top: 6px;
+}
+.tile .mastery__legend {
+  margin: 4px 0 6px;
+}
+
+.tile__label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--label);
+}
+
+.tile__value {
+  font-family: var(--font-term);
+  font-size: 34px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.tile__sub {
+  color: var(--text-muted);
+}
+
+.tile__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 6px 0;
+  font-size: var(--size-secondary);
+  color: var(--text-muted);
+}
+.tile .button {
+  margin-top: auto;
+}
+
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-link {
+  padding: 6px 12px;
+  border: 1px solid var(--btn-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--size-secondary);
+  cursor: pointer;
+}
+.chip-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.home-how {
+  margin: 8px 0 20px;
+}
+.home-how summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.home-how .list {
+  margin-top: 10px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 720px) {
+  .hero {
+    padding: 18px;
+  }
+  .hero__top {
+    flex-direction: column;
+  }
+  .hero__side {
+    flex-direction: row;
+    flex-basis: 100%;
+  }
+  .path {
+    height: 34px;
+    gap: 2px;
+  }
+}
