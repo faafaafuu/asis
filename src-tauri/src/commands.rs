@@ -1951,6 +1951,30 @@ pub async fn practice_ask(app: AppHandle, text: String) -> Result<String, String
     crate::practice::ask(&app, &text, false).await
 }
 
+/// Своя задача без темы курса — Ноа напарник по ней.
+#[tauri::command]
+pub fn practice_task(app: AppHandle, task: String) {
+    crate::practice::set_task(&app, &task);
+}
+
+/// Слушать всё время, пока открыто окно: зовут по имени — «Ноа, …».
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn practice_always(app: AppHandle, on: bool) {
+    crate::practice::set_always(on);
+    if on {
+        crate::start_wake(&app);
+    } else if !app.state::<AppState>().config().voice.wake_word {
+        crate::stop_wake();
+    }
+}
+
+/// Кнопка под репликой Ноа: выполнить её действие или только набрать команду.
+#[tauri::command]
+pub fn practice_act(app: AppHandle, line: usize, index: usize, paste: Option<bool>) -> Result<(), String> {
+    crate::practice::act(&app, line, index, paste.unwrap_or(false))
+}
+
 /// Спросить голосом: разговор без рук, фразы — вопросы практике.
 #[cfg(desktop)]
 #[tauri::command]
@@ -1984,7 +2008,7 @@ pub fn practice_term_resize(cols: u16, rows: u16) {
 #[cfg(desktop)]
 #[tauri::command]
 pub fn practice_listening() -> bool {
-    crate::practice::voice_on() && crate::in_conversation()
+    crate::practice::always() || (crate::practice::voice_on() && crate::in_conversation())
 }
 
 /// Текст из буфера обмена — вставить в терминал. Через программу, а не

@@ -382,6 +382,10 @@ pub fn run() {
             commands::practice_switch,
             commands::practice_progress,
             commands::practice_screen,
+            commands::practice_task,
+            #[cfg(desktop)]
+            commands::practice_always,
+            commands::practice_act,
             commands::practice_server,
             commands::practice_forget_server_key,
             #[cfg(mobile)]
@@ -2190,7 +2194,9 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
         let state = app.state::<AppState>();
         let config = state.config();
         (
-            config.voice.enabled && config.voice.wake_word,
+            // Практика просит слушать, пока её окно открыто, — и при выключенном
+            // ожидании имени в настройках.
+            config.voice.enabled && (config.voice.wake_word || practice::always()),
             config.voice.input_device.clone(),
             config.voice.wake_name().to_string(),
         )

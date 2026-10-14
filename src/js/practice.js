@@ -416,7 +416,7 @@ function setup(root) {
   }
   // Курсы есть, а практика ни к какой теме не привязана — сразу к теме, на
   // которой человек остановился в курсе.
-  if (courses.length && !practice?.topic && !picking && !autoOpened) {
+  if (courses.length && !practice?.topic && !practice?.task && !picking && !autoOpened) {
     autoOpened = true;
     // Курс, где человек остановился, — иначе первый.
     const course = courses.find((c) => c.current) ?? courses[0];
@@ -476,12 +476,12 @@ function setup(root) {
     }
     box.append(list);
     if (picking) {
-      const back = el("button", "link", "← вернуться к сценарию");
+      const back = el("button", "link", "← вернуться назад");
       back.addEventListener("click", () => {
         picking = false;
         render();
       });
-      box.append(back);
+      box.append(taskStart(), back);
       return;
     }
     wish.placeholder = "Пожелание, если есть: «на трёх серверах», «через Docker»…";
@@ -500,6 +500,7 @@ function setup(root) {
   });
   box.append(wish, go);
   if (error) box.append(el("p", "setup__error", error));
+  if (courses.length) box.append(taskStart());
   box.append(
     el(
       "p",
@@ -507,6 +508,55 @@ function setup(root) {
       "Вывод терминала уходит вашей модели, поэтому Ноа смотрит экономно: молчит, пока всё идёт как надо, и подключается, если что-то упало, если спросите или нажмёте «Проверь шаг». 💬 — разбирать каждую команду. Пароли и токены она закрывает, 👁 выключает наблюдение.",
     ),
   );
+}
+
+/** Своя задача: не тема курса, а то, что нужно сделать сейчас, — Ноа напарник. */
+function taskStart() {
+  const box = el("section", "setup__task");
+  box.append(el("h3", "", "Или своя задача"));
+  box.append(
+    el(
+      "p",
+      "",
+      "Что нужно сделать — развернуть кластер, найти, где теряются пакеты, написать Helm-чарт. Ноа видит терминал, помнит задачу и что уже сделано, предлагает команды и выполняет их по кнопке или вашему «выполни».",
+    ),
+  );
+  const area = el("textarea", "answer");
+  area.rows = 2;
+  area.placeholder = "Например: поднять мониторинг кластера — Prometheus и Grafana через Helm";
+  const go = button("Начать с Ноа", () => startTask(area.value));
+  area.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      startTask(area.value);
+    }
+  });
+  box.append(area, go);
+  return box;
+}
+
+async function startTask(text) {
+  if (!text.trim()) return;
+  picking = false;
+  await api.invoke("practice_task", { task: text }).catch(() => {});
+  practice = await api.invoke("practice_state").catch(() => practice);
+  render();
+  term.focus();
+}
+
+/** Вид своей задачи: сверху — задача, дальше лента и вопрос. */
+function taskCard() {
+  const card = el("section", "coach__step");
+  card.append(el("div", "coach__step-num", "Задача"), el("p", "coach__step-goal", practice.task));
+  const done = practice.history?.length ?? 0;
+  if (done) card.append(el("p", "coach__step-why", `Команд в журнале: ${done} — Ноа помнит, что уже сделано и что упало.`));
+  const actions = el("div", "coach__actions");
+  actions.append(
+    button("💡 Что дальше?", () => ask("Что делать дальше по задаче? Коротко и командой, если можно."), true),
+    button("🗺 Где мы", () => ask("Общая картина: что уже сделано по задаче, что осталось и как части связаны?"), true),
+  );
+  card.append(actions);
+  return card;
 }
 
 function stepCard(scenario) {
@@ -582,15 +632,69 @@ const feed = el("div", "coach__feed");
 
 function paintFeed() {
   const lines = practice?.feed ?? [];
+  const from = Math.max(0, lines.length - 40);
   feed.replaceChildren(
-    ...lines.slice(-40).map((line) => {
-      const node = el("p", `line line--${line.who === "me" ? "me" : line.kind || "comment"}`);
-      node.innerHTML = inline(line.text);
+    ...lines.slice(from).map((line, i) => {
+      const node = el("div", `line line--${line.who === "me" ? "me" : line.kind || "comment"}`);
+      if (line.text) node.append(Object.assign(el("p", "line__text"), { innerHTML: inline(line.text) }));
+      (line.actions ?? []).forEach((action, index) => node.append(actionCard(action, from + i, index)));
       return node;
     }),
   );
   if (waiting) feed.append(el("p", "line line--hint", "Ноа думает…"));
   feed.scrollTop = feed.scrollHeight;
+}
+
+/** Опасное — удалить, перезагрузить, стереть: кнопка просит второе нажатие. */
+const DANGER = /rm -r|rm -f|mkfs|dd if=|reboot|shutdown|poweroff|kubectl delete|helm (uninstall|delete)|drop (database|table)|truncate |iptables -f|userdel|wipefs|fdisk|docker (system prune|volume rm)|git reset --hard|git push (-f|--force)|terraform destroy/i;
+
+/**
+ * Действие под репликой Ноа: команда — «Вставить» (набрать без Enter) и
+ * «Выполнить», файл — «Записать». Выполняет программа, вводя строку в
+ * терминал; результат Ноа смотрит сама.
+ */
+function actionCard(action, line, index) {
+  const danger = action.kind === "run" && DANGER.test(action.command);
+  const card = el("div", danger ? "act act--danger" : "act");
+  const label = action.kind === "file" ? el("div", "act__what") : el("code", "act__cmd");
+  if (action.kind === "file") {
+    label.append("📄 ", el("code", "", action.path));
+    if (action.sudo) label.append(el("span", "act__note", "sudo"));
+  } else label.textContent = action.command;
+  const row = el("div", "act__buttons");
+  const run = (paste) =>
+    api.invoke("practice_act", { line, index, paste }).catch((err) => {
+      practice?.feed.push({ who: "noa", kind: "error", text: String(err) });
+      paintFeed();
+    });
+  if (action.kind === "run") {
+    const put = button("⎘ Вставить", () => run(true), true);
+    put.title = "Набрать в терминале без Enter — проверить и запустить самому";
+    row.append(put);
+  }
+  const go = button(action.kind === "file" ? "📄 Записать" : "▶ Выполнить", () => {
+    if (danger && !go.dataset.sure) {
+      go.dataset.sure = "1";
+      go.textContent = "Необратимо — нажмите ещё раз";
+      setTimeout(() => {
+        delete go.dataset.sure;
+        go.textContent = "▶ Выполнить";
+      }, 4000);
+      return;
+    }
+    run(false);
+  });
+  row.append(go);
+  card.append(label);
+  if (action.kind === "file") {
+    const peek = el("details", "act__peek");
+    const pre = el("pre", "");
+    pre.textContent = action.content;
+    peek.append(el("summary", "", "что в файле"), pre);
+    card.append(peek);
+  }
+  card.append(row);
+  return card;
 }
 
 // Поле вопроса тоже одно на всё время: недописанный вопрос не теряется,
@@ -600,12 +704,20 @@ const askArea = el("textarea", "answer");
 askArea.rows = 1;
 askArea.placeholder = "Спросить Ноа — Enter";
 const mic = el("button", "icon-toggle coach__mic", "🎙");
-mic.title = "Спросить голосом";
-mic.addEventListener("click", () => {
-  listening = !listening;
-  api.invoke("practice_listen", { on: listening }).catch(() => {});
+// 🎙 — Ноа слушает всё время, пока окно открыто: зовут по имени — «Ноа,
+// глянь, что за ошибка». Выбор помнится до следующего открытия.
+const ALWAYS = "noa.practiceAlways";
+mic.addEventListener("click", () => setAlways(!listening));
+function setAlways(on) {
+  listening = on;
+  try {
+    localStorage.setItem(ALWAYS, on ? "on" : "off");
+  } catch {
+    /* не запомнится — не беда */
+  }
+  api.invoke("practice_always", { on }).catch(() => {});
   paintMic();
-});
+}
 const sendBtn = el("button", "icon-toggle", "↵");
 sendBtn.title = "Отправить";
 sendBtn.addEventListener("click", () => send());
@@ -620,7 +732,7 @@ askArea.addEventListener("keydown", (event) => {
 
 function paintMic() {
   mic.setAttribute("aria-pressed", String(listening));
-  mic.title = listening ? "Слушаю — нажмите, чтобы перестать" : "Спросить голосом";
+  mic.title = listening ? "Слушаю всё время — зовите «Ноа, …». Нажмите, чтобы перестать" : "Слушать всё время — звать по имени";
 }
 
 function send() {
@@ -677,6 +789,23 @@ function render() {
   // длинная схема не должна уводить их за край окна.
   const body = el("div", "coach__body");
   root.append(body);
+  if (!scenario && !picking && practice?.task) {
+    ui.title.textContent = "Задача · Практика";
+    body.append(taskCard());
+    root.append(feedSplit, feed, askRow);
+    const foot = el("div", "coach__foot");
+    const other = el("button", "link", "Другая задача или тема ▾");
+    other.addEventListener("click", () => {
+      picking = true;
+      courses = null;
+      render();
+    });
+    foot.append(other);
+    root.append(foot);
+    paintFeed();
+    paintStatus();
+    return;
+  }
   if (!scenario) {
     setup(body);
     if (practice?.feed?.length) {
@@ -730,11 +859,14 @@ api?.listen("practice:state", (event) => {
   const { practice: fresh, say, spoken } = event.payload ?? {};
   if (!fresh) return;
   const sameScenario =
-    practice?.topic === fresh.topic && practice?.scenario?.title === fresh.scenario?.title && practice?.step === fresh.step;
+    practice?.topic === fresh.topic &&
+    practice?.task === fresh.task &&
+    practice?.scenario?.title === fresh.scenario?.title &&
+    practice?.step === fresh.step;
   practice = fresh;
   // Лента меняется часто — панель целиком перерисовывается только при новом
   // шаге или сценарии: иначе схема мигала бы на каждое замечание.
-  if (sameScenario && practice.scenario) {
+  if (sameScenario && (practice.scenario || practice.task) && !picking) {
     paintFeed();
     paintEye();
     // Переключатели 👁 и 💬 — по свежему состоянию.
@@ -768,7 +900,7 @@ function paintStatus() {
   status.textContent = {
     speaking: "Ноа говорит",
     thinking: "Ноа думает…",
-    listening: "Слушаю — спрашивайте",
+    listening: "Слушаю — зовите «Ноа, …»",
     idle: practice?.watching ? "Ноа смотрит терминал" : "Ноа не смотрит",
   }[mode];
   sub.textContent = practice?.scenario
@@ -884,4 +1016,10 @@ applySizes();
   practice = await api.invoke("practice_state").catch(() => null);
   await loadTopics();
   render();
+  // «Слушать всё время» включали в прошлый раз — включить снова.
+  try {
+    if (localStorage.getItem(ALWAYS) === "on") setAlways(true);
+  } catch {
+    /* по умолчанию — не слушать */
+  }
 })();

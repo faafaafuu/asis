@@ -51,6 +51,11 @@
           { who: "noa", kind: "comment", text: "Вы зашли на первый сервер по SSH — дальше всё, что набираете, выполняется уже на нём." },
           { who: "noa", kind: "error", text: "curl не найден: на чистой Ubuntu его нет. Поставьте пакетом и повторите." },
           { who: "noa", kind: "hint", text: "Дальше: `apt install -y curl`, потом установщик k3s." },
+          { who: "me", kind: "answer", text: "как посмотреть состояние подов" },
+          { who: "noa", kind: "answer", text: "Список подов во всех пространствах имён и их состояние:", actions: [
+            { kind: "run", command: "kubectl get pods -A -o wide" },
+            { kind: "file", path: "/home/me/monitoring/values.yaml", content: "grafana:\n  adminPassword: change-me\n  persistence:\n    enabled: true\n", sudo: false },
+            { kind: "run", command: "kubectl delete ns monitoring" } ] },
           { who: "me", kind: "answer", text: "а зачем вообще отдельный server и agent?" },
           { who: "noa", kind: "answer", text: "Server — мозг: хранит, что где должно работать, и раздаёт задачи. Agent — руки: запускает поды. Разделяют, чтобы мозг не падал от нагрузки приложений." },
         ],
@@ -113,6 +118,15 @@
           case "practice_watch":
             state.watching = args.on;
             emit("practice:state", { practice: structuredClone(state), say: "", spoken: false });
+            return null;
+          case "practice_act":
+            state.feed.push({ who: "noa", kind: "step", text: args.paste ? "набрала команду" : "▶ выполняю" });
+            emit("practice:state", { practice: structuredClone(state), say: "", spoken: false });
+            return null;
+          case "practice_task":
+            state.task = args.task; state.scenario = null; state.feed = [{ who: "noa", kind: "step", text: `Задача: ${args.task}.` }];
+            return null;
+          case "practice_always":
             return null;
           case "practice_verbose":
             state.verbose = args.on;

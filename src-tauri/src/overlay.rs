@@ -1041,10 +1041,19 @@ pub fn show_practice(app: &AppHandle) -> tauri::Result<()> {
         .center()
         .build()?;
     // Окно закрыли — оболочка и голос практики уходят вместе с ним.
-    window.on_window_event(|event| {
+    let closing = app.clone();
+    window.on_window_event(move |event| {
         if let tauri::WindowEvent::Destroyed = event {
             crate::practice::term_stop();
             crate::practice::set_voice(false);
+            // «Слушать всё время» — только пока окно открыто.
+            if crate::practice::always() {
+                crate::practice::set_always(false);
+                let wake = closing.state::<crate::state::AppState>().config().voice.wake_word;
+                if !wake {
+                    crate::stop_wake();
+                }
+            }
         }
     });
     Ok(())

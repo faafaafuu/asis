@@ -133,6 +133,14 @@ pub struct Practice {
     /// по просьбе и при проверке шага: каждая команда — это запрос к модели.
     #[serde(default)]
     pub verbose: bool,
+    /// Своя задача человека, без темы курса: «развернуть кластер», «найти,
+    /// где теряются пакеты». Ноа — напарник: помнит её и ведёт к результату.
+    #[serde(default)]
+    pub task: String,
+    /// Журнал команд, введённых в терминал, с итогом: ✓ — прошла, ✗ — упала.
+    /// Память Ноа о том, что уже сделано, — уходит модели с каждым вопросом.
+    #[serde(default)]
+    pub history: Vec<String>,
 }
 
 fn yes() -> bool {
@@ -159,6 +167,10 @@ struct Store {
     thread: Vec<ThreadItem>,
     /// Ответ голосом идёт: фразы разговора без рук — вопросы практике.
     voice: bool,
+    /// Ноа слушает всё время, пока открыто окно практики: зовут по имени.
+    always: bool,
+    /// Действия из последнего ответа — «выполни» голосом запускает первое.
+    offered: Vec<Action>,
 }
 
 static STORE: Mutex<Store> = Mutex::new(Store {
@@ -166,10 +178,15 @@ static STORE: Mutex<Store> = Mutex::new(Store {
     saved: Saved { current: String::new(), items: BTreeMap::new() },
     thread: Vec::new(),
     voice: false,
+    always: false,
+    offered: Vec::new(),
 });
 
 const MAX_FEED: usize = 80;
-const DEPTH: usize = 4;
+/// Сколько обменов помнит разговор: напарнику по задаче нужно больше, чем
+/// репетитору по шагу, — он держит в голове, что уже пробовали.
+const DEPTH: usize = 8;
+const MAX_HISTORY: usize = 40;
 
 fn path(app: &AppHandle) -> Option<std::path::PathBuf> {
     app.path().app_config_dir().ok().map(|dir| dir.join("practice.json"))
@@ -531,8 +548,23 @@ fn topic_material(p: &Practice, full: bool) -> String {
 /// Сценарий для модели: тема, цель, общая картина, шаги с отметкой текущего.
 fn scenario_material(p: &Practice) -> String {
     let topic = topic_material(p, false);
+    // Что уже сделано в терминале — память напарника: что пробовали, что упало.
+    let done = if p.history.is_empty() {
+        String::new()
+    } else {
+        format!("Команды в этом сеансе (✓ прошла, ✗ упала), последние внизу:\n{}\n", p.history.join("\n"))
+    };
     let Some(s) = &p.scenario else {
-        return format!("{topic}Сценария пока нет: человек просто работает в терминале. Объясняй, что он делает.\n");
+        if !p.task.trim().is_empty() {
+            return format!(
+                "{topic}Задача человека: {}\nТы — напарник: держишь задачу в голове и ведёшь к результату — \
+                 подсказываешь следующий шаг, разбираешь ошибки, предлагаешь подходящие инструменты \
+                 (k9s, helm, stern, mtr, tcpdump и т. п.), когда они упростят работу или сделают её \
+                 надёжнее, пишешь конфиги, манифесты и Helm-чарты. Непонятное объясняешь по ходу.\n{done}",
+                p.task.trim()
+            );
+        }
+        return format!("{topic}Сценария пока нет: человек просто работает в терминале. Объясняй, что он делает.\n{done}");
     };
     let steps = s
         .steps
@@ -547,7 +579,7 @@ fn scenario_material(p: &Practice) -> String {
         .join("\n");
     let picture = serde_json::to_string(&s.picture).unwrap_or_default();
     format!(
-        "{topic}Сценарий «{}». Цель: {}\nЧто нужно заранее: {}\nОбщая картина (блоки и связи): {picture}\nШаги:\n{steps}\n",
+        "{topic}Сценарий «{}». Цель: {}\nЧто нужно заранее: {}\nОбщая картина (блоки и связи): {picture}\nШаги:\n{steps}\n{done}",
         s.title, s.goal, s.setup
     )
 }
@@ -653,6 +685,9 @@ struct Look {
     next: String,
     node: String,
     error: bool,
+    /// Исправление, которое Ноа может сделать сама, — кнопкой под замечанием.
+    #[serde(rename = "do")]
+    actions: Vec<Action>,
 }
 
 /// Практика — как в настоящей эксплуатации, а не учебное упрощение: этому
@@ -692,7 +727,7 @@ async fn observe(app: &AppHandle, chunk: String, glance: Glance) {
          его терминал и идёшь рядом: объясняешь, что он сделал и что ответил сервер, замечаешь \
          ошибки, подсказываешь следующий шаг.\n\n{material}\n\
          Ответь строго JSON, без текста вокруг: \
-         {{\"say\": \"…\", \"done\": false, \"next\": \"…\", \"node\": \"…\", \"error\": false}}\n\
+         {{\"say\": \"…\", \"done\": false, \"next\": \"…\", \"node\": \"…\", \"error\": false, \"do\": []}}\n\
          - say — что сказать вслух, 1–3 короткие разговорные фразы, связно и в контексте цели: что сделано, что дальше и зачем это понадобится; ошибка — что значит и как поправить. Не пересказывай вывод. Рутина без нового смысла \
          (cd, ls, clear, опечатка, которую человек сам исправил) — пустая строка.\n\
          - done — true, только если по выводу видно, что текущий шаг сценария выполнен.\n\
@@ -701,6 +736,7 @@ async fn observe(app: &AppHandle, chunk: String, glance: Glance) {
          - node — id блока общей картины, которого касается сделанное, или пусто.\n\
          - error — true, если команда упала или сделано не то, в том числе так, как в проде \
          не делают.\n\
+         - {DO} Упало — положи в do исправление, если оно очевидно.\n\
          {PROD}\n\
          Если сделанное — это понятие из урока, назови его так, как в уроке: так практика \
          связывается с теорией. say — {SAY} Команда для ввода — только в next. \
@@ -740,6 +776,9 @@ async fn observe(app: &AppHandle, chunk: String, glance: Glance) {
         let excess = store.thread.len().saturating_sub(DEPTH);
         store.thread.drain(..excess);
     }
+    if !look.actions.is_empty() {
+        STORE.lock().unwrap_or_else(|err| err.into_inner()).offered = usable(look.actions.clone());
+    }
     let say = with(app, |p| {
         if !look.node.is_empty() {
             p.here = look.node.clone();
@@ -748,7 +787,8 @@ async fn observe(app: &AppHandle, chunk: String, glance: Glance) {
         if say.is_empty() && glance == Glance::Check && !look.done {
             say = "Пока не вижу в терминале, что шаг сделан.".into();
         }
-        note(p, "noa", if look.error { "error" } else { "comment" }, &say);
+        let actions = usable(look.actions.clone());
+        note_with(p, "noa", if look.error { "error" } else { "comment" }, &say, actions);
         if look.done && !running {
             let next = advance(p);
             say = format!("{say} {next}").trim().to_string();
@@ -765,6 +805,10 @@ pub async fn ask(app: &AppHandle, text: &str, voice: bool) -> Result<String, Str
     let text = text.trim();
     if text.is_empty() {
         return Err("Спросите что-нибудь.".into());
+    }
+    // «Выполни», «да», «вставь» — про предложенную команду, а не новый вопрос.
+    if let Some(reply) = confirm(app, text) {
+        return reply;
     }
     // «Следи», «смотри, что я пишу» — включить сопровождение каждой строки и
     // команды: человек просит идти рядом, а не ждать вопроса.
@@ -791,15 +835,18 @@ pub async fn ask(app: &AppHandle, text: &str, voice: bool) -> Result<String, Str
          терминале. Просят подсказку — сначала направление, команду — если застрял. Просят общую \
          картину — что уже построено, где мы сейчас, что впереди и как части связаны. \
          {PROD} Без вступлений и похвалы.\n\
-         Ответь строго JSON, без текста вокруг: {{\"text\": \"…\", \"say\": \"…\"}}\n\
+         Ответь строго JSON, без текста вокруг: {{\"text\": \"…\", \"say\": \"…\", \"do\": []}}\n\
          - text — для экрана: до 120 слов, команды и пути — в `обратных кавычках`.\n\
          - say — то же вслух, {SAY}\n\
+         - {DO} Спрашивают «как посмотреть…», «как сделать…» — положи команду в do: человек \
+         выполнит её кнопкой или скажет «выполни».\n\
          По-русски.",
         name(app)
     );
     let thread = STORE.lock().unwrap_or_else(|err| err.into_inner()).thread.clone();
     let raw = model(app, &rules, &thread, text, false).await?;
     let (shown, said, actions) = three_ways(&raw);
+    STORE.lock().unwrap_or_else(|err| err.into_inner()).offered = actions.clone();
     {
         let mut store = STORE.lock().unwrap_or_else(|err| err.into_inner());
         store.thread.push(ThreadItem { q: text.to_string(), a: shown.clone() });
@@ -810,6 +857,90 @@ pub async fn ask(app: &AppHandle, text: &str, voice: bool) -> Result<String, Str
     with(app, |p| note_with(p, "noa", kind, &shown, actions));
     publish(app, &said, voice);
     Ok(if voice { said } else { shown })
+}
+
+/// Согласие на предложенное: «да», «выполни», «давай» — выполнить первое
+/// действие из последнего ответа; «вставь» — только набрать команду, без
+/// Enter. Опасное голосом не запускается — только кнопкой в окне.
+fn confirm(app: &AppHandle, said: &str) -> Option<Result<String, String>> {
+    let lower = said.to_lowercase().replace('ё', "е");
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    if words.is_empty() || words.len() > 4 {
+        return None;
+    }
+    const RUN: &[&str] = &["да", "давай", "выполни", "выполняй", "запусти", "запускай", "делай", "сделай", "ага", "жми", "погнали"];
+    const PASTE: &[&str] = &["вставь", "вставляй", "набери"];
+    let paste = words.iter().any(|w| PASTE.contains(w));
+    let run = words.iter().any(|w| RUN.contains(w));
+    if !paste && !run {
+        return None;
+    }
+    let action = STORE.lock().unwrap_or_else(|err| err.into_inner()).offered.first().cloned()?;
+    let reply = if dangerous(&action) {
+        "Эта команда необратимая — запустите её кнопкой в окне, если уверены.".to_string()
+    } else if paste {
+        match &action {
+            Action::Run { command } => match term_write(command.trim()) {
+                Ok(()) => "Набрала — проверьте и нажмите Enter.".into(),
+                Err(err) => return Some(Err(err)),
+            },
+            Action::File { .. } => "Файл набирать незачем — скажите «выполни», и я его запишу.".into(),
+        }
+    } else {
+        match run_action(app, &action) {
+            Ok(()) => "Выполняю.".into(),
+            Err(err) => return Some(Err(err)),
+        }
+    };
+    with(app, |p| {
+        note(p, "me", "answer", said.trim());
+        note(p, "noa", "hint", &reply);
+    });
+    publish(app, "", false);
+    Some(Ok(reply))
+}
+
+/// Необратимое: удалить, перезагрузить, стереть. Голосом — нельзя, кнопкой —
+/// после подтверждения.
+pub fn dangerous(action: &Action) -> bool {
+    let Action::Run { command } = action else { return false };
+    let lower = command.to_lowercase();
+    const MARKS: &[&str] = &[
+        "rm -r", "rm -f", "rm -rf", "mkfs", "dd if=", "reboot", "shutdown", "poweroff", "halt",
+        "kubectl delete", "helm uninstall", "helm delete", "drop database", "drop table", "truncate ",
+        "iptables -f", "userdel", "wipefs", "fdisk", "parted", "> /dev/sd", "docker system prune",
+        "docker volume rm", "git reset --hard", "git push --force", "git push -f", "terraform destroy",
+    ];
+    MARKS.iter().any(|mark| lower.contains(mark))
+}
+
+/// Выполнить действие Ноа и посмотреть на итог: команда, которую Ноа
+/// запустила сама, без разбора результата выглядела бы брошенной.
+pub fn run_action(app: &AppHandle, action: &Action) -> Result<(), String> {
+    perform(action)?;
+    WATCH.lock().unwrap_or_else(|err| err.into_inner()).expect = true;
+    // Сделанное второй раз «да» не повторит.
+    STORE.lock().unwrap_or_else(|err| err.into_inner()).offered.retain(|offered| offered != action);
+    let what = match action {
+        Action::Run { command } => format!("▶ `{}`", command.trim()),
+        Action::File { path, .. } => format!("📄 записываю `{}`", path.trim()),
+    };
+    with(app, |p| note(p, "noa", "step", &what));
+    publish(app, "", false);
+    Ok(())
+}
+
+/// Кнопка в окне: выполнить действие из реплики ленты.
+pub fn act(app: &AppHandle, line: usize, index: usize, paste: bool) -> Result<(), String> {
+    let action = peek(app, |p| p.feed.get(line).and_then(|l| l.actions.get(index)).cloned())
+        .ok_or("Этого действия уже нет — лента обновилась.")?;
+    if paste {
+        return match &action {
+            Action::Run { command } => term_write(command.trim()),
+            Action::File { .. } => Err("Файл вставляется только целиком — кнопкой «Выполнить».".into()),
+        };
+    }
+    run_action(app, &action)
 }
 
 /// Как говорить вслух — для всех ответов практики.
@@ -867,11 +998,61 @@ fn speakable(text: &str) -> String {
 
 /// Спрашивают голосом: фразы разговора без рук идут сюда.
 pub fn voice_on() -> bool {
-    STORE.lock().unwrap_or_else(|err| err.into_inner()).voice
+    let store = STORE.lock().unwrap_or_else(|err| err.into_inner());
+    store.voice || store.always
 }
 
 pub fn set_voice(on: bool) {
     STORE.lock().unwrap_or_else(|err| err.into_inner()).voice = on;
+}
+
+/// Слушать всё время, пока открыто окно практики: «Ноа, глянь, что за
+/// ошибка» — и сказанное уходит практике. Ожидание имени включается на это
+/// время, даже если в настройках оно выключено.
+pub fn always() -> bool {
+    STORE.lock().unwrap_or_else(|err| err.into_inner()).always
+}
+
+pub fn set_always(on: bool) {
+    STORE.lock().unwrap_or_else(|err| err.into_inner()).always = on;
+}
+
+/// Своя задача без темы курса: Ноа — напарник по ней. Новая задача —
+/// чистая лента и журнал; та же — продолжение.
+pub fn set_task(app: &AppHandle, task: &str) {
+    let task = task.trim().to_string();
+    let intro = {
+        let mut store = STORE.lock().unwrap_or_else(|err| err.into_inner());
+        load(&mut store, app);
+        let like = store.saved.items.get(&store.saved.current).cloned();
+        let item = store.saved.items.entry(String::new()).or_insert_with(|| blank(None, None, like.as_ref()));
+        let fresh = item.task != task;
+        if fresh {
+            item.task = task.clone();
+            item.scenario = None;
+            item.feed.clear();
+            item.history.clear();
+            item.done = false;
+            item.step = 0;
+        }
+        let intro = if task.is_empty() || !fresh {
+            String::new()
+        } else {
+            let text = format!(
+                "Задача: {task}. Работайте в терминале — я вижу его и помню, что сделано. \
+                 Спрашивайте как обычно; команду, которую я предложу, можно выполнить кнопкой или сказать «выполни»."
+            );
+            item.feed.push(Line { who: "noa".into(), kind: "step".into(), text: text.clone(), actions: Vec::new() });
+            text
+        };
+        store.saved.current = String::new();
+        store.thread.clear();
+        store.offered.clear();
+        save(app, &store.saved);
+        intro
+    };
+    log::info!("практика: своя задача ({} знаков)", task.chars().count());
+    publish(app, &intro, false);
 }
 
 /* ── Терминал ──────────────────────────────────────────────────────────── */
@@ -909,6 +1090,8 @@ struct Watch {
     screen: String,
     /// Экран при прошлом взгляде на редактор — чтобы сказать о новых строках.
     editor_seen: String,
+    /// Команду запустила Ноа — на её итог она смотрит сама, даже в тихом режиме.
+    expect: bool,
 }
 
 static WATCH: Mutex<Watch> = Mutex::new(Watch {
@@ -922,6 +1105,7 @@ static WATCH: Mutex<Watch> = Mutex::new(Watch {
     session: 0,
     screen: String::new(),
     editor_seen: String::new(),
+    expect: false,
 });
 
 const MAX_FRESH: usize = 40_000;
@@ -1390,14 +1574,15 @@ async fn watch_loop(app: AppHandle, id: u64) {
                 watch.long_noted = true;
             }
             watch.busy = true;
-            Some((std::mem::take(&mut watch.fresh), !quiet))
+            let expect = quiet && std::mem::take(&mut watch.expect);
+            Some((std::mem::take(&mut watch.fresh), !quiet, expect))
         };
         if let Some(chunk) = editor {
             observe(&app, chunk, Glance::Editor).await;
             WATCH.lock().unwrap_or_else(|err| err.into_inner()).busy = false;
             continue;
         }
-        let Some((raw, running)) = take else { continue };
+        let Some((raw, running, expect)) = take else { continue };
         let chunk = shorten(&redact(&clean(&raw)), 5000);
         // Каждый взгляд модели — секунды и токены. Известные ошибки Ноа
         // разбирает сразу и сама; к модели идёт только упавшее, а в подробном
@@ -1407,17 +1592,34 @@ async fn watch_loop(app: AppHandle, id: u64) {
                 with(&app, |p| note(p, "noa", "error", warning));
                 publish(&app, warning, false);
             }
+            remember_command(&app, &chunk);
         }
         if running {
             observe(&app, chunk, Glance::Running).await;
         } else if let Some(hint) = instant(&chunk) {
             with(&app, |p| note(p, "noa", "error", hint));
             publish(&app, hint, false);
-        } else if failed(&chunk) || (verbose && !routine(&chunk) && chunk.trim().chars().count() >= 2) {
+        } else if expect || failed(&chunk) || (verbose && !routine(&chunk) && chunk.trim().chars().count() >= 2) {
             observe(&app, chunk, Glance::Output).await;
         }
         WATCH.lock().unwrap_or_else(|err| err.into_inner()).busy = false;
     }
+}
+
+/// Журнал команд — память Ноа о сделанном: «✓ helm install …», «✗ kubectl apply …».
+/// Пустые и рутинные (cd, ls) не записываются: в них нет хода работы.
+fn remember_command(app: &AppHandle, chunk: &str) {
+    let command = command_of(chunk);
+    if command.is_empty() || routine(chunk) {
+        return;
+    }
+    let short: String = command.chars().take(160).collect();
+    let mark = if failed(chunk) || instant(chunk).is_some() { "✗" } else { "✓" };
+    with(app, |p| {
+        p.history.push(format!("{mark} {short}"));
+        let excess = p.history.len().saturating_sub(MAX_HISTORY);
+        p.history.drain(..excess);
+    });
 }
 
 /// Команда из первой строки куска: после приглашения `$ `, `# ` или `> `.
@@ -1757,6 +1959,17 @@ mod tests {
         assert!(routine("PS C:\\Users\\manda> cd projects"));
         assert!(!routine("root@node1:~# ls /nope\nls: cannot access '/nope': No such file or directory"));
         assert!(!routine("root@node1:~# kubectl get nodes\nNAME STATUS"));
+    }
+
+    #[test]
+    fn irreversible_commands_need_a_button() {
+        let run = |c: &str| Action::Run { command: c.into() };
+        assert!(dangerous(&run("kubectl delete ns monitoring")));
+        assert!(dangerous(&run("sudo rm -rf /var/lib/etcd")));
+        assert!(dangerous(&run("helm uninstall grafana -n monitoring")));
+        assert!(!dangerous(&run("kubectl get pods -A")));
+        assert!(!dangerous(&run("helm install grafana grafana/grafana -n monitoring")));
+        assert!(!dangerous(&Action::File { path: "/tmp/values.yaml".into(), content: "a: 1".into(), sudo: false }));
     }
 
     #[test]
