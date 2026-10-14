@@ -169,6 +169,7 @@ function renderSide() {
   ui.coursePercent.textContent = course ? `${course.percent}%` : "";
   ui.courseBar.style.width = `${course?.percent ?? 0}%`;
   ui.home.setAttribute("aria-current", String(view.kind === "home"));
+  ui.lobby?.setAttribute("aria-current", String(view.kind === "lobby"));
   ui.final.setAttribute("aria-current", String(view.kind === "final"));
   ui.final.dataset.locked = String(!course?.finalUnlocked);
   ui.final.textContent =
@@ -367,6 +368,53 @@ function watchBuilds(status, stop) {
   tick();
 }
 
+/**
+ * Все курсы: карточки с прогрессом и сборка нового. Раньше окно открывалось
+ * сразу в одном курсе, и выйти было некуда — ни к другим курсам, ни к сборке.
+ */
+async function renderLobby() {
+  view = { kind: "lobby", topic: null, step: "lesson" };
+  review = null;
+  await refreshOverview();
+  renderSide();
+  const root = page("Курсы", "Выберите курс или соберите новый — по любой теме, под свою цель.");
+  const grid = el("div", "lobby");
+  for (const other of courses) {
+    const card = el("button", "lobby__card");
+    card.type = "button";
+    card.setAttribute("aria-current", String(other.id === course?.id));
+    const done = other.topics.filter((t) => t.status === "done").length;
+    const bar = el("span", "bar bar--small");
+    const fill = el("span", "bar__fill");
+    fill.style.width = `${other.percent}%`;
+    bar.append(fill);
+    card.append(
+      el("span", "lobby__title", other.title),
+      el("span", "lobby__about", other.description || ""),
+      bar,
+      el(
+        "span",
+        "lobby__meta",
+        `${other.percent}% · сдано тем ${done} из ${other.topics.length}${other.building ? ` · собирается: ${other.building.done} из ${other.building.total}` : ""}`,
+      ),
+    );
+    card.addEventListener("click", () => {
+      if (busy) return;
+      course = other;
+      try {
+        localStorage.setItem("noa.lastCourse", other.id);
+      } catch {
+        /* не запомнится — откроется первый */
+      }
+      renderHome();
+    });
+    grid.append(card);
+  }
+  root.append(grid);
+  // Сборка — и в программе, и в Ноа онлайн: курс пишет сервер через мост.
+  root.append(courseBuilder(!courses.length));
+}
+
 function renderHome() {
   view = { kind: "home", topic: null, step: "lesson" };
   review = null;
@@ -414,7 +462,10 @@ function renderHome() {
   }
   const root = page(course.title, course.description);
   root.prepend(courseSwitch());
-  if (!document.documentElement.classList.contains("is-web")) root.append(courseBuilder(false));
+  const more = el("button", "link-more", "☰ Все курсы и новый курс →");
+  more.type = "button";
+  more.addEventListener("click", () => !busy && renderLobby());
+  root.append(more);
   if (course.building) {
     root.append(
       el(
@@ -2246,6 +2297,9 @@ async function refreshOverview() {
 
 ui.home.addEventListener("click", () => {
   if (!busy) renderHome();
+});
+ui.lobby?.addEventListener("click", () => {
+  if (!busy) renderLobby();
 });
 ui.final.addEventListener("click", () => {
   if (!busy) openFinal();

@@ -145,6 +145,7 @@ button {
   scrollbar-color: var(--scroll-thumb) transparent;
 }
 
+.side__lobby,
 .side__home,
 .side__final,
 .topic {
@@ -158,16 +159,25 @@ button {
   text-align: left;
   cursor: pointer;
 }
+.side__lobby:hover,
 .side__home:hover,
 .side__final:hover,
 .topic:hover {
   background: var(--btn-hover-bg);
 }
+.side__lobby[aria-current="true"],
 .side__home[aria-current="true"],
 .side__final[aria-current="true"],
 .topic[aria-current="true"] {
   border-color: var(--accent);
 }
+/* «Все курсы» — над обзором текущего курса: выход в лобби. */
+.side__lobby {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: var(--size-secondary);
+}
+
 .side__final {
   margin-top: 6px;
   border-color: var(--btn-border);
@@ -1661,4 +1671,72 @@ button {
 .account__title {
   margin: 0;
   font-size: 18px;
+}
+
+/* ── Лобби: все курсы ──────────────────────────────────────────────────── */
+
+.lobby {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.lobby__card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--btn-border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lobby__card:hover {
+  border-color: var(--accent);
+}
+.lobby__card[aria-current="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.lobby__title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.lobby__about {
+  color: var(--text-muted);
+  font-size: var(--size-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lobby__about:empty {
+  display: none;
+}
+
+.lobby__meta {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.link-more {
+  align-self: flex-start;
+  margin: 4px 0 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.link-more:hover {
+  text-decoration: underline;
 }
