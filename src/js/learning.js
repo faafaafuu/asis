@@ -170,6 +170,41 @@ function renderSide() {
   ui.courseBar.style.width = `${course?.percent ?? 0}%`;
   ui.home.setAttribute("aria-current", String(view.kind === "home"));
   ui.lobby?.setAttribute("aria-current", String(view.kind === "lobby"));
+  // В лобби курс ещё не выбран: ни его тем, ни экзамена, ни полоски в
+  // заголовке — сбоку только курсы.
+  const lobby = view.kind === "lobby";
+  ui.home.hidden = lobby;
+  ui.final.hidden = lobby;
+  ui.courseBar.closest(".head__progress")?.toggleAttribute("hidden", lobby);
+  if (lobby) {
+    ui.courseTitle.textContent = "Все курсы";
+    ui.topics.replaceChildren(
+      ...courses.map((other) => {
+        const item = el("li");
+        const node = el("button", "topic");
+        const line = el("span", "topic__line");
+        line.append(el("span", "topic__title", other.title), el("span", "topic__score", `${other.percent}%`));
+        const bar = el("span", "bar bar--small");
+        const fill = el("span", "bar__fill");
+        fill.style.width = `${other.percent}%`;
+        bar.append(fill);
+        node.append(line, bar);
+        node.addEventListener("click", () => {
+          if (busy) return;
+          course = other;
+          try {
+            localStorage.setItem("noa.lastCourse", other.id);
+          } catch {
+            /* не запомнится — откроется первый */
+          }
+          renderHome();
+        });
+        item.append(node);
+        return item;
+      }),
+    );
+    return;
+  }
   ui.final.setAttribute("aria-current", String(view.kind === "final"));
   ui.final.dataset.locked = String(!course?.finalUnlocked);
   ui.final.textContent =
