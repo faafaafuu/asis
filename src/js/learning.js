@@ -821,9 +821,15 @@ function deepBox(topic, at) {
   const body = el("div", "lesson deep__body");
   body.hidden = true;
   let loaded = false;
+  // Разбор тоже можно слушать — так же, как урок, по абзацам.
+  let reader = null;
+  const showBody = (on) => {
+    body.hidden = !on;
+    if (reader) reader.hidden = !on;
+  };
   const toggle = button("🔍 Разобрать подробно", () => {
     if (loaded) {
-      body.hidden = !body.hidden;
+      showBody(body.hidden);
       toggle.textContent = body.hidden ? "🔍 Показать разбор" : "Свернуть разбор";
     } else {
       load(false);
@@ -840,7 +846,10 @@ function deepBox(topic, at) {
       if (text) {
         loaded = true;
         body.innerHTML = markdown(text);
-        body.hidden = cachedOnly;
+        reader?.remove();
+        reader = attachReader(body, { api, el, button, label: "разбор", keys: false });
+        box.insertBefore(reader, body);
+        showBody(!cachedOnly);
         toggle.textContent = cachedOnly ? "🔍 Показать разбор" : "Свернуть разбор";
       }
     } catch (err) {

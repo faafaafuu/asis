@@ -42,6 +42,10 @@ pub struct OpenPayload {
     /// Нужно, когда окно открыли голосом: человек спросил вслух и ответа ждёт
     /// тоже вслух, а не глазами.
     speak: bool,
+    /// Окно объяснения выделенного (левый Ctrl): только текст — без кнопки
+    /// «прочитать» и без пробела, который читает вслух. Голос — у окон, открытых
+    /// голосом; у выделения пробел печатается как обычно.
+    quiet: bool,
     /// Готовый текст вместо вопроса к модели.
     ///
     /// Так приходит напоминание о задаче: спрашивать про него нечего, оно уже
@@ -132,6 +136,7 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
         error_text,
         dialogue,
         speak: false,
+        quiet: true,
         answer: None,
     };
     state.set_selection(selection);
@@ -144,10 +149,10 @@ pub fn show_for_selection(app: &AppHandle, selection: Selection) -> tauri::Resul
         window.emit_to(POPUP_LABEL, "popup:open", payload)?;
     }
 
-    // Пока попап на экране, пробел принадлежит ему. В остальное время хук
-    // пропускает клавиши насквозь и ничего не трогает.
+    // Объяснение выделенного — без голоса: пробел остаётся пробелом и
+    // печатается там, где человек работает.
     #[cfg(desktop)]
-    crate::voice::hotkey::arm(true);
+    crate::voice::hotkey::arm(false);
     Ok(())
 }
 
@@ -471,6 +476,7 @@ pub fn show_for_voice(app: &AppHandle, question: String) -> tauri::Result<()> {
         error_text,
         dialogue,
         speak: true,
+        quiet: false,
         answer: None,
     };
     state.set_selection(Selection {
@@ -522,6 +528,7 @@ pub fn show_for_reminder(app: &AppHandle, text: String) -> tauri::Result<()> {
         error_text,
         dialogue: false,
         speak: false,
+        quiet: false,
         // Напоминание — готовый текст: спрашивать про него модель нечего.
         answer: Some(text.clone()),
     };

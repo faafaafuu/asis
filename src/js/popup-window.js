@@ -167,7 +167,7 @@ if (api) {
 
   /** Показывает содержимое по данным из Rust. */
   function applyOpen(payload) {
-    const { term, context, theme, errorText, dialogue, speak, answer } = payload ?? {};
+    const { term, context, theme, errorText, dialogue, speak, quiet, answer } = payload ?? {};
     // Новый вопрос — новое окно: размер снова определяет содержимое. Rust к
     // этому моменту уже забыл про ручную геометрию, и разметка должна забыть
     // тоже, иначе окно осталось бы растянутым под ответ в две строки.
@@ -181,7 +181,7 @@ if (api) {
       view.announce(answer, { kind: /^Вышла версия/.test(answer) ? "news" : "reminder" });
       return;
     }
-    view.open({ term: term ?? "", context: context ?? "", speak: Boolean(speak) });
+    view.open({ term: term ?? "", context: context ?? "", speak: Boolean(speak), quiet: Boolean(quiet) });
   }
 
   // Окно могли открыть раньше, чем эта страница загрузилась: тогда событие
@@ -256,9 +256,10 @@ if (api) {
     quiet();
     api.invoke("voice_stop").catch(() => {});
   };
-  // Микрофон — как пробел: зажал — слушаем, отпустил — вопрос ушёл.
+  // Микрофон — слушать вопрос сразу. Как пробел он не работает: короткий
+  // клик пробел понимает как «прочитай», и Ноа перечитывала последний ответ.
   view.onMic = (down) => {
-    api.invoke("popup_space", { down }).catch(() => {});
+    if (down) api.invoke("popup_listen").catch(() => {});
   };
   view.onOpenSettings = () => {
     api.invoke("open_settings", { section: "model" }).catch(() => {});

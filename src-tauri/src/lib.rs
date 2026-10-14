@@ -324,6 +324,7 @@ pub fn run() {
             commands::close_popup,
             commands::popup_active,
             commands::popup_space,
+            commands::popup_listen,
             commands::open_order_link,
             commands::food_settings,
             commands::save_food_settings,

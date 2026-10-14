@@ -189,6 +189,13 @@ pub fn space_down() {
     let _ = timer.send(press);
 }
 
+/// Слушать сразу — кнопка микрофона в окне. Пробел решает по удержанию, и
+/// короткий клик по микрофону он принимал за «прочитай»: Ноа перечитывала
+/// последний ответ вместо того, чтобы слушать вопрос.
+pub fn listen_now() {
+    send(Event::Listen);
+}
+
 /// Пробел отпущен: не додержали до «слушай» — значит, «прочитай».
 pub fn space_up() {
     if PRESS.swap(0, Ordering::SeqCst) == 0 {
@@ -324,6 +331,9 @@ unsafe extern "system" fn keyboard_proc(
     if info.vkCode == VK_ESCAPE.0 as u32
         && down
         && (VOICE_ACTIVE.load(Ordering::Relaxed)
+            // Разговор без рук слушает и между фразами, когда индикатора нет:
+            // Esc должен заканчивать и его.
+            || crate::in_conversation()
             || RECORDING.load(Ordering::Relaxed)
             || crate::voice::speaking()
             || crate::alarms::ringing())

@@ -784,6 +784,14 @@ pub fn popup_active() {
     crate::overlay::touch_popup();
 }
 
+/// Микрофон в окне попапа: слушать вопрос сразу, без «коротко — прочитать».
+#[tauri::command]
+pub fn popup_listen() {
+    crate::overlay::touch_popup();
+    #[cfg(desktop)]
+    crate::voice::hotkey::listen_now();
+}
+
 /// Пробел в самом окне попапа при пустом поле ввода: `down` — нажат, иначе
 /// отпущен.
 ///

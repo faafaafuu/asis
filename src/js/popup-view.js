@@ -328,11 +328,14 @@ export class PopupView {
    * открывается на вопрос, заданный голосом с чистого места: человек спросил
    * вслух, ответа он ждёт тоже вслух, а не глазами.
    */
-  open({ term: raw, context = "", speak = false }, { retrying = false } = {}) {
+  open({ term: raw, context = "", speak = false, quiet = false }, { retrying = false } = {}) {
     this.#abortAll();
     this.#clearRetry();
     if (!retrying) this.retries = 0;
-    this.lastOpen = { term: raw, context, speak };
+    this.lastOpen = { term: raw, context, speak, quiet };
+    // Объяснение выделенного (левый Ctrl) — без голоса: ни кнопки «прочитать»,
+    // ни пробела. Голос — у окон, открытых голосом.
+    this.quiet = Boolean(quiet);
     this.speakOnAnswer = Boolean(speak);
     // Окно открыл голосовой вопрос — его «термин» и есть сам вопрос. Следующие
     // вопросы голосом — новые вопросы, а не уточнения к первому: иначе модель
@@ -703,7 +706,7 @@ export class PopupView {
     this.ui.title.textContent = s.notice?.title ?? "";
 
     this.ui.stop.hidden = !busy;
-    this.ui.speak.hidden = !this.onSpeak || busy || !(s.phase === "success" || s.phase === "error");
+    this.ui.speak.hidden = !this.onSpeak || this.quiet || busy || !(s.phase === "success" || s.phase === "error");
     this.ui.speak.classList.toggle("is-on", this.speakingNow);
     this.ui.speak.title = this.speakingNow ? "Замолчать" : "Прочитать вслух";
     this.ui.expand.hidden = busy || !this.#canExpand();

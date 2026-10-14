@@ -28,7 +28,7 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * Подключает чтение к узлу урока. Отдаёт панель управления — её ставят над
  * уроком. `onFinish` — раздел дочитан (окно может предложить следующий).
  */
-export function attachReader(lesson, { api, el, button, onFinish }) {
+export function attachReader(lesson, { api, el, button, onFinish, label = "урок", keys: useKeys = true }) {
   const blocks = readableBlocks(lesson);
   const state = { at: 0, playing: false, run: 0 };
   let focus = true;
@@ -39,7 +39,7 @@ export function attachReader(lesson, { api, el, button, onFinish }) {
   }
 
   const bar = el("div", "reader");
-  const play = button("▶ Слушать урок", () => (state.playing ? stop() : start()));
+  const play = button(`▶ Слушать ${label}`, () => (state.playing ? stop() : start()));
   const back = button("⏮", () => jump(-1), true);
   const next = button("⏭", () => jump(1), true);
   back.title = "Предыдущий абзац (←)";
@@ -57,7 +57,7 @@ export function attachReader(lesson, { api, el, button, onFinish }) {
   bar.append(play, back, next, focusBtn, where);
 
   function paint() {
-    play.textContent = state.playing ? "⏸ Пауза" : state.at > 0 ? "▶ Дальше слушать" : "▶ Слушать урок";
+    play.textContent = state.playing ? "⏸ Пауза" : state.at > 0 ? "▶ Дальше слушать" : `▶ Слушать ${label}`;
     focusBtn.textContent = focus ? "◐ Фокус: вкл" : "◑ Фокус: выкл";
     where.textContent = blocks.length ? `абзац ${Math.min(state.at + 1, blocks.length)} из ${blocks.length}` : "";
     lesson.classList.toggle("reader-focus", focus && (state.playing || state.at > 0));
@@ -173,6 +173,9 @@ export function attachReader(lesson, { api, el, button, onFinish }) {
       stop();
       return;
     }
+    // Пробел и стрелки — у одного чтения на странице: у урока. У разбора под
+    // ним — кнопки, иначе пробел запускал бы оба сразу.
+    if (!useKeys || lesson.hidden) return;
     if (event.target.closest?.("textarea, input")) return;
     if (event.code === "Space") {
       event.preventDefault();
