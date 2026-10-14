@@ -183,16 +183,23 @@ function renderSide() {
       line.append(
         el("span", `topic__mark topic__mark--${topic.status}`, MARKS[topic.status] ?? "·"),
         el("span", "topic__title", `${at + 1}. ${topic.title}`),
-        el("span", "topic__score", topic.examBest != null ? `${topic.examBest}%` : ""),
+        // Число — то же, что полоска: сколько темы пройдено. Раньше справа стоял
+        // балл экзамена, и «90%» при полоске на половине сбивало с толку.
+        el("span", "topic__score", topic.status === "new" ? "" : `${topicPercent(topic)}%`),
       );
       const bar = el("span", "bar bar--small");
       const fill = el("span", "bar__fill");
       fill.style.width = `${topicPercent(topic)}%`;
       bar.append(fill);
       node.append(line, bar);
-      node.title = topic.conceptsTotal
-        ? `${topic.summary}\nУверенно: ${topic.conceptsMature} из ${topic.conceptsTotal} понятий`
-        : topic.summary;
+      // Из чего складывается и чего не хватает: урок — 20, задачи — 30, экзамен — 50.
+      const parts = [
+        `Урок: ${topic.read ? "прочитан ✓" : "не отмечен прочитанным"}`,
+        topic.tasksTotal ? `Задачи: ${topic.tasksDone} из ${topic.tasksTotal}` : "",
+        `Мини-экзамен: ${topic.examBest != null ? `${topic.examBest}%${topic.examBest >= course.topicPass ? " ✓" : ` (нужно ${course.topicPass}%)`}` : "не сдавали"}`,
+        topic.conceptsTotal ? `Уверенно: ${topic.conceptsMature} из ${topic.conceptsTotal} понятий` : "",
+      ].filter(Boolean);
+      node.title = `${topic.summary}\n\n${parts.join("\n")}`;
       node.addEventListener("click", () => resumeTopic(topic.id));
       item.append(node);
       return item;
