@@ -1391,11 +1391,23 @@ fn sandboxie() -> Option<PathBuf> {
 pub fn close(spoken: &str, force: bool) -> String {
     let windows = open_windows();
 
+    // «Закрой браузер» — тот браузер, что открыт: имени «браузер» нет ни у
+    // одной программы, и раньше ответом было «не нашёл открытой программы»
+    // при открытом Chrome. Открыто несколько — верхний (окна идут сверху вниз).
+    let lower = spoken.to_lowercase();
+    let mut best: Option<(usize, f32, bool)> = if lower.contains("браузер") || lower.contains("browser") {
+        windows.iter().position(|window| is_browser(&window.exe)).map(|at| (at, 1.0, true))
+    } else {
+        None
+    };
+
     // Лучшее окно — по заголовку или по имени программы: «закрой телеграм»
     // совпадает с Telegram.exe, «закрой диспетчер задач» — только с
     // заголовком окна.
-    let mut best: Option<(usize, f32, bool)> = None;
     for (at, window) in windows.iter().enumerate() {
+        if best.is_some_and(|(_, top, _)| top >= 1.0) {
+            break;
+        }
         let by_exe = score(spoken, &window.exe);
         let by_title = score(spoken, &window.title);
         let value = by_exe.max(by_title);
@@ -1416,6 +1428,7 @@ pub fn close(spoken: &str, force: bool) -> String {
         // Хозяина чужих окон задачей не снимают: вместе с ним ушли бы все
         // приложения из магазина.
         if force && !shared {
+            remember_closed(&chosen.exe, &readable(&chosen.exe));
             return end_task(&chosen.exe, &readable(&chosen.exe));
         }
         let targets: Vec<&OpenWindow> = windows
@@ -1435,13 +1448,37 @@ pub fn close(spoken: &str, force: bool) -> String {
             .filter(|window| close_window(window.handle))
             .count();
         log::info!("закрываю {name}: окон {closed}");
-        if closed > 0 && !shared {
-            finish_leftovers(chosen.exe.clone(), name.clone());
+        if closed == 0 {
+            return format!("{name} не закрылся.");
         }
-        return match closed {
-            0 => format!("{name} не закрылся."),
-            _ => format!("Закрываю {name}."),
+        if !shared {
+            remember_closed(&chosen.exe, &name);
+        }
+        // Проверяем, а не верим на слово: окно могло не закрыться — свёрнуто
+        // на другом столе, спрашивает «сохранить?», программа зависла. Раньше
+        // Ноа говорила «закрываю», а Chrome оставался на экране.
+        let handles: Vec<isize> = targets.iter().map(|window| window.handle).collect();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let left = loop {
+            std::thread::sleep(Duration::from_millis(250));
+            let left = open_windows().iter().filter(|window| handles.contains(&window.handle)).count();
+            if left == 0 || Instant::now() >= deadline {
+                break left;
+            }
         };
+        if left == 0 {
+            if !shared {
+                finish_leftovers(chosen.exe.clone(), name.clone());
+            }
+            return format!("Закрыла {name}.");
+        }
+        // Браузер не спрашивает о несохранённом — вкладки он восстановит сам.
+        // Не закрылся — снимаем задачу, чтобы «закрой» значило «закрыто».
+        if is_browser(&chosen.exe) {
+            log::info!("{name}: окна не закрылись за 4 с — снимаю задачу");
+            return end_task(&chosen.exe, &name);
+        }
+        return format!("{name} не закрылся — наверное, спрашивает о сохранении. Не нужно — скажите «сними задачу».");
     }
 
     let Some((name, pids)) = running_process(spoken) else {
@@ -1455,6 +1492,173 @@ pub fn close(spoken: &str, force: bool) -> String {
         _ => format!("Закрываю {name}."),
     }
 }
+
+const BROWSERS: &[&str] = &["chrome", "msedge", "firefox", "brave", "opera", "browser", "vivaldi", "arc", "yandex", "chromium", "zen"];
+
+fn is_browser(exe: &str) -> bool {
+    BROWSERS.contains(&exe.to_lowercase().trim_end_matches(".exe"))
+}
+
+/// Что закрывали последним — для «он всё ещё открыт» сразу следом.
+static LAST_CLOSED: std::sync::Mutex<Option<(String, String, Instant)>> = std::sync::Mutex::new(None);
+
+fn remember_closed(exe: &str, name: &str) {
+    *LAST_CLOSED.lock().unwrap_or_else(|err| err.into_inner()) = Some((exe.to_string(), name.to_string(), Instant::now()));
+}
+
+/// «Он всё ещё открыт», «ты не закрыл» — сразу после закрытия: снять задачу с
+/// той же программы, а не разговаривать о ней. `None` — закрывали давно или
+/// ничего.
+pub fn close_again() -> Option<String> {
+    let (exe, name, at) = LAST_CLOSED.lock().unwrap_or_else(|err| err.into_inner()).clone()?;
+    if at.elapsed() > Duration::from_secs(120) {
+        return None;
+    }
+    if pids_of(&exe).is_empty() {
+        return Some(format!("{name} уже закрыт — процессов не осталось."));
+    }
+    Some(end_task(&exe, &name))
+}
+
+/// Есть ли такая программа — уверенно, для быстрых команд без модели. Не
+/// уверены — пусть разбирает модель: «открой то, чего нет» не должно
+/// запускать первое похожее.
+pub fn knows(spoken: &str) -> bool {
+    catalog().iter().any(|entry| score(spoken, &entry.name) >= 0.75)
+}
+
+/// Открыть программу и убедиться, что окно появилось. Раньше Ноа говорила
+/// «открываю», не глядя, открылось ли.
+pub fn launch_checked(spoken: &str) -> String {
+    let before: Vec<isize> = open_windows().iter().map(|window| window.handle).collect();
+    let reply = launch(spoken, false, "");
+    let Some(name) = reply.strip_prefix("Открываю ").map(|rest| rest.trim_end_matches('.').to_string()) else {
+        return reply;
+    };
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        std::thread::sleep(Duration::from_millis(300));
+        let shown = open_windows().iter().any(|window| {
+            !before.contains(&window.handle)
+                || score(&name, &window.exe) >= MATCH_THRESHOLD
+                || score(&name, &window.title) >= MATCH_THRESHOLD
+        });
+        if shown {
+            return format!("Открыла {name}.");
+        }
+        if Instant::now() >= deadline {
+            log::warn!("«{name}» запущен, но окна за 8 с не появилось");
+            return format!("Запустила {name}, но окна пока нет — возможно, он открылся в трее.");
+        }
+    }
+}
+
+/// Закрыть программу вида: браузер, мессенджер, почту. Открыто несколько —
+/// верхнюю (окна идут сверху вниз).
+pub fn close_kind(exes: &[&str], title: &str, force: bool) -> String {
+    let windows = open_windows();
+    let Some(window) = windows.iter().find(|window| exes.contains(&window.exe.to_lowercase().as_str())) else {
+        // Окон нет — может, висит в трее.
+        let running = processes()
+            .into_iter()
+            .map(|(_, exe)| exe.to_lowercase().trim_end_matches(".exe").to_string())
+            .find(|exe| exes.contains(&exe.as_str()));
+        return match running {
+            Some(exe) => close(&exe, force),
+            None => format!("Открытого {title} не вижу."),
+        };
+    };
+    close(&window.exe, force)
+}
+
+/// Окна, которые закрывать нельзя «всем скопом»: рабочий стол, панели,
+/// оболочки вроде Seelen UI, оверлеи.
+fn part_of_desktop(window: &OpenWindow) -> bool {
+    let exe = window.exe.to_lowercase();
+    window.title == "Program Manager"
+        || NEVER_END.contains(&exe.as_str()) && exe != "explorer"
+        || ["seelen", "rainmeter", "nvcontainer", "nvidia", "widgets", "gamebar", "xboxgamebar", "phoneexperiencehost"]
+            .iter()
+            .any(|name| exe.contains(name))
+}
+
+/// «Закрой все окна»: каждое просится закрыться, как крестиком. Спросившие
+/// «сохранить?» остаются — там решает человек.
+pub fn close_everything() -> String {
+    let targets: Vec<OpenWindow> = open_windows().into_iter().filter(|window| !part_of_desktop(window)).collect();
+    if targets.is_empty() {
+        return "Открытых окон нет.".into();
+    }
+    for window in &targets {
+        close_window(window.handle);
+    }
+    std::thread::sleep(Duration::from_millis(2500));
+    let left: Vec<String> = open_windows()
+        .into_iter()
+        .filter(|window| targets.iter().any(|target| target.handle == window.handle))
+        .map(|window| readable(&window.exe))
+        .collect();
+    log::info!("закрываю все окна: {} из {}", targets.len() - left.len(), targets.len());
+    if left.is_empty() {
+        "Закрыла все окна.".into()
+    } else {
+        let mut names = left;
+        names.dedup();
+        format!("Закрыла почти всё. Остались: {} — наверное, спрашивают о сохранении.", names.join(", "))
+    }
+}
+
+/// «Закрой это окно» — то, в котором человек работал последним.
+pub fn close_front() -> String {
+    let target = LAST_EXTERNAL.load(Ordering::Relaxed);
+    let windows = open_windows();
+    let Some(window) = windows.iter().find(|window| window.handle == target) else {
+        return "Не вижу, какое окно закрыть.".into();
+    };
+    let name = readable(&window.exe);
+    if part_of_desktop(window) {
+        return format!("{name} — часть рабочего стола, его не закрываю.");
+    }
+    close_window(window.handle);
+    std::thread::sleep(Duration::from_millis(1200));
+    if open_windows().iter().any(|other| other.handle == target) {
+        format!("{name} не закрылся — наверное, спрашивает о сохранении.")
+    } else {
+        format!("Закрыла {name}.")
+    }
+}
+
+/// Нажать клавиши в системе, не трогая окна: громкость, музыка, Win+M.
+#[cfg(target_os = "windows")]
+pub fn tap(keys: &[u16], times: usize) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VIRTUAL_KEY,
+    };
+    let event = |vk: u16, up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(vk),
+                wScan: 0,
+                dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    for _ in 0..times {
+        let mut inputs: Vec<INPUT> = keys.iter().map(|&vk| event(vk, false)).collect();
+        inputs.extend(keys.iter().rev().map(|&vk| event(vk, true)));
+        // SAFETY: события клавиатуры — массив, живущий до конца вызова.
+        unsafe {
+            SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        }
+        std::thread::sleep(Duration::from_millis(15));
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn tap(_keys: &[u16], _times: usize) {}
 
 /// Все процессы программы с этим именем файла, кроме нашего и системных.
 fn pids_of(exe: &str) -> Vec<u32> {

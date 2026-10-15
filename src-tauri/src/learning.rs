@@ -1417,14 +1417,21 @@ pub async fn voice(app: &AppHandle, action: &str, about: &str) -> String {
         "quiz" => start_quiz(&course, topic.as_ref()),
         "review" => crate::recall::start(&course, topic.as_ref()),
         "progress" => summary(&course),
+        // «Открой обучение» — открыть, и всё. Пересказ прогресса — только
+        // когда о нём спросили («как мой прогресс»): на просьбу открыть он
+        // звучал простынёй, которую никто не просил.
         _ => {
+            let named = topic.as_ref().map(|topic| topic.title.clone());
             if let Some(topic) = topic {
                 with(&course.id, |progress| progress.current = Some(topic.id.clone()));
             }
-            if let Err(err) = crate::overlay::show_learning(app) {
-                log::warn!("окно обучения не открылось: {err}");
+            match crate::overlay::show_learning(app) {
+                Ok(()) => match named {
+                    Some(title) => format!("Открываю «{title}»."),
+                    None => "Открываю обучение.".into(),
+                },
+                Err(err) => format!("Окно обучения не открылось: {err}"),
             }
-            summary(&course)
         }
     }
 }

@@ -153,6 +153,20 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(show) = window_request(said) {
         return Some(crate::set_show_window(app, show));
     }
+    // Простые команды — «открой», «закрой», «сверни», «громче», «таймер»,
+    // «закройся» — сразу, без модели: она понимала их через раз и думала
+    // по 6–20 секунд. Не уверены — дальше, к модели.
+    if let Some(reply) = crate::quick::perform(app, said).await {
+        return Some(reply);
+    }
+    // «Он всё ещё открыт», «ты не закрыл» сразу после «закрой …» — снять
+    // задачу, а не обсуждать.
+    if still_open(said) {
+        let again = tauri::async_runtime::spawn_blocking(crate::pc::close_again).await.ok().flatten();
+        if let Some(reply) = again {
+            return Some(reply);
+        }
+    }
     // «Собери путеводитель про умный дом», «открой путеводители» — без модели.
     if let Some(reply) = guide_request(app, said) {
         return Some(reply);
@@ -419,6 +433,36 @@ fn practice_request(app: &AppHandle, said: &str) -> Option<String> {
         return None;
     }
     Some(open_own(app, OwnWindow::Practice))
+}
+
+/// Прямые слова о питании компьютера: «выключи компьютер», «перезагрузись»,
+/// «спящий режим», «заблокируй экран».
+fn power_said(said: &str) -> bool {
+    let lower = said.to_lowercase().replace('ё', "е");
+    let machine = ["компьютер", "комп", "пк", "ноутбук", "ноут", "систем", "винд"].iter().any(|w| lower.contains(w));
+    let off = ["выключ", "вырубай", "выруби", "заверши работу", "гаси"].iter().any(|w| lower.contains(w));
+    let restart = lower.contains("перезагру") || lower.contains("ребут");
+    let sleep = lower.contains("спящ") || lower.contains("усыпи") || lower.contains("в сон") || lower.contains("гибернац");
+    let lock = lower.contains("заблокир") || lower.contains("блокировк");
+    // «Перезагрузи роутер», «заблокируй карту» — не о компьютере: без слова
+    // «компьютер» годятся только «перезагрузись», «спящий режим», «заблокируй экран».
+    (machine && (off || restart || sleep || lock))
+        || lower.contains("перезагрузись")
+        || sleep
+        || (lock && lower.contains("экран"))
+}
+
+/// Закончить разговор после ответа: «закройся», «уйди».
+pub fn hand_off() {
+    HANDOFF.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// «Он всё ещё открыт», «не закрыл», «не закрылось» — жалоба на закрытие.
+fn still_open(said: &str) -> bool {
+    let lower = said.to_lowercase().replace('ё', "е");
+    ["все еще открыт", "до сих пор открыт", "не закрыл", "не закрылс", "не закрылось", "так и открыт", "еще открыт", "всё равно открыт", "все равно открыт"]
+        .iter()
+        .any(|phrase| lower.contains(phrase))
 }
 
 /// Путеводители голосом: «собери путеводитель про деревья Москвы» — начать и
@@ -1160,7 +1204,17 @@ fn open_tasks() -> Vec<Task> {
 /* ── Разбор реплики ──────────────────────────────────────────────────────── */
 
 async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
-    let Some(parsed) = interpret(app, &intent_rules(app, open), said).await else {
+    // Разбор — не дольше восьми секунд. Модель порой думала над «открою
+    // практику» двадцать с лишним секунд и всё равно не разбирала; ответ на
+    // обычный вопрос к этому времени уже готовится рядом (prepare_answer).
+    let parsed = match tokio::time::timeout(std::time::Duration::from_secs(8), interpret(app, &intent_rules(app, open), said)).await {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            log::warn!("разбор «{said}» дольше 8 с — отвечаю как на вопрос");
+            None
+        }
+    };
+    let Some(parsed) = parsed else {
         // Не разобрали — считаем обычным вопросом. Промолчать в ответ на
         // вопрос хуже, чем не завести задачу: задачу человек повторит.
         return Intent::Chat;
@@ -1298,8 +1352,16 @@ async fn read_intent(app: &AppHandle, said: &str, open: &[Task]) -> Intent {
                 },
             }
         }
+        // Выключить, усыпить, перезагрузить — только прямыми словами. Модель
+        // однажды прочла так «Играет музыка», другой раз — «вот смотри,
+        // сейчас покажу»: компьютер нельзя гасить по догадке.
         "power" => match crate::pc::Power::parse(&text("action")) {
-            Some(action) => Intent::Power { action },
+            Some(crate::pc::Power::Cancel) => Intent::Power { action: crate::pc::Power::Cancel },
+            Some(action) if power_said(said) => Intent::Power { action },
+            Some(_) => {
+                log::warn!("«{said}» разобрано как выключение, но прямых слов нет — не выполняю");
+                Intent::Chat
+            }
             None => Intent::Chat,
         },
         "web" => {
@@ -3420,6 +3482,18 @@ pub fn changed(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn power_needs_plain_words() {
+        assert!(power_said("Выключи компьютер."));
+        assert!(power_said("Компьютер выключу, пожалуйста."));
+        assert!(power_said("перезагрузись"));
+        assert!(power_said("уйди в спящий режим"));
+        assert!(!power_said("Играет музыка."));
+        assert!(!power_said("Вот смотри, сейчас тебе покажу"));
+        assert!(!power_said("Ну а снять задачу Клод."));
+        assert!(!power_said("перезагрузи роутер"));
+    }
 
     #[test]
     fn guide_topic_is_taken_after_the_word() {

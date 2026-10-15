@@ -477,6 +477,17 @@ fn is_hallucination(text: &str) -> bool {
     if HALLUCINATIONS.iter().any(|mark| lower.contains(mark)) {
         return true;
     }
+    // «Играет музыка», «— ТРЕВОЖНАЯ МУЗЫКА», «интригующая музыка» — подпись к
+    // звуку целиком. Музыка в комнате превращалась в такие фразы, и одна из
+    // них однажды разобралась как «выключи компьютер».
+    let caption: Vec<&str> = lower
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    if (1..=3).contains(&caption.len()) && caption.last().is_some_and(|w| w.starts_with("музык")) {
+        return true;
+    }
 
     // Целиком в скобках — «[музыка]», «(смех)», «「Google Chrome」» — это подпись
     // к звуку из тех же субтитров, а не сказанные слова.

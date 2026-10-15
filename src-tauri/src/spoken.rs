@@ -2,6 +2,46 @@
 //! экране», путь — последней частью. Общий для голоса на компьютере и для
 //! практики, которая есть и на телефоне.
 
+/// Ответ модели пришёл JSON-ом вместо текста — «{ "answer": [ "…" ] }» — и
+/// звучал вслух со скобками и кавычками. Отсюда берутся только слова: строки
+/// из него через пробел. Не JSON — текст как есть.
+pub fn plain(text: &str) -> String {
+    let trimmed = text.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+    if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+        return text.to_string();
+    }
+    let Some(value) = crate::practice::lenient_json(trimmed) else {
+        return text.to_string();
+    };
+    fn strings(value: &serde_json::Value, out: &mut Vec<String>) {
+        match value {
+            serde_json::Value::String(text) if !text.trim().is_empty() => out.push(text.trim().to_string()),
+            serde_json::Value::Array(items) => items.iter().for_each(|item| strings(item, out)),
+            serde_json::Value::Object(map) => {
+                // Сначала то, что предназначено человеку.
+                for key in ["say", "text", "answer", "reply", "message", "response_text"] {
+                    if let Some(found) = map.get(key) {
+                        let before = out.len();
+                        strings(found, out);
+                        if out.len() > before {
+                            return;
+                        }
+                    }
+                }
+                map.values().for_each(|item| strings(item, out));
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    strings(&value, &mut out);
+    if out.is_empty() {
+        text.to_string()
+    } else {
+        out.join(" ")
+    }
+}
+
 /// Код вслух не читается. Синтезатор проговаривал команды по буквам — «эс-эс-аш
 /// минус и» — и пути через «слэш»: на слух это не понять, а на экране они и
 /// так есть. Модель просят объяснять словами, что делает команда; это —

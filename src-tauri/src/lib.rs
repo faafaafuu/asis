@@ -19,6 +19,7 @@ mod jobs;
 mod order;
 mod overlay;
 mod planner;
+mod quick;
 mod pc;
 mod web;
 mod spend;
@@ -2251,7 +2252,8 @@ pub(crate) fn start_wake(app: &tauri::AppHandle) {
                 let Some(text) = hear_hinted(&app, wav, &hint) else {
                     continue;
                 };
-                let Some(question) = wake_split(&text, &name) else {
+                // По имени — или «чувак, открой задачи»: оклик и сразу команда.
+                let Some(question) = wake_split(&text, &name).or_else(|| quick::addressed(&text)) else {
                     // Говорили не с нами — забываем и слушаем дальше.
                     continue;
                 };
@@ -2435,6 +2437,7 @@ fn speak_with_hud(app: &tauri::AppHandle, text: String, wait: bool) {
     if !app.state::<AppState>().config().voice.enabled {
         return;
     }
+    let text = spoken::plain(&text);
     log::info!("говорю: «{}»", text.chars().take(90).collect::<String>());
 
     // Колонок и наушников нет — голос ушёл бы в пустоту, и человек видел бы
@@ -2910,6 +2913,7 @@ pub(crate) fn set_show_window(app: &tauri::AppHandle, show: bool) -> String {
 /// Ответ на распоряжение: с окном или только голосом — как выбрал человек.
 #[cfg(desktop)]
 fn respond(app: &tauri::AppHandle, text: String) {
+    let text = spoken::plain(&text);
     if show_window(app) {
         announce(app, text, true);
     } else if turn_cancelled() {
