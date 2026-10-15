@@ -160,7 +160,7 @@ export function guidePage(guide, { api, el, button, inline, attachReader, onBack
   const cover = el("header", `guide__cover${guide.cover ? "" : " guide__cover--plain"}`);
   if (guide.cover) cover.append(lazyImage(api, guide.id, guide.cover, "guide__cover-img"));
   const over = el("div", "guide__over");
-  const back = el("button", "guide__back", "← Обучение");
+  const back = el("button", "guide__back", "← Путеводители");
   back.addEventListener("click", onBack);
   over.append(back, el("span", "guide__emoji", guide.emoji || "📖"), el("h2", "guide__title", guide.title));
   if (guide.subtitle) over.append(el("p", "guide__subtitle", guide.subtitle));

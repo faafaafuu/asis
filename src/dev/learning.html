@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru" data-theme="neon">
+<html lang="ru" data-theme="neon" data-scale="window-l">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="../styles/tokens.css" />
     <link rel="stylesheet" href="../styles/learning.css" />
     <link rel="stylesheet" href="../styles/guides.css" />
+    <link rel="stylesheet" href="../styles/learn-home.css" />
     <script src="../js/window-errors.js"></script>
     <script>
       // Витрина лобби курсов: подменные курсы, без программы и сайта.
@@ -58,24 +59,23 @@
   </head>
   <body>
     <header class="head" data-el="head">
-      <h1 class="head__title" data-el="appVersion">NOAH</h1>
-      <span class="head__course" data-el="courseTitle"></span>
-      <div class="head__progress" title="Сколько курса пройдено">
-        <span class="bar"><span class="bar__fill" data-el="courseBar"></span></span>
-        <span class="head__percent" data-el="coursePercent"></span>
-      </div>
+      <span class="head__mark"><img src="../assets/noah-mark.svg" alt="" /></span>
+      <span class="head__brand" data-el="appVersion">NOAH</span>
+      <span class="head__slash">/</span>
+      <span class="head__crumbs" data-el="crumbs">Обучение</span>
+      <span class="head__grow"></span>
       <button class="head__focus" data-el="focusChip" type="button" hidden title="Фокус-сессия: пауза, заметка на потом, стоп"></button>
-      <button class="head__button" data-el="minimize" type="button" title="Свернуть" aria-label="Свернуть окно обучения">—</button>
-      <button class="head__button head__close" data-el="close" type="button" title="Закрыть" aria-label="Закрыть окно обучения">×</button>
+      <button class="head__button" data-el="minimize" type="button" title="Свернуть" aria-label="Свернуть окно обучения"><span class="head__dash"></span></button>
+      <button class="head__button head__close" data-el="close" type="button" title="Закрыть" aria-label="Закрыть окно обучения"><svg width="16" height="16" style="stroke-width: 2"><use href="#i-close"></use></svg></button>
     </header>
 
     <div class="layout">
-      <!-- Темы курса: статус, баллы, ошибки. Внизу — финальный экзамен. -->
-      <nav class="side" aria-label="Темы">
-        <button class="side__lobby" data-el="lobby" type="button" title="Все курсы, путеводители и сборка нового">⌂ Обучение</button>
-        <button class="side__home" data-el="home" type="button">Обзор курса</button>
-        <ol class="topics" data-el="topics"></ol>
-        <button class="side__final" data-el="final" type="button">Финальный экзамен</button>
+      <!-- Меню (Главная · Повторение · Фокус · Путеводители), ниже — курсы на
+           главной или темы курса, внизу — сборка курса или финальный экзамен. -->
+      <nav class="side" aria-label="Обучение">
+        <div class="side__menu" data-el="menu"></div>
+        <div class="side__list"><ol class="topics" data-el="topics"></ol></div>
+        <div class="side__foot" data-el="sideFoot"></div>
       </nav>
 
       <main class="main" data-el="main"></main>

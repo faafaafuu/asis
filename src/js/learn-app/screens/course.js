@@ -4,6 +4,7 @@
 import { el, icon, label, progress, loading, header, nav, register, call, iconButton, plural, markdown, toast, prefs, isWeb } from "../core.js";
 import { store, topicPercent, isDone, currentTopic } from "../store.js";
 import { pressMenu, confirmAction } from "../gestures.js";
+import { tiles } from "./courses.js";
 
 /**
  * Удалить курс — после подтверждения снизу: курс собирается долго, а
@@ -48,17 +49,82 @@ register("course", (screen, { course: courseId }) => {
     return {};
   }
   const at = currentTopic(course);
-  screen.append(header({ title: "Курс", right: iconButton("more", "Ещё", () => nav.push("topics-more", { course: courseId })) }));
+  screen.append(header({ title: "Обзор курса", right: iconButton("more", "Ещё", () => nav.push("topics-more", { course: courseId })) }));
   const content = el("div", "content");
   screen.append(content);
 
-  const head = el("div", "course-head");
-  const line = el("div", "course-head__progress");
-  line.append(progress(course.percent, "bar4"), el("span", "", `${course.percent}%`));
-  const mature = course.mastery ? `${course.mastery.mature} из ${course.mastery.total} понятий держатся` : "";
-  head.append(el("span", "display course-head__title", course.title), line, el("span", "small dim", [plural(course.topics.length, "тема", "темы", "тем"), mature].filter(Boolean).join(" · ")));
+  // Заголовок 24 и прогресс: процент · полоса · сдано из.
+  const head = el("div", "m-course-head");
+  const done = course.topics.filter(isDone).length;
+  const line = el("div", "m-course-head__progress");
+  line.append(el("span", "m-course-head__pct", `${course.percent}%`), progress(course.percent, "m-bar"), el("span", "m-progress__pct", `${done} / ${course.topics.length}`));
+  head.append(el("span", "m-course-head__title", course.title), line);
   content.append(head);
 
+  // «Дальше»: тема, «Начать» на всю ширину, ниже урок с Ноа и практика.
+  if (at && !isDone(at)) {
+    const next = el("div", "m-active m-next");
+    const n = course.topics.indexOf(at) + 1;
+    const section = at.step === "lesson" || at.step === "talk" ? (at.section ?? 0) : 0;
+    const text = el("span", "m-next__text");
+    text.append(label(`// дальше${at.read || section ? ` · раздел ${section + 1}` : ""}`), el("span", "m-next__title", `${n}. ${at.title}`));
+    const params = { course: course.id, topic: at.id };
+    const start = el("button", "m-btn m-btn--primary");
+    start.append(icon("play", 16, 2.5), at.read || section ? "Дальше" : "Начать");
+    start.addEventListener("click", () => nav.push(at.read ? "topic" : "lesson", params));
+    const pair = el("div", "m-next__pair");
+    const talk = el("button", "m-btn m-btn--soft");
+    talk.append(icon("mic", 16, 2), "Урок с Ноа");
+    talk.addEventListener("click", () => nav.push("lesson", params));
+    pair.append(talk);
+    if (!isWeb) {
+      const practice = el("button", "m-btn m-btn--soft");
+      practice.append(icon("window", 16, 2), "Практика");
+      practice.addEventListener("click", () => nav.push("practice", params));
+      pair.append(practice);
+    }
+    next.append(text, start, pair);
+    content.append(next);
+  }
+
+  // Путь курса: 12 клеток в ряд, заливка — сколько темы пройдено.
+  const path = el("div", "m-block");
+  path.append(label("Путь курса"));
+  const cells = el("div", "m-path");
+  course.topics.forEach((topic, i) => {
+    const cell = el("button", `m-cell${topic.id === at?.id && !isDone(topic) ? " is-now" : ""}`);
+    const pct = isDone(topic) ? 100 : topicPercent(topic, course.topicPass);
+    cell.setAttribute("aria-label", `${i + 1}. ${topic.title} · ${pct}%`);
+    const fill = el("span");
+    fill.style.height = `${pct}%`;
+    cell.append(fill);
+    cell.addEventListener("click", () => nav.push("topic", { course: course.id, topic: topic.id }));
+    cells.append(cell);
+  });
+  path.append(cells);
+  content.append(path);
+
+  content.append(tiles(course));
+
+  // Слабые места: больше всего ошибок — сверху.
+  const weak = course.topics.filter((t) => t.mistakes > 0).sort((a, b) => b.mistakes - a.mistakes);
+  if (weak.length) {
+    const box = el("div", "m-block");
+    const top = el("div", "m-head");
+    top.append(label("Слабые места"), el("span", "m-head__more", `всего · ${weak.length}`));
+    box.append(top);
+    const rows = el("div", "m-rows");
+    for (const topic of weak.slice(0, 4)) {
+      const row = el("button", "m-row m-row--weak");
+      row.append(el("span", "m-row__title", topic.title), el("span", "m-row__err", `ошибок ${topic.mistakes}`), icon("chevron-right", 20, 2));
+      row.addEventListener("click", () => nav.push("topic", { course: course.id, topic: topic.id }));
+      rows.append(row);
+    }
+    box.append(rows);
+    content.append(box);
+  }
+
+  content.append(label("Все темы"));
   const seg = el("div", "seg");
   const body = el("div", "list");
   const views = { topics: "Темы", map: "Карта", sheet: "Шпаргалка" };

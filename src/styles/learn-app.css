@@ -2558,3 +2558,323 @@ button.plate:active,
 .content--guide .maker__row {
   flex-direction: column;
 }
+
+/* ── Главная и обзор курса по хендоффу (M1, M2) ────────────────────────────
+   Сетка 4 px, кнопки 48 (вторичные 44), строки 64 и 52, плитки 112.
+   Текст не меняет геометрию: многоточие или две строки фиксированной высоты. */
+
+.m-active {
+  padding: 16px;
+  border: 1px solid oklch(0.85 0.16 195 / 0.7);
+  background: rgba(0, 240, 255, 0.045);
+  box-shadow: 0 0 22px -8px rgba(0, 240, 255, 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.m-continue__title {
+  height: 48px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 20px;
+  line-height: 24px;
+  color: var(--c-head);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.m-progress {
+  height: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 12px;
+}
+.m-progress__pct {
+  font-size: 11.5px;
+  text-align: right;
+  color: var(--c-muted);
+  white-space: nowrap;
+}
+.m-bar {
+  height: 4px;
+  background: rgba(0, 240, 255, 0.14);
+}
+.m-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--c-accent);
+}
+.m-bar--thin {
+  height: 2px;
+  background: rgba(0, 240, 255, 0.12);
+}
+.m-continue__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px 48px;
+  gap: 8px;
+  margin-top: 4px;
+}
+.m-continue__actions.is-two {
+  grid-template-columns: minmax(0, 1fr) 48px;
+}
+.m-btn {
+  height: 48px;
+  display: grid;
+  grid-template-columns: 16px auto;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  background: none;
+  color: var(--c-soft);
+  font: inherit;
+  font-size: 14px;
+}
+.m-btn:active {
+  transform: scale(0.98);
+}
+.m-btn--primary {
+  border: none;
+  background: var(--c-accent);
+  color: var(--c-on-accent);
+  font-weight: 500;
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.4);
+}
+.m-btn--icon {
+  grid-template-columns: 20px;
+  padding: 0;
+}
+.m-btn--soft {
+  height: 44px;
+  font-size: 13px;
+}
+
+.m-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.m-tile {
+  height: 112px;
+  display: grid;
+  grid-template-rows: 16px 28px 16px;
+  align-content: space-between;
+  padding: 12px;
+  border: 1px solid rgba(0, 240, 255, 0.2);
+  background: rgba(0, 240, 255, 0.025);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.m-tile__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.m-tile__head svg {
+  color: var(--c-accent);
+}
+.m-tile__label {
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--c-label);
+}
+.m-tile__value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.m-tile__num {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 28px;
+  line-height: 28px;
+  color: var(--c-head);
+}
+.m-tile__unit {
+  font-size: 12px;
+  color: var(--c-muted);
+}
+.m-tile__note {
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--c-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m-head {
+  height: 28px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.m-head__more {
+  font-size: 12px;
+  color: var(--c-accent);
+}
+.m-add {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  background: none;
+  color: var(--c-accent);
+}
+.m-rows {
+  border: 1px solid rgba(0, 240, 255, 0.18);
+}
+.m-rows > * + * {
+  border-top: 1px solid rgba(0, 240, 255, 0.1);
+}
+.m-row {
+  width: 100%;
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.m-row > svg {
+  color: var(--c-dim);
+}
+.m-row--course {
+  height: 64px;
+  grid-template-columns: 40px minmax(0, 1fr) 20px;
+}
+.m-row--weak {
+  height: 52px;
+  grid-template-columns: minmax(0, 1fr) 72px 20px;
+}
+.m-row__body {
+  display: grid;
+  grid-template-rows: 20px 2px;
+  row-gap: 8px;
+  min-width: 0;
+}
+.m-row__line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 8px;
+}
+.m-row__title {
+  font-size: 13px;
+  color: var(--c-head);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.m-row--weak .m-row__title {
+  color: var(--c-body);
+}
+.m-row__pct {
+  font-size: 11.5px;
+  text-align: right;
+  color: var(--c-dim);
+}
+.m-row__pct.is-on {
+  color: var(--c-accent);
+}
+.m-row__err {
+  font-size: 11.5px;
+  text-align: right;
+  color: var(--c-bad);
+  white-space: nowrap;
+}
+.m-mono {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  color: #f7fbff;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 15px;
+}
+
+/* M2 — обзор курса */
+.m-course-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.m-course-head__title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 28px;
+  text-transform: uppercase;
+  color: var(--c-head);
+}
+.m-course-head__progress {
+  height: 24px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.m-course-head__pct {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 20px;
+  color: var(--c-accent);
+}
+.m-next {
+  gap: 12px;
+}
+.m-next__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.m-next__title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 22px;
+  color: var(--c-head);
+}
+.m-next__pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 8px;
+}
+.m-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.m-path {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 4px;
+}
+.m-cell {
+  position: relative;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: rgba(0, 240, 255, 0.08);
+}
+.m-cell.is-now {
+  box-shadow: inset 0 0 0 1.5px var(--c-accent), 0 0 10px rgba(0, 240, 255, 0.5);
+}
+.m-cell > span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--c-ok);
+  opacity: 0.85;
+}

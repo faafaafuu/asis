@@ -77,7 +77,7 @@ export async function guideShelf() {
   }
   if (!Array.isArray(cards)) return null;
   const list = el("div", "list");
-  list.append(label(`// путеводители${cards.length ? ` · ${cards.length}` : ""}`));
+  list.append(label(`Путеводители${cards.length ? ` · ${cards.length}` : ""}`));
   const row = el("div", "guide-row");
   for (const card of cards) row.append(shelfCard(card));
   const add = el("button", "guide-tile guide-tile--add");

@@ -244,7 +244,7 @@ const PARALLAX = 28;
 /* ── Навигация ─────────────────────────────────────────────────────────── */
 
 const TABS = [
-  { id: "courses", label: "Курсы", icon: "learn", root: "courses" },
+  { id: "courses", label: "Обучение", icon: "learn", root: "courses" },
   { id: "review", label: "Повторение", icon: "cards", root: "review" },
   { id: "focus", label: "Фокус", icon: "timer", root: "focus" },
   { id: "profile", label: "Профиль", icon: "user", root: "profile" },
@@ -680,7 +680,7 @@ export function header({ home = false, big = "", meta = null, title = "", back =
     img.src = "assets/noah-mark.svg";
     img.alt = "";
     mark.append(img);
-    bar.append(mark, el("span", "bar__name", "NOAH"), el("span", "bar__app", "Учёба"), el("span", "grow"));
+    bar.append(mark, el("span", "bar__name", "NOAH"), el("span", "bar__app", "Обучение"), el("span", "grow"));
     if (onMic) bar.append(iconButton("mic", "Спросить Ноа", onMic));
     return bar;
   }

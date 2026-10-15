@@ -1,0 +1,1169 @@
+/* Окно обучения по хендоффу «NOAH Обучение — главная и обзор курса», тема
+   «Неон». Главное правило — симметрия: сетка 4 px, размеры фиксированы,
+   текст не меняет геометрию. Блоки одного ряда — одна высота и одна
+   структура (grid с фиксированными строками); длинный текст — многоточие
+   или две строки, карточки от текста не растут. */
+
+:root {
+  --lh-accent: oklch(0.85 0.16 195);
+  --lh-on-accent: #04181c;
+  --lh-label: oklch(0.7 0.18 330);
+  --lh-t1: #f2fdff;
+  --lh-t2: #d8f7fa;
+  --lh-t3: #c5eef3;
+  --lh-t4: #8fb6bd;
+  --lh-t5: #6f9aa3;
+  --lh-t6: #3d5c63;
+  --lh-link: #9fdde6;
+  --lh-line: rgba(0, 240, 255, 0.2);
+  --lh-line-soft: rgba(0, 240, 255, 0.12);
+  --lh-plate: rgba(0, 240, 255, 0.025);
+  --lh-hover: rgba(0, 240, 255, 0.05);
+  --lh-active-line: oklch(0.85 0.16 195 / 0.7);
+  --lh-active-glow: 0 0 26px -10px rgba(0, 240, 255, 0.6);
+  --lh-done: #7dfcc6;
+  --lh-streak: #ffd98a;
+  --lh-error: #ff9db4;
+  --lh-exam: rgba(255, 70, 200, 0.35);
+  --lh-track: rgba(0, 240, 255, 0.14);
+  --lh-head: "Rajdhani", "Exo 2", sans-serif;
+  --lh-ui: "JetBrains Mono", ui-monospace, monospace;
+}
+
+body {
+  background: linear-gradient(165deg, #0b0f16 0%, #060809 60%, #0a0710 100%);
+  color: var(--lh-t2);
+  font-family: var(--lh-ui);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--lh-accent);
+  outline-offset: 2px;
+}
+
+/* ── Заголовок окна 40 ─────────────────────────────────────────────────── */
+
+.head {
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 0 12px;
+  background: #05070b;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.14);
+}
+.head__mark {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: #b5342e;
+}
+.head__mark img {
+  width: 14px;
+  display: block;
+}
+.head__brand {
+  font-family: "Exo 2", sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--lh-t1);
+}
+.head__slash {
+  color: var(--lh-t6);
+}
+.head__crumbs {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--lh-link);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.head__grow {
+  flex: 1;
+}
+.head .head__button {
+  width: 44px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--lh-t4);
+  cursor: pointer;
+}
+.head .head__button:hover {
+  background: rgba(0, 240, 255, 0.08);
+  color: var(--lh-t1);
+}
+.head .head__close:hover {
+  background: #d4564a;
+  color: #fff;
+}
+.head__dash {
+  width: 12px;
+  height: 2px;
+  background: currentColor;
+}
+
+/* ── Каркас и сайдбар 232 ──────────────────────────────────────────────── */
+
+.layout {
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+.side {
+  padding: 0;
+  gap: 0;
+  border-right: 1px solid var(--lh-line-soft);
+  background: rgba(2, 4, 7, 0.55);
+}
+.side__menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid rgba(0, 240, 255, 0.1);
+}
+.menu-item {
+  height: 36px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--lh-link);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-item:hover {
+  background: rgba(0, 240, 255, 0.07);
+  color: var(--lh-t1);
+}
+.menu-item[aria-current="true"] {
+  border-color: oklch(0.85 0.16 195 / 0.55);
+  background: rgba(0, 240, 255, 0.07);
+  color: var(--lh-t1);
+}
+.menu-item__badge {
+  font-size: 11px;
+  text-align: right;
+  color: var(--lh-t5);
+}
+
+.side__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 240, 255, 0.18) transparent;
+}
+.side .topics {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: visible;
+}
+.side__label {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  margin: 4px 0 0;
+  padding: 0 10px;
+  font-family: var(--lh-ui);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lh-label);
+}
+
+/* Курс в сайдбаре главной — 52: название + % и полоса 2 px. */
+.side-course {
+  width: 100%;
+  height: 52px;
+  display: grid;
+  grid-template-rows: 20px 2px;
+  align-content: center;
+  row-gap: 8px;
+  padding: 0 10px;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.side-course:hover {
+  background: rgba(0, 240, 255, 0.06);
+}
+.side-course__line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 8px;
+  align-items: center;
+}
+.side-course__title {
+  font-size: 12.5px;
+  color: var(--lh-t3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-course__pct {
+  font-size: 11px;
+  text-align: right;
+  color: var(--lh-t5);
+}
+.side-course__pct.is-on {
+  color: var(--lh-accent);
+}
+
+/* Тема в сайдбаре курса — 32: метка · номер · название · %. */
+.side-topic {
+  width: 100%;
+  height: 32px;
+  display: grid;
+  grid-template-columns: 16px 20px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  color: var(--lh-t4);
+  text-align: left;
+  cursor: pointer;
+}
+.side-topic:hover {
+  background: rgba(0, 240, 255, 0.06);
+}
+.side-topic.is-done {
+  color: var(--lh-t3);
+}
+.side-topic.is-now,
+.side-topic[aria-current="true"] {
+  background: rgba(0, 240, 255, 0.07);
+  box-shadow: inset 2px 0 0 var(--lh-accent);
+  color: var(--lh-t1);
+}
+.side-topic__mark {
+  font-size: 11px;
+  text-align: center;
+  color: var(--lh-t6);
+}
+.side-topic.is-done .side-topic__mark {
+  color: var(--lh-done);
+}
+.side-topic.is-now .side-topic__mark {
+  color: var(--lh-accent);
+}
+.side-topic__n {
+  font-size: 11px;
+  text-align: right;
+  color: var(--lh-t5);
+}
+.side-topic__title {
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-topic__pct {
+  font-size: 10.5px;
+  text-align: right;
+  color: var(--lh-t6);
+}
+.side-topic.is-done .side-topic__pct {
+  color: var(--lh-t4);
+}
+.side-topic.is-now .side-topic__pct {
+  color: var(--lh-accent);
+}
+
+/* «Обзор курса» — 36, над темами. */
+.side-overview {
+  width: 100%;
+  height: 36px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 6px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--lh-link);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.side-overview:hover {
+  background: rgba(0, 240, 255, 0.07);
+}
+.side-overview[aria-current="true"] {
+  border-color: oklch(0.85 0.16 195 / 0.55);
+  background: rgba(0, 240, 255, 0.07);
+  color: var(--lh-t1);
+}
+
+.side__foot {
+  padding: 8px;
+  border-top: 1px solid rgba(0, 240, 255, 0.1);
+}
+.side__foot:empty {
+  display: none;
+}
+.side-build {
+  width: 100%;
+  height: 40px;
+  display: grid;
+  grid-template-columns: 16px auto;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  background: rgba(0, 240, 255, 0.06);
+  color: var(--lh-accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+.side-build:hover {
+  background: rgba(0, 240, 255, 0.14);
+}
+.side-final {
+  width: 100%;
+  height: 40px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border: 1px dashed var(--lh-exam);
+  background: none;
+  color: var(--lh-t4);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.side-final svg {
+  color: var(--lh-label);
+}
+.side-final[data-locked="false"] {
+  border-style: solid;
+  border-color: var(--lh-accent);
+  color: var(--lh-t1);
+}
+.side-final[data-locked="false"] svg {
+  color: var(--lh-accent);
+}
+.side-final[aria-current="true"] {
+  background: rgba(0, 240, 255, 0.07);
+}
+.side-final__count {
+  font-size: 11px;
+  color: var(--lh-t5);
+}
+
+/* ── Содержимое ────────────────────────────────────────────────────────── */
+
+.main {
+  padding: 0;
+  scrollbar-color: rgba(0, 240, 255, 0.18) transparent;
+}
+.main > .page {
+  padding: 24px 28px 32px;
+}
+.lh {
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 24px 28px 32px;
+}
+
+.lh-label {
+  font-size: 10.5px;
+  line-height: 16px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--lh-label);
+}
+.lh-h {
+  font-family: var(--lh-head);
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--lh-t1);
+}
+
+/* Кнопки: иконка + текст — grid 16px auto, по центру. */
+.lh-btn {
+  height: 40px;
+  display: grid;
+  grid-template-columns: 16px auto;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  background: none;
+  color: var(--lh-link);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: box-shadow var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+.lh-btn:hover {
+  border-color: var(--lh-accent);
+  color: var(--lh-t1);
+}
+.lh-btn--primary {
+  border: none;
+  background: var(--lh-accent);
+  color: var(--lh-on-accent);
+  font-weight: 500;
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.4);
+}
+.lh-btn--primary:hover {
+  color: var(--lh-on-accent);
+  box-shadow: 0 0 24px rgba(0, 240, 255, 0.65);
+}
+.lh-btn--soft {
+  background: rgba(0, 240, 255, 0.04);
+  color: var(--lh-accent);
+}
+.lh-btn--soft:hover {
+  background: rgba(0, 240, 255, 0.12);
+}
+.lh-btn--icon {
+  width: 40px;
+  grid-template-columns: 18px;
+  padding: 0;
+}
+.lh-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.lh-bar {
+  height: 4px;
+  background: var(--lh-track);
+}
+.lh-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--lh-accent);
+  box-shadow: 0 0 6px var(--lh-accent);
+}
+.lh-bar--thin {
+  height: 2px;
+  background: var(--lh-line-soft);
+}
+.lh-bar--thin > span,
+.lh-bar--card > span {
+  box-shadow: none;
+}
+.lh-bar--card {
+  height: 3px;
+  background: var(--lh-line-soft);
+}
+
+/* 1. Приветствие и итоги */
+.lh-hello {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 16px;
+}
+.lh-hello__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.lh-hello__date {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--lh-t5);
+}
+.lh-hello__title {
+  font-size: 28px;
+  line-height: 32px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lh-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 96px);
+  border: 1px solid rgba(0, 240, 255, 0.18);
+}
+.lh-stat {
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 12px;
+}
+.lh-stat + .lh-stat {
+  border-left: 1px solid rgba(0, 240, 255, 0.18);
+}
+.lh-stat__label {
+  font-size: 10px;
+  line-height: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lh-t5);
+}
+.lh-stat__value {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--lh-t1);
+  white-space: nowrap;
+}
+
+/* 2. «Продолжить» — grid 1fr 200px */
+.lh-active {
+  border: 1px solid var(--lh-active-line);
+  background: rgba(0, 240, 255, 0.045);
+  box-shadow: var(--lh-active-glow), inset 0 0 40px -28px rgba(0, 240, 255, 0.7);
+}
+.lh-continue {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 200px;
+  gap: 24px;
+  align-items: stretch;
+  padding: 20px;
+}
+.lh-continue__text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.lh-continue__meta {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--lh-t4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lh-continue__title {
+  font-family: var(--lh-head);
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 24px;
+  height: 48px;
+  color: var(--lh-t1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lh-continue__grow {
+  flex: 1;
+}
+.lh-continue__progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px;
+  align-items: center;
+  gap: 12px;
+}
+.lh-continue__pct {
+  font-size: 11.5px;
+  text-align: right;
+  color: var(--lh-t4);
+}
+.lh-continue__actions {
+  display: grid;
+  grid-template-rows: repeat(3, 40px);
+  gap: 8px;
+  align-content: center;
+}
+
+/* 3. Плитки: подпись · число · пояснение · полоска · кнопка */
+.lh-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.lh-tile {
+  display: grid;
+  grid-template-rows: 16px 32px 16px 6px 40px;
+  row-gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--lh-line);
+  background: var(--lh-plate);
+}
+.lh-tile__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10.5px;
+  line-height: 16px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.lh-tile__head > :first-child {
+  color: var(--lh-label);
+}
+.lh-tile__meta {
+  color: var(--lh-t5);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.lh-tile__value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.lh-tile__num {
+  font-family: var(--lh-head);
+  font-weight: 700;
+  font-size: 32px;
+  line-height: 32px;
+  color: var(--lh-t1);
+}
+.lh-tile__unit {
+  font-size: 12px;
+  color: var(--lh-t4);
+}
+.lh-tile__note {
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--lh-t4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lh-segs {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+}
+.lh-segs > span {
+  height: 6px;
+  background: var(--lh-track);
+}
+
+/* Заголовок блока */
+.lh-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.lh-block__head {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lh-block__title {
+  font-size: 18px;
+  line-height: 24px;
+}
+.lh-block__note {
+  font-size: 12px;
+  color: var(--lh-t5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lh-block__head--label {
+  height: 16px;
+  gap: 16px;
+}
+.lh-block__head--label .lh-label {
+  flex: 1;
+}
+
+/* 4. Мои курсы 2 × 2, карточка 184 */
+.lh-courses {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.lh-course {
+  height: 184px;
+  display: grid;
+  grid-template-rows: 40px 40px 36px 1fr 24px;
+  row-gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--lh-line);
+  background: var(--lh-plate);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+.lh-course:hover {
+  border-color: oklch(0.85 0.16 195 / 0.6);
+  background: var(--lh-hover);
+}
+.lh-course.is-current {
+  border-color: oklch(0.85 0.16 195 / 0.45);
+  box-shadow: 0 0 18px -8px rgba(0, 240, 255, 0.6);
+}
+.lh-course__top {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 12px;
+}
+.lh-mono {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  background: var(--tile, #2b5bc4);
+  color: #f7fbff;
+  font-family: var(--lh-head);
+  font-weight: 700;
+  font-size: 16px;
+}
+.lh-course__meta {
+  font-size: 11px;
+  color: var(--lh-t5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lh-course__pct {
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--lh-line);
+  font-size: 11px;
+  color: var(--lh-t5);
+}
+.lh-course__pct.is-on {
+  color: var(--lh-accent);
+}
+.lh-course__title {
+  font-size: 13.5px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--lh-t1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lh-course__about {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--lh-t4);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.lh-course__foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.lh-course__count {
+  font-size: 11.5px;
+  color: var(--lh-t5);
+}
+.lh-course--add {
+  grid-template-rows: 40px 20px 18px;
+  align-content: center;
+  justify-items: center;
+  border-style: dashed;
+  border-color: rgba(0, 240, 255, 0.3);
+  background: none;
+  color: var(--lh-t4);
+  text-align: center;
+}
+.lh-course--add:hover {
+  border-color: var(--lh-accent);
+  color: var(--lh-t1);
+  background: rgba(0, 240, 255, 0.04);
+}
+.lh-course__plus {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(0, 240, 255, 0.4);
+  color: var(--lh-accent);
+}
+.lh-course--add .lh-course__title {
+  -webkit-line-clamp: 1;
+}
+
+/* Сборка курса — раскрывается из «Новый курс» */
+.lh .builder {
+  border: 1px solid rgba(0, 240, 255, 0.18);
+  border-radius: 0;
+  background: rgba(0, 240, 255, 0.02);
+}
+
+/* 5. Путеводители */
+.lh-guides {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(0, 240, 255, 0.18);
+  background: rgba(0, 240, 255, 0.02);
+}
+.lh-guides__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  gap: 8px;
+}
+.lh-input {
+  height: 40px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid rgba(0, 240, 255, 0.35);
+  border-radius: 0;
+  background: #020407;
+  color: var(--lh-t1);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.lh-input:focus {
+  border-color: var(--lh-accent);
+  box-shadow: 0 0 0 1px var(--lh-accent);
+}
+.lh-guides__go {
+  grid-template-columns: auto;
+  border-color: var(--lh-accent);
+  background: rgba(0, 240, 255, 0.1);
+  color: var(--lh-accent);
+}
+.lh-guides__go:hover {
+  background: rgba(0, 240, 255, 0.2);
+}
+.lh-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.lh-chip {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(0, 240, 255, 0.22);
+  background: none;
+  color: var(--lh-link);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lh-chip:hover {
+  border-color: var(--lh-accent);
+  color: var(--lh-t1);
+}
+.lh-guides__status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--lh-t4);
+}
+.lh-guides__status:empty {
+  display: none;
+}
+
+/* Таблица строк 48: путеводители, слабые места */
+.lh-table {
+  border: 1px solid rgba(0, 240, 255, 0.18);
+}
+.lh-row {
+  width: 100%;
+  height: 48px;
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 0 16px;
+  border: none;
+  border-top: 1px solid rgba(0, 240, 255, 0.1);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.lh-row:first-child {
+  border-top: none;
+}
+button.lh-row {
+  cursor: pointer;
+}
+button.lh-row:hover {
+  background: var(--lh-hover);
+}
+.lh-row--guide {
+  grid-template-columns: 24px minmax(0, 1fr) 140px 20px;
+}
+.lh-row--weak {
+  grid-template-columns: 24px minmax(0, 1fr) 96px 112px;
+}
+.lh-row__n {
+  font-size: 11px;
+  color: var(--lh-t5);
+}
+.lh-row__title {
+  font-size: 13px;
+  color: var(--lh-t3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lh-row__meta {
+  font-size: 11.5px;
+  text-align: right;
+  color: var(--lh-t5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lh-row__meta.is-live {
+  color: var(--lh-accent);
+}
+.lh-row svg {
+  color: var(--lh-t5);
+}
+.lh-dots {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+}
+.lh-dots > span {
+  height: 6px;
+  background: rgba(255, 157, 180, 0.15);
+}
+.lh-dots > span.is-on {
+  background: var(--lh-error);
+}
+.lh-row__btn {
+  height: 32px;
+  border: 1px solid rgba(0, 240, 255, 0.3);
+  background: none;
+  color: var(--lh-link);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.lh-row__btn:hover {
+  border-color: var(--lh-accent);
+  color: var(--lh-t1);
+}
+
+/* ── Обзор курса ───────────────────────────────────────────────────────── */
+
+.lh-course-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lh-course-head__title {
+  font-size: 28px;
+  line-height: 32px;
+}
+.lh-course-head__about {
+  max-width: 64ch;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--lh-t4);
+}
+.lh-course-head__progress {
+  height: 32px;
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+.lh-course-head__pct {
+  font-family: var(--lh-head);
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--lh-accent);
+}
+.lh-course-head__count {
+  font-size: 12px;
+  color: var(--lh-t4);
+}
+.lh-course-head__building {
+  font-size: 12px;
+  color: var(--lh-accent);
+}
+
+/* «Дальше» 88 — grid 1fr 120 40 40 */
+.lh-next {
+  height: 88px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px 40px 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px;
+}
+.lh-next__text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-right: 8px;
+}
+.lh-next__title {
+  font-family: var(--lh-head);
+  font-weight: 700;
+  font-size: 20px;
+  line-height: 24px;
+  color: var(--lh-t1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Путь курса: клетки 32, заливка снизу по уверенности */
+.lh-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--lh-t4);
+}
+.lh-legend > span {
+  width: 8px;
+  height: 8px;
+}
+.lh-legend--done > span {
+  background: var(--lh-done);
+}
+.lh-legend--now > span {
+  box-shadow: inset 0 0 0 1.5px var(--lh-accent);
+}
+.lh-legend--rest > span {
+  background: rgba(0, 240, 255, 0.16);
+}
+.lh-path {
+  display: grid;
+  grid-template-columns: repeat(var(--cells, 24), minmax(0, 1fr));
+  gap: 4px;
+}
+.lh-cell {
+  position: relative;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: rgba(0, 240, 255, 0.08);
+  cursor: pointer;
+}
+.lh-cell:hover {
+  background: rgba(0, 240, 255, 0.14);
+}
+.lh-cell.is-now {
+  box-shadow: inset 0 0 0 1.5px var(--lh-accent), 0 0 10px rgba(0, 240, 255, 0.5);
+}
+.lh-cell > span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--lh-done);
+  opacity: 0.85;
+}
+
+/* Свёрнутое внизу обзора: карта и справка */
+.lh-more {
+  border: 1px solid rgba(0, 240, 255, 0.14);
+}
+.lh-more > summary {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 12.5px;
+  color: var(--lh-link);
+  cursor: pointer;
+  list-style: none;
+}
+.lh-more > summary::-webkit-details-marker {
+  display: none;
+}
+.lh-more > summary::before {
+  content: "▸";
+  width: 16px;
+  color: var(--lh-accent);
+}
+.lh-more[open] > summary::before {
+  content: "▾";
+}
+.lh-more > :not(summary) {
+  margin: 0 16px 16px;
+}
+
+@media (max-width: 860px) {
+  .lh-hello {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lh-continue {
+    grid-template-columns: minmax(0, 1fr) 168px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lh *,
+  .side * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Путеводитель внутри новых полей окна: обложка — во всю ширину колонки. */
+.main > .page--guide {
+  max-width: none;
+  padding-top: 0;
+}
+.page--guide .guide {
+  margin-top: 0;
+}
+.page--guide .guide__cover {
+  margin: 0 -28px;
+}
+
+.lh .builder {
+  width: 100%;
+  margin: 0;
+}
+
+.lh-row__btn {
+  width: 100%;
+  min-width: 0;
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-final > span:nth-child(2) {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Размеры по макету — с рамкой и полями внутри. */
+.head *,
+.side,
+.side *,
+.lh,
+.lh * {
+  box-sizing: border-box;
+}

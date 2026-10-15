@@ -6,10 +6,10 @@
 // Материал и проверка — в Rust (learning.rs). Вопросы экзамена приходят сюда
 // без ответов: подсмотреть их в окне нельзя, проверка идёт на стороне Rust.
 
-import { tauri, appWindow, applyTheme } from "./bridge.js";
+import { tauri, appWindow } from "./bridge.js";
 import { renderLessonAgent } from "./lesson-agent.js";
 import { attachReader } from "./lesson-reader.js";
-import { guideBuilder, guideCard, guidePage, tint } from "./guides.js";
+import { guideCard, guidePage, tint } from "./guides.js";
 
 const api = tauri();
 const ui = {};
@@ -18,8 +18,21 @@ for (const node of document.querySelectorAll("[data-el]")) ui[node.dataset.el] =
 // В шапке — версия, которая стоит: в программе её знает Rust, в браузере это Ноа онлайн.
 api
   ?.invoke("app_version")
-  .then((version) => (ui.appVersion.textContent = `NOAH ${version}`))
-  .catch(() => (ui.appVersion.textContent = document.documentElement.classList.contains("is-web") ? "NOAH · Ноа онлайн" : "NOAH"));
+  .then((version) => (ui.appVersion.title = `NOAH ${version}`))
+  .catch(() => (ui.appVersion.title = document.documentElement.classList.contains("is-web") ? "NOAH · Ноа онлайн" : "NOAH"));
+
+// Значки — спрайт NOAH в начале страницы: на него ссылаются <use href="#i-…">.
+fetch(new URL("../styles/noah/icons.svg", import.meta.url))
+  .then((response) => response.text())
+  .then((text) => {
+    const box = document.createElement("div");
+    box.hidden = true;
+    box.innerHTML = text;
+    document.body.prepend(box);
+  })
+  .catch(() => {
+    /* без значков — подписи всё равно есть */
+  });
 
 /** Состояние окна. */
 let courses = [];
@@ -167,29 +180,81 @@ function phoneTopics() {
   ui.head.prepend(toggle);
 }
 
+const NS = "http://www.w3.org/2000/svg";
+
+/** Значок из спрайта NOAH (styles/noah/icons.svg). */
+function icon(name, size = 16, stroke = 2) {
+  const node = document.createElementNS(NS, "svg");
+  node.setAttribute("width", String(size));
+  node.setAttribute("height", String(size));
+  node.style.strokeWidth = String(stroke);
+  const use = document.createElementNS(NS, "use");
+  use.setAttribute("href", `#i-${name}`);
+  node.append(use);
+  return node;
+}
+
+/** Хлебные крошки в заголовке окна: где ты. */
+function crumbs() {
+  const parts = ["Обучение"];
+  if (view.kind === "guides" || view.kind === "guide") parts.push("Путеводители");
+  if (view.kind === "guide" && guide) parts.push(guide.title);
+  if (!["lobby", "guides", "guide"].includes(view.kind) && course) {
+    parts.push(course.title);
+    const topic = view.kind === "topic" ? course.topics.find((t) => t.id === view.topic) : null;
+    if (topic) parts.push(topic.title);
+    if (view.kind === "final") parts.push("Финальный экзамен");
+  }
+  ui.crumbs.textContent = parts.join(" / ");
+  ui.crumbs.title = ui.crumbs.textContent;
+}
+
+/** Меню 4 × 36: Главная · Повторение · Фокус · Путеводители. */
+function renderMenu() {
+  const due = course?.mastery ? course.mastery.due + course.mastery.newLeft : 0;
+  const items = [
+    ["Главная", "learn", "", view.kind === "lobby", () => renderLobby()],
+    ["Повторение", "cards", due ? String(due) : "", view.kind === "review", () => course && startReview(null)],
+    ["Фокус", "timer", "", false, () => (focus ? openFocusMenu() : openFocusSetup())],
+    ["Путеводители", "note", guides ? String(guides.length) : "", view.kind === "guides" || view.kind === "guide", () => renderGuides()],
+  ];
+  ui.menu.replaceChildren(
+    ...items.map(([text, name, badge, on, go]) => {
+      const node = el("button", "menu-item");
+      node.setAttribute("aria-current", String(on));
+      node.append(icon(name), el("span", "", text), el("span", "menu-item__badge", badge));
+      node.addEventListener("click", () => !busy && go());
+      return node;
+    }),
+  );
+}
+
+function sideLabel(text) {
+  return el("li", "side__label", text);
+}
+
 function renderSide() {
   phoneTopics();
-  ui.courseTitle.textContent = course ? course.title : "";
-  ui.coursePercent.textContent = course ? `${course.percent}%` : "";
-  ui.courseBar.style.width = `${course?.percent ?? 0}%`;
-  ui.home.setAttribute("aria-current", String(view.kind === "home"));
-  ui.lobby?.setAttribute("aria-current", String(view.kind === "lobby"));
-  // В лобби курс ещё не выбран: ни его тем, ни экзамена, ни полоски в
-  // заголовке — сбоку только курсы.
-  const lobby = view.kind === "lobby" || view.kind === "guide";
-  ui.home.hidden = lobby;
-  ui.final.hidden = lobby;
-  ui.courseBar.closest(".head__progress")?.toggleAttribute("hidden", lobby);
+  crumbs();
+  renderMenu();
+  ui.sideFoot.replaceChildren();
+
+  // Путеводитель — его разделы.
   if (view.kind === "guide") {
-    ui.courseTitle.textContent = guide?.title ?? "Путеводитель";
     ui.topics.replaceChildren(
-      ...(guide?.sections ?? []).map((section) => {
+      sideLabel("Разделы"),
+      ...(guide?.sections ?? []).map((section, at) => {
         const item = el("li");
-        const node = el("button", "topic");
+        const node = el("button", "side-topic");
         const ready = section.text.length || section.items.length;
-        const line = el("span", "topic__line");
-        line.append(el("span", "topic__mark", section.emoji || "•"), el("span", "topic__title", section.title), el("span", "topic__score", ready ? "" : "…"));
-        node.append(line);
+        if (ready) node.classList.add("is-done");
+        node.title = section.title;
+        node.append(
+          el("span", "side-topic__mark", section.emoji || "·"),
+          el("span", "side-topic__n", String(at + 1)),
+          el("span", "side-topic__title", section.title),
+          el("span", "side-topic__pct", ready ? "" : "…"),
+        );
         node.addEventListener("click", () =>
           document.getElementById(`guide-${section.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }),
         );
@@ -199,74 +264,72 @@ function renderSide() {
     );
     return;
   }
-  if (lobby) {
-    ui.courseTitle.textContent = "Обучение";
-    const label = (text) => {
-      const item = el("li", "side__label", text);
-      return item;
-    };
-    const guideItems = (guides ?? []).map((card) => {
-      const item = el("li");
-      const node = el("button", "topic");
-      const line = el("span", "topic__line");
-      line.append(el("span", "topic__mark", card.emoji || "📖"), el("span", "topic__title", card.title));
-      node.append(line);
-      node.addEventListener("click", () => !busy && openGuide(card.id));
-      item.append(node);
-      return item;
-    });
+
+  // Главная и путеводители — курсы строками 52, внизу «Собрать курс».
+  if (view.kind === "lobby" || view.kind === "guides") {
     ui.topics.replaceChildren(
-      ...(courses.length ? [label("Курсы")] : []),
+      ...(courses.length ? [sideLabel(`Курсы · ${courses.length}`)] : []),
       ...courses.map((other) => {
         const item = el("li");
-        const node = el("button", "topic");
-        const line = el("span", "topic__line");
-        line.append(el("span", "topic__title", other.title), el("span", "topic__score", `${other.percent}%`));
-        const bar = el("span", "bar bar--small");
-        const fill = el("span", "bar__fill");
-        fill.style.width = `${other.percent}%`;
-        bar.append(fill);
-        node.append(line, bar);
+        const node = el("button", "side-course");
+        node.title = other.title;
+        const line = el("span", "side-course__line");
+        line.append(
+          el("span", "side-course__title", other.title),
+          el("span", `side-course__pct${other.percent ? " is-on" : ""}`, `${other.percent}%`),
+        );
+        node.append(line, bar(other.percent, "lh-bar lh-bar--thin"));
         node.addEventListener("click", () => {
           if (busy) return;
-          course = other;
-          try {
-            localStorage.setItem("noa.lastCourse", other.id);
-          } catch {
-            /* не запомнится — откроется первый */
-          }
+          chooseCourse(other);
           renderHome();
         });
         item.append(node);
         return item;
       }),
-      ...(guideItems.length ? [label("Путеводители"), ...guideItems] : []),
     );
+    const build = el("button", "side-build");
+    build.append(icon("plus", 16, 2.25), el("span", "", "Собрать курс"));
+    build.addEventListener("click", () => {
+      if (busy) return;
+      const open = () => {
+        const box = ui.main.querySelector(".builder");
+        if (!box) return false;
+        box.hidden = false;
+        box.open = true;
+        box.scrollIntoView({ behavior: "smooth", block: "center" });
+        box.querySelector("textarea")?.focus();
+        return true;
+      };
+      if (!open()) renderLobby().then(open);
+    });
+    ui.sideFoot.append(build);
     return;
   }
-  ui.final.setAttribute("aria-current", String(view.kind === "final"));
-  ui.final.dataset.locked = String(!course?.finalUnlocked);
-  ui.final.textContent =
-    course?.finalBest != null ? `Финальный экзамен · ${course.finalBest}%` : "Финальный экзамен";
 
+  // Курс: «Обзор курса», темы строками 32, внизу финальный экзамен.
+  const overview = el("button", "side-overview");
+  overview.setAttribute("aria-current", String(view.kind === "home"));
+  overview.append(icon("target"), el("span", "", "Обзор курса"));
+  overview.addEventListener("click", () => !busy && renderHome());
+  const now = nextTopic();
   ui.topics.replaceChildren(
+    el("li"),
     ...(course?.topics ?? []).map((topic, at) => {
       const item = el("li");
-      const node = el("button", "topic");
+      const node = el("button", "side-topic");
+      const done = topic.status === "done";
+      const current = view.kind === "topic" ? view.topic === topic.id : now?.id === topic.id;
+      if (done) node.classList.add("is-done");
+      if (current) node.classList.add("is-now");
       node.setAttribute("aria-current", String(view.kind === "topic" && view.topic === topic.id));
-      const line = el("span", "topic__line");
-      line.append(
-        el("span", `topic__mark topic__mark--${topic.status}`, MARKS[topic.status] ?? "·"),
-        el("span", "topic__title", `${at + 1}. ${topic.title}`),
-        // Число — то же, что полоска: сколько темы пройдено. Раньше справа стоял
-        // балл экзамена, и «90%» при полоске на половине сбивало с толку.
-        el("span", "topic__score", topic.status === "new" ? "" : `${topicPercent(topic)}%`),
+      const percent = topicPercent(topic);
+      node.append(
+        el("span", "side-topic__mark", done ? "✓" : current ? "▸" : "·"),
+        el("span", "side-topic__n", String(at + 1)),
+        el("span", "side-topic__title", topic.title),
+        el("span", "side-topic__pct", percent ? `${percent}%` : "—"),
       );
-      const bar = el("span", "bar bar--small");
-      const fill = el("span", "bar__fill");
-      fill.style.width = `${topicPercent(topic)}%`;
-      bar.append(fill);
-      node.append(line, bar);
       // Из чего складывается и чего не хватает: урок — 20, задачи — 30, экзамен — 50.
       const parts = [
         `Урок: ${topic.read ? "прочитан ✓" : "не отмечен прочитанным"}`,
@@ -274,14 +337,38 @@ function renderSide() {
         `Мини-экзамен: ${topic.examBest != null ? `${topic.examBest}%${topic.examBest >= course.topicPass ? " ✓" : ` (нужно ${course.topicPass}%)`}` : "не сдавали"}`,
         topic.conceptsTotal ? `Уверенно: ${topic.conceptsMature} из ${topic.conceptsTotal} понятий` : "",
       ].filter(Boolean);
-      node.title = `${topic.summary}\n\n${parts.join("\n")}`;
+      node.title = `${at + 1}. ${topic.title}\n${topic.summary ?? ""}\n\n${parts.join("\n")}`;
       node.addEventListener("click", () => resumeTopic(topic.id));
       item.append(node);
       return item;
     }),
   );
+  ui.topics.firstChild.append(overview);
+  if (course) {
+    const final = el("button", "side-final");
+    final.dataset.locked = String(!course.finalUnlocked);
+    final.setAttribute("aria-current", String(view.kind === "final"));
+    const done = course.topics.filter((t) => t.status === "done").length;
+    final.append(
+      icon(course.finalUnlocked ? "target" : "lock"),
+      el("span", "", course.finalBest != null ? `Финальный экзамен · ${course.finalBest}%` : "Финальный экзамен"),
+      el("span", "side-final__count", `${done} / ${course.topics.length}`),
+    );
+    final.title = course.finalUnlocked ? "Все темы сданы — экзамен открыт" : "Откроется, когда все темы будут сданы";
+    final.addEventListener("click", () => !busy && openFinal());
+    ui.sideFoot.append(final);
+  }
   // Тема из конца курса не должна прятаться под прокруткой колонки.
-  ui.topics.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest" });
+  ui.topics.querySelector(".is-now")?.scrollIntoView({ block: "nearest" });
+}
+
+/** Полоса прогресса: дорожка и заливка. */
+function bar(percent, className = "lh-bar") {
+  const track = el("span", className);
+  const fill = el("span");
+  fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  track.append(fill);
+  return track;
 }
 
 /* ── Страницы ──────────────────────────────────────────────────────────── */
@@ -414,9 +501,9 @@ function watchBuilds(status, stop) {
 }
 
 /**
- * Главная обучения: что продолжить, полка курсов и полка путеводителей.
- * Курсы учат — уроки, задачи, экзамены; путеводители рассказывают —
- * разделы, виды, цифры и картинки, без проверок. Сборка нового — здесь же.
+ * Главная обучения по хендоффу: приветствие и итоги, «Продолжить», плитки
+ * «Повторение» и «Фокус», мои курсы 2 × 2 и путеводители. Блоки одного ряда —
+ * одна высота и одна структура.
  */
 async function renderLobby() {
   view = { kind: "lobby", topic: null, step: "lesson" };
@@ -424,99 +511,200 @@ async function renderLobby() {
   guide = null;
   await Promise.all([refreshOverview(), refreshGuides()]);
   renderSide();
-  const root = page("", "");
-  root.replaceChildren();
-  root.classList.add("page--lobby");
+  const root = lhPage();
 
-  const head = el("header", "lobby-hero");
-  const titles = el("div", "lobby-hero__titles");
-  titles.append(el("h2", "lobby-hero__title", "Обучение"));
-  titles.append(el("p", "lobby-hero__lead", "Курсы учат — уроки, задачи, экзамены. Путеводители рассказывают — разделы, виды, цифры и картинки."));
-  head.append(titles);
-  const counts = el("div", "lobby-hero__stats");
-  const stat = (value, text) => {
-    const box = el("span", "stat");
-    box.append(el("span", "stat__value", String(value)), el("span", "stat__label", text));
+  // 1. Приветствие и три итога.
+  const current = courses.find((c) => c.id === lastCourse()) ?? course;
+  const f = current?.focus ?? { today: 0, week: 0, streak: 0 };
+  const hello = el("div", "lh-hello");
+  const text = el("div", "lh-hello__text");
+  const date = new Date().toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
+  text.append(el("span", "lh-hello__date", date[0].toUpperCase() + date.slice(1)), el("span", "lh-h lh-hello__title", greeting()));
+  const stats = el("div", "lh-stats");
+  const doneAll = courses.reduce((sum, c) => sum + c.topics.filter((t) => t.status === "done").length, 0);
+  const stat = (label, value, color) => {
+    const box = el("span", "lh-stat");
+    const number = el("span", "lh-stat__value", value);
+    if (color) number.style.color = color;
+    box.append(el("span", "lh-stat__label", label), number);
     return box;
   };
-  const doneTopics = courses.reduce((sum, c) => sum + c.topics.filter((t) => t.status === "done").length, 0);
-  counts.append(stat(courses.length, "курсов"), stat(doneTopics, "тем сдано"));
-  if (guides) counts.append(stat(guides.length, "путеводителей"));
-  head.append(counts);
-  root.append(head);
+  stats.append(
+    stat("Серия", plural(f.streak, "день", "дня", "дней"), "var(--lh-streak)"),
+    stat("Неделя", `${f.week} мин`),
+    stat("Сдано", plural(doneAll, "тема", "темы", "тем"), "var(--lh-done)"),
+  );
+  hello.append(text, stats);
+  root.append(hello);
 
-  const resume = continueCard();
-  if (resume) root.append(resume);
+  // 2. «Продолжить»
+  const next = current ? nextOf(current) : null;
+  if (current && next) root.append(continueCard(current, next));
 
-  // Курсы
-  const coursesBox = el("section", "shelf-block");
-  const coursesHead = el("div", "shelf-block__head");
-  coursesHead.append(el("h3", "shelf-block__title", "Курсы"));
-  coursesBox.append(coursesHead);
-  const shelf = el("div", "shelf");
-  for (const other of courses) shelf.append(courseCard(other));
+  // 3. Плитки
+  if (current) root.append(tilesRow(current));
+
+  // 4. Мои курсы
+  const mine = el("section", "lh-block");
+  const mineHead = el("div", "lh-block__head");
+  mineHead.append(el("span", "lh-h lh-block__title", "Мои курсы"), el("span", "lh-block__note", String(courses.length)));
+  mine.append(mineHead);
+  const grid = el("div", "lh-courses");
+  for (const other of courses) grid.append(courseCard(other));
+  // Сборка курса прячется, пока не нажали «Новый курс»: в макете её нет.
   const builder = courseBuilder(!courses.length);
-  const add = el("button", "shelf__card shelf__card--add");
-  add.append(el("span", "shelf__plus", "＋"), el("span", "shelf__title", "Новый курс"), el("span", "shelf__about", "По любой теме, под вашу цель: уроки, задачи, экзамены"));
+  builder.hidden = Boolean(courses.length);
+  const add = el("button", "lh-course lh-course--add");
+  const plus = el("span", "lh-course__plus");
+  plus.append(icon("plus", 20, 2.25));
+  add.append(plus, el("span", "lh-course__title", "Новый курс"), el("span", "lh-course__about", "Любая тема — уроки, задачи, экзамены"));
   add.addEventListener("click", () => {
+    builder.hidden = false;
     builder.open = true;
     builder.scrollIntoView({ behavior: "smooth", block: "center" });
     builder.querySelector("textarea")?.focus();
   });
-  shelf.append(add);
-  coursesBox.append(shelf, builder);
-  root.append(coursesBox);
+  grid.append(add);
+  mine.append(grid, builder);
+  root.append(mine);
 
-  // Путеводители — только в программе: собирает их модель на этом компьютере.
-  if (guides) {
-    const guidesBox = el("section", "shelf-block");
-    guidesBox.dataset.shelf = "guides";
-    const guidesHead = el("div", "shelf-block__head");
-    guidesHead.append(el("h3", "shelf-block__title", "Путеводители"));
-    guidesBox.append(guidesHead);
-    const guideShelf = el("div", "shelf");
-    guideShelf.dataset.el = "guideShelf";
-    fillGuideShelf(guideShelf);
-    guidesBox.append(guideShelf);
-    guidesBox.append(guideBuilder({ api, el, button, onStarted: (id) => openGuide(id) }));
-    root.append(guidesBox);
-  }
+  // 5. Путеводители — только в программе: пишет их модель на этом компьютере.
+  if (guides) root.append(guidesBlock(false));
 }
 
-/** Карточки путеводителей — перерисовываются сами, пока путеводитель пишется. */
-function fillGuideShelf(shelf) {
-  shelf.replaceChildren(...(guides ?? []).map((card) => guideCard(card, { api, el, onOpen: (id) => !busy && openGuide(id) })));
-  if (!guides?.length) shelf.append(el("p", "shelf__empty", "Пока ни одного. Напишите тему ниже — например, «деревья Москвы»."));
+/** Страница новой разметки: колонка блоков с полями 24/28. */
+function lhPage() {
+  const node = el("div", "lh");
+  ui.main.replaceChildren(node);
+  ui.main.scrollTop = 0;
+  return node;
 }
 
-/** «Продолжить» — курс, на котором остановились, и его тема. */
-function continueCard() {
-  const current = courses.find((c) => c.id === lastCourse()) ?? course;
-  if (!current) return null;
-  const next =
-    current.topics.find((t) => t.id === current.current && t.status !== "done") ?? current.topics.find((t) => t.status !== "done");
-  if (!next) return null;
-  const card = el("button", "resume");
-  card.style.setProperty("--hue", tint(current.title));
-  const text = el("span", "resume__text");
+function greeting() {
+  const hour = new Date().getHours();
+  return hour < 5 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер";
+}
+
+function plural(n, one, few, many) {
+  const tens = n % 100;
+  const last = n % 10;
+  const word = tens >= 11 && tens <= 14 ? many : last === 1 ? one : last >= 2 && last <= 4 ? few : many;
+  return `${n} ${word}`;
+}
+
+/** Тема, с которой продолжать курс: где остановились, иначе первая несданная. */
+function nextOf(of) {
+  return of.topics.find((t) => t.id === of.current && t.status !== "done") ?? of.topics.find((t) => t.status !== "done") ?? null;
+}
+
+/** «Продолжить» — grid 1fr 200px: текст и прогресс · три кнопки столбиком. */
+function continueCard(of, next) {
+  const card = el("section", "lh-active lh-continue");
+  const text = el("div", "lh-continue__text");
+  const at = of.topics.indexOf(next) + 1;
   text.append(
-    el("span", "resume__label", next.read || next.status !== "new" ? "Продолжить" : "Начать"),
-    el("span", "resume__topic", `${current.topics.indexOf(next) + 1}. ${next.title}`),
-    el("span", "resume__course", current.title),
+    el("span", "lh-label", "// продолжить"),
+    el("span", "lh-continue__meta", `${of.title} · тема ${at} из ${of.topics.length}`),
+    el("span", "lh-continue__title", next.title),
+    el("span", "lh-continue__grow"),
   );
-  const bar = el("span", "bar resume__bar");
-  const fill = el("span", "bar__fill");
-  fill.style.width = `${current.percent}%`;
-  bar.append(fill);
-  const right = el("span", "resume__right");
-  right.append(el("span", "resume__percent", `${current.percent}%`), bar);
-  card.append(el("span", "resume__play", "▶"), text, right);
-  card.addEventListener("click", () => {
+  const progress = el("div", "lh-continue__progress");
+  progress.append(bar(of.percent), el("span", "lh-continue__pct", `${of.percent}% курса`));
+  text.append(progress);
+  const actions = el("div", "lh-continue__actions");
+  const place = placeOf(next.id);
+  const started = next.read || next.status !== "new" || place.section > 0;
+  const enter = (step) => {
     if (busy) return;
-    chooseCourse(current);
-    resumeTopic(next.id);
-  });
+    chooseCourse(of);
+    step ? openTopic(next.id, step) : resumeTopic(next.id);
+  };
+  actions.append(
+    lhButton(started ? `Раздел ${place.section + 1}` : "Начать", "play", () => enter(null), "lh-btn--primary", 2.5),
+    lhButton("Урок с Ноа", "mic", () => enter("talk")),
+    lhButton("Практика", "window", () => enter("practice")),
+  );
+  card.append(text, actions);
   return card;
+}
+
+function lhButton(text, name, onClick, extra = "", stroke = 2) {
+  const node = el("button", `lh-btn ${extra}`.trim());
+  node.append(icon(name, 16, stroke), el("span", "", text));
+  node.addEventListener("click", onClick);
+  return node;
+}
+
+/** Две плитки одинаковой структуры: Повторение и Фокус. */
+function tilesRow(of) {
+  const row = el("div", "lh-tiles");
+  const m = of.mastery ?? { total: 0, due: 0, newLeft: 0, mature: 0, young: 0, learning: 0, new: 0 };
+  const count = (m.due ?? 0) + (m.newLeft ?? 0);
+  const minutes = Math.max(1, Math.round(count * 0.25));
+  const review = tile({
+    label: "Повторение",
+    meta: count ? `≈ ${minutes} мин` : "",
+    value: String(count),
+    unit: "карточек",
+    note: m.total ? `уверенно ${m.mature} · держится ${m.young} · учится ${m.learning}` : "в курсе нет понятий",
+    segs: shares(
+      [
+        [m.mature, "var(--lh-done)"],
+        [m.young, "#8ab4ff"],
+        [m.learning, "#ffd98a"],
+      ],
+      m.total,
+    ),
+    cta: count ? "Повторить сейчас" : "На сегодня всё",
+    icon: "cards",
+    go: count ? () => !busy && startReview(null) : null,
+  });
+  const f = of.focus ?? { today: 0, week: 0, streak: 0 };
+  const focusTile = tile({
+    label: "Фокус",
+    meta: f.streak ? `${plural(f.streak, "день", "дня", "дней")} подряд` : "",
+    value: String(f.today),
+    unit: "мин сегодня",
+    note: `${f.week} мин за неделю`,
+    segs: Array.from({ length: 7 }, (_, i) => (i < Math.min(7, f.streak) ? "var(--lh-accent)" : "")),
+    cta: focus ? "Фокус идёт — меню" : "Фокус-сессия",
+    icon: "timer",
+    go: () => !busy && (focus ? openFocusMenu() : openFocusSetup()),
+  });
+  row.append(review, focusTile);
+  return row;
+}
+
+/** Семь отрезков полоски поровну долям: уверенно, держится, учится, остальное. */
+function shares(parts, total) {
+  const out = [];
+  if (!total) return Array(7).fill("");
+  let left = 7;
+  for (const [n, color] of parts) {
+    const k = Math.min(left, Math.round((n / total) * 7));
+    for (let i = 0; i < k; i++) out.push(color);
+    left -= k;
+  }
+  while (out.length < 7) out.push("");
+  return out;
+}
+
+function tile({ label, meta, value, unit, note, segs, cta, icon: name, go }) {
+  const box = el("div", "lh-tile");
+  const head = el("span", "lh-tile__head");
+  head.append(el("span", "", label), el("span", "lh-tile__meta", meta));
+  const number = el("span", "lh-tile__value");
+  number.append(el("span", "lh-tile__num", value), el("span", "lh-tile__unit", unit));
+  const strip = el("span", "lh-segs");
+  for (const color of segs) {
+    const seg = el("span");
+    if (color) seg.style.background = color;
+    strip.append(seg);
+  }
+  const button = lhButton(cta, name, () => go?.(), "lh-btn--soft", 2.25);
+  button.disabled = !go;
+  box.append(head, number, el("span", "lh-tile__note", note), strip, button);
+  return box;
 }
 
 function chooseCourse(other) {
@@ -528,42 +716,151 @@ function chooseCourse(other) {
   }
 }
 
-/** Обложка курса: цвет из названия, буквы, прогресс. */
+const TILES = ["#2b5bc4", "#b5342e", "#5f8c4c", "#8a4fc4", "#c4842b", "#2b8fa8"];
+
+/** Буквы курса для плитки-монограммы: первые буквы двух значимых слов. */
+function monogram(title) {
+  const words = title.split(/[\s:—,/-]+/).filter((w) => w.length > 2 && /^[\p{L}\d]/u.test(w));
+  const letters = words.slice(0, 2).map((w) => w[0].toUpperCase());
+  // Название начинается латиницей — и вторая буква латинская: «DevOps и
+  // инфраструктура» — «DI», а не «DИ».
+  if (/^[A-Z]/.test(letters[0] ?? "")) letters[1] = LATIN[letters[1]] ?? letters[1];
+  return (letters.join("") || title.slice(0, 2)).toUpperCase();
+}
+
+const LATIN = { А: "A", Б: "B", В: "V", Г: "G", Д: "D", Е: "E", Ж: "Z", З: "Z", И: "I", Й: "I", К: "K", Л: "L", М: "M", Н: "N", О: "O", П: "P", Р: "R", С: "S", Т: "T", У: "U", Ф: "F", Х: "H", Ц: "C", Ч: "C", Ш: "S", Щ: "S", Э: "E", Ю: "U", Я: "Y" };
+
+/** Карточка курса 184: монограмма · мета · % / название / описание / полоса. */
 function courseCard(other) {
-  const card = el("button", "shelf__card shelf__card--course");
-  card.style.setProperty("--hue", tint(other.title));
-  card.setAttribute("aria-current", String(other.id === course?.id));
+  const card = el("button", `lh-course${other.id === course?.id ? " is-current" : ""}`);
+  const top = el("span", "lh-course__top");
+  const mono = el("span", "lh-mono", monogram(other.title));
+  mono.style.setProperty("--tile", TILES[tint(other.title) % TILES.length]);
   const done = other.topics.filter((t) => t.status === "done").length;
-  const cover = el("span", "shelf__cover");
-  const letters = other.title
-    .split(/[\s:—-]+/)
-    .filter((w) => w.length > 2 && /^[\p{L}\d]/u.test(w))
-    .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
-    .join("");
-  cover.append(el("span", "shelf__mono", letters || "К"), el("span", "shelf__badge", `${other.percent}%`));
-  const body = el("span", "shelf__body");
-  body.append(el("span", "shelf__title", other.title));
-  if (other.description) body.append(el("span", "shelf__about", other.description));
-  const bar = el("span", "bar bar--small");
-  const fill = el("span", "bar__fill");
-  fill.style.width = `${other.percent}%`;
-  bar.append(fill);
-  body.append(
-    bar,
-    el(
-      "span",
-      "shelf__meta",
-      `сдано тем ${done} из ${other.topics.length}${other.building ? ` · собирается: ${other.building.done} из ${other.building.total}` : ""}`,
-    ),
-  );
-  card.append(cover, body);
+  const due = other.mastery ? other.mastery.due + other.mastery.newLeft : 0;
+  const meta = other.building
+    ? `собирается · ${other.building.done} из ${other.building.total}`
+    : due
+      ? `повторить ${due}`
+      : `${plural(other.topics.length, "тема", "темы", "тем")}`;
+  top.append(mono, el("span", "lh-course__meta", meta), el("span", `lh-course__pct${other.percent ? " is-on" : ""}`, `${other.percent}%`));
+  const foot = el("span", "lh-course__foot");
+  foot.append(bar(other.percent, "lh-bar lh-bar--card"), el("span", "lh-course__count", `${done} / ${other.topics.length} тем`));
+  card.append(top, el("span", "lh-course__title", other.title), el("span", "lh-course__about", other.description || ""), el("span"), foot);
+  card.title = other.title;
   card.addEventListener("click", () => {
     if (busy) return;
     chooseCourse(other);
     renderHome();
   });
   return card;
+}
+
+const GUIDE_IDEAS = ["Деревья Москвы", "Как построить дом", "Всё про умный дом", "Грибы средней полосы", "Кофе: от зерна до чашки"];
+
+/**
+ * Путеводители: поле 40 + «Собрать» 120, чипы-подсказки 28 и готовые
+ * путеводители строками. `shelf` — со страницы «Путеводители»: ещё и обложки.
+ */
+function guidesBlock(shelf) {
+  const box = el("section", "lh-block");
+  box.dataset.shelf = "guides";
+  const head = el("div", "lh-block__head");
+  head.append(el("span", "lh-h lh-block__title", "Путеводители"), el("span", "lh-block__note", "почитать для интереса — без задач и экзаменов"));
+  box.append(head);
+  const panel = el("div", "lh-guides");
+  const row = el("div", "lh-guides__row");
+  const input = el("input", "lh-input");
+  input.type = "text";
+  input.placeholder = "О чём путеводитель — например, «деревья Москвы»";
+  const status = el("p", "lh-guides__status");
+  const go = el("button", "lh-btn lh-guides__go", "Собрать");
+  go.addEventListener("click", async () => {
+    const goal = input.value.trim();
+    if (goal.length < 3) {
+      status.textContent = "Напишите тему хотя бы парой слов.";
+      input.focus();
+      return;
+    }
+    go.disabled = true;
+    status.textContent = "Начинаю: сначала план, потом раздел за разделом…";
+    try {
+      const id = await api.invoke("guide_build", { goal });
+      input.value = "";
+      status.textContent = "";
+      openGuide(id);
+    } catch (err) {
+      status.textContent = String(err);
+    }
+    go.disabled = false;
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") go.click();
+  });
+  row.append(input, go);
+  const chips = el("div", "lh-chips");
+  for (const idea of GUIDE_IDEAS) {
+    const chip = el("button", "lh-chip", idea);
+    chip.addEventListener("click", () => {
+      input.value = idea;
+      input.focus();
+    });
+    chips.append(chip);
+  }
+  panel.append(row, chips, status);
+  box.append(panel);
+  if (shelf) {
+    const covers = el("div", "shelf");
+    covers.dataset.el = "guideShelf";
+    fillGuideShelf(covers);
+    box.append(covers);
+  } else if (guides?.length) {
+    const list = el("div", "lh-table");
+    list.dataset.el = "guideRows";
+    fillGuideRows(list);
+    box.append(list);
+  }
+  return box;
+}
+
+/** Готовые путеводители строками 48: значок · название · разделы. */
+function fillGuideRows(list) {
+  list.replaceChildren(
+    ...(guides ?? []).map((card) => {
+      const row = el("button", "lh-row lh-row--guide");
+      const live = card.status === "building";
+      row.append(
+        el("span", "lh-row__n", card.emoji || "📖"),
+        el("span", "lh-row__title", card.title),
+        el("span", `lh-row__meta${live ? " is-live" : ""}`, live ? `пишется · ${card.written} из ${card.sections || "…"}` : plural(card.sections, "раздел", "раздела", "разделов")),
+        icon("chevron-right", 20),
+      );
+      row.title = card.subtitle || card.title;
+      row.addEventListener("click", () => !busy && openGuide(card.id));
+      return row;
+    }),
+  );
+}
+
+/** Карточки путеводителей с обложками — на странице «Путеводители». */
+function fillGuideShelf(shelf) {
+  shelf.replaceChildren(...(guides ?? []).map((card) => guideCard(card, { api, el, onOpen: (id) => !busy && openGuide(id) })));
+  if (!guides?.length) shelf.append(el("p", "shelf__empty", "Пока ни одного. Напишите тему выше — например, «деревья Москвы»."));
+}
+
+/** «Путеводители» из меню: сборка и полка с обложками. */
+async function renderGuides() {
+  view = { kind: "guides", topic: null, step: "lesson" };
+  review = null;
+  guide = null;
+  await refreshGuides();
+  renderSide();
+  const root = lhPage();
+  if (!guides) {
+    root.append(el("p", "lh-block__note", "Путеводители собирает программа на компьютере — в браузере их нет."));
+    return;
+  }
+  root.append(guidesBlock(true));
 }
 
 async function refreshGuides() {
@@ -598,11 +895,13 @@ function renderGuide(top = false) {
     button,
     inline,
     attachReader,
-    onBack: () => !busy && renderLobby(),
-    onDeleted: () => renderLobby(),
+    onBack: () => !busy && renderGuides(),
+    onDeleted: () => renderGuides(),
     onChanged: () => reloadGuide(),
   });
-  ui.main.replaceChildren(node);
+  const wrap = el("div", "page page--guide");
+  wrap.append(node);
+  ui.main.replaceChildren(wrap);
   ui.main.scrollTop = top ? 0 : scroll;
 }
 
@@ -611,7 +910,7 @@ async function reloadGuide() {
   try {
     guide = await api.invoke("guide_get", { id: view.guide });
   } catch {
-    return renderLobby();
+    return renderGuides();
   }
   // Читают вслух — не перерисовывать под голосом: дорисуется, когда умолкнет.
   if (ui.main.querySelector(".reader-focus")) return;
@@ -663,50 +962,70 @@ function renderHome() {
     root.append(steps);
     return;
   }
-  // Главная курса: сверху — что делать сейчас, крупно и одной кнопкой;
-  // дальше — путь по темам, сегодняшнее, слабые места и карта. Справка о том,
-  // как устроен курс, свёрнута: её читают один раз.
-  const root = page("", "");
-  root.replaceChildren();
-  root.append(courseHero());
+  // Обзор курса по хендоффу: заголовок и прогресс, «Дальше», путь курса,
+  // плитки, слабые места. Карта и справка — свёрнуты внизу.
+  const root = lhPage();
+  const done = course.topics.filter((t) => t.status === "done").length;
+  const head = el("div", "lh-course-head");
+  head.append(el("span", "lh-h lh-course-head__title", course.title));
+  if (course.description) head.append(el("span", "lh-course-head__about", course.description));
+  const progress = el("div", "lh-course-head__progress");
+  progress.append(
+    el("span", "lh-course-head__pct", `${course.percent}%`),
+    bar(course.percent),
+    el("span", "lh-course-head__count", `${done} из ${course.topics.length} тем${course.finalBest != null ? ` · финал ${course.finalBest}%` : ""}`),
+  );
+  head.append(progress);
   if (course.building) {
-    root.append(
-      el(
-        "p",
-        "note",
-        `Курс ещё собирается: готово ${course.building.done} из ${course.building.total} тем. Новые темы появятся сами — учиться можно уже сейчас.`,
-      ),
-    );
+    head.append(el("span", "lh-course-head__building", `Курс ещё собирается: готово ${course.building.done} из ${course.building.total} тем — новые появятся сами.`));
   }
-  root.append(coursePath());
-  root.append(todayTiles());
+  root.append(head);
 
-  const weak = course.topics.filter((t) => t.mistakes > 0);
+  const next = nextTopic();
+  root.append(nextCard(next));
+  root.append(pathBlock(next));
+  root.append(tilesRow(course));
+
+  const weak = course.topics
+    .map((topic, at) => ({ topic, at }))
+    .filter(({ topic }) => topic.mistakes > 0)
+    .sort((a, b) => b.topic.mistakes - a.topic.mistakes)
+    .slice(0, 6);
   if (weak.length) {
-    const box = el("section", "home-block");
-    box.append(el("h3", "home-block__title", "Слабые места"));
-    const list = el("div", "chips-row");
-    for (const topic of weak) {
-      const link = el("button", "chip-link", `${topic.title} · ошибок ${topic.mistakes}`);
-      link.type = "button";
-      link.addEventListener("click", () => openTopic(topic.id, "mistakes"));
-      list.append(link);
+    const box = el("section", "lh-block");
+    const headRow = el("div", "lh-block__head lh-block__head--label");
+    headRow.append(el("span", "lh-label", "Слабые места"), el("span", "lh-block__note", "где больше всего ошибок"));
+    box.append(headRow);
+    const table = el("div", "lh-table");
+    for (const { topic, at } of weak) {
+      const row = el("div", "lh-row lh-row--weak");
+      const dots = el("span", "lh-dots");
+      for (let i = 0; i < 5; i++) dots.append(el("span", i < topic.mistakes ? "is-on" : ""));
+      const go = el("button", "lh-row__btn", `Разобрать · ${topic.mistakes}`);
+      go.addEventListener("click", () => !busy && openTopic(topic.id, "mistakes"));
+      row.append(el("span", "lh-row__n", String(at + 1).padStart(2, "0")), el("span", "lh-row__title", topic.title), dots, go);
+      table.append(row);
     }
-    box.append(list);
+    box.append(table);
     root.append(box);
   }
 
   if (course.mastery?.total) {
-    const box = el("section", "home-block");
-    box.append(el("h3", "home-block__title", "Карта курса"));
-    box.append(el("p", "muted", "Темы и связи между ними. Цвет — насколько тема держится в памяти; щёлкните тему, чтобы открыть её."));
+    const map = el("details", "lh-more");
+    map.append(el("summary", "", "Карта курса — темы и связи"));
     const holder = el("div", "map-holder");
-    box.append(holder);
-    root.append(box);
-    drawCourseMap(holder);
+    map.append(holder);
+    let drawn = false;
+    map.addEventListener("toggle", () => {
+      if (map.open && !drawn) {
+        drawn = true;
+        drawCourseMap(holder);
+      }
+    });
+    root.append(map);
   }
 
-  const how = el("details", "home-how");
+  const how = el("details", "lh-more");
   how.append(el("summary", "", "Как устроен курс"));
   const list = el("ul", "list");
   for (const text of [
@@ -719,7 +1038,6 @@ function renderHome() {
     "Под каждым разделом урока: «Разобрать подробно» — раздел по шагам, с примерами и ошибками; " +
       "«Обсудить» — вопросы о нём текстом или голосом.",
     `Финальный экзамен открывается после всех тем, проходной балл — ${course.finalPass}%.`,
-    "Ошибки копятся во вкладке «Ошибки» каждой темы — повторяйте, пока не исчезнут.",
     "Голосом: «Ноа, давай повторим», «погоняй меня по курсу», «как мой прогресс».",
   ]) {
     list.append(el("li", "", text));
@@ -730,149 +1048,65 @@ function renderHome() {
 
 /** Тема, с которой продолжать: где остановились, иначе первая несданная. */
 function nextTopic() {
-  return (
-    course.topics.find((t) => t.id === course.current && t.status !== "done") ??
-    course.topics.find((t) => t.status !== "done") ??
-    null
-  );
+  return course ? nextOf(course) : null;
 }
 
-/**
- * Главный блок: курс, прогресс и одна большая кнопка «Продолжить» — с темой
- * и местом в ней. Рядом — урок с Ноа и практика по этой же теме.
- */
-function courseHero() {
-  const hero = el("section", "hero");
-  const top = el("div", "hero__top");
-  const titles = el("div", "hero__titles");
-  titles.append(el("h2", "hero__title", course.title));
-  if (course.description) titles.append(el("p", "hero__lead", course.description));
-  const all = el("button", "link-more hero__all", "⌂ Обучение");
-  all.type = "button";
-  all.title = "Все курсы, путеводители и сборка нового";
-  all.addEventListener("click", () => !busy && renderLobby());
-  top.append(titles, all);
-  hero.append(top);
-
-  const done = course.topics.filter((t) => t.status === "done").length;
-  const progress = el("div", "hero__progress");
-  const bar = el("span", "bar hero__bar");
-  const fill = el("span", "bar__fill");
-  fill.style.width = `${course.percent}%`;
-  bar.append(fill);
-  progress.append(
-    el("span", "hero__percent", `${course.percent}%`),
-    bar,
-    el("span", "hero__meta", `сдано тем ${done} из ${course.topics.length}${course.finalBest != null ? ` · финал ${course.finalBest}%` : ""}`),
-  );
-  hero.append(progress);
-
-  const next = nextTopic();
-  const actions = el("div", "hero__actions");
-  if (next) {
-    const place = placeOf(next.id);
-    const where = next.read || next.status !== "new" ? "продолжить" : "начать";
-    const go = el("button", "hero__go");
-    go.type = "button";
-    go.append(
-      el("span", "hero__go-label", `▶ ${where[0].toUpperCase()}${where.slice(1)}`),
-      el("span", "hero__go-topic", `${course.topics.indexOf(next) + 1}. ${next.title}`),
-      el("span", "hero__go-where", place.section ? `раздел ${place.section + 1}` : "с начала"),
-    );
-    go.addEventListener("click", () => !busy && resumeTopic(next.id));
-    actions.append(go);
-    const side = el("div", "hero__side");
-    side.append(
-      button("🎙 Урок с Ноа", () => !busy && openTopic(next.id, "talk"), true),
-      button("🖥 Практика", () => !busy && openTopic(next.id, "practice"), true),
-    );
-    actions.append(side);
-  } else {
-    const go = el("button", "hero__go");
-    go.type = "button";
-    go.append(el("span", "hero__go-label", "▶ Финальный экзамен"), el("span", "hero__go-topic", "Все темы сданы"));
-    go.addEventListener("click", () => !busy && openFinal());
-    actions.append(go);
+/** «Дальше» 88 — текст · Начать 120 · урок с Ноа 40 · практика 40. */
+function nextCard(next) {
+  const card = el("section", "lh-active lh-next");
+  const text = el("span", "lh-next__text");
+  if (!next) {
+    text.append(el("span", "lh-label", "// все темы сданы"), el("span", "lh-next__title", "Финальный экзамен"));
+    card.append(text, lhButton("Начать", "play", () => !busy && openFinal(), "lh-btn--primary", 2.5));
+    return card;
   }
-  hero.append(actions);
-  return hero;
+  const at = course.topics.indexOf(next) + 1;
+  const place = placeOf(next.id);
+  const started = next.read || next.status !== "new" || place.section > 0;
+  text.append(
+    el("span", "lh-label", `// дальше · тема ${at}${started ? ` · раздел ${place.section + 1}` : ""}`),
+    el("span", "lh-next__title", next.title),
+  );
+  text.title = next.title;
+  const talk = lhButton("", "mic", () => !busy && openTopic(next.id, "talk"), "lh-btn--icon");
+  talk.title = "Урок с Ноа";
+  talk.setAttribute("aria-label", "Урок с Ноа");
+  const practice = lhButton("", "window", () => !busy && openTopic(next.id, "practice"), "lh-btn--icon");
+  practice.title = "Практика";
+  practice.setAttribute("aria-label", "Практика");
+  card.append(text, lhButton(started ? "Дальше" : "Начать", "play", () => !busy && resumeTopic(next.id), "lh-btn--primary", 2.5), talk, practice);
+  return card;
 }
 
 /**
- * Путь курса: все темы по порядку отрезками. Сданные — заполнены, текущая —
- * подсвечена, остальные — тихо. С одного взгляда видно, где ты и сколько
- * осталось; щелчок — открыть тему.
+ * Путь курса: клетка на тему, заливка снизу — сколько темы пройдено, текущая
+ * — в кольце. С одного взгляда видно, где ты и сколько осталось.
  */
-function coursePath() {
-  const box = el("section", "home-block");
-  const next = nextTopic();
-  const head = el("div", "home-block__head");
-  head.append(el("h3", "home-block__title", "Путь курса"));
-  if (next) head.append(el("span", "muted", `Дальше: ${next.title}`));
+function pathBlock(next) {
+  const box = el("section", "lh-block");
+  const head = el("div", "lh-block__head lh-block__head--label");
+  const legend = (cls, text) => {
+    const item = el("span", `lh-legend lh-legend--${cls}`);
+    item.append(el("span"), document.createTextNode(text));
+    return item;
+  };
+  head.append(el("span", "lh-label", "Путь курса"), legend("done", "сдано"), legend("now", "сейчас"), legend("rest", "впереди"));
   box.append(head);
-  const path = el("div", "path");
+  const path = el("div", "lh-path");
+  path.style.setProperty("--cells", String(Math.min(24, Math.max(course.topics.length, 1))));
   course.topics.forEach((topic, at) => {
-    const step = el("button", `path__step path__step--${topic.status}${next && topic.id === next.id ? " is-now" : ""}`);
-    step.type = "button";
-    step.title = `${at + 1}. ${topic.title} — ${topicPercent(topic)}%`;
-    step.setAttribute("aria-label", step.title);
-    const fill = el("span", "path__fill");
-    fill.style.height = `${Math.max(8, topicPercent(topic))}%`;
-    step.append(fill);
-    step.addEventListener("click", () => !busy && resumeTopic(topic.id));
-    path.append(step);
+    const cell = el("button", `lh-cell${next && topic.id === next.id ? " is-now" : ""}`);
+    const percent = topicPercent(topic);
+    cell.title = `${at + 1}. ${topic.title} · ${percent}%`;
+    cell.setAttribute("aria-label", cell.title);
+    const fill = el("span");
+    fill.style.height = `${topic.status === "done" ? 100 : percent}%`;
+    cell.append(fill);
+    cell.addEventListener("click", () => !busy && resumeTopic(topic.id));
+    path.append(cell);
   });
   box.append(path);
-  const legend = el("div", "path__legend");
-  legend.append(
-    el("span", "legend legend--done", "сдано"),
-    el("span", "legend legend--now", "сейчас"),
-    el("span", "legend legend--rest", "впереди"),
-  );
-  box.append(legend);
   return box;
-}
-
-/** «Сегодня»: две плитки рядом — повторение карточек и фокус. */
-function todayTiles() {
-  const row = el("section", "tiles");
-  const m = course.mastery ?? { total: 0 };
-
-  const review = el("div", "tile");
-  review.append(el("div", "tile__label", "Повторение"));
-  if (m.total) {
-    const count = m.due + m.newLeft;
-    review.append(el("div", "tile__value", String(count)), el("div", "tile__sub", count ? "карточек на сегодня" : "на сегодня всё"));
-    review.append(masteryBar(m));
-    const legend = el("div", "mastery__legend");
-    legend.append(
-      el("span", "legend legend--mature", `уверенно ${m.mature}`),
-      el("span", "legend legend--young", `держится ${m.young}`),
-      el("span", "legend legend--learning", `учится ${m.learning}`),
-      el("span", "legend legend--new", `новых ${m.new}`),
-    );
-    review.append(legend);
-    const go = button(count ? "🃏 Повторить сейчас" : "Повторено — завтра ещё", () => startReview(null), !count);
-    go.disabled = !count;
-    review.append(go);
-  } else {
-    review.append(el("p", "muted", "В курсе нет понятий — повторять нечего."));
-  }
-
-  const f = course.focus ?? { today: 0, week: 0, streak: 0 };
-  const focusTile = el("div", "tile");
-  focusTile.append(el("div", "tile__label", "Фокус"));
-  focusTile.append(el("div", "tile__value", `${f.today} мин`), el("div", "tile__sub", "сегодня"));
-  const stats = el("div", "tile__stats");
-  stats.append(
-    el("span", "", `${f.week} мин за неделю`),
-    el("span", "", `${f.streak} ${f.streak === 1 ? "день" : f.streak >= 2 && f.streak <= 4 ? "дня" : "дней"} подряд`),
-  );
-  focusTile.append(stats);
-  if (!focus) focusTile.append(button("🎯 Фокус-сессия", openFocusSetup, true));
-
-  row.append(review, focusTile);
-  return row;
 }
 
 /**
@@ -1375,10 +1609,12 @@ function talkPanel(target) {
 // сами. Посреди экзамена и ответа окно не трогаем.
 api?.listen("guides:changed", async () => {
   if (view.kind === "guide") return reloadGuide();
-  if (view.kind !== "lobby") return;
+  if (view.kind !== "lobby" && view.kind !== "guides") return;
   await refreshGuides();
   const shelf = ui.main.querySelector('[data-el="guideShelf"]');
   if (shelf) fillGuideShelf(shelf);
+  const rows = ui.main.querySelector('[data-el="guideRows"]');
+  if (rows) fillGuideRows(rows);
   renderSide();
 });
 
@@ -2577,15 +2813,6 @@ async function refreshOverview() {
   }
 }
 
-ui.home.addEventListener("click", () => {
-  if (!busy) renderHome();
-});
-ui.lobby?.addEventListener("click", () => {
-  if (!busy) renderLobby();
-});
-ui.final.addEventListener("click", () => {
-  if (!busy) openFinal();
-});
 
 /* ── Окно ──────────────────────────────────────────────────────────────── */
 
@@ -2611,7 +2838,18 @@ ui.close.addEventListener("click", () => {
   api?.invoke("close_learning").catch(() => {});
 });
 
-api?.invoke("runtime_config").then((config) => applyTheme(config?.theme));
+// Тема окна обучения — «Неон», всегда: по ней свёрстаны главная и обзор.
+// Программа ставит тему из настроек при создании окна и при догрузке —
+// здесь она возвращается.
+{
+  const root = document.documentElement;
+  const neon = () => {
+    if (root.dataset.theme !== "neon") root.dataset.theme = "neon";
+    if (root.dataset.scale !== "window-l") root.dataset.scale = "window-l";
+  };
+  neon();
+  new MutationObserver(neon).observe(root, { attributes: true, attributeFilter: ["data-theme", "data-scale"] });
+}
 // Окно открыли голосом на другой теме — показать её.
 document.addEventListener("visibilitychange", async () => {
   if (document.visibilityState !== "visible" || busy || view.kind === "final" || exam) return;
@@ -2630,8 +2868,6 @@ api?.listen("guides:open", (event) => {
 refreshOverview().then(async () => {
   const wanted = await api?.invoke("guide_wanted").catch(() => null);
   if (wanted != null) return wanted ? openGuide(wanted) : renderLobby();
-  const current = course?.topics.find((t) => t.id === course.current);
-  // На главную, если есть что повторить: сначала повторение, потом новое.
-  if (current && !(course?.mastery?.due > 0)) resumeTopic(current.id);
-  else renderHome();
+  // Окно открывается на главной обучения: там «Продолжить» одной кнопкой.
+  renderLobby();
 });
