@@ -35,6 +35,22 @@ async function material(course, topicId) {
 /** История собеседований — балл по времени: виден рост. */
 const history = () => prefs.get("interviews", []);
 
+/** Вопрос разобран до конца (оценён), а не только начат. */
+const closed = (r) => Boolean(r && r.verdict && r.score != null);
+
+/** Средний балл по разобранным вопросам. */
+const average = (list) => {
+  const done = list.filter(closed);
+  return done.length ? Math.round(done.reduce((sum, r) => sum + r.score, 0) / done.length) : 0;
+};
+
+/** Записать собеседование в историю; то же `at` — обновить запись (продолжили незаконченное). */
+function remember(entry) {
+  const all = history().filter((one) => one.at !== entry.at);
+  all.push(entry);
+  prefs.set("interviews", all.slice(-50));
+}
+
 
 register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   const course = store.course(courseId);
@@ -58,6 +74,12 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   let questions = [];
   let results = [];
   let at = 0;
+  /** Когда начато это собеседование — ключ черновика и записи в истории. */
+  let startedAt = 0;
+  /** Итог показан — дальше только просмотр, черновик больше не пишется. */
+  let finished = false;
+  /** Незаконченное собеседование по курсу: вышли — можно продолжить с того же вопроса. */
+  const draftKey = `interviewDraft:${courseId}`;
   /** Снять подписку на распознаваемую речь (разговором). */
   let unhear = null;
 
@@ -91,6 +113,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     );
     content.replaceChildren(box);
     paintHistory();
+    paintDraft();
 
     if (topicId) {
       content.append(label("// о чём"));
@@ -150,6 +173,58 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     dock.replaceChildren(go);
   }
 
+  /** Незаконченное собеседование — продолжить с того же вопроса или начать заново. */
+  function paintDraft() {
+    const draft = prefs.get(draftKey, null);
+    if (!draft?.questions?.length) return;
+    const done = draft.results.filter(closed).length;
+    if (done >= draft.questions.length) return prefs.set(draftKey, null);
+    const plate = el("div", "plate plate--active");
+    plate.append(
+      label(`// не закончено · ${done} из ${draft.questions.length}`),
+      el("span", "continue__lead", done ? `Разобрано ${done}, пока ${average(draft.results)}%. Продолжим с ${done + 1}-го вопроса.` : "Вопросы готовы, начнём с первого."),
+    );
+    const go = el("button", "btn btn--primary");
+    go.style.cssText = "height:44px;margin-top:6px";
+    go.append(icon("play", 18, 2.25), "Продолжить");
+    go.addEventListener("click", () => resume(draft));
+    const drop = el("button", "btn btn--plain", "Начать заново");
+    drop.style.cssText = "height:36px;padding:0;align-self:flex-start;font-size:12.5px";
+    drop.addEventListener("click", async () => {
+      prefs.set(draftKey, null);
+      await collapse(plate);
+    });
+    plate.append(go, drop);
+    content.children[0]?.after(plate);
+  }
+
+  /** Сохранить ход собеседования: после каждого вопроса и при выходе. */
+  function saveDraft() {
+    if (!questions.length || !startedAt || finished) return;
+    const done = results.filter(closed);
+    if (done.length >= questions.length) return prefs.set(draftKey, null);
+    prefs.set(draftKey, {
+      at: startedAt, scope, level, talk, aloud, questions,
+      // Начатый, но не разобранный вопрос при продолжении задаётся заново.
+      results: results.map((r) => (closed(r) ? r : null)),
+    });
+    // Разобранное уже видно в истории — не пропадёт, даже если не продолжать.
+    if (done.length) remember({ at: startedAt, course: courseId, topic: scope, level, n: done.length, of: questions.length, score: average(results), partial: true });
+  }
+
+  function resume(draft) {
+    ({ scope, level, talk, aloud, questions } = draft);
+    startedAt = draft.at;
+    finished = false;
+    results = draft.results.map((r) => (closed(r) ? r : undefined));
+    at = results.findIndex((r) => !closed(r));
+    if (at < 0) at = questions.length;
+    dock.replaceChildren();
+    if (at >= questions.length) return report();
+    if (talk) conversation();
+    else ask();
+  }
+
   /** Прошлые собеседования по курсу — смахнуть влево или удержать — удалить. */
   function paintHistory() {
     const mine = history().filter((item) => item.course === courseId);
@@ -171,7 +246,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
       const topic = item.topic ? topicCard(course, item.topic)?.title : "весь курс";
       row.append(
         el("span", `interview-history__score ${item.score >= PASS ? "is-pass" : ""}`, `${item.score}%`),
-        el("span", "interview-history__text", `${new Date(item.at).toLocaleDateString("ru-RU")} · ${item.level} · ${topic ?? ""}`),
+        el("span", "interview-history__text", `${new Date(item.at).toLocaleDateString("ru-RU")} · ${item.level} · ${topic ?? ""}${item.partial ? ` · ${item.n} из ${item.of}, не до конца` : ""}`),
       );
       const wrap = swipeRow(row, [{ text: "Удалить", icon: "trash", danger: true, run: () => forget(item, wrap) }]);
       pressMenu(row, () => [{ text: "Удалить из истории", icon: "trash", danger: true, run: () => forget(item, wrap) }]);
@@ -224,6 +299,9 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     if (!alive) return;
     results = [];
     at = 0;
+    finished = false;
+    startedAt = Date.now();
+    saveDraft();
     if (talk) conversation();
     else ask();
   }
@@ -653,6 +731,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
             if (result.score == null) result.score = 0;
             result.verdict = { good: "", missing: result.gaps, ideal: result.note };
             line(result.score >= PASS ? "good" : "bad", result.note ? `Главное: ${result.note}` : "Вопрос разобрали.", `${result.score}%`);
+            saveDraft();
             break;
           }
         }
@@ -699,6 +778,7 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   }
 
   function feedback(result) {
+    saveDraft();
     const v = result.verdict ?? {};
     content.replaceChildren();
     const head = el("div", `plate interview__score ${result.score >= PASS ? "is-pass" : "is-weak"}`);
@@ -739,11 +819,11 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     at = questions.length;
     progressRow.replaceChildren(steps(questions.length, questions.length, -1, { ok: true, thin: true }));
     meta.textContent = "итог";
-    const scored = results.filter((r) => r && r.score != null);
-    const total = scored.length ? Math.round(scored.reduce((sum, r) => sum + (r.score ?? 0), 0) / scored.length) : 0;
-    const all = history();
-    all.push({ at: Date.now(), course: courseId, topic: scope, level, n: scored.length, score: total });
-    prefs.set("interviews", all.slice(-50));
+    finished = true;
+    const scored = results.filter(closed);
+    const total = average(results);
+    prefs.set(draftKey, null);
+    if (scored.length) remember({ at: startedAt || Date.now(), course: courseId, topic: scope, level, n: scored.length, of: questions.length, score: total });
 
     content.replaceChildren();
     const head = el("div", "plate plate--active");
@@ -808,6 +888,8 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   return {
     full: true,
     cleanup: () => {
+      // Вышли посреди собеседования — разобранное и место, где остановились, сохраняются.
+      if (at < questions.length) saveDraft();
       alive = false;
       voice.stop();
       voice.cancel();
