@@ -7,6 +7,7 @@ import { store, currentTopic, topicCard, greeting, isDone } from "../store.js";
 import { open as openAssistant } from "../assistant.js";
 import { removeCourse, topicActions } from "./course.js";
 import { swipeRow, pressMenu, collapse, pullToRefresh } from "../gestures.js";
+import { guideShelf } from "./guide.js";
 
 register("courses", (screen) => {
   screen.append(header({ home: true, onMic: () => openAssistant() }));
@@ -95,6 +96,10 @@ register("courses", (screen) => {
       for (const item of courses) list.append(courseCard(item));
       content.append(list);
     }
+    // Путеводители — ниже курсов; в браузере их нет, полки тоже.
+    const guides = el("div");
+    content.append(guides);
+    guideShelf().then((shelf) => alive && shelf && guides.replaceWith(shelf));
     if (!signed) return;
     const builds = await store.builds(true);
     if (!alive) return;

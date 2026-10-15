@@ -363,9 +363,12 @@
         practice.done = false;
         publish();
         return null;
-      default:
+      default: {
+        const guided = (await import("/dev/guides-mock.js")).mockGuides(cmd, args);
+        if (guided !== undefined) return guided;
         console.warn("витрина: нет подмены для", cmd, args);
         return null;
+      }
     }
   }
 

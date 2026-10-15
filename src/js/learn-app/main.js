@@ -16,6 +16,7 @@ import "./screens/focus.js";
 import "./screens/profile.js";
 import "./screens/drill.js";
 import "./screens/interview.js";
+import "./screens/guide.js";
 
 async function sprite() {
   try {
@@ -86,3 +87,7 @@ const coursesArrived = () => {
 api?.listen("learn:courses", coursesArrived);
 // В браузере курсы дорастают так же — событием Ноа онлайн.
 api?.listen("learn:changed", coursesArrived);
+// Путеводитель дописал раздел — полка на главном экране обновляется.
+api?.listen("guides:changed", () => {
+  if (nav.current === "courses" && nav.depth === 1) nav.refresh();
+});
