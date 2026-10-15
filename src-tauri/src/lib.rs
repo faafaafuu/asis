@@ -2437,6 +2437,18 @@ fn speak_with_hud(app: &tauri::AppHandle, text: String, wait: bool) {
     }
     log::info!("говорю: «{}»", text.chars().take(90).collect::<String>());
 
+    // Колонок и наушников нет — голос ушёл бы в пустоту, и человек видел бы
+    // полную тишину в ответ на просьбу. Ответ — текстом в окне.
+    #[cfg(desktop)]
+    if !voice::can_play() {
+        log::warn!("говорить нечем — устройств вывода нет; показываю ответ текстом");
+        overlay::hide_hud(app);
+        if let Err(err) = overlay::show_note(app, text, None) {
+            log::warn!("окно с ответом не открылось: {err}");
+        }
+        return;
+    }
+
     // Сколько можно ждать конца речи: с большим запасом на длину фразы.
     let limit = std::time::Duration::from_secs(30 + text.chars().count() as u64 / 8);
     let handle = app.clone();

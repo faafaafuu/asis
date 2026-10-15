@@ -217,6 +217,16 @@ fn open_output() -> Option<(rodio::OutputStream, rodio::Sink)> {
     }
 }
 
+/// Есть ли куда играть: хоть одно устройство вывода в системе. Колонки
+/// выключены, наушники в футляре — ответ голосом уйдёт в пустоту.
+pub fn has_output() -> bool {
+    use cpal::traits::HostTrait;
+    cpal::default_host()
+        .output_devices()
+        .map(|mut devices| devices.next().is_some())
+        .unwrap_or(false)
+}
+
 /// Первое устройство вывода, которое удалось открыть.
 fn first_working_device() -> Option<rodio::OutputStream> {
     use cpal::traits::{DeviceTrait, HostTrait};

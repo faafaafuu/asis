@@ -211,6 +211,9 @@ static DEAD: Mutex<Vec<(String, std::time::Instant)>> = Mutex::new(Vec::new());
 /// Сколько ровных нулей подряд считаем признаком неподключённого микрофона.
 const DEAD_AFTER_MS: u64 = 8_000;
 
+/// Сколько без единого отсчёта считаем, что устройство пропало.
+const STALLED: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Сколько не возвращаться к молчавшему микрофону. Потом пробуем снова: телефон
 /// могли подключить.
 const DEAD_FOR: std::time::Duration = std::time::Duration::from_secs(600);
@@ -286,6 +289,14 @@ fn mic_loop(rx: Receiver<Command>) {
     // подряд оно отдало ровными нулями.
     let mut current = String::new();
     let mut zeros = 0usize;
+    // Что просили слушать в разговоре и когда звук приходил в последний раз.
+    // Устройство могут выдернуть посреди разговора (наушники отвалились,
+    // телефон-микрофон отключился): тогда звук перестаёт приходить совсем, и
+    // счётчик нулей не растёт — прослушивание висло на мёртвом устройстве
+    // часами. Нет звука дольше STALLED — открываем микрофон заново.
+    let mut wanted = String::new();
+    let mut last_data = std::time::Instant::now();
+    let mut lost: Option<(Listening, Sender<Heard>)> = None;
 
     loop {
         match rx.recv_timeout(std::time::Duration::from_millis(50)) {
@@ -320,10 +331,13 @@ fn mic_loop(rx: Receiver<Command>) {
                 let _ = reply.send(recording);
             }
             Ok(Command::StartTalk(preferred, mode, sender)) => {
+                wanted = preferred.clone();
                 current = usable(&preferred);
                 remember_device(&current);
                 zeros = 0;
+                last_data = std::time::Instant::now();
                 active = open(&current);
+                lost = active.is_none().then(|| (mode, sender.clone()));
                 talk = active
                     .as_ref()
                     .map(|(_, _, rate)| Segmenter::new(*rate, mode, sender));
@@ -331,12 +345,33 @@ fn mic_loop(rx: Receiver<Command>) {
             Ok(Command::StopTalk) => {
                 active = None;
                 talk = None;
+                lost = None;
             }
             Err(RecvTimeoutError::Timeout) => {
+                // Микрофона не было вовсе — пробуем снова, вдруг подключили.
+                if lost.is_some() && last_data.elapsed() >= STALLED {
+                    last_data = std::time::Instant::now();
+                    current = usable(&wanted);
+                    active = open(&current);
+                    if active.is_some() {
+                        log::info!("микрофон появился — слушаю дальше");
+                        let (mode, sender) = lost.take().expect("проверено выше");
+                        talk = active.as_ref().map(|(_, _, rate)| Segmenter::new(*rate, mode, sender));
+                    }
+                    continue;
+                }
                 let mut silent = None;
+                let mut stalled = None;
                 if let (Some((_, buffer, rate)), Some(segmenter)) = (&active, &mut talk) {
                     let chunk =
                         std::mem::take(&mut *buffer.lock().unwrap_or_else(|e| e.into_inner()));
+                    if chunk.is_empty() {
+                        if last_data.elapsed() >= STALLED {
+                            stalled = Some((segmenter.mode, segmenter.sender.clone()));
+                        }
+                    } else {
+                        last_data = std::time::Instant::now();
+                    }
                     if !chunk.is_empty() {
                         zeros = if all_zero(&chunk) { zeros + chunk.len() } else { 0 };
                         if ms(zeros, *rate) >= DEAD_AFTER_MS {
@@ -344,6 +379,22 @@ fn mic_loop(rx: Receiver<Command>) {
                         }
                     }
                     segmenter.feed(&chunk, *rate);
+                }
+                // Звук перестал приходить — устройство пропало. Открываем
+                // микрофон заново: выбранный, основной или любой живой.
+                if let Some((mode, sender)) = stalled {
+                    log::warn!("микрофон «{}» перестал отдавать звук — открываю заново", if current.is_empty() { default_name() } else { current.clone() });
+                    last_data = std::time::Instant::now();
+                    zeros = 0;
+                    active = None;
+                    current = usable(&wanted);
+                    remember_device(&current);
+                    active = open(&current);
+                    talk = active.as_ref().map(|(_, _, rate)| Segmenter::new(*rate, mode, sender.clone()));
+                    if active.is_none() {
+                        lost = Some((mode, sender));
+                    }
+                    continue;
                 }
                 // Микрофон молчит нулями — продолжаем слушать с другого, не
                 // прерывая ожидания имени и разговора. Другого нет — остаёмся.
