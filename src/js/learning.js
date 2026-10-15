@@ -9,6 +9,7 @@
 import { tauri, appWindow, applyTheme } from "./bridge.js";
 import { renderLessonAgent } from "./lesson-agent.js";
 import { attachReader } from "./lesson-reader.js";
+import { guideBuilder, guideCard, guidePage, tint } from "./guides.js";
 
 const api = tauri();
 const ui = {};
@@ -29,6 +30,9 @@ let exam = null;
 let busy = false;
 /** Идёт повторение карточек: очередь и счёт. */
 let review = null;
+/** Путеводители: карточки для лобби и открытый сейчас. В браузере их нет — null. */
+let guides = null;
+let guide = null;
 /** Какое понятие спрашивали после какого раздела урока: «тема#раздел» → id. */
 const recalled = new Map();
 
@@ -172,13 +176,47 @@ function renderSide() {
   ui.lobby?.setAttribute("aria-current", String(view.kind === "lobby"));
   // В лобби курс ещё не выбран: ни его тем, ни экзамена, ни полоски в
   // заголовке — сбоку только курсы.
-  const lobby = view.kind === "lobby";
+  const lobby = view.kind === "lobby" || view.kind === "guide";
   ui.home.hidden = lobby;
   ui.final.hidden = lobby;
   ui.courseBar.closest(".head__progress")?.toggleAttribute("hidden", lobby);
-  if (lobby) {
-    ui.courseTitle.textContent = "Все курсы";
+  if (view.kind === "guide") {
+    ui.courseTitle.textContent = guide?.title ?? "Путеводитель";
     ui.topics.replaceChildren(
+      ...(guide?.sections ?? []).map((section) => {
+        const item = el("li");
+        const node = el("button", "topic");
+        const ready = section.text.length || section.items.length;
+        const line = el("span", "topic__line");
+        line.append(el("span", "topic__mark", section.emoji || "•"), el("span", "topic__title", section.title), el("span", "topic__score", ready ? "" : "…"));
+        node.append(line);
+        node.addEventListener("click", () =>
+          document.getElementById(`guide-${section.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        );
+        item.append(node);
+        return item;
+      }),
+    );
+    return;
+  }
+  if (lobby) {
+    ui.courseTitle.textContent = "Обучение";
+    const label = (text) => {
+      const item = el("li", "side__label", text);
+      return item;
+    };
+    const guideItems = (guides ?? []).map((card) => {
+      const item = el("li");
+      const node = el("button", "topic");
+      const line = el("span", "topic__line");
+      line.append(el("span", "topic__mark", card.emoji || "📖"), el("span", "topic__title", card.title));
+      node.append(line);
+      node.addEventListener("click", () => !busy && openGuide(card.id));
+      item.append(node);
+      return item;
+    });
+    ui.topics.replaceChildren(
+      ...(courses.length ? [label("Курсы")] : []),
       ...courses.map((other) => {
         const item = el("li");
         const node = el("button", "topic");
@@ -202,6 +240,7 @@ function renderSide() {
         item.append(node);
         return item;
       }),
+      ...(guideItems.length ? [label("Путеводители"), ...guideItems] : []),
     );
     return;
   }
@@ -375,50 +414,208 @@ function watchBuilds(status, stop) {
 }
 
 /**
- * Все курсы: карточки с прогрессом и сборка нового. Раньше окно открывалось
- * сразу в одном курсе, и выйти было некуда — ни к другим курсам, ни к сборке.
+ * Главная обучения: что продолжить, полка курсов и полка путеводителей.
+ * Курсы учат — уроки, задачи, экзамены; путеводители рассказывают —
+ * разделы, виды, цифры и картинки, без проверок. Сборка нового — здесь же.
  */
 async function renderLobby() {
   view = { kind: "lobby", topic: null, step: "lesson" };
   review = null;
-  await refreshOverview();
+  guide = null;
+  await Promise.all([refreshOverview(), refreshGuides()]);
   renderSide();
-  const root = page("Курсы", "Выберите курс или соберите новый — по любой теме, под свою цель.");
-  const grid = el("div", "lobby");
-  for (const other of courses) {
-    const card = el("button", "lobby__card");
-    card.type = "button";
-    card.setAttribute("aria-current", String(other.id === course?.id));
-    const done = other.topics.filter((t) => t.status === "done").length;
-    const bar = el("span", "bar bar--small");
-    const fill = el("span", "bar__fill");
-    fill.style.width = `${other.percent}%`;
-    bar.append(fill);
-    card.append(
-      el("span", "lobby__title", other.title),
-      el("span", "lobby__about", other.description || ""),
-      bar,
-      el(
-        "span",
-        "lobby__meta",
-        `${other.percent}% · сдано тем ${done} из ${other.topics.length}${other.building ? ` · собирается: ${other.building.done} из ${other.building.total}` : ""}`,
-      ),
-    );
-    card.addEventListener("click", () => {
-      if (busy) return;
-      course = other;
-      try {
-        localStorage.setItem("noa.lastCourse", other.id);
-      } catch {
-        /* не запомнится — откроется первый */
-      }
-      renderHome();
-    });
-    grid.append(card);
+  const root = page("", "");
+  root.replaceChildren();
+  root.classList.add("page--lobby");
+
+  const head = el("header", "lobby-hero");
+  const titles = el("div", "lobby-hero__titles");
+  titles.append(el("h2", "lobby-hero__title", "Обучение"));
+  titles.append(el("p", "lobby-hero__lead", "Курсы учат — уроки, задачи, экзамены. Путеводители рассказывают — разделы, виды, цифры и картинки."));
+  head.append(titles);
+  const counts = el("div", "lobby-hero__stats");
+  const stat = (value, text) => {
+    const box = el("span", "stat");
+    box.append(el("span", "stat__value", String(value)), el("span", "stat__label", text));
+    return box;
+  };
+  const doneTopics = courses.reduce((sum, c) => sum + c.topics.filter((t) => t.status === "done").length, 0);
+  counts.append(stat(courses.length, "курсов"), stat(doneTopics, "тем сдано"));
+  if (guides) counts.append(stat(guides.length, "путеводителей"));
+  head.append(counts);
+  root.append(head);
+
+  const resume = continueCard();
+  if (resume) root.append(resume);
+
+  // Курсы
+  const coursesBox = el("section", "shelf-block");
+  const coursesHead = el("div", "shelf-block__head");
+  coursesHead.append(el("h3", "shelf-block__title", "Курсы"));
+  coursesBox.append(coursesHead);
+  const shelf = el("div", "shelf");
+  for (const other of courses) shelf.append(courseCard(other));
+  const builder = courseBuilder(!courses.length);
+  const add = el("button", "shelf__card shelf__card--add");
+  add.append(el("span", "shelf__plus", "＋"), el("span", "shelf__title", "Новый курс"), el("span", "shelf__about", "По любой теме, под вашу цель: уроки, задачи, экзамены"));
+  add.addEventListener("click", () => {
+    builder.open = true;
+    builder.scrollIntoView({ behavior: "smooth", block: "center" });
+    builder.querySelector("textarea")?.focus();
+  });
+  shelf.append(add);
+  coursesBox.append(shelf, builder);
+  root.append(coursesBox);
+
+  // Путеводители — только в программе: собирает их модель на этом компьютере.
+  if (guides) {
+    const guidesBox = el("section", "shelf-block");
+    guidesBox.dataset.shelf = "guides";
+    const guidesHead = el("div", "shelf-block__head");
+    guidesHead.append(el("h3", "shelf-block__title", "Путеводители"));
+    guidesBox.append(guidesHead);
+    const guideShelf = el("div", "shelf");
+    guideShelf.dataset.el = "guideShelf";
+    fillGuideShelf(guideShelf);
+    guidesBox.append(guideShelf);
+    guidesBox.append(guideBuilder({ api, el, button, onStarted: (id) => openGuide(id) }));
+    root.append(guidesBox);
   }
-  root.append(grid);
-  // Сборка — и в программе, и в Ноа онлайн: курс пишет сервер через мост.
-  root.append(courseBuilder(!courses.length));
+}
+
+/** Карточки путеводителей — перерисовываются сами, пока путеводитель пишется. */
+function fillGuideShelf(shelf) {
+  shelf.replaceChildren(...(guides ?? []).map((card) => guideCard(card, { api, el, onOpen: (id) => !busy && openGuide(id) })));
+  if (!guides?.length) shelf.append(el("p", "shelf__empty", "Пока ни одного. Напишите тему ниже — например, «деревья Москвы»."));
+}
+
+/** «Продолжить» — курс, на котором остановились, и его тема. */
+function continueCard() {
+  const current = courses.find((c) => c.id === lastCourse()) ?? course;
+  if (!current) return null;
+  const next =
+    current.topics.find((t) => t.id === current.current && t.status !== "done") ?? current.topics.find((t) => t.status !== "done");
+  if (!next) return null;
+  const card = el("button", "resume");
+  card.style.setProperty("--hue", tint(current.title));
+  const text = el("span", "resume__text");
+  text.append(
+    el("span", "resume__label", next.read || next.status !== "new" ? "Продолжить" : "Начать"),
+    el("span", "resume__topic", `${current.topics.indexOf(next) + 1}. ${next.title}`),
+    el("span", "resume__course", current.title),
+  );
+  const bar = el("span", "bar resume__bar");
+  const fill = el("span", "bar__fill");
+  fill.style.width = `${current.percent}%`;
+  bar.append(fill);
+  const right = el("span", "resume__right");
+  right.append(el("span", "resume__percent", `${current.percent}%`), bar);
+  card.append(el("span", "resume__play", "▶"), text, right);
+  card.addEventListener("click", () => {
+    if (busy) return;
+    chooseCourse(current);
+    resumeTopic(next.id);
+  });
+  return card;
+}
+
+function chooseCourse(other) {
+  course = other;
+  try {
+    localStorage.setItem("noa.lastCourse", other.id);
+  } catch {
+    /* не запомнится — откроется первый */
+  }
+}
+
+/** Обложка курса: цвет из названия, буквы, прогресс. */
+function courseCard(other) {
+  const card = el("button", "shelf__card shelf__card--course");
+  card.style.setProperty("--hue", tint(other.title));
+  card.setAttribute("aria-current", String(other.id === course?.id));
+  const done = other.topics.filter((t) => t.status === "done").length;
+  const cover = el("span", "shelf__cover");
+  const letters = other.title
+    .split(/[\s:—-]+/)
+    .filter((w) => w.length > 2 && /^[\p{L}\d]/u.test(w))
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+  cover.append(el("span", "shelf__mono", letters || "К"), el("span", "shelf__badge", `${other.percent}%`));
+  const body = el("span", "shelf__body");
+  body.append(el("span", "shelf__title", other.title));
+  if (other.description) body.append(el("span", "shelf__about", other.description));
+  const bar = el("span", "bar bar--small");
+  const fill = el("span", "bar__fill");
+  fill.style.width = `${other.percent}%`;
+  bar.append(fill);
+  body.append(
+    bar,
+    el(
+      "span",
+      "shelf__meta",
+      `сдано тем ${done} из ${other.topics.length}${other.building ? ` · собирается: ${other.building.done} из ${other.building.total}` : ""}`,
+    ),
+  );
+  card.append(cover, body);
+  card.addEventListener("click", () => {
+    if (busy) return;
+    chooseCourse(other);
+    renderHome();
+  });
+  return card;
+}
+
+async function refreshGuides() {
+  if (!api) return;
+  try {
+    guides = (await api.invoke("guides_list")) ?? [];
+  } catch {
+    guides = null;
+  }
+}
+
+/** Открыть путеводитель. Пишется — перерисуется сам по `guides:changed`. */
+async function openGuide(id) {
+  try {
+    guide = await api.invoke("guide_get", { id });
+  } catch (err) {
+    page("Путеводитель", String(err));
+    return;
+  }
+  view = { kind: "guide", topic: null, step: "lesson", guide: id };
+  review = null;
+  renderGuide(true);
+}
+
+function renderGuide(top = false) {
+  if (!guide) return;
+  const scroll = ui.main.scrollTop;
+  renderSide();
+  const node = guidePage(guide, {
+    api,
+    el,
+    button,
+    inline,
+    attachReader,
+    onBack: () => !busy && renderLobby(),
+    onDeleted: () => renderLobby(),
+    onChanged: () => reloadGuide(),
+  });
+  ui.main.replaceChildren(node);
+  ui.main.scrollTop = top ? 0 : scroll;
+}
+
+async function reloadGuide() {
+  if (view.kind !== "guide" || !view.guide) return;
+  try {
+    guide = await api.invoke("guide_get", { id: view.guide });
+  } catch {
+    return renderLobby();
+  }
+  // Читают вслух — не перерисовывать под голосом: дорисуется, когда умолкнет.
+  if (ui.main.querySelector(".reader-focus")) return;
+  renderGuide();
 }
 
 function renderHome() {
@@ -550,9 +747,9 @@ function courseHero() {
   const titles = el("div", "hero__titles");
   titles.append(el("h2", "hero__title", course.title));
   if (course.description) titles.append(el("p", "hero__lead", course.description));
-  const all = el("button", "link-more hero__all", "☰ Все курсы");
+  const all = el("button", "link-more hero__all", "⌂ Обучение");
   all.type = "button";
-  all.title = "Другие курсы и сборка нового";
+  all.title = "Все курсы, путеводители и сборка нового";
   all.addEventListener("click", () => !busy && renderLobby());
   top.append(titles, all);
   hero.append(top);
@@ -1176,6 +1373,15 @@ function talkPanel(target) {
 
 // Курс дописывается — сборкой или нейросетью по MCP: новые темы появляются
 // сами. Посреди экзамена и ответа окно не трогаем.
+api?.listen("guides:changed", async () => {
+  if (view.kind === "guide") return reloadGuide();
+  if (view.kind !== "lobby") return;
+  await refreshGuides();
+  const shelf = ui.main.querySelector('[data-el="guideShelf"]');
+  if (shelf) fillGuideShelf(shelf);
+  renderSide();
+});
+
 api?.listen("learn:changed", async () => {
   if (busy || exam) return;
   await refreshOverview();
@@ -2413,7 +2619,17 @@ document.addEventListener("visibilitychange", async () => {
   renderSide();
 });
 
-refreshOverview().then(() => {
+// Голосом: «собери путеводитель про…», «открой путеводители».
+api?.listen("guides:open", (event) => {
+  if (busy) return;
+  api.invoke("guide_wanted").catch(() => null);
+  if (event.payload) openGuide(event.payload);
+  else renderLobby();
+});
+
+refreshOverview().then(async () => {
+  const wanted = await api?.invoke("guide_wanted").catch(() => null);
+  if (wanted != null) return wanted ? openGuide(wanted) : renderLobby();
   const current = course?.topics.find((t) => t.id === course.current);
   // На главную, если есть что повторить: сначала повторение, потом новое.
   if (current && !(course?.mastery?.due > 0)) resumeTopic(current.id);

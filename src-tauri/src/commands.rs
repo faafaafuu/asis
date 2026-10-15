@@ -1903,6 +1903,67 @@ pub async fn learn_build_stop(id: String) -> Result<(), String> {
     crate::platform::stop_build(&id).await
 }
 
+/* ── Путеводители ──────────────────────────────────────────────────────── */
+
+/// Путеводители для лобби обучения — карточки без текста.
+#[tauri::command]
+pub async fn guides_list(app: AppHandle) -> Vec<crate::guides::Card> {
+    crate::guides::list(&app)
+}
+
+#[tauri::command]
+pub async fn guide_get(app: AppHandle, id: String) -> Result<crate::guides::Guide, String> {
+    crate::guides::get(&app, &id)
+}
+
+/// Начать путеводитель по просьбе — он пишется сам, раздел за разделом.
+#[tauri::command]
+pub async fn guide_build(app: AppHandle, goal: String) -> Result<String, String> {
+    crate::guides::start(&app, &goal)
+}
+
+/// Дописать прерванный путеводитель или добавить раздел (`wish`).
+#[tauri::command]
+pub async fn guide_resume(app: AppHandle, id: String, wish: Option<String>) -> Result<(), String> {
+    crate::guides::resume(&app, &id, wish)
+}
+
+#[tauri::command]
+pub async fn guide_stop() {
+    crate::guides::stop();
+}
+
+#[tauri::command]
+pub async fn guide_delete(app: AppHandle, id: String) -> Result<(), String> {
+    crate::guides::delete(&app, &id)
+}
+
+/// Статья Википедии, откуда картинка путеводителя, — в браузере. Только
+/// Википедия: произвольную ссылку из окна не открываем.
+#[tauri::command]
+pub fn guide_source(url: String) -> Result<(), String> {
+    let wiki = url
+        .strip_prefix("https://")
+        .and_then(|rest| rest.split('/').next())
+        .is_some_and(|host| host.ends_with(".wikipedia.org") && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-'));
+    if !wiki {
+        return Err("это не статья Википедии".into());
+    }
+    open_externally(&url)
+}
+
+/// Что окну обучения показать при загрузке, если его открыли голосом.
+#[tauri::command]
+pub async fn guide_wanted() -> Option<String> {
+    crate::guides::take_wanted()
+}
+
+/// Картинка путеводителя строкой data:.
+#[tauri::command]
+pub async fn guide_picture(app: AppHandle, id: String, file: String) -> Result<String, String> {
+    crate::guides::picture(&app, &id, &file)
+}
+
 /* ── Практика в терминале ──────────────────────────────────────────────── */
 
 /// Открыть окно практики — из темы курса или само по себе.

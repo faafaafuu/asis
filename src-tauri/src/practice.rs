@@ -1005,7 +1005,7 @@ pub(crate) fn three_ways(raw: &str) -> (String, String, Vec<Action>) {
 /// JSON от модели — терпимо. Пути Windows вроде `C:\Users` модель пишет с
 /// одиночными обратными слэшами, и строгий разбор отвергал весь ответ: вслух
 /// звучал сырой JSON. Такие слэши удваиваются, и разбор пробуется ещё раз.
-fn lenient_json(json: &str) -> Option<serde_json::Value> {
+pub(crate) fn lenient_json(json: &str) -> Option<serde_json::Value> {
     if let Ok(value) = serde_json::from_str(json) {
         return Some(value);
     }

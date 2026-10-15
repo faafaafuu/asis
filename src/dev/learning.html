@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="../styles/fonts.css" />
     <link rel="stylesheet" href="../styles/tokens.css" />
     <link rel="stylesheet" href="../styles/learning.css" />
+    <link rel="stylesheet" href="../styles/guides.css" />
     <script src="../js/window-errors.js"></script>
     <script>
       // Витрина лобби курсов: подменные курсы, без программы и сайта.
@@ -43,7 +44,13 @@
           { id: "air", title: "Аэропорт", status: "new", read: false, tasksDone: 0, tasksTotal: 3, examBest: null, mistakes: 0, conceptsTotal: 0, conceptsMature: 0, summary: "" } ] },
       ];
       globalThis.__TAURI__ = {
-        core: { invoke: async (cmd) => ({ learn_overview: courses, learn_builds: [], app_version: "1.15.0", runtime_config: { theme: new URLSearchParams(location.search).get("theme") ?? "neon" } })[cmd] ?? null },
+        core: {
+          invoke: async (cmd, args = {}) => {
+            const guided = (await import("./guides-mock.js")).mockGuides(cmd, args);
+            if (guided !== undefined) return guided;
+            return ({ learn_overview: courses, learn_builds: [], app_version: "1.17.0", runtime_config: { theme: new URLSearchParams(location.search).get("theme") ?? "neon" } })[cmd] ?? null;
+          },
+        },
         event: { listen: async () => () => {} },
         window: { getCurrentWindow: () => null },
       };
@@ -65,7 +72,7 @@
     <div class="layout">
       <!-- Темы курса: статус, баллы, ошибки. Внизу — финальный экзамен. -->
       <nav class="side" aria-label="Темы">
-        <button class="side__lobby" data-el="lobby" type="button" title="Все курсы и сборка нового">☰ Все курсы</button>
+        <button class="side__lobby" data-el="lobby" type="button" title="Все курсы, путеводители и сборка нового">⌂ Обучение</button>
         <button class="side__home" data-el="home" type="button">Обзор курса</button>
         <ol class="topics" data-el="topics"></ol>
         <button class="side__final" data-el="final" type="button">Финальный экзамен</button>

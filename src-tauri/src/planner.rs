@@ -153,6 +153,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(show) = window_request(said) {
         return Some(crate::set_show_window(app, show));
     }
+    // «Собери путеводитель про умный дом», «открой путеводители» — без модели.
+    if let Some(reply) = guide_request(app, said) {
+        return Some(reply);
+    }
     // «Открой практику» — сразу, без модели: модель принимала её за обучение.
     if let Some(reply) = practice_request(app, said) {
         return Some(reply);
@@ -415,6 +419,49 @@ fn practice_request(app: &AppHandle, said: &str) -> Option<String> {
         return None;
     }
     Some(open_own(app, OwnWindow::Practice))
+}
+
+/// Путеводители голосом: «собери путеводитель про деревья Москвы» — начать и
+/// показать его в обучении; «открой путеводители» — полка на главной обучения.
+fn guide_request(app: &AppHandle, said: &str) -> Option<String> {
+    use tauri::Emitter;
+    let lower = said.to_lowercase().replace('ё', "е");
+    let at = lower.find("путеводител")?;
+    const BUILD: &[&str] = &["собер", "сдела", "состав", "напиш", "созда", "подготов"];
+    if !BUILD.iter().any(|word| lower.contains(word)) {
+        crate::guides::want(None);
+        return Some(match crate::overlay::show_learning(app) {
+            Ok(()) => {
+                let _ = app.emit("guides:open", "");
+                "Открываю путеводители.".into()
+            }
+            Err(err) => format!("Окно обучения не открылось: {err}"),
+        });
+    }
+    let topic = guide_topic(&said[said.char_indices().nth(lower[..at].chars().count()).map_or(0, |(i, _)| i)..]);
+    if topic.chars().count() < 3 {
+        return Some("О чём собрать путеводитель? Скажите, например: «собери путеводитель про деревья Москвы».".into());
+    }
+    match crate::guides::start(app, &topic) {
+        Ok(id) => {
+            crate::guides::want(Some(id.clone()));
+            let _ = crate::overlay::show_learning(app);
+            let _ = app.emit("guides:open", id);
+            Some(format!("Собираю путеводитель «{topic}» — открыла его в обучении, разделы будут появляться по мере готовности."))
+        }
+        Err(err) => Some(err),
+    }
+}
+
+/// Тема из «путеводитель про деревья Москвы»: после слова и предлога.
+fn guide_topic(tail: &str) -> String {
+    let rest = tail.split_once(char::is_whitespace).map_or("", |(_, rest)| rest).trim();
+    let lower = rest.to_lowercase();
+    let rest = ["на тему ", "про ", "по ", "об ", "о "]
+        .iter()
+        .find_map(|p| lower.starts_with(p).then(|| &rest[p.len()..]))
+        .unwrap_or(rest);
+    rest.trim().trim_end_matches(['.', '!', '?']).trim().to_string()
 }
 
 fn own_window(program: &str) -> Option<OwnWindow> {
@@ -3373,6 +3420,14 @@ pub fn changed(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guide_topic_is_taken_after_the_word() {
+        assert_eq!(guide_topic("путеводитель про деревья Москвы."), "деревья Москвы");
+        assert_eq!(guide_topic("путеводитель на тему умный дом"), "умный дом");
+        assert_eq!(guide_topic("путеводитель по грибам средней полосы"), "грибам средней полосы");
+        assert_eq!(guide_topic("путеводитель"), "");
+    }
 
     #[test]
     fn showing_the_clipboard_is_heard() {
