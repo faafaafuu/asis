@@ -720,7 +720,7 @@ const TILES = ["#2b5bc4", "#b5342e", "#5f8c4c", "#8a4fc4", "#c4842b", "#2b8fa8"]
 
 /** Буквы курса для плитки-монограммы: первые буквы двух значимых слов. */
 function monogram(title) {
-  const words = title.split(/[\s:—,/-]+/).filter((w) => w.length > 2 && /^[\p{L}\d]/u.test(w));
+  const words = title.split(/[\s:—,/-]+/).filter((w) => (w.length > 2 || /^\p{Lu}{2}$/u.test(w)) && /^[\p{L}\d]/u.test(w));
   const letters = words.slice(0, 2).map((w) => w[0].toUpperCase());
   // Название начинается латиницей — и вторая буква латинская: «DevOps и
   // инфраструктура» — «DI», а не «DИ».

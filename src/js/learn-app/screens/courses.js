@@ -195,7 +195,7 @@ const LATIN = { А: "A", Б: "B", В: "V", Г: "G", Д: "D", Е: "E", Ж: "Z", �
 
 /** Плитка-монограмма курса: первые буквы двух значимых слов, цвет — из названия. */
 export function monogram(title, size = "") {
-  const words = title.split(/[\s:—,/-]+/).filter((w) => w.length > 2 && /^[\p{L}\d]/u.test(w));
+  const words = title.split(/[\s:—,/-]+/).filter((w) => (w.length > 2 || /^\p{Lu}{2}$/u.test(w)) && /^[\p{L}\d]/u.test(w));
   const letters = words.slice(0, 2).map((w) => w[0].toUpperCase());
   if (/^[A-Z]/.test(letters[0] ?? "")) letters[1] = LATIN[letters[1]] ?? letters[1];
   let hash = 0;
