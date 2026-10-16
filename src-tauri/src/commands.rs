@@ -250,8 +250,35 @@ pub fn save_ai_settings(
         // Пустое поле ключа означает «не менять»: в окно он приходит замаскированным,
         // и сохранять маску вместо настоящего ключа нельзя.
         let moved = config.ai.endpoint.trim().trim_end_matches('/') != settings.endpoint.trim().trim_end_matches('/');
-        if !settings.api_key.is_empty() && !settings.api_key.starts_with('•') {
-            config.ai.api_key = settings.api_key;
+        let entered = settings.api_key.trim().to_string();
+        let typed = !entered.is_empty() && !entered.starts_with('•');
+        // Ключ узнаётся по виду. Ключ OpenRouter, вписанный, пока текущей
+        // моделью стоял мост, раньше записывался мосту: мост отвечал «нужен
+        // верный Bearer-токен», а модели OpenRouter оставались со старым,
+        // удалённым ключом — «User not found». Теперь ключ идёт своему
+        // сервису, и этот сервис становится текущим.
+        let other_service = typed
+            .then(|| crate::brains::service_of_key(&entered))
+            .flatten()
+            .filter(|marker| !settings.endpoint.contains(marker));
+        if let Some(marker) = other_service {
+            if let Some(brain) = crate::brains::give_key(&mut config, marker, &entered) {
+                log::info!("ключ сервиса {marker} сохранён для его моделей; включаю {}", brain.model);
+                config.ai.endpoint = brain.endpoint;
+                config.ai.model = brain.model;
+                config.ai.proxy = brain.proxy;
+                config.ai.api_key = entered;
+                crate::brains::remember(&mut config);
+                drop(config);
+                persist(&app, &state)?;
+                let config = state.config();
+                state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
+                return Ok(());
+            }
+        }
+        if typed {
+            log::info!("новый ключ для {} сохранён", settings.endpoint);
+            config.ai.api_key = entered;
         } else if moved {
             // Другой сервис, а ключ не введён — берём тот, что Ноа помнит для
             // него; чужой ключ прежнего сервиса сюда не годится.

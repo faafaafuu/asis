@@ -48,6 +48,17 @@ pub fn remember(config: &mut Config) {
     }
     let current = Brain::of(&config.ai);
     config.brains.retain(|brain| !brain.same(&current));
+    // Ключ один на сервис. Новый ключ — у всех запомненных моделей этого
+    // адреса: иначе «переключись на DeepSeek» доставал из памяти ключ,
+    // сохранённый вместе с моделью месяц назад, — истёкший или удалённый, —
+    // и OpenRouter отвечал «API key expired» и «User not found» сразу после
+    // того, как человек вписал новый.
+    if !current.api_key.is_empty() && !current.local() {
+        let endpoint = current.endpoint.trim().trim_end_matches('/').to_string();
+        for brain in config.brains.iter_mut().filter(|brain| brain.endpoint.trim().trim_end_matches('/') == endpoint) {
+            brain.api_key = current.api_key.clone();
+        }
+    }
     config.brains.insert(0, current);
     config.brains.truncate(KEEP);
 }
@@ -65,6 +76,33 @@ pub fn key_for(config: &Config, endpoint: &str) -> String {
         .find(|brain| brain.endpoint.trim().trim_end_matches('/') == wanted && !brain.api_key.is_empty())
         .map(|brain| brain.api_key.clone())
         .unwrap_or_default()
+}
+
+/// Чей это ключ — по виду: часть адреса сервиса. Не узнали — `None`.
+pub fn service_of_key(key: &str) -> Option<&'static str> {
+    let key = key.trim();
+    if key.starts_with("sk-or-") {
+        Some("openrouter.ai")
+    } else if key.starts_with("gsk_") {
+        Some("groq.com")
+    } else if key.starts_with("AIza") {
+        Some("googleapis.com")
+    } else if key.starts_with("sk-ant-") {
+        Some("anthropic.com")
+    } else {
+        None
+    }
+}
+
+/// Отдать ключ всем запомненным моделям сервиса. Отдаёт самую свежую из них
+/// — ту, что включить; моделей этого сервиса нет — `None`.
+pub fn give_key(config: &mut Config, marker: &str, key: &str) -> Option<Brain> {
+    let mut first = None;
+    for brain in config.brains.iter_mut().filter(|brain| brain.endpoint.contains(marker)) {
+        brain.api_key = key.to_string();
+        first.get_or_insert_with(|| brain.clone());
+    }
+    first
 }
 
 /// Модель в списке окна: одна строка, выбирается щелчком.
@@ -473,8 +511,11 @@ fn switch(app: &AppHandle, brain: Brain) -> String {
         config.ai.endpoint = brain.endpoint.clone();
         config.ai.model = brain.model.clone();
         config.ai.proxy = brain.proxy.clone();
-        if !brain.local() || !brain.api_key.is_empty() {
-            config.ai.api_key = brain.api_key.clone();
+        // Самый свежий ключ этого сервиса — он первым в списке запомненных.
+        let fresh = key_for(&config, &brain.endpoint);
+        let key = if fresh.is_empty() { brain.api_key.clone() } else { fresh };
+        if !brain.local() || !key.is_empty() {
+            config.ai.api_key = key;
         }
         remember(&mut config);
     }
@@ -494,6 +535,36 @@ fn switch(app: &AppHandle, brain: Brain) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_key_goes_to_its_own_service() {
+        assert_eq!(service_of_key("sk-or-v1-abc"), Some("openrouter.ai"));
+        assert_eq!(service_of_key("какой-то токен моста"), None);
+        let mut config = Config::default();
+        config.brains = vec![
+            Brain { endpoint: "http://127.0.0.2:8791/v1/chat/completions".into(), api_key: "bridge".into(), model: "claude-code-bridge:free".into(), ..Default::default() },
+            Brain { endpoint: "https://openrouter.ai/api/v1/chat/completions".into(), api_key: "old".into(), model: "deepseek".into(), ..Default::default() },
+        ];
+        let chosen = give_key(&mut config, "openrouter.ai", "sk-or-new").expect("есть модель OpenRouter");
+        assert_eq!(chosen.model, "deepseek");
+        assert_eq!(config.brains[0].api_key, "bridge");
+        assert_eq!(config.brains[1].api_key, "sk-or-new");
+    }
+
+    #[test]
+    fn a_new_key_reaches_every_model_of_the_service() {
+        let mut config = Config::default();
+        config.ai.provider = "http".into();
+        config.ai.endpoint = "https://openrouter.ai/api/v1/chat/completions".into();
+        config.ai.model = "deepseek/old".into();
+        config.ai.api_key = "old-key".into();
+        remember(&mut config);
+        config.ai.model = "glm/other".into();
+        config.ai.api_key = "new-key".into();
+        remember(&mut config);
+        assert!(config.brains.iter().all(|brain| brain.api_key == "new-key"));
+        assert_eq!(key_for(&config, "https://openrouter.ai/api/v1/chat/completions"), "new-key");
+    }
 
     fn brain(endpoint: &str, model: &str) -> Brain {
         Brain { endpoint: endpoint.into(), model: model.into(), ..Default::default() }
