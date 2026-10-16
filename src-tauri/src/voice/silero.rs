@@ -370,15 +370,17 @@ fn pieces(text: &str) -> Vec<String> {
         sentences.push(current);
     }
     let mut out: Vec<String> = Vec::new();
-    for sentence in sentences {
-        let sentence = sentence.trim();
+    for raw in sentences {
+        let ends_line = raw.ends_with('\n');
+        let sentence = raw.trim();
         if sentence.is_empty() {
             continue;
         }
         let grouped = out.len() > 1;
         match out.last_mut() {
             Some(last) if grouped && last.chars().count() + sentence.chars().count() < 300 => {
-                last.push(' ');
+                // Пункты списка — с новой строки: сервер ставит между ними паузу.
+                last.push(if ends_line { '\n' } else { ' ' });
                 last.push_str(sentence);
             }
             _ => out.push(sentence.to_string()),

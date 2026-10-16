@@ -215,16 +215,57 @@ pub fn stop() {
 /// и длинные тире. Часть этого синтезатор проговаривает буквально («тире»,
 /// «звёздочка»), часть просто спотыкает интонацию.
 fn clean(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut last_space = true;
+    // Построчно: строка — пункт списка или абзац, и звучать она должна
+    // отдельным предложением. Раньше переносы и маркеры превращались в
+    // пробелы, и «по шагам» из пяти пунктов читалось одной кашей — без
+    // единой точки, без паузы и без понижения голоса между шагами.
+    let lines: Vec<(bool, String)> = text
+        .lines()
+        .map(|line| (is_item(line), clean_line(line)))
+        .filter(|(_, line)| !line.is_empty())
+        .collect();
+    let count = lines.len();
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(at, (item, line))| {
+            // Заголовок перед пунктами — «По шагам:», остальное — с точкой.
+            let ends = line.ends_with(['.', '!', '?', '…', ':', ';']);
+            if ends || count == 1 {
+                line
+            } else if !item && at + 1 < count && line.chars().count() <= 30 && line.split_whitespace().count() <= 4 {
+                format!("{line}:")
+            } else {
+                format!("{line}.")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
-    for ch in text.chars() {
+/// Строка — пункт списка: начинается маркером или номером.
+fn is_item(line: &str) -> bool {
+    let line = line.trim_start();
+    let digits = line.chars().take_while(|c| c.is_ascii_digit()).count();
+    line.starts_with(['-', '•', '·', '*', '–', '—']) || (digits > 0 && digits < 3 && line[digits..].starts_with(['.', ')']))
+}
+
+/// Одна строка: без маркера списка, разметки и украшений.
+fn clean_line(line: &str) -> String {
+    let mut line = line.trim();
+    // Маркер пункта: «- », «• », «* », «1. », «2) », «#».
+    line = line.trim_start_matches(['-', '•', '·', '*', '#', '>', '–', '—']).trim_start();
+    let digits = line.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits > 0 && digits < 3 && line[digits..].starts_with(['.', ')']) {
+        line = line[digits + 1..].trim_start();
+    }
+    let mut out = String::with_capacity(line.len());
+    let mut last_space = true;
+    for ch in line.chars() {
         let ch = match ch {
-            // Маркеры списков и оформление — на паузу: перечисление должно
-            // звучать перечислением, а не сплошной строкой.
-            '·' | '•' | '—' | '–' | '*' | '`' => ' ',
+            '·' | '•' | '—' | '–' | '*' | '`' | '#' => ' ',
             '«' | '»' | '"' => ' ',
-            '\n' | '\r' | '\t' => ' ',
+            '\t' => ' ',
             other => other,
         };
         if ch == ' ' {
@@ -237,7 +278,14 @@ fn clean(text: &str) -> String {
         }
         out.push(ch);
     }
-    out.trim().to_string()
+    let out = out.trim().to_string();
+    // «ПО ШАГАМ» прописными синтезатор читает как аббревиатуру по буквам.
+    if out.chars().filter(|c| c.is_alphabetic()).count() > 3 && out.chars().filter(|c| c.is_alphabetic()).all(char::is_uppercase) {
+        let lower = out.to_lowercase();
+        let mut chars = lower.chars();
+        return chars.next().map(|first| first.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default();
+    }
+    out
 }
 
 #[cfg(test)]
@@ -250,8 +298,18 @@ mod tests {
             clean("Альбедо — доля отражённого света"),
             "Альбедо доля отражённого света"
         );
-        assert_eq!(clean("· первый\n· второй"), "первый второй");
+        assert_eq!(clean("· первый\n· второй"), "первый.\nвторой.");
         assert_eq!(clean("он сказал «да»"), "он сказал да");
+    }
+
+    #[test]
+    fn steps_are_read_as_steps() {
+        let text = "ПО ШАГАМ\n- Go-приложение на порту 8080 выполняет основную работу\n- Sidecar-логгер перехватывает его stdout\n1. Логгер отправляет логи в CloudWatch";
+        assert_eq!(
+            clean(text),
+            "По шагам:\nGo-приложение на порту 8080 выполняет основную работу.\nSidecar-логгер перехватывает его stdout.\nЛоггер отправляет логи в CloudWatch."
+        );
+        assert_eq!(clean("Короткий ответ без точки"), "Короткий ответ без точки");
     }
 
     #[test]

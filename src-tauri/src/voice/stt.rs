@@ -66,7 +66,16 @@ const MAX_GAIN: f32 = 8.0;
 /// Между словами человек молчит до полусекунды — на запятой, на вдохе, подбирая
 /// слово. Меньше секунды здесь означало бы рвать фразу посередине и отвечать на
 /// половину вопроса. Больше — заметная пауза перед каждым ответом.
-const END_OF_PHRASE_MS: u64 = 1000;
+///
+/// Секунды не хватало: человек думает вслух, делает паузу посреди мысли — и
+/// Ноа отвечала на половину. Полторы секунды, а в длинной фразе — две: чем
+/// дольше говорят, тем длиннее паузы на подумать. Оборванное на «и», «что»,
+/// предлоге доклеивается следующей фразой (см. `unfinished` в lib.rs).
+const END_OF_PHRASE_MS: u64 = 1500;
+
+/// Дольше скольких секунд речи фраза считается длинной.
+const LONG_SPEECH_MS: u64 = 4000;
+const END_OF_LONG_PHRASE_MS: u64 = 2000;
 
 /// В уроке с Ноа человек пересказывает и думает вслух: паузы между мыслями
 /// длиннее, и секунда рвала пересказ на середине. Там конец — после 2,6 с.
@@ -720,7 +729,9 @@ impl Segmenter {
                 // в одно, и расшифровка стала бы хуже, а не лучше.
                 self.silence += part.len();
                 self.utterance.extend_from_slice(part);
-                if ms(self.silence, rate) >= end_of_phrase() {
+                let spoken = ms(self.utterance.len().saturating_sub(self.silence), rate);
+                let needed = if spoken >= LONG_SPEECH_MS { end_of_phrase().max(END_OF_LONG_PHRASE_MS) } else { end_of_phrase() };
+                if ms(self.silence, rate) >= needed {
                     self.finish();
                 }
             } else {
@@ -1061,8 +1072,11 @@ mod tests {
         segmenter.feed(&speech, 16_000);
         assert!(segmenter.speaking, "громкий отрезок должен считаться речью");
 
-        // Секунда тишины после неё закрывает фразу.
+        // Секунда тишины — ещё пауза на подумать: фраза не закрыта.
         segmenter.feed(&vec![0.0_f32; 16_000], 16_000);
+        assert!(rx.try_recv().is_err(), "секунда паузы не должна обрывать фразу");
+        // Ещё полсекунды — и фраза закрывается.
+        segmenter.feed(&vec![0.0_f32; 8_000], 16_000);
         assert!(
             matches!(rx.try_recv(), Ok(Heard::Phrase(_))),
             "фраза должна была уйти в канал"

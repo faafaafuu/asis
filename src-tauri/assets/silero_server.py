@@ -100,11 +100,16 @@ def speakable(text: str) -> str:
 def chunks(text: str, limit: int = 800):
     """Длинный текст — кусками по границам предложений: у модели есть предел."""
     part = ""
-    for sentence in re.split(r"(?<=[.!?…])\s+", text.strip()):
+    pieces = re.split(r"(?<=[.!?…:])(\s+)", text.strip())
+    # Разделители сохраняются: перенос строки — граница пункта, по ней
+    # marked() ставит паузу. Склеенные пробелом пункты звучали одной кашей.
+    for at in range(0, len(pieces), 2):
+        sentence = pieces[at]
+        glue = "\n" if at > 0 and "\n" in pieces[at - 1] else " "
         if part and len(part) + len(sentence) + 1 > limit:
             yield part
             part = ""
-        part = f"{part} {sentence}".strip()
+        part = f"{part}{glue}{sentence}" if part else sentence
     if part:
         yield part
 
@@ -121,7 +126,9 @@ def marked(part: str, rate: float) -> str:
         sentences = [s for s in re.split(r"(?<=[.!?…])\s+", paragraph.strip()) if s]
         if sentences:
             paragraphs.append("".join(f"<s>{escape(s)}</s>" for s in sentences))
-    body = '<break time="350ms"/>'.join(paragraphs) or escape(part)
+    # Между пунктами и абзацами — заметная пауза: шаг закончился, начинается
+    # следующий.
+    body = '<break time="550ms"/>'.join(paragraphs) or escape(part)
     return f'<speak><prosody rate="{rate_word(rate)}">{body}</prosody></speak>'
 
 

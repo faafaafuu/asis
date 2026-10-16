@@ -2106,18 +2106,36 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
             // человек принимает за «зависла». Дальше — молча, чтобы музыка и
             // чужая речь не превратились в «не расслышала» без конца.
             let mut asked_again = false;
-            for heard in phrases {
+            // Начало фразы, оборванной на «и», «что», предлоге: ждём
+            // продолжения и отвечаем на целое.
+            let mut pending: Option<String> = None;
+            loop {
+                let heard = if pending.is_some() {
+                    match phrases.recv_timeout(std::time::Duration::from_millis(CONTINUE_WAIT_MS)) {
+                        Ok(heard) => Some(heard),
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                } else {
+                    match phrases.recv() {
+                        Ok(heard) => Some(heard),
+                        Err(_) => break,
+                    }
+                };
                 if !CONVERSATION.load(Ordering::SeqCst) {
                     break;
                 }
 
                 let wav = match heard {
-                    voice::stt::Heard::LongSilence => {
+                    Some(voice::stt::Heard::LongSilence) => {
                         log::info!("тишина затянулась — разговор окончен");
                         break;
                     }
-                    voice::stt::Heard::Phrase(wav) => wav,
+                    Some(voice::stt::Heard::Phrase(wav)) => Some(wav),
+                    // Продолжения не было — отвечаем на то, что успели сказать.
+                    None => None,
                 };
+                let waited_out = wav.is_none();
 
                 // Пока думаем и отвечаем — не слушаем: иначе в следующую фразу
                 // попадёт собственный ответ.
@@ -2125,7 +2143,22 @@ pub(crate) fn start_conversation(app: &tauri::AppHandle) {
                 let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", false);
 
                 begin_turn();
-                match hear(&app, wav) {
+                let fresh = wav.and_then(|wav| hear(&app, wav));
+                let joined = match (pending.take(), fresh) {
+                    (Some(start), Some(rest)) => Some(format!("{start} {rest}")),
+                    (Some(start), None) => Some(start),
+                    (None, text) => text,
+                };
+                if let Some(text) = joined.as_deref().filter(|text| !waited_out && unfinished(text)) {
+                    log::info!("«{text}» — фраза оборвана, жду продолжение");
+                    pending = Some(text.to_string());
+                    end_turn();
+                    voice::stt::pause_conversation(false);
+                    overlay::show_hud(&app, "listening");
+                    let _ = app.emit_to(overlay::POPUP_LABEL, "voice:listening", true);
+                    continue;
+                }
+                match joined {
                     Some(text) if is_farewell(&text, &app.state::<AppState>().wake_name()) => {
                         log::info!("попрощались («{text}») — разговор окончен");
                         if alarms::stop() {
@@ -3148,6 +3181,36 @@ fn lone_word(text: &str) -> bool {
     words == 1 && fragment(text)
 }
 
+/// Сколько ждать продолжения оборванной фразы.
+const CONTINUE_WAIT_MS: u64 = 3500;
+
+/// Фраза оборвана на полуслове: кончается союзом, предлогом, «типа», «вот»,
+/// запятой или тире. Человек сделал паузу посреди мысли — отвечать рано.
+fn unfinished(text: &str) -> bool {
+    let trimmed = text.trim_end();
+    if trimmed.ends_with([',', '—', '–', '-', ':']) {
+        return true;
+    }
+    // Вопрос со знаком — законченный. Точку же распознавание ставит и на
+    // паузе посреди мысли, поэтому дальше смотрим на последнее слово.
+    if trimmed.ends_with('?') {
+        return false;
+    }
+    let last = trimmed
+        .trim_end_matches(|c: char| !c.is_alphanumeric())
+        .rsplit(|c: char| !c.is_alphanumeric())
+        .next()
+        .unwrap_or_default()
+        .to_lowercase();
+    const DANGLING: &[&str] = &[
+        "и", "а", "но", "или", "что", "чтобы", "потому", "поэтому", "если", "когда", "который", "которая",
+        "которое", "которые", "как", "где", "куда", "в", "во", "на", "с", "со", "к", "ко", "по", "для", "из", "от",
+        "до", "за", "про", "об", "о", "у", "при", "без", "над", "под", "ну", "типа", "вот", "тоже", "допустим",
+        "например", "значит", "чем", "либо",
+    ];
+    DANGLING.contains(&last.as_str())
+}
+
 fn fragment(text: &str) -> bool {
     const GREETINGS: &[&str] = &["привет", "здравств", "здоров", "хай", "салют", "добр"];
     let lower = text.to_lowercase();
@@ -3508,4 +3571,20 @@ mod farewell_tests {
         assert!(!fragment("что такое альбедо"));
     }
 
+}
+
+#[cfg(test)]
+mod unfinished_tests {
+    use super::unfinished;
+
+    #[test]
+    fn a_pause_mid_thought_is_not_the_end() {
+        assert!(unfinished("Открой мне, пожалуйста, и"));
+        assert!(unfinished("Я хотел спросить, потому что."));
+        assert!(unfinished("Найди мне билеты в"));
+        assert!(unfinished("Короче, типа,"));
+        assert!(!unfinished("Сколько ехать до Тверской?"));
+        assert!(!unfinished("Открой обучение."));
+        assert!(!unfinished("Что это?"));
+    }
 }
