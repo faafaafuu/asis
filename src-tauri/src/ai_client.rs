@@ -56,6 +56,14 @@ pub enum AiError {
     Config(String),
 }
 
+/// Сервис модели отказал в доступе (401/403): ключ истёк, не задан или
+/// адрес не пускают. Отметку снимает тот, кто переключит модель на запасную.
+static DENIED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn take_denied() -> bool {
+    DENIED.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
 impl AiError {
     /// Повторяем только то, что имеет шанс пройти со второй попытки.
     ///
@@ -103,6 +111,21 @@ impl AiError {
                 "У сервиса модели кончились деньги на счету. Пополните счёт \
                  или выберите модель на этом компьютере в настройках"
                     .to_string()
+            }
+            // Под «не принял ключ» раньше пряталось три разных поломки, и было
+            // непонятно, что делать. Называем ту, что случилась.
+            AiError::Refused(401, message) if message.to_lowercase().contains("expired") => {
+                "Ключ сервиса истёк — создайте новый, без срока действия, и впишите его в настройках".to_string()
+            }
+            AiError::Refused(401, message) if message.to_lowercase().contains("missing authentication") => {
+                "Ключ сервиса не задан — впишите его в настройках".to_string()
+            }
+            AiError::Refused(403, message)
+                if ["security policy", "region", "country", "not available in your"]
+                    .iter()
+                    .any(|mark| message.to_lowercase().contains(mark)) =>
+            {
+                "Сервис не пускает с этого адреса — включите VPN или прокси в настройках".to_string()
             }
             AiError::Refused(401 | 403, _) => {
                 "Сервис не принял ключ — проверьте его в настройках".to_string()
@@ -693,6 +716,9 @@ impl HttpProvider {
                 .unwrap_or_else(|| body.chars().take(200).collect());
             let message = message.trim().to_string();
             log::warn!("отказ сервиса {status}: {message}");
+            if matches!(status.as_u16(), 401 | 403) {
+                DENIED.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             return Err(AiError::Refused(status.as_u16(), message));
         }
         // Заголовки приходят сразу, а текст — когда модель договорит: время
@@ -1631,6 +1657,16 @@ impl AiProvider for WikipediaProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_refusals_name_the_real_cause() {
+        let expired = AiError::Refused(401, "API key expired.".into()).user_text("");
+        assert!(expired.contains("истёк"), "{expired}");
+        let missing = AiError::Refused(401, "Missing Authentication header".into()).user_text("");
+        assert!(missing.contains("не задан"), "{missing}");
+        let region = AiError::Refused(403, "Access denied by security policy.".into()).user_text("");
+        assert!(region.contains("VPN"), "{region}");
+    }
 
     #[test]
     fn a_cut_answer_ends_on_a_whole_sentence() {

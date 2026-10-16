@@ -2437,7 +2437,7 @@ fn speak_with_hud(app: &tauri::AppHandle, text: String, wait: bool) {
     if !app.state::<AppState>().config().voice.enabled {
         return;
     }
-    let text = spoken::plain(&text);
+    let text = with_fallback(app, spoken::plain(&text));
     log::info!("говорю: «{}»", text.chars().take(90).collect::<String>());
 
     // Колонок и наушников нет — голос ушёл бы в пустоту, и человек видел бы
@@ -2913,13 +2913,25 @@ pub(crate) fn set_show_window(app: &tauri::AppHandle, show: bool) -> String {
 /// Ответ на распоряжение: с окном или только голосом — как выбрал человек.
 #[cfg(desktop)]
 fn respond(app: &tauri::AppHandle, text: String) {
-    let text = spoken::plain(&text);
+    let text = with_fallback(app, spoken::plain(&text));
     if show_window(app) {
         announce(app, text, true);
     } else if turn_cancelled() {
         log::info!("ответ пришёл после Esc — не произношу: «{text}»");
     } else {
         speak_with_hud(app, text, true);
+    }
+}
+
+/// Сервис модели только что отказал по ключу или адресу — перейти на
+/// запасную модель и сказать об этом к ответу, а не молчать в следующий раз.
+fn with_fallback(app: &tauri::AppHandle, text: String) -> String {
+    if !ai_client::take_denied() {
+        return text;
+    }
+    match brains::fall_back(app) {
+        Some(switched) => format!("{}. {switched}", text.trim().trim_end_matches('.')),
+        None => text,
     }
 }
 

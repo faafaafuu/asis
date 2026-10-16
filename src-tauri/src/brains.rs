@@ -422,6 +422,49 @@ pub async fn voice(app: &AppHandle, said: &str) -> Option<String> {
     }
 }
 
+/// Основная модель отказала по ключу или адресу — перейти на запасную из
+/// знакомых: мост (туннелем или через сайт), иначе своя модель в Ollama.
+/// Отдаёт, что сказать, или `None`, если переходить некуда.
+pub fn fall_back(app: &AppHandle) -> Option<String> {
+    let (current, brains, site) = {
+        let state = app.state::<AppState>();
+        let config = state.config();
+        (Brain::of(&config.ai), config.brains.clone(), site_bridge(&config))
+    };
+    let bridge = |brain: &Brain| brain.endpoint.contains(":8791") || brain.endpoint.contains("/api/noa/bridge") || brain.model.contains("bridge");
+    let other = |brain: &Brain| brain.endpoint.trim_end_matches('/') != current.endpoint.trim_end_matches('/');
+    // Только то, что отвечает сейчас: туннель к мосту рвётся каналом каждые
+    // несколько минут, и переключение на лежащий мост было бы той же тишиной.
+    let backup = brains
+        .iter()
+        .find(|brain| bridge(brain) && other(brain) && reachable(&brain.endpoint))
+        .cloned()
+        .or_else(|| site.filter(|brain| other(brain) && reachable(&brain.endpoint)))
+        .or_else(|| brains.iter().find(|brain| brain.local() && other(brain)).cloned())?;
+    log::warn!("модель «{}» отказала в доступе — перехожу на «{}»", current.model, backup.model);
+    switch(app, backup.clone());
+    Some(format!("Переключилась на {} — {}, повторите вопрос.", spoken_name(&backup.model), kind(&backup)))
+}
+
+/// Отвечает ли адрес прямо сейчас: соединение за полторы секунды.
+fn reachable(endpoint: &str) -> bool {
+    use std::net::ToSocketAddrs;
+    let rest = endpoint.split("://").nth(1).unwrap_or(endpoint);
+    let host = rest.split('/').next().unwrap_or_default();
+    let with_port = if host.contains(':') {
+        host.to_string()
+    } else if endpoint.starts_with("https") {
+        format!("{host}:443")
+    } else {
+        format!("{host}:80")
+    };
+    with_port
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut addrs| addrs.next())
+        .is_some_and(|addr| std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(1500)).is_ok())
+}
+
 fn switch(app: &AppHandle, brain: Brain) -> String {
     let state = app.state::<AppState>();
     {
