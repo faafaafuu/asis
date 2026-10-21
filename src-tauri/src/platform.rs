@@ -486,6 +486,136 @@ pub async fn video_status(id: &str) -> Result<Value, String> {
     get_with(&url, &format!("/api/noa/videos/{}?_={}", urlencode(id), random_hex()), &token).await
 }
 
+/// Свой сайт отвечает через зеркало целиком: напрямую канал рвёт ответ на
+/// первых килобайтах, и 4 МБ ролика мелкими кусками шли минуты, а зеркало
+/// отдаёт их за пару секунд. Метка `_` — чтобы зеркало не держало копию.
+/// `None` — сайт не свой или зеркало не ответило: тогда напрямую.
+async fn through_mirror(url: &str, path: &str, token: &str) -> Option<Vec<u8>> {
+    let own = [crate::config::DEFAULT_PLATFORM_URL, crate::config::OLD_PLATFORM_URL, MIRROR_URL].contains(&url);
+    if !own {
+        return None;
+    }
+    let client = crate::net::client_builder().timeout(Duration::from_secs(90)).build().ok()?;
+    let joiner = if path.contains('?') { '&' } else { '?' };
+    let whole = format!("{MIRROR_URL}{path}{joiner}_={}", random_hex());
+    match client.get(&whole).bearer_auth(token).send().await {
+        Ok(response) if response.status().is_success() => match response.bytes().await {
+            Ok(data) if !data.is_empty() => Some(data.to_vec()),
+            Ok(_) => {
+                log::info!("через зеркало пришло пустое: {path}");
+                None
+            }
+            Err(err) => {
+                log::info!("через зеркало оборвалось: {path}: {err}");
+                None
+            }
+        },
+        Ok(response) => {
+            log::info!("через зеркало: {path}: сайт ответил {}", response.status());
+            None
+        }
+        Err(err) => {
+            log::info!("через зеркало не пришло: {path}: {err}");
+            None
+        }
+    }
+}
+
+/* ── Путеводители ─────────────────────────────────────────────────────── */
+
+/// Путеводители аккаунта — карточками.
+pub async fn guide_cards() -> Result<Value, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Err("Путеводители живут в аккаунте — войдите в аккаунт NOAH.".into());
+    }
+    let reply = get_with(&url, &format!("/api/noa/guides?_={}", random_hex()), &token).await?;
+    Ok(reply["guides"].clone())
+}
+
+/// Путеводитель целиком — через зеркало, он весит десятки килобайт.
+pub async fn guide_get(id: &str) -> Result<Value, String> {
+    let (url, token) = settings();
+    let path = format!("/api/noa/guides/{}", urlencode(id));
+    let reply = match through_mirror(&url, &path, &token).await {
+        Some(bytes) => serde_json::from_slice::<Value>(&bytes).map_err(|err| format!("путеводитель пришёл битым: {err}"))?,
+        None => get_with(&url, &format!("{path}?_={}", random_hex()), &token).await?,
+    };
+    if let Some(error) = reply["error"].as_str() {
+        return Err(error.to_string());
+    }
+    Ok(reply["guide"].clone())
+}
+
+/// Картинка путеводителя.
+pub async fn guide_picture(id: &str, file: &str) -> Result<Vec<u8>, String> {
+    let (url, token) = settings();
+    let path = format!("/api/noa/guides/{}/pictures/{}", urlencode(id), urlencode(file));
+    if let Some(bytes) = through_mirror(&url, &path, &token).await {
+        return Ok(bytes);
+    }
+    let response = client()?
+        .get(format!("{url}{path}"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|err| format!("картинка не пришла: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("картинка не пришла: сайт ответил {}", response.status()));
+    }
+    response.bytes().await.map(|b| b.to_vec()).map_err(|err| format!("картинка оборвалась: {err}"))
+}
+
+pub async fn guide_start(goal: &str) -> Result<String, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Err("Путеводители собираются на сервере — войдите в аккаунт NOAH.".into());
+    }
+    let reply = post(&url, "/api/noa/guides", &token, &json!({ "goal": goal })).await?;
+    reply["id"].as_str().map(str::to_string).ok_or_else(|| "сайт не прислал путеводитель".into())
+}
+
+pub async fn guide_resume(id: &str, wish: Option<&str>) -> Result<(), String> {
+    let (url, token) = settings();
+    post(&url, &format!("/api/noa/guides/{}/resume", urlencode(id)), &token, &json!({ "wish": wish })).await.map(|_| ())
+}
+
+pub async fn guide_stop() -> Result<(), String> {
+    let (url, token) = settings();
+    post(&url, "/api/noa/guides/stop", &token, &json!({})).await.map(|_| ())
+}
+
+pub async fn guide_remove(id: &str) -> Result<(), String> {
+    let (url, token) = settings();
+    post(&url, &format!("/api/noa/guides/{}/remove", urlencode(id)), &token, &json!({})).await.map(|_| ())
+}
+
+/// Путеводитель с устройства — в аккаунт, текстом и кусками: канал рвёт
+/// длинные запросы. Картинки сервер берёт заново по тем же статьям.
+pub async fn guide_upload(id: &str, text: &str) -> Result<(), String> {
+    let (url, token) = settings();
+    // Сервер считает длину строки JavaScript — единицами UTF-16.
+    let size = text.encode_utf16().count();
+    let (mut at, mut part, mut units) = (0usize, String::new(), 0usize);
+    let path = format!("/api/noa/guides/{}/part", urlencode(id));
+    let mut chars = text.chars().peekable();
+    while chars.peek().is_some() {
+        while let Some(&ch) = chars.peek() {
+            if units + ch.len_utf16() > 5000 {
+                break;
+            }
+            part.push(ch);
+            units += ch.len_utf16();
+            chars.next();
+        }
+        post(&url, &path, &token, &json!({ "at": at, "text": part, "size": size })).await?;
+        at += units;
+        part.clear();
+        units = 0;
+    }
+    Ok(())
+}
+
 /// Файл ролика. Канал из России рвёт длинные ответы, поэтому — кусками по
 /// диапазону байт, по шесть сразу, каждый своим соединением. Сперва крупно;
 /// рвётся — мелко.
@@ -496,22 +626,8 @@ pub async fn video_bytes(id: &str, file: &str) -> Result<Vec<u8>, String> {
         .pool_max_idle_per_host(0)
         .build()
         .map_err(|err| err.to_string())?;
-    // Свой сайт — сначала через зеркало: напрямую канал рвёт ответ на первых
-    // килобайтах, и 4 МБ мелкими кусками шли минуты, а зеркало отдаёт их
-    // целиком за пару секунд. Метка `_` — чтобы зеркало не держало копию.
-    let own = [crate::config::DEFAULT_PLATFORM_URL, crate::config::OLD_PLATFORM_URL, MIRROR_URL].contains(&url.as_str());
-    if own {
-        let whole = format!("{MIRROR_URL}/api/noa/videos/{}/{file}?_={}", urlencode(id), random_hex());
-        let sent = client.get(&whole).bearer_auth(&token).timeout(Duration::from_secs(90)).send().await;
-        match sent {
-            Ok(response) if response.status().is_success() => match response.bytes().await {
-                Ok(data) if !data.is_empty() => return Ok(data.to_vec()),
-                Ok(_) => log::info!("ролик через зеркало пришёл пустым"),
-                Err(err) => log::info!("ролик через зеркало оборвался: {err}"),
-            },
-            Ok(response) => log::info!("ролик через зеркало: сайт ответил {}", response.status()),
-            Err(err) => log::info!("ролик через зеркало не пришёл: {err}"),
-        }
+    if let Some(data) = through_mirror(&url, &format!("/api/noa/videos/{}/{file}", urlencode(id)), &token).await {
+        return Ok(data);
     }
     let path = format!("{url}/api/noa/videos/{}/{file}", urlencode(id));
     let fetch = {
@@ -579,6 +695,19 @@ pub async fn course_builds() -> Result<Value, String> {
 pub async fn stop_build(id: &str) -> Result<(), String> {
     let (url, token) = settings();
     post(&url, &format!("/api/noa/builds/{id}/stop"), &token, &json!({})).await.map(|_| ())
+}
+
+/// Продолжить остановленную или упавшую сборку — с последней готовой темы.
+pub async fn resume_build(id: &str) -> Result<Value, String> {
+    let (url, token) = settings();
+    let reply = post(&url, &format!("/api/noa/builds/{id}/resume"), &token, &json!({})).await?;
+    Ok(reply["build"].clone())
+}
+
+/// Убрать сборку из списка; собранные темы остаются в курсе.
+pub async fn remove_build(id: &str) -> Result<(), String> {
+    let (url, token) = settings();
+    post(&url, &format!("/api/noa/builds/{id}/remove"), &token, &json!({})).await.map(|_| ())
 }
 
 /// Сверка с курсами аккаунта сейчас — «потянуть вниз» на экране курсов.

@@ -1930,6 +1930,18 @@ pub async fn learn_build_stop(id: String) -> Result<(), String> {
     crate::platform::stop_build(&id).await
 }
 
+/// Продолжить остановленную или упавшую сборку.
+#[tauri::command]
+pub async fn learn_build_resume(id: String) -> Result<serde_json::Value, String> {
+    crate::platform::resume_build(&id).await
+}
+
+/// Убрать сборку из списка.
+#[tauri::command]
+pub async fn learn_build_remove(id: String) -> Result<(), String> {
+    crate::platform::remove_build(&id).await
+}
+
 /* ── Ролики к урокам ──────────────────────────────────────────────────── */
 
 /// Заказать ролик по разделу урока (`section`) или по всей теме.
@@ -1968,34 +1980,34 @@ pub async fn learn_video_file(app: AppHandle, id: String, poster: Option<bool>) 
 /// Путеводители для лобби обучения — карточки без текста.
 #[tauri::command]
 pub async fn guides_list(app: AppHandle) -> Vec<crate::guides::Card> {
-    crate::guides::list(&app)
+    crate::guides::list(&app).await
 }
 
 #[tauri::command]
 pub async fn guide_get(app: AppHandle, id: String) -> Result<crate::guides::Guide, String> {
-    crate::guides::get(&app, &id)
+    crate::guides::get(&app, &id).await
 }
 
 /// Начать путеводитель по просьбе — он пишется сам, раздел за разделом.
 #[tauri::command]
 pub async fn guide_build(app: AppHandle, goal: String) -> Result<String, String> {
-    crate::guides::start(&app, &goal)
+    crate::guides::start(&app, &goal).await
 }
 
 /// Дописать прерванный путеводитель или добавить раздел (`wish`).
 #[tauri::command]
 pub async fn guide_resume(app: AppHandle, id: String, wish: Option<String>) -> Result<(), String> {
-    crate::guides::resume(&app, &id, wish)
+    crate::guides::resume(&app, &id, wish).await
 }
 
 #[tauri::command]
-pub async fn guide_stop() {
-    crate::guides::stop();
+pub async fn guide_stop() -> Result<(), String> {
+    crate::guides::stop().await
 }
 
 #[tauri::command]
 pub async fn guide_delete(app: AppHandle, id: String) -> Result<(), String> {
-    crate::guides::delete(&app, &id)
+    crate::guides::delete(&app, &id).await
 }
 
 /// Статья Википедии, откуда картинка путеводителя, — в браузере. Только
@@ -2021,7 +2033,7 @@ pub async fn guide_wanted() -> Option<String> {
 /// Картинка путеводителя строкой data:.
 #[tauri::command]
 pub async fn guide_picture(app: AppHandle, id: String, file: String) -> Result<String, String> {
-    crate::guides::picture(&app, &id, &file)
+    crate::guides::picture(&app, &id, &file).await
 }
 
 /* ── Практика в терминале ──────────────────────────────────────────────── */

@@ -152,6 +152,36 @@ register("profile", (screen) => {
         });
         row.append(stop);
       }
+      if (build.status === "failed" || build.status === "stopped") {
+        const tools = el("div", "build-tools");
+        const resume = el("button", "btn btn--plain", "Продолжить");
+        const remove = el("button", "btn btn--plain", "Убрать");
+        resume.addEventListener("click", async () => {
+          resume.disabled = remove.disabled = true;
+          try {
+            await call("learn_build_resume", { id: build.id }, { slow: true });
+            toast("Сборка продолжается — с последней готовой темы");
+            await store.builds(true);
+            nav.refresh();
+          } catch (err) {
+            toast(String(err));
+            resume.disabled = remove.disabled = false;
+          }
+        });
+        remove.addEventListener("click", async () => {
+          resume.disabled = remove.disabled = true;
+          try {
+            await call("learn_build_remove", { id: build.id }, { slow: true });
+            await store.builds(true);
+            row.remove();
+          } catch (err) {
+            toast(String(err));
+            resume.disabled = remove.disabled = false;
+          }
+        });
+        tools.append(resume, remove);
+        row.append(tools);
+      }
       make.append(row);
     }
     make.append(

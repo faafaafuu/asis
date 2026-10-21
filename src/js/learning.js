@@ -417,7 +417,7 @@ function courseBuilder(open = false) {
     try {
       await api.invoke("learn_build", { goal: text, quality: quality.value });
       goal.value = "";
-      watchBuilds(status, stop);
+      watchBuilds(status, stop, past);
     } catch (err) {
       status.textContent = String(err);
     }
@@ -429,14 +429,16 @@ function courseBuilder(open = false) {
   stop.hidden = true;
   const row = el("div", "actions");
   row.append(go, stop);
+  const past = el("div", "builder__past");
   box.append(
     el("p", "muted", "Ноа составит план и напишет курс тема за темой на сервере через ваш мост: урок, понятия, карточки, задачи, мини-экзамен. Курс появится здесь сам — по первой теме можно учиться сразу."),
     goal,
     quality,
     row,
     status,
+    past,
   );
-  watchBuilds(status, stop);
+  watchBuilds(status, stop, past);
   return box;
 }
 
@@ -470,13 +472,46 @@ function accountCard() {
   return box;
 }
 
+/**
+ * Упавшие и остановленные сборки: причина словами, «Продолжить» — с
+ * последней готовой темы, «Убрать» — из списка (собранные темы остаются).
+ */
+function pastBuilds(past, builds, again) {
+  past.replaceChildren();
+  for (const build of builds.filter((b) => b.status === "failed" || b.status === "stopped")) {
+    const item = el("div", "builder__item");
+    const head = el("div", "builder__item-head");
+    head.append(el("b", "", build.title || build.goal || "Курс"), el("span", "muted", build.status === "failed" ? "ошибка" : "остановлена"));
+    const tools = el("div", "actions");
+    const resume = button("Продолжить", async () => {
+      resume.disabled = remove.disabled = true;
+      try {
+        await api.invoke("learn_build_resume", { id: build.id });
+        again();
+      } catch (err) {
+        item.querySelector(".builder__why").textContent = String(err);
+        resume.disabled = remove.disabled = false;
+      }
+    }, true);
+    const remove = button("Убрать", async () => {
+      resume.disabled = remove.disabled = true;
+      await api.invoke("learn_build_remove", { id: build.id }).catch(() => {});
+      item.remove();
+    }, true);
+    tools.append(resume, remove);
+    item.append(head, el("p", "builder__why muted", build.message || ""), tools);
+    past.append(item);
+  }
+}
+
 /** Ход сборки — пока окно на месте; готовая тема — сразу в списке. */
 let buildTimer = 0;
-function watchBuilds(status, stop) {
+function watchBuilds(status, stop, past) {
   clearTimeout(buildTimer);
   const tick = async () => {
     if (!status.isConnected) return;
     const builds = await api.invoke("learn_builds").catch(() => []);
+    pastBuilds(past, Array.isArray(builds) ? builds : [], () => watchBuilds(status, stop, past));
     const running = (Array.isArray(builds) ? builds : []).find((b) => b.status === "running");
     const last = Array.isArray(builds) ? builds[0] : null;
     if (running) {

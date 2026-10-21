@@ -133,6 +133,10 @@ export function mountNoa({ route, db, Fail, readJson }) {
   if (!db.prepare("SELECT name FROM pragma_table_info('noa_builds') WHERE name = 'quality'").get()) {
     db.exec("ALTER TABLE noa_builds ADD COLUMN quality TEXT NOT NULL DEFAULT 'sonnet'");
   }
+  // Убранная из списка сборка: курс, если он собрался хоть частью, остаётся.
+  if (!db.prepare("SELECT name FROM pragma_table_info('noa_builds') WHERE name = 'hidden'").get()) {
+    db.exec("ALTER TABLE noa_builds ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
+  }
 
   /**
    * Номер человека — строкой. Число node:sqlite передаёт как дробное, и в
@@ -348,7 +352,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
 
   route("GET", /^\/api\/noa\/builds$/, ({ user: who, tokenUser }) => {
     const user = need(who ?? tokenUser);
-    const rows = db.prepare("SELECT * FROM noa_builds WHERE user_id = ? ORDER BY created DESC LIMIT 5").all(user.id);
+    const rows = db.prepare("SELECT * FROM noa_builds WHERE user_id = ? AND hidden = 0 ORDER BY created DESC LIMIT 5").all(user.id);
     return { builds: rows.map(buildRow), version: coursesVersion(user.id) };
   });
 
@@ -359,6 +363,29 @@ export function mountNoa({ route, db, Fail, readJson }) {
     const control = running.get(row.id);
     if (control) control.stop = true;
     else if (row.status === "running") updateBuild(row.id, { status: "stopped", message: "Сборка остановлена." });
+    return { ok: true };
+  });
+
+  // Продолжить остановленную или упавшую — с последней готовой темы.
+  route("POST", /^\/api\/noa\/builds\/([0-9a-f-]{36})\/resume$/, ({ user: who, tokenUser, match }) => {
+    const user = bridgeUser(who ?? tokenUser);
+    const row = db.prepare("SELECT * FROM noa_builds WHERE id = ? AND user_id = ?").get(match[1], user.id);
+    if (!row) throw new Fail(404, "Такой сборки нет.");
+    if (row.status === "running" || row.status === "done") return { build: buildRow(row) };
+    const active = db.prepare("SELECT title FROM noa_builds WHERE user_id = ? AND status = 'running'").get(user.id);
+    if (active) throw new Fail(409, `Уже собирается курс${active.title ? ` «${active.title}»` : ""} — дождитесь его или остановите.`);
+    updateBuild(row.id, { status: "running", hidden: 0, message: "Продолжаю сборку" });
+    runBuild(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(row.id));
+    return { build: buildRow(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(row.id)) };
+  });
+
+  // Убрать из списка законченную, остановленную или упавшую.
+  route("POST", /^\/api\/noa\/builds\/([0-9a-f-]{36})\/remove$/, ({ user: who, tokenUser, match }) => {
+    const user = need(who ?? tokenUser);
+    const row = db.prepare("SELECT * FROM noa_builds WHERE id = ? AND user_id = ?").get(match[1], user.id);
+    if (!row) throw new Fail(404, "Такой сборки нет.");
+    if (row.status === "running") throw new Fail(409, "Сборка идёт — сначала остановите её.");
+    updateBuild(row.id, { hidden: 1 });
     return { ok: true };
   });
 
@@ -424,8 +451,9 @@ export function mountNoa({ route, db, Fail, readJson }) {
     return { ok: true, ...writeProgress(db, user.id, data, Fail) };
   });
 
-  // Ролики к урокам (video.mjs) пишет та же модель через мост и только для владельца.
-  return { bridgeChat, bridgeUser };
+  // Ролики к урокам (video.mjs) и путеводители (guides.mjs) пишет та же
+  // модель через мост и только для владельца.
+  return { bridgeChat, bridgeUser, need };
 }
 
 /** Прогресс аккаунта: `{ data, savedAt }`, `data` — как learning.json. */

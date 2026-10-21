@@ -348,6 +348,34 @@ export function shapePlan(raw, taken = new Set()) {
 
 export class Stopped extends Error {}
 
+/** Паузы перед повторами запроса к модели, мс. */
+const RETRY_PAUSES = [5_000, 20_000, 60_000];
+
+const LOGIN = /authenticat|oauth|\/login|not logged|unauthori[sz]ed|invalid api key|401/i;
+const LIMIT = /usage limit|rate.?limit|overloaded|529|429|quota/i;
+
+/** Пройдёт ли отказ сам: всё, кроме отказа входа. */
+export function passing(err) {
+  return !LOGIN.test(String(err?.message ?? err));
+}
+
+/** Причина отказа словами — её видит человек в списке сборок. */
+export function plainError(err) {
+  const text = String(err?.message ?? err);
+  if (LOGIN.test(text)) return "Мост к Claude не вошёл в аккаунт — войдите в Claude Code на сервере и нажмите «Продолжить».";
+  if (LIMIT.test(text)) return "Claude перегружен или кончился лимит — нажмите «Продолжить» чуть позже, готовые темы останутся.";
+  if (/claude завершился с ошибкой/.test(text)) return "Модель не ответила — нажмите «Продолжить», сборка пойдёт с того же места.";
+  return text;
+}
+
+/** Пауза, которую прерывает остановка сборки. */
+async function pause(ms, check) {
+  for (let left = ms; left > 0; left -= 1000) {
+    check();
+    await new Promise((done) => setTimeout(done, Math.min(1000, left)));
+  }
+}
+
 /**
  * Собирает курс, сохраняя после каждой темы.
  *
@@ -370,13 +398,20 @@ export async function buildCourse({ goal, format, chat, save, progress = () => {
   const check = () => {
     if (stopped()) throw new Stopped("Сборка остановлена.");
   };
-  /** Модель с одной повторной попыткой: мост иногда не успевает. */
+  /**
+   * Модель с повторами: перегрузка, лимит в минуту или обрыв связи проходят
+   * за десятки секунд, и сборка из-за них падать не должна. Отказ входа сам
+   * не пройдёт — его не повторяем.
+   */
   const ask = async (messages, opts) => {
-    try {
-      return await chat(messages, opts);
-    } catch (err) {
-      check();
-      return chat(messages, opts);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await chat(messages, opts);
+      } catch (err) {
+        check();
+        if (attempt >= RETRY_PAUSES.length || !passing(err)) throw new Error(plainError(err));
+        await pause(RETRY_PAUSES[attempt], check);
+      }
     }
   };
 

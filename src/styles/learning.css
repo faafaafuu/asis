@@ -1664,6 +1664,30 @@ button {
 .builder__status:empty {
   display: none;
 }
+.builder__past {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.builder__past:empty {
+  display: none;
+}
+.builder__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px dashed var(--btn-border);
+  border-radius: 8px;
+}
+.builder__item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.builder__why {
+  margin: 0;
+}
 
 .account {
   border-color: var(--accent);

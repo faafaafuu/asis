@@ -364,6 +364,8 @@ pub fn run() {
             commands::learn_build,
             commands::learn_builds,
             commands::learn_build_stop,
+            commands::learn_build_resume,
+            commands::learn_build_remove,
             commands::learn_video_make,
             commands::learn_videos,
             commands::learn_video_status,

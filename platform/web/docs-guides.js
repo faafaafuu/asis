@@ -519,7 +519,7 @@ Noa stays quiet while things go well; common errors are explained instantly with
     section: "howto",
     ru: {
       title: "Ролик к уроку",
-      lead: "Короткое видео-схема по разделу урока или по всей теме — голосом Ноа, собирается само за две-три минуты.",
+      lead: "Короткое видео-схема по разделу урока или по всей теме — голосом Ноа, собирается само примерно за две минуты.",
       body: `
 Ролик — анимированная схема: блоки, стрелки, что куда идёт, и голос Ноа поверх. Не пересказ текста, а картинка, которую трудно нарисовать словами: как запрос проходит через сервис к подам, как пакет идёт по сети.
 
@@ -536,7 +536,7 @@ Noa stays quiet while things go well; common errors are explained instantly with
     },
     en: {
       title: "Lesson videos",
-      lead: "A short animated diagram for a lesson section or a whole topic, narrated by Noa, built in two or three minutes.",
+      lead: "A short animated diagram for a lesson section or a whole topic, narrated by Noa, built in about two minutes.",
       body: `
 Press **🎬 Video for this section** under a lesson section or **🎬 Topic video** above the lesson, or say “Noa, make a video for this section”. The server writes the script and diagram code, voices and renders it; keep studying while it builds. Videos are shared between the desktop app, the phone app and Noa online; the desktop keeps a downloaded video for offline viewing. Requires signing in on the site.
 `,

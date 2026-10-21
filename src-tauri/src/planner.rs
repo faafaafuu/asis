@@ -172,7 +172,7 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         }
     }
     // «Собери путеводитель про умный дом», «открой путеводители» — без модели.
-    if let Some(reply) = guide_request(app, said) {
+    if let Some(reply) = guide_request(app, said).await {
         return Some(reply);
     }
     // «Открой практику» — сразу, без модели: модель принимала её за обучение.
@@ -471,7 +471,7 @@ fn still_open(said: &str) -> bool {
 
 /// Путеводители голосом: «собери путеводитель про деревья Москвы» — начать и
 /// показать его в обучении; «открой путеводители» — полка на главной обучения.
-fn guide_request(app: &AppHandle, said: &str) -> Option<String> {
+async fn guide_request(app: &AppHandle, said: &str) -> Option<String> {
     use tauri::Emitter;
     let lower = said.to_lowercase().replace('ё', "е");
     let at = lower.find("путеводител")?;
@@ -490,7 +490,7 @@ fn guide_request(app: &AppHandle, said: &str) -> Option<String> {
     if topic.chars().count() < 3 {
         return Some("О чём собрать путеводитель? Скажите, например: «собери путеводитель про деревья Москвы».".into());
     }
-    match crate::guides::start(app, &topic) {
+    match crate::guides::start(app, &topic).await {
         Ok(id) => {
             crate::guides::want(Some(id.clone()));
             let _ = crate::overlay::show_learning(app);

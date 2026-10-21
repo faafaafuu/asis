@@ -265,6 +265,78 @@ async function site(path, body) {
   return data;
 }
 
+/* ── Путеводители — в аккаунте, собирает сервер ───────────────────────────
+   Пока какой-то пишется, вкладка сверяется раз в несколько секунд и
+   говорит окну о новых разделах — как программа событием guides:changed. */
+
+let guideMarks = "";
+let guideTimer = 0;
+const guideMark = (card) => `${card.id}:${card.status}:${card.written}:${card.sections};`;
+
+function noteGuides(cards) {
+  for (const card of cards) if (!guideMarks.includes(guideMark(card))) emit("guides:changed", card.id);
+  guideMarks = cards.map(guideMark).join("");
+  if (cards.some((card) => card.status === "building")) watchGuides();
+}
+
+function watchGuides() {
+  clearTimeout(guideTimer);
+  guideTimer = setTimeout(async () => {
+    try {
+      noteGuides((await site(`/api/noa/guides?_=${Date.now()}`)).guides ?? []);
+    } catch {
+      watchGuides();
+    }
+  }, 4000);
+}
+
+async function guides(noa, cmd, args) {
+  const id = encodeURIComponent(String(args.id ?? ""));
+  switch (cmd) {
+    case "guides_list": {
+      if (!noa.user) return [];
+      const cards = (await site(`/api/noa/guides?_=${Date.now()}`)).guides ?? [];
+      guideMarks = cards.map(guideMark).join("");
+      if (cards.some((card) => card.status === "building")) watchGuides();
+      return cards;
+    }
+    case "guide_get": {
+      const { guide } = await site(`/api/noa/guides/${id}?_=${Date.now()}`);
+      if (guide.status === "building") watchGuides();
+      return guide;
+    }
+    case "guide_build": {
+      if (!noa.user) throw new Error("Путеводители собираются на сервере — войдите на сайт.");
+      const made = await site("/api/noa/guides", { goal: args.goal });
+      emit("guides:changed", made.id);
+      watchGuides();
+      return made.id;
+    }
+    case "guide_resume":
+      await site(`/api/noa/guides/${id}/resume`, { wish: args.wish ?? "" });
+      emit("guides:changed", args.id);
+      watchGuides();
+      return null;
+    case "guide_stop":
+      await site("/api/noa/guides/stop", {});
+      return null;
+    case "guide_delete":
+      await site(`/api/noa/guides/${id}/remove`, {});
+      emit("guides:changed", args.id);
+      return null;
+    case "guide_picture":
+      // Браузер берёт картинку по адресу сам, со своим кэшем.
+      return `/api/noa/guides/${id}/pictures/${encodeURIComponent(String(args.file ?? ""))}`;
+    case "guide_source":
+      if (/^https:\/\/[\w.-]+\.wikipedia\.org\//.test(String(args.url))) open(args.url, "_blank", "noopener");
+      return null;
+    case "guide_wanted":
+      return null;
+    default:
+      return undefined;
+  }
+}
+
 /** Разговор с ассистентом — последние обмены, чтобы «а это?» было понятно. */
 const assistantThread = [];
 
@@ -332,6 +404,10 @@ async function learnApp(noa, cmd, args) {
       return site("/api/noa/builds", { goal: args.goal, quality: args.quality ?? "sonnet" });
     case "learn_build_stop":
       return site(`/api/noa/builds/${encodeURIComponent(args.id)}/stop`, {});
+    case "learn_build_resume":
+      return (await site(`/api/noa/builds/${encodeURIComponent(args.id)}/resume`, {})).build;
+    case "learn_build_remove":
+      return site(`/api/noa/builds/${encodeURIComponent(args.id)}/remove`, {});
     case "ai_explain":
       return dictionaryClient().explain(args.term, args.context);
     case "ai_ask":
@@ -386,6 +462,8 @@ async function run(cmd, args = {}) {
   const l = noa.learning;
   const own = await learnApp(noa, cmd, args);
   if (own !== undefined) return own;
+  const guide = await guides(noa, cmd, args);
+  if (guide !== undefined) return guide;
   switch (cmd) {
     case "runtime_config":
       return { theme: localStorage.getItem("noa.theme") || "noah", language: "ru" };
