@@ -154,6 +154,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
         return Some(crate::set_show_window(app, show));
     }
     // «Сделай видео по этому разделу», «ролик про сервисы» — ролик к уроку.
+    // «Сделай аудиодраму по этому уроку» — раньше роликов: «сериал» не про видео.
+    if let Some(reply) = crate::dramas::voice(app, said).await {
+        return Some(reply);
+    }
     if let Some(reply) = crate::videos::voice(app, said).await {
         return Some(reply);
     }

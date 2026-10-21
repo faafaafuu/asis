@@ -41,6 +41,7 @@ mod focus;
 mod learning;
 mod guides;
 mod videos;
+mod dramas;
 mod tutor;
 mod practice;
 mod spoken;
@@ -371,6 +372,12 @@ pub fn run() {
             commands::learn_video_status,
             commands::learn_video_file,
             commands::learn_video_wanted,
+            commands::learn_drama_make,
+            commands::learn_dramas,
+            commands::learn_drama_status,
+            commands::learn_drama_script,
+            commands::learn_drama_file,
+            commands::learn_drama_wanted,
             commands::guides_list,
             commands::guide_get,
             commands::guide_build,

@@ -236,6 +236,146 @@ def mux(job):
     return None
 
 
+# ── Аудиодрамы ───────────────────────────────────────────────────────────
+#
+# Задание с drama.json — сценарий аудиодрамы (platform/server/drama.mjs).
+# Каждая реплика — своим голосом, подача — темпом, высотой и громкостью;
+# между репликами — короткие паузы, между сценами — длиннее, ремарки читает
+# рассказчик. Серия — episode-N.mp3 и timeline-N.json: кто и когда говорит,
+# чтобы окно подсвечивало реплику и по вопросу возвращало к сцене.
+
+# Голос: (диктор Silero, темп, высота).
+CAST = {
+    "junior": ("aidar", 1.10, 1.03),
+    "lena": ("baya", 1.0, 1.0),
+    "palych": ("eugene", 0.93, 0.88),
+    "narrator": ("xenia", 0.96, 1.0),
+}
+# Подача: (темп, высота, громкость).
+DELIVERY = {
+    "быстро": (1.12, 1.0, 1.0),
+    "на нервах": (1.16, 1.04, 1.05),
+    "шёпотом": (0.95, 1.0, 0.55),
+    "спокойно": (0.96, 1.0, 1.0),
+    "с иронией": (1.0, 1.02, 1.0),
+    "хрипло": (0.95, 0.94, 1.0),
+    "зловеще": (0.9, 0.92, 0.95),
+    "радостно": (1.06, 1.05, 1.05),
+    "растерянно": (1.0, 1.02, 0.95),
+    "твёрдо": (0.97, 0.98, 1.05),
+}
+GAP = 0.28
+QUESTION_GAP = 0.45
+SCENE_GAP = 1.1
+RATE = 48000
+
+
+def wav_length(path):
+    with wave.open(path) as sound:
+        return sound.getnframes() / sound.getframerate()
+
+
+def silence(path, seconds):
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"anullsrc=r={RATE}:cl=mono",
+                    "-t", f"{seconds:.3f}", "-c:a", "pcm_s16le", path], check=True)
+
+
+def voiced(text, speaker, delivery, raw, out):
+    """Реплика голосом персонажа: синтез и обработка подачей."""
+    voice_name, tempo, pitch = CAST.get(speaker, CAST["narrator"])
+    d_tempo, d_pitch, volume = DELIVERY.get(delivery, (1.0, 1.0, 1.0))
+    body = json.dumps({"text": text, "speaker": voice_name, "rate": 1.0}).encode("utf-8")
+    request = urllib.request.Request(VOICE, data=body, headers={"Content-Type": "application/json"})
+    with open(raw, "wb") as file:
+        file.write(urllib.request.urlopen(request, timeout=180).read())
+    with wave.open(raw) as sound:
+        source_rate = sound.getframerate()
+    pitch *= d_pitch
+    tempo *= d_tempo
+    # asetrate меняет высоту вместе со скоростью; atempo возвращает скорость
+    # к нужной. Шёпот — ещё и без низов.
+    chain = [f"asetrate={int(source_rate * pitch)}", f"aresample={RATE}", f"atempo={max(0.5, min(2.0, tempo / pitch)):.3f}", f"volume={volume:.2f}"]
+    if delivery == "шёпотом":
+        chain.append("highpass=f=300")
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", raw, "-af", ",".join(chain), "-ac", "1", "-ar", str(RATE),
+                    "-c:a", "pcm_s16le", out], check=True)
+    os.remove(raw)
+    return wav_length(out)
+
+
+def drama_episode(job, episode):
+    """Серия: реплики по порядку, паузы, разметка по времени, MP3."""
+    n = episode["n"]
+    folder = os.path.join(job, f"voice-{n}")
+    os.makedirs(folder, exist_ok=True)
+    pieces, timeline, at = [], [], 0.0
+    gaps = {}
+
+    def gap(seconds):
+        key = f"{seconds:.2f}"
+        if key not in gaps:
+            gaps[key] = os.path.join(folder, f"gap-{key}.wav")
+            silence(gaps[key], seconds)
+        return gaps[key]
+
+    def add(text, speaker, delivery, scene, line, after):
+        nonlocal at
+        text = str(text or "").strip()
+        if not text:
+            return
+        index = len(timeline)
+        out = os.path.join(folder, f"{index:03d}.wav")
+        length = voiced(text, speaker, delivery, os.path.join(folder, f"{index:03d}.raw.wav"), out)
+        timeline.append({"scene": scene, "line": line, "speaker": speaker, "start": round(at, 2), "end": round(at + length, 2)})
+        pieces.append(out)
+        pieces.append(gap(after))
+        at += length + after
+
+    if episode.get("recap"):
+        add(episode["recap"], "narrator", "спокойно", "", "recap", SCENE_GAP)
+    for scene in episode.get("scenes", []):
+        add(scene.get("setting"), "narrator", "спокойно", scene.get("id", ""), "setting", 0.6)
+        lines = scene.get("lines", [])
+        for k, line in enumerate(lines):
+            last = k == len(lines) - 1
+            text = str(line.get("spoken", ""))
+            pause = SCENE_GAP if last else (QUESTION_GAP if text.rstrip().endswith("?") else GAP)
+            add(text, line.get("speaker"), line.get("delivery"), scene.get("id", ""), line.get("id", ""), pause)
+    if episode.get("hook"):
+        add(episode["hook"], "narrator", "зловеще", "", "hook", 0.5)
+
+    stage(job, "mix")
+    listing = os.path.join(folder, "list.txt")
+    with open(listing, "w", encoding="utf-8") as out:
+        out.writelines(f"file '{piece}'\n" for piece in pieces)
+    target = os.path.join(job, f"episode-{n}.mp3")
+    done = subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", listing,
+                           "-c:a", "libmp3lame", "-b:a", "64k", "-ac", "1", target + ".tmp.mp3"], capture_output=True, text=True)
+    if done.returncode != 0:
+        raise RuntimeError("сведение серии: " + done.stderr[-400:])
+    os.replace(target + ".tmp.mp3", target)
+    os.chmod(target, 0o644)
+    write(os.path.join(job, f"timeline-{n}.json"), timeline)
+    shutil.rmtree(folder, ignore_errors=True)
+    write(os.path.join(job, f"done-{n}.json"), {"seconds": round(at, 1)})
+    return at
+
+
+def run_drama(job):
+    started = time.time()
+    try:
+        drama = json.load(open(os.path.join(job, "drama.json"), encoding="utf-8"))
+        for episode in drama.get("episodes", []):
+            if os.path.exists(os.path.join(job, f"episode-{episode['n']}.mp3")):
+                continue
+            stage(job, "voice")
+            seconds = drama_episode(job, episode)
+            log(f"{os.path.basename(job)}: серия {episode['n']} озвучена за {time.time() - started:.0f} с, звучит {seconds:.0f} с")
+    except Exception as err:  # голос, ffmpeg, диск — сайту нужен ответ
+        write(os.path.join(job, "error.json"), {"log": f"{type(err).__name__}: {err}"})
+        log(f"{os.path.basename(job)}: аудиодрама не озвучилась: {err}")
+
+
 def run(job):
     started = time.time()
     marks = []
@@ -277,7 +417,10 @@ def main():
                 path = os.path.join(job, old)
                 if os.path.exists(path):
                     os.remove(path)
-            run(job)
+            if os.path.exists(os.path.join(job, "drama.json")):
+                run_drama(job)
+            else:
+                run(job)
         time.sleep(2)
 
 

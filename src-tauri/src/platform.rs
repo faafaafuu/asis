@@ -620,16 +620,60 @@ pub async fn guide_upload(id: &str, text: &str) -> Result<(), String> {
 /// диапазону байт, по шесть сразу, каждый своим соединением. Сперва крупно;
 /// рвётся — мелко.
 pub async fn video_bytes(id: &str, file: &str) -> Result<Vec<u8>, String> {
+    file_bytes(&format!("/api/noa/videos/{}/{file}", urlencode(id))).await
+}
+
+/* ── Аудиодрамы ───────────────────────────────────────────────────────── */
+
+pub async fn drama_order(body: &Value) -> Result<Value, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Err("Аудиодрамы собираются на сервере — войдите в аккаунт NOAH.".into());
+    }
+    post(&url, "/api/noa/dramas", &token, body).await
+}
+
+pub async fn drama_list(course: &str, topic: &str) -> Result<Value, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Ok(json!({ "dramas": [] }));
+    }
+    let path = format!("/api/noa/dramas?course={}&topic={}&_={}", urlencode(course), urlencode(topic), random_hex());
+    get_with(&url, &path, &token).await
+}
+
+pub async fn drama_status(id: &str) -> Result<Value, String> {
+    let (url, token) = settings();
+    get_with(&url, &format!("/api/noa/dramas/{}?_={}", urlencode(id), random_hex()), &token).await
+}
+
+/// Сценарий с разметкой — десятки килобайт: через зеркало.
+pub async fn drama_script(id: &str) -> Result<Value, String> {
+    let (url, token) = settings();
+    let path = format!("/api/noa/dramas/{}/script", urlencode(id));
+    let reply = match through_mirror(&url, &path, &token).await {
+        Some(bytes) => serde_json::from_slice::<Value>(&bytes).map_err(|err| format!("сценарий пришёл битым: {err}"))?,
+        None => get_with(&url, &format!("{path}?_={}", random_hex()), &token).await?,
+    };
+    if let Some(error) = reply["error"].as_str() {
+        return Err(error.to_string());
+    }
+    Ok(reply)
+}
+
+/// Файл с сайта — ролик, серия аудиодрамы: целиком через зеркало, а нет —
+/// кусками напрямую (канал рвёт длинные ответы).
+pub async fn file_bytes(rel: &str) -> Result<Vec<u8>, String> {
     let (url, token) = settings();
     let client = crate::net::client_builder()
         .timeout(Duration::from_secs(20))
         .pool_max_idle_per_host(0)
         .build()
         .map_err(|err| err.to_string())?;
-    if let Some(data) = through_mirror(&url, &format!("/api/noa/videos/{}/{file}", urlencode(id)), &token).await {
+    if let Some(data) = through_mirror(&url, rel, &token).await {
         return Ok(data);
     }
-    let path = format!("{url}/api/noa/videos/{}/{file}", urlencode(id));
+    let path = format!("{url}{rel}");
     let fetch = {
         let (client, path, token) = (client.clone(), path.clone(), token.clone());
         move |start: usize, end: usize| {

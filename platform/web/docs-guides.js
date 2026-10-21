@@ -543,6 +543,37 @@ Press **🎬 Video for this section** under a lesson section or **🎬 Topic vid
     },
   },
   {
+    slug: "dramas",
+    section: "howto",
+    ru: {
+      title: "Аудиодрама к уроку",
+      lead: "Урок — живой сценой на три голоса: запоминается через историю, а не зубрёжкой. Около пяти минут, собирается само за три.",
+      body: `
+Ночь, сайт лежит, звонят клиенты. Джун Костя паникует и задаёт те вопросы, что задали бы вы; Лена спокойно объясняет; старый сисадмин Палыч ворчит и даёт заповеди. Объяснение идёт через ошибки и действия героев, ключевой термин звучит несколько раз в разных ситуациях. Каждое утверждение модель проверяет: аналогия — только если она честная и сказано, где ломается.
+
+## Как заказать
+
+- **🎧 Аудиодрама** — на странице темы: одна серия по уроку.
+- **🎞 Сериал с этого урока** — серия на урок, до пяти подряд, со сквозным сюжетом: «в прошлой серии…» и крючок в конце. Первая серия готова минуты через три, остальные дописываются следом.
+- **⚙** — уровень (джун или мидл), имя джуна и длина серии.
+- Голосом: «Ноа, сделай аудиодраму по этому уроку», «собери сериал по курсу с этой темы».
+
+## Слушать
+
+Пока играет — видно, кто говорит и что, с кодом и латиницей как пишут; щелчок по реплике — туда. После серии — 5–8 вопросов: вспомнить, что делать, чем отличается. Ошиблись — **↺ Вернуться к сцене** проиграет тот самый момент истории. Через день — три вопроса на повтор, без подсказок.
+
+Аудиодрамы общие для программы на компьютере, приложения на телефоне и Ноа онлайн; на компьютере прослушанная серия играет и без сети. Нужен вход в аккаунт на сайте.
+`,
+    },
+    en: {
+      title: "Lesson audio dramas",
+      lead: "A lesson as a three-voice scene you remember through the story — about five minutes, built in about three.",
+      body: `
+A junior panics and asks your questions, Lena explains calmly, old sysadmin Palych grumbles out rules. Press **🎧 Audio drama** on a topic page, or **🎞 Series from this lesson** for up to five linked episodes; **⚙** sets level, the junior's name and length. While it plays you see who speaks; after it, 5–8 questions tied to scenes — a wrong answer replays that moment. Three review questions come back the next day. Shared between the desktop app, the phone app and Noa online; requires signing in on the site.
+`,
+    },
+  },
+  {
     slug: "guides",
     section: "howto",
     ru: {

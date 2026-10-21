@@ -1975,6 +1975,43 @@ pub async fn learn_video_file(app: AppHandle, id: String, poster: Option<bool>) 
     Ok(crate::practice::base64(&bytes))
 }
 
+/* ── Аудиодрамы ───────────────────────────────────────────────────────── */
+
+/// Заказать аудиодраму: серию по уроку (`scope` = lesson) или сериал с этого
+/// урока (section). `settings` — уровень, имя джуна, длина серии.
+#[tauri::command]
+pub async fn learn_drama_make(course: String, topic: String, scope: String, settings: Option<serde_json::Value>, again: Option<bool>) -> Result<serde_json::Value, String> {
+    crate::dramas::order(&course, &topic, &scope, &settings.unwrap_or_default(), again.unwrap_or(false)).await
+}
+
+#[tauri::command]
+pub async fn learn_dramas(course: String, topic: String) -> Result<serde_json::Value, String> {
+    crate::platform::drama_list(&course, &topic).await
+}
+
+#[tauri::command]
+pub async fn learn_drama_status(id: String) -> Result<serde_json::Value, String> {
+    crate::platform::drama_status(&id).await
+}
+
+/// Сценарий с разметкой по времени: реплики, вопросы, повтор через день.
+#[tauri::command]
+pub async fn learn_drama_script(id: String) -> Result<serde_json::Value, String> {
+    crate::platform::drama_script(&id).await
+}
+
+/// Серия строкой base64: окно делает из неё Blob.
+#[tauri::command]
+pub async fn learn_drama_file(app: AppHandle, id: String, episode: u32) -> Result<String, String> {
+    let bytes = crate::dramas::episode(&app, &id, episode).await?;
+    Ok(crate::practice::base64(&bytes))
+}
+
+#[tauri::command]
+pub async fn learn_drama_wanted() -> Option<serde_json::Value> {
+    crate::dramas::take_wanted()
+}
+
 /* ── Путеводители ──────────────────────────────────────────────────────── */
 
 /// Путеводители для лобби обучения — карточки без текста.

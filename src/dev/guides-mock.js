@@ -71,7 +71,11 @@ export const guide = {
   ],
 };
 
+import { mockDrama } from "./drama-mock.js";
+
 export function mockGuides(cmd, args) {
+  const drama = mockDrama(cmd, args);
+  if (drama !== undefined) return drama;
   if (cmd === "guides_list") return guideCards;
   if (cmd === "guide_get") return args.id === "g1" ? guide : { ...guide, id: "g2", title: "Всё про умный дом", emoji: "🏠", cover: null, intro: "", sections: [] };
   if (cmd === "guide_picture") return PICTURES[args.file.replace(/\.\w+$/, "")] ?? null;

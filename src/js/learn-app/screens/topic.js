@@ -2,8 +2,9 @@
 // окна обучения в программе), пояснение режима, чипы понятий и закреплённая
 // кнопка «Продолжить …» — в тот режим, где человек сейчас.
 
-import { el, icon, label, loading, header, nav, register, iconButton, plural, sections, markdown, isWeb, sheet, prefs } from "../core.js";
+import { el, icon, label, loading, header, nav, register, iconButton, plural, sections, markdown, isWeb, sheet, prefs, api } from "../core.js";
 import { store, topicCard } from "../store.js";
+import { dramaBox } from "../../drama-panel.js";
 
 const MODES = [
   { id: "lesson", name: "Урок с Ноа", icon: "chat", about: "Ноа ведёт урок по разделам: читает вслух, разбирает подробно и обсуждает с вами то, что непонятно." },
@@ -101,6 +102,21 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
     const note = el("div", "note");
     note.append(label(`// ${about.name.toLowerCase()}`), el("span", "", about.about));
     content.append(note);
+
+    // Аудиодрама по теме: живая сцена на три голоса, слушать — прямо здесь.
+    content.append(
+      dramaBox({
+        api,
+        el,
+        button: (text, onClick) => {
+          const node = el("button", "btn btn--secondary", text);
+          node.addEventListener("click", onClick);
+          return node;
+        },
+        course: courseId,
+        topic: topicId,
+      }),
+    );
 
     const terms = (topic.concepts ?? []).slice(0, 8).map((c) => c.term);
     if (terms.length) {

@@ -11,6 +11,7 @@ import { renderLessonAgent } from "./lesson-agent.js";
 import { attachReader } from "./lesson-reader.js";
 import { guideCard, guidePage, tint } from "./guides.js";
 import { videoBox } from "./video-panel.js";
+import { dramaBox } from "./drama-panel.js";
 
 const api = tauri();
 const ui = {};
@@ -1399,8 +1400,9 @@ function renderLesson(root, topic) {
   });
   head.append(whole);
   root.append(head);
-  // Ролик по всей теме — над уроком; по разделу — под ним.
+  // Ролик и аудиодрама по всей теме — над уроком; ролик по разделу — под ним.
   root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: null }));
+  root.append(dramaBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id }));
 
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(parts[at]);
@@ -1675,6 +1677,7 @@ function renderWholeLesson(root, topic) {
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(topic.lesson);
   root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: null }));
+  root.append(dramaBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id }));
   root.append(attachReader(lesson, { api, el, button }));
   root.append(lesson);
   const actions = el("div", "actions");
@@ -2919,12 +2922,13 @@ async function openVideoPlace(wanted) {
 api?.listen("learn:video", async (event) => {
   if (busy || !event.payload) return;
   api.invoke("learn_video_wanted").catch(() => null);
+  api.invoke("learn_drama_wanted").catch(() => null);
   await refreshOverview();
   openVideoPlace(event.payload);
 });
 
 refreshOverview().then(async () => {
-  const video = await api?.invoke("learn_video_wanted").catch(() => null);
+  const video = (await api?.invoke("learn_video_wanted").catch(() => null)) ?? (await api?.invoke("learn_drama_wanted").catch(() => null));
   if (video && (await openVideoPlace(video))) return;
   const wanted = await api?.invoke("guide_wanted").catch(() => null);
   if (wanted != null) return wanted ? openGuide(wanted) : renderLobby();

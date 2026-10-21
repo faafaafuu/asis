@@ -527,6 +527,61 @@ async function run(cmd, args = {}) {
           : `${head} Ролик — про один раздел урока.\n\nТекст раздела:\n${parts[args.section] ?? ""}`;
       return site("/api/noa/videos", { course: args.course, topic: args.topic, section: args.section ?? null, material, again: Boolean(args.again) });
     }
+    case "learn_dramas":
+      if (!noa.user) return { dramas: [] };
+      return site(`/api/noa/dramas?course=${encodeURIComponent(args.course)}&topic=${encodeURIComponent(args.topic)}&_=${Date.now()}`);
+    case "learn_drama_make": {
+      if (!noa.user) throw new Error("Аудиодрамы собираются на сервере — войдите на сайт.");
+      const view = await l.topicView(args.course, args.topic);
+      const topic = view.topic ?? view;
+      const settings = args.settings ?? {};
+      const body = {
+        course: args.course,
+        topic: args.topic,
+        topicTitle: topic.title,
+        scope: args.scope === "section" ? "section" : "lesson",
+        level: settings.level,
+        junior: settings.junior,
+        minutes: settings.minutes,
+        again: Boolean(args.again),
+      };
+      const concepts = (list) => (list ?? []).slice(0, 12).map((c) => `- ${c.term} — ${c.definition}`).join(String.fromCharCode(10));
+      if (body.scope === "section") {
+        // Сериал — с этой темы и до четырёх следующих.
+        const overview = await l.overview();
+        const course = (overview ?? []).find((c) => c.id === args.course);
+        const from = course?.topics.findIndex((t) => t.id === args.topic) ?? -1;
+        const next = from >= 0 ? course.topics.slice(from, from + 5) : [];
+        body.lessons = [];
+        for (const card of next) {
+          const other = await Promise.resolve()
+            .then(() => l.topicView(args.course, card.id))
+            .catch(() => null);
+          const t = other?.topic ?? other;
+          if (t) body.lessons.push({ title: t.title, theses: `${t.summary ?? ""}
+Понятия:
+${concepts(t.concepts)}` });
+        }
+      } else {
+        body.material = `Тема «${topic.title}». ${topic.summary ?? ""}
+
+Понятия:
+${concepts(topic.concepts)}
+
+Урок:
+${String(topic.lesson ?? "").slice(0, 8500)}`;
+      }
+      return site("/api/noa/dramas", body);
+    }
+    case "learn_drama_status":
+      return site(`/api/noa/dramas/${encodeURIComponent(args.id)}?_=${Date.now()}`);
+    case "learn_drama_script":
+      return site(`/api/noa/dramas/${encodeURIComponent(args.id)}/script?_=${Date.now()}`);
+    case "learn_drama_file":
+      // Браузер берёт серию по адресу сам — с перемоткой.
+      return `/api/noa/dramas/${encodeURIComponent(args.id)}/episode-${Number(args.episode) || 1}.mp3`;
+    case "learn_drama_wanted":
+      return null;
     case "learn_video_status":
       return site(`/api/noa/videos/${encodeURIComponent(args.id)}?_=${Date.now()}`);
     case "learn_video_file":

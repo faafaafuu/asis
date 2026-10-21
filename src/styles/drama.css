@@ -1,0 +1,270 @@
+/* Аудиодрама к уроку (drama-panel.js): одна и та же в окне обучения, в
+   приложении на телефоне и в Ноа онлайн. Цвета голосов: джун — розовый
+   (подписи «Неона»), Лена — циан, Палыч — золото, рассказчик — приглушённый. */
+
+.drama {
+  --junior: oklch(0.7 0.18 330);
+  --lena: var(--accent);
+  --palych: #ffd98a;
+  --narrator: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0 16px;
+}
+.drama__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.drama__gear {
+  min-width: 36px;
+}
+.drama__status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.drama__status.is-bad {
+  color: var(--error, #ff9db4);
+}
+
+.drama__tune {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--divider);
+}
+.drama__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.drama__select,
+.drama__input {
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--btn-border, var(--divider));
+  border-radius: var(--field-radius, 2px);
+  background: var(--input-bg, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.drama__input {
+  width: 140px;
+}
+.drama__hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.drama__player {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+.drama__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.drama__title {
+  font-weight: 600;
+  color: var(--text);
+}
+.drama__tabs {
+  display: flex;
+  gap: 4px;
+}
+.drama__tab {
+  min-width: 32px;
+  padding: 2px 8px;
+}
+.drama__tab[aria-current="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.drama__audio {
+  width: 100%;
+}
+
+/* Сейчас звучит: ремарка, кто и что — крупно. */
+.drama__now {
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.drama__setting {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+.drama__setting:empty {
+  display: none;
+}
+.drama__who {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--narrator);
+}
+.drama__said {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.drama__who.is-junior { color: var(--junior); }
+.drama__who.is-lena { color: var(--lena); }
+.drama__who.is-palych { color: var(--palych); }
+
+/* Вся серия строками. */
+.drama__lines {
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--divider);
+}
+.drama__line {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--divider) 60%, transparent);
+  font-size: 13px;
+  cursor: pointer;
+}
+.drama__line:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.drama__line.is-now {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.drama__name {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--narrator);
+  padding-top: 2px;
+}
+.drama__line.is-junior .drama__name { color: var(--junior); }
+.drama__line.is-lena .drama__name { color: var(--lena); }
+.drama__line.is-palych .drama__name { color: var(--palych); }
+.drama__line.is-narrator .drama__text {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.drama__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Вопросы. */
+.drama__q {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--divider);
+}
+.drama__kind {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: oklch(0.7 0.18 330);
+}
+.drama__ask {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text);
+}
+.drama__options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.drama__options > button {
+  text-align: left;
+}
+.drama__options > button.is-good,
+.drama__result .is-good {
+  color: #7dfcc6;
+  border-color: #7dfcc6;
+}
+.drama__options > button.is-bad,
+.drama__result .is-bad {
+  color: #ff9db4;
+  border-color: #ff9db4;
+}
+.drama__result p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.drama__done {
+  margin: 0;
+  color: var(--text);
+}
+
+.drama__terms summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.drama__terms dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.drama__terms dt {
+  font-family: var(--font-mono, monospace);
+}
+.drama__terms dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+.drama__later {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.drama__later:empty {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .drama__line {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+  .drama__said {
+    font-size: 16px;
+  }
+  .drama__lines {
+    max-height: 220px;
+  }
+}
