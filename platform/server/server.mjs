@@ -9,7 +9,7 @@ import net from "node:net";
 import tls from "node:tls";
 import { Duplex } from "node:stream";
 import { readFile, stat } from "node:fs/promises";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
@@ -654,7 +654,57 @@ const TYPES = {
   ".woff2": "font/woff2",
   ".woff": "font/woff",
   ".ttf": "font/ttf",
+  ".jpg": "image/jpeg",
+  ".mp4": "video/mp4",
 };
+
+/* ── Сайт «NOAH Учёба» ─────────────────────────────────────────────────────
+   Отдельный продукт со своим репозиторием (noah-learn): главная о
+   возможностях на /learn/, приложение — /learn/app/. Файлы сайта — в
+   LEARN_SITE; на сервере их обновляют копированием, без перезапуска. */
+
+const LEARN_SITE = process.env.NOAH_LEARN_SITE ?? "/opt/noah-learn/site";
+const LEARN_CSP =
+  "default-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+
+/** Файл сайта; нет такого — false. Ролики — с перемоткой (Range). */
+async function serveLearnSite(req, res, rel) {
+  if (!/^[\w./-]+$/.test(rel) || rel.split("/").some((part) => !part || part.startsWith("."))) return false;
+  const file = join(LEARN_SITE, rel);
+  let info;
+  try {
+    info = await stat(file);
+  } catch {
+    return false;
+  }
+  if (!info.isFile()) return false;
+  const type = TYPES[extname(file)] ?? "application/octet-stream";
+  const page = extname(file) === ".html";
+  const head = {
+    ...SECURITY_HEADERS,
+    "Content-Security-Policy": LEARN_CSP,
+    "Content-Type": type,
+    "Accept-Ranges": "bytes",
+    // Страница — всегда свежая (CDN зеркала иначе держит её часами), остальное — на час.
+    ...(page ? { "Cache-Control": "no-cache", "CDN-Cache-Control": "no-store", "Surrogate-Control": "no-store" } : { "Cache-Control": "public, max-age=3600" }),
+  };
+  const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ""));
+  if (range && (range[1] || range[2])) {
+    const start = range[1] ? Number(range[1]) : Math.max(0, info.size - Number(range[2]));
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), info.size - 1) : info.size - 1;
+    if (start >= info.size || start > end) {
+      res.writeHead(416, { "Content-Range": `bytes */${info.size}` });
+      res.end();
+      return true;
+    }
+    res.writeHead(206, { ...head, "Content-Range": `bytes ${start}-${end}/${info.size}`, "Content-Length": end - start + 1 });
+    createReadStream(file, { start, end }).pipe(res);
+    return true;
+  }
+  res.writeHead(200, { ...head, "Content-Length": info.size });
+  createReadStream(file).pipe(res);
+  return true;
+}
 
 /**
  * Метка версии сайта — отпечаток всех его файлов.
@@ -876,7 +926,7 @@ async function handle(req, res) {
     const pageOnIp =
       req.method === "GET" &&
       /^[\d.]+(:\d+)?$/.test(String(req.headers.host ?? "")) &&
-      (url.pathname === "/" || url.pathname === "/app" || url.pathname === "/app/" || url.pathname === "/learn" || /^\/app\/[\w-]+\.html$/.test(url.pathname));
+      (url.pathname === "/" || url.pathname === "/app" || url.pathname === "/app/" || ["/learn", "/learn/", "/learn/app", "/learn/app/"].includes(url.pathname) || /^\/app\/[\w-]+\.html$/.test(url.pathname));
     const mirrorHost = [...MIRRORS].find((host) => !/^[\d.]+(:\d+)?$/.test(host));
     if (pageOnIp && mirrorHost) {
       const search = url.pathname.startsWith("/app") && !url.search ? `?v=${appStamp()}` : url.search;
@@ -891,9 +941,9 @@ async function handle(req, res) {
     const host = String(req.headers.host ?? "").toLowerCase();
     const viaCdn = Boolean(req.headers["x-forwarded-for"]);
     const russian = /(^|,)\s*ru\b/i.test(String(req.headers["accept-language"] ?? ""));
-    const entry = ["/", "/app", "/app/", "/noa", "/noa/", "/learn", "/learn/"].includes(url.pathname);
+    const entry = ["/", "/app", "/app/", "/noa", "/noa/", "/learn", "/learn/", "/learn/app", "/learn/app/"].includes(url.pathname);
     if (req.method === "GET" && entry && mirrorHost && (host === "noahlab.ru" || host === "www.noahlab.ru") && !viaCdn && russian && !url.searchParams.has("direct")) {
-      const path = url.pathname.startsWith("/app") ? "/noa" : url.pathname.startsWith("/learn") ? "/learn" : url.pathname;
+      const path = url.pathname.startsWith("/app") ? "/noa" : url.pathname.startsWith("/learn/app") ? "/learn/app/" : url.pathname.startsWith("/learn") ? "/learn/" : url.pathname;
       const search = path === "/" ? `?v=${Date.now().toString(36)}` : "";
       res.writeHead(302, { Location: `https://${mirrorHost}${path}${search}`, "Cache-Control": "no-store" });
       return res.end();
@@ -905,7 +955,16 @@ async function handle(req, res) {
     // /noa — короткий адрес Ноа онлайн, которого нет в памяти CDN.
     // /learn — приложение «NOAH Учёба» (то же, что на iPhone) в браузере:
     // та же пересылка с меткой версии, на /app/learn.html.
-    if (req.method === "GET" && ["/learn", "/learn/"].includes(url.pathname) && !url.search) {
+    // /learn/ — сайт «NOAH Учёба» (репозиторий noah-learn, файлы в
+    // LEARN_SITE), /learn/app/ — само приложение.
+    if (req.method === "GET" && url.pathname === "/learn") {
+      res.writeHead(302, { Location: `/learn/${url.search}`, "Cache-Control": "no-store" });
+      return res.end();
+    }
+    if (req.method === "GET" && url.pathname.startsWith("/learn/") && !url.pathname.startsWith("/learn/app")) {
+      if (await serveLearnSite(req, res, url.pathname.slice("/learn/".length) || "index.html")) return;
+    }
+    if (req.method === "GET" && ["/learn/app", "/learn/app/"].includes(url.pathname) && !url.search) {
       const body =
         '<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>NOAH Учёба</title>' +
         '<script src="/app/go-learn.js"></script></head><body></body></html>';
