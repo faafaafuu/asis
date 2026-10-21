@@ -128,7 +128,7 @@ pub async fn voice(app: &AppHandle, said: &str) -> Option<String> {
             Some(if job["status"] == "done" {
                 format!("Ролик {what} уже есть — открыла урок.")
             } else {
-                format!("Собираю ролик {what} — минуты две-три. Ход виден в уроке.")
+                format!("Собираю ролик {what} — около двух минут. Ход виден в уроке.")
             })
         }
         Err(err) => Some(err),

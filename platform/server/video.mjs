@@ -106,13 +106,23 @@ export function parseVideo(text) {
   return { title, scenes, code: code.trim() + "\n" };
 }
 
+/**
+ * Код без содержимого обычных строк: подписи на схеме («open() открывает
+ * файл», «os и sys») — не код и не должны валить проверку. f-строки
+ * остаются: выражения в них выполняются.
+ */
+function withoutText(code) {
+  const literal = /(?<!\w)([rRbBuUfF]{0,2})("""[\s\S]*?"""|'''[\s\S]*?'''|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')/g;
+  return code.replace(literal, (all, prefix) => (/f/i.test(prefix) ? all : `${prefix}""`));
+}
+
 /** Код из ответа — только на деталях набора. Отдаёт, что не так, или "". */
 export function checkCode(code, scenes) {
   if (!/class\s+Video\s*\(\s*NoahScene\s*\)/.test(code)) return "нет класса Video(NoahScene)";
   const imports = code.split("\n").filter((line) => /^\s*(import|from)\s/.test(line));
   if (imports.some((line) => line.trim() !== "from noah_kit import *")) return "лишний import — разрешён только from noah_kit import *";
   const banned = /\b(open|exec|eval|compile|__import__|getattr|setattr|globals|locals|input)\s*\(|\b(os|sys|subprocess|socket|shutil|pathlib|urllib|requests|builtins)\b|__\w+__/;
-  const found = banned.exec(code.replace(/def\s+__init__|__name__/g, ""));
+  const found = banned.exec(withoutText(code).replace(/def\s+__init__|__name__/g, ""));
   if (found) return `запрещено: ${found[0]}`;
   const holds = [...code.matchAll(/self\.hold\(\s*(\d+)\s*\)/g)].map((m) => Number(m[1]));
   if (holds.length !== scenes.length) return `self.hold — ${holds.length}, а фраз озвучки — ${scenes.length}: должно совпадать`;
@@ -180,6 +190,7 @@ export function mountVideo({ route, db, Fail, readJson, chat, owner }) {
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       const problem = parsed.scenes.length < 3 ? "нет фраз озвучки (SCENES)" : checkCode(parsed.code, parsed.scenes);
       if (!problem) return { parsed, messages: [...messages, { role: "assistant", content: reply }] };
+      console.log(`ролик ${id.slice(0, 8)}: код не прошёл проверку — ${problem}`);
       update(id, { stage: "fix" });
       const fix = [...messages, { role: "assistant", content: reply }, { role: "user", content: `Код не прошёл проверку: ${problem}. Пришли ответ заново целиком в том же виде.` }];
       reply = await ask(fix);

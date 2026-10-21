@@ -5,6 +5,7 @@
 время, self.hold(i) — дождаться конца озвучки сцены i, self.say(текст) —
 субтитр, self.focus(блок) — выделить блок, остальное приглушить."""
 import json
+import os
 
 from manim import *
 
@@ -19,6 +20,37 @@ HEAD = "Exo 2"
 MONO = "JetBrains Mono"
 
 config.background_color = BG
+
+# Рендер кусками: служба запускает несколько процессов, каждому —
+# NOAH_SPAN="начало,конец" в секундах сцены по её собственным часам. Процесс
+# рисует только анимации, начавшиеся в этом промежутке; до него сцена
+# проигрывается без кадров, после — останавливается. Часы — сумма заявленных
+# длительностей, а не время рендера: пропущенная анимация продвигает время
+# ровно на свою длину, нарисованная — целыми кадрами, и границы у процессов
+# разошлись бы.
+SPAN = tuple(float(x) for x in os.environ["NOAH_SPAN"].split(",")) if os.environ.get("NOAH_SPAN") else None
+
+if SPAN:
+    from manim.renderer.cairo_renderer import CairoRenderer
+    from manim.utils.exceptions import EndSceneEarlyException
+
+    _update_frame = CairoRenderer.update_frame
+    _save_static = CairoRenderer.save_static_frame_data
+
+    def _update_frame_lazy(self, *args, **kwargs):
+        # Кадры пропускаемых анимаций не пишутся — и рисовать их незачем.
+        if self.skip_animations:
+            return None
+        return _update_frame(self, *args, **kwargs)
+
+    def _save_static_lazy(self, scene, static_mobjects):
+        if self.skip_animations:
+            self.static_image = None
+            return None
+        return _save_static(self, scene, static_mobjects)
+
+    CairoRenderer.update_frame = _update_frame_lazy
+    CairoRenderer.save_static_frame_data = _save_static_lazy
 
 
 def icon(name, color, size=0.6):
@@ -110,10 +142,30 @@ class NoahScene(Scene):
         # рендера ставит озвучку, и звук не уезжает, даже если анимация
         # вышла длиннее речи.
         self.starts = [0.0]
+        self.clock = 0.0
+        # Кусок: отметки сцен внутри него — от начала куска, по кадрам.
+        self.marks = []
+        self.part_t0 = None
+
+    def play(self, *args, **kwargs):
+        if SPAN:
+            start, end = SPAN
+            if self.clock >= end - 1e-6:
+                raise EndSceneEarlyException()
+            mine = self.clock >= start - 1e-6
+            self.renderer._original_skipping_status = not mine
+            if mine and self.part_t0 is None:
+                self.part_t0 = self.renderer.time
+        super().play(*args, **kwargs)
+        self.clock += self.duration
 
     def tear_down(self):
-        with open("timeline.json", "w", encoding="utf-8") as out:
-            json.dump(self.starts, out)
+        if SPAN:
+            with open(os.environ.get("NOAH_MARKS", "marks.json"), "w", encoding="utf-8") as out:
+                json.dump(self.marks, out)
+        else:
+            with open("timeline.json", "w", encoding="utf-8") as out:
+                json.dump(self.starts, out)
 
     def go(self, *anims, rt=1.0):
         self.play(*anims, run_time=rt)
@@ -126,6 +178,9 @@ class NoahScene(Scene):
         self.spent = 0.0
         self.index = index + 1
         self.starts.append(round(self.renderer.time, 3))
+        if SPAN and SPAN[0] - 1e-6 <= self.clock < SPAN[1] - 1e-6:
+            since = self.renderer.time - self.part_t0 if self.part_t0 is not None else 0.0
+            self.marks.append([len(self.starts) - 1, round(since, 3)])
 
     def say(self, text):
         """Субтитр внизу: главная мысль сцены."""

@@ -36,3 +36,11 @@ test("в контейнер не проходит лишнее", () => {
   assert.match(checkCode(code.replace("        self.hold(2)\n", ""), scenes), /hold/);
   assert.match(checkCode(code.replace("Video(NoahScene)", "Other(Scene)"), scenes), /Video/);
 });
+
+test("подписи на схеме — не код", () => {
+  const { code, scenes } = parseVideo(reply);
+  const label = (text) => code.replace("self.hold(2)", `self.say(${text})\n        self.hold(2)`);
+  assert.equal(checkCode(label(`"open() и os.read — системные вызовы"`), scenes), "");
+  assert.equal(checkCode(label(`'__init__ и sys'`), scenes), "");
+  assert.match(checkCode(label(`f"{getattr(self, 'x')}"`), scenes), /getattr/);
+});
