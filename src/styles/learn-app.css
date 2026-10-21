@@ -2878,3 +2878,40 @@ button.plate:active,
   background: var(--c-ok);
   opacity: 0.85;
 }
+
+/* Ролик к разделу урока */
+.video {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.video__row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.video__go {
+  width: 100%;
+}
+.video__status {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--c-muted);
+}
+.video__status.is-bad {
+  color: var(--c-bad);
+}
+.video__screen {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--c-accent);
+  background: #060809;
+}
+.video__tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}

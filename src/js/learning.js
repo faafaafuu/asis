@@ -10,6 +10,7 @@ import { tauri, appWindow } from "./bridge.js";
 import { renderLessonAgent } from "./lesson-agent.js";
 import { attachReader } from "./lesson-reader.js";
 import { guideCard, guidePage, tint } from "./guides.js";
+import { videoBox } from "./video-panel.js";
 
 const api = tauri();
 const ui = {};
@@ -1363,6 +1364,8 @@ function renderLesson(root, topic) {
   });
   head.append(whole);
   root.append(head);
+  // Ролик по всей теме — над уроком; по разделу — под ним.
+  root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: null }));
 
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(parts[at]);
@@ -1377,6 +1380,7 @@ function renderLesson(root, topic) {
   root.append(lesson);
 
   root.append(deepBox(topic, at));
+  root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: at }));
 
   const concept = conceptOf(parts[at], at, topic);
   if (concept) {
@@ -1635,6 +1639,7 @@ api?.listen("learn:talk", (event) => {
 function renderWholeLesson(root, topic) {
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(topic.lesson);
+  root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: null }));
   root.append(attachReader(lesson, { api, el, button }));
   root.append(lesson);
   const actions = el("div", "actions");
@@ -2865,7 +2870,27 @@ api?.listen("guides:open", (event) => {
   else renderLobby();
 });
 
+/** Голос заказал ролик — урок открывается на разделе, где виден ход сборки. */
+async function openVideoPlace(wanted) {
+  const other = courses.find((c) => c.id === wanted.course);
+  if (!other) return false;
+  chooseCourse(other);
+  // Ролик по теме виден над первым разделом, по разделу — под ним.
+  await openTopic(wanted.topic, "lesson", wanted.section ?? 0);
+  return true;
+}
+
+// Голосом: «сделай видео по этому разделу», «ролик про сервисы».
+api?.listen("learn:video", async (event) => {
+  if (busy || !event.payload) return;
+  api.invoke("learn_video_wanted").catch(() => null);
+  await refreshOverview();
+  openVideoPlace(event.payload);
+});
+
 refreshOverview().then(async () => {
+  const video = await api?.invoke("learn_video_wanted").catch(() => null);
+  if (video && (await openVideoPlace(video))) return;
   const wanted = await api?.invoke("guide_wanted").catch(() => null);
   if (wanted != null) return wanted ? openGuide(wanted) : renderLobby();
   // Окно открывается на главной обучения: там «Продолжить» одной кнопкой.

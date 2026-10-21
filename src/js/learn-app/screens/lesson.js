@@ -3,8 +3,9 @@
 // «Частая ошибка», «Разобрать подробно» и «Обсудить» голосом. Внизу —
 // «Назад» и «Дальше: следующий раздел». Место в уроке помнится.
 
-import { el, icon, label, loading, nav, register, iconButton, sections, sectionTitle, sectionBody, markdown, speakable, voice, call, sheet, steps, ring, toast } from "../core.js";
+import { el, icon, label, loading, nav, register, iconButton, sections, sectionTitle, sectionBody, markdown, speakable, voice, call, sheet, steps, ring, toast, api } from "../core.js";
 import { store, topicCard } from "../store.js";
+import { videoBox } from "../../video-panel.js";
 
 register("lesson", (screen, { course: courseId, topic: topicId }) => {
   const course = store.course(courseId);
@@ -65,6 +66,21 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
     talk.addEventListener("click", () => discuss());
     pair.append(deep, talk);
     content.append(pair);
+    // Ролик по разделу: собирается на сервере, смотрится прямо здесь.
+    content.append(
+      videoBox({
+        api,
+        el,
+        button: (text, onClick) => {
+          const node = el("button", "btn btn--secondary", text);
+          node.addEventListener("click", onClick);
+          return node;
+        },
+        course: courseId,
+        topic: topicId,
+        section: at,
+      }),
+    );
     content.scrollTop = 0;
     const following = parts[at + 1];
     next.replaceChildren(

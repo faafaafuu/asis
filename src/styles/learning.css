@@ -2061,3 +2061,39 @@ button {
     gap: 2px;
   }
 }
+
+/* ── Ролик к уроку ─────────────────────────────────────────────────────── */
+
+.video {
+  margin: 10px 0 14px;
+}
+.video__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.video__status {
+  color: var(--text-muted);
+  font-size: var(--size-secondary);
+}
+.video__status.is-bad {
+  color: var(--error);
+}
+.video__player {
+  margin-top: 10px;
+}
+.video__screen {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--accent);
+  border-radius: var(--card-radius, 8px);
+  background: #060809;
+  box-shadow: 0 0 22px -10px var(--accent);
+}
+.video__tools {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}

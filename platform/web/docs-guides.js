@@ -515,6 +515,54 @@ Noa stays quiet while things go well; common errors are explained instantly with
     },
   },
   {
+    slug: "videos",
+    section: "howto",
+    ru: {
+      title: "Ролик к уроку",
+      lead: "Короткое видео-схема по разделу урока или по всей теме — голосом Ноа, собирается само за две-три минуты.",
+      body: `
+Ролик — анимированная схема: блоки, стрелки, что куда идёт, и голос Ноа поверх. Не пересказ текста, а картинка, которую трудно нарисовать словами: как запрос проходит через сервис к подам, как пакет идёт по сети.
+
+## Как заказать
+
+- **🎬 Видео по разделу** — под текстом раздела урока: ролик именно про этот кусок.
+- **🎬 Ролик по теме** — над уроком: обзор всей темы, что это и из чего состоит.
+- Голосом: «Ноа, сделай видео по этому разделу» — по разделу, на котором вы остановились; «Ноа, сделай ролик про сервисы в Kubernetes» — по теме, найденной по названию. Ноа откроет урок, там виден ход сборки.
+
+Собирает сервер: модель пишет сценарий и код схемы, служба озвучивает и рендерит. Пока идёт сборка, можно заниматься дальше — панель сама покажет ролик, когда он будет готов. Не понравился — **↻ Пересобрать**.
+
+Ролики общие для программы на компьютере, приложения на телефоне и Ноа онлайн под одним аккаунтом: собранный в одном месте виден в другом. На компьютере готовый ролик сохраняется и второй раз открывается без сети. Нужен вход в аккаунт на сайте.
+`,
+    },
+    en: {
+      title: "Lesson videos",
+      lead: "A short animated diagram for a lesson section or a whole topic, narrated by Noa, built in two or three minutes.",
+      body: `
+Press **🎬 Video for this section** under a lesson section or **🎬 Topic video** above the lesson, or say “Noa, make a video for this section”. The server writes the script and diagram code, voices and renders it; keep studying while it builds. Videos are shared between the desktop app, the phone app and Noa online; the desktop keeps a downloaded video for offline viewing. Requires signing in on the site.
+`,
+    },
+  },
+  {
+    slug: "guides",
+    section: "howto",
+    ru: {
+      title: "Путеводители",
+      lead: "Подборка про что угодно — деревья Москвы, умный дом, как построить дом — разделами и с картинками, без задач.",
+      body: `
+Путеводитель — как курс, но чтобы почитать: разделы, особенности, карточки фактов и картинки из Википедии. Без экзаменов и карточек на повторение.
+
+Собрать — в обучении, блок **Путеводители → Собрать**, или голосом: «Ноа, собери путеводитель про деревья Москвы». Ноа составит план и наполнит разделы по одному; открыть можно сразу, недособранное дособирается само. Готовые путеводители — на главной обучения и в приложении на телефоне.
+`,
+    },
+    en: {
+      title: "Guides",
+      lead: "A read-only collection on any subject — sections, features and pictures, no tasks.",
+      body: `
+Open Learning → **Guides → Build**, or say “Noa, build a guide about Moscow trees”. Noa drafts a plan and fills the sections one by one with pictures from Wikipedia; you can start reading before it finishes.
+`,
+    },
+  },
+  {
     slug: "telegram",
     section: "howto",
     ru: {

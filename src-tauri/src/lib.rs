@@ -40,6 +40,7 @@ mod shots;
 mod focus;
 mod learning;
 mod guides;
+mod videos;
 mod tutor;
 mod practice;
 mod spoken;
@@ -363,6 +364,11 @@ pub fn run() {
             commands::learn_build,
             commands::learn_builds,
             commands::learn_build_stop,
+            commands::learn_video_make,
+            commands::learn_videos,
+            commands::learn_video_status,
+            commands::learn_video_file,
+            commands::learn_video_wanted,
             commands::guides_list,
             commands::guide_get,
             commands::guide_build,

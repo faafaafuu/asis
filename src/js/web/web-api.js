@@ -15,6 +15,7 @@ import { startTalk } from "./talk.js";
 import { splitScheme } from "../scheme.js";
 import { dictionaryClient, loadModel, saveModel, bridgeAvailable, chat } from "./ai-web.js";
 import { request } from "./net.js";
+import { sections as lessonSections } from "./learn-core.js";
 
 const listeners = new Map();
 
@@ -432,6 +433,27 @@ async function run(cmd, args = {}) {
       return null;
     case "learn_deep":
       return l.deep(args.course, args.topic, args.section, Boolean(args.cached));
+    // Ролики к урокам собирает сервер; здесь — заказ, ход и адрес файла.
+    case "learn_videos":
+      if (!noa.user) return { videos: [] };
+      return site(`/api/noa/videos?course=${encodeURIComponent(args.course)}&topic=${encodeURIComponent(args.topic)}&_=${Date.now()}`);
+    case "learn_video_make": {
+      if (!noa.user) throw new Error("Ролики собираются на сервере — войдите на сайт.");
+      const view = await l.topicView(args.course, args.topic);
+      const topic = view.topic ?? view;
+      const parts = lessonSections(String(topic.lesson ?? ""));
+      const head = `Тема «${topic.title}».`;
+      const material =
+        args.section == null
+          ? `${head} Ролик — обзор всей темы.\n\nКоротко: ${topic.summary ?? ""}\n\nНачало урока:\n${String(topic.lesson ?? "").slice(0, 4000)}`
+          : `${head} Ролик — про один раздел урока.\n\nТекст раздела:\n${parts[args.section] ?? ""}`;
+      return site("/api/noa/videos", { course: args.course, topic: args.topic, section: args.section ?? null, material, again: Boolean(args.again) });
+    }
+    case "learn_video_status":
+      return site(`/api/noa/videos/${encodeURIComponent(args.id)}?_=${Date.now()}`);
+    case "learn_video_file":
+      // Браузер берёт ролик по адресу сам — с докачкой и перемоткой.
+      return `/api/noa/videos/${encodeURIComponent(args.id)}/${args.poster ? "poster.jpg" : "video.mp4"}`;
     case "learn_discuss":
       discussByVoice(l, args.target);
       return null;

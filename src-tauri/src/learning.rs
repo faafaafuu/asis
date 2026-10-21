@@ -937,6 +937,22 @@ pub fn remember_place(course_id: &str, topic_id: &str, step: &str, section: usiz
     Ok(())
 }
 
+/// Где занимались последним: курс, тема и раздел урока — по свежему курсу.
+pub fn last_place() -> Option<(String, String, usize)> {
+    let guard = STORE.lock().unwrap_or_else(|err| err.into_inner());
+    let (_, store) = guard.as_ref()?;
+    store
+        .courses
+        .iter()
+        .filter_map(|(id, progress)| {
+            let topic = progress.current.clone()?;
+            let section = progress.topics.get(&topic).map_or(0, |own| own.section);
+            Some((progress.updated.clone().unwrap_or_default(), id.clone(), topic, section))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, course, topic, section)| (course, topic, section))
+}
+
 /// Урок прочитан.
 pub fn mark_read(course_id: &str, topic_id: &str) -> Result<(), String> {
     let course = course(course_id)?;

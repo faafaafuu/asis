@@ -1930,6 +1930,39 @@ pub async fn learn_build_stop(id: String) -> Result<(), String> {
     crate::platform::stop_build(&id).await
 }
 
+/* ── Ролики к урокам ──────────────────────────────────────────────────── */
+
+/// Заказать ролик по разделу урока (`section`) или по всей теме.
+#[tauri::command]
+pub async fn learn_video_make(course: String, topic: String, section: Option<usize>, again: Option<bool>) -> Result<serde_json::Value, String> {
+    let material = crate::videos::material(&course, &topic, section)?;
+    crate::platform::video_order(&course, &topic, section, &material, again.unwrap_or(false)).await
+}
+
+/// Какой урок открыть: ролик заказали голосом.
+#[tauri::command]
+pub async fn learn_video_wanted() -> Option<serde_json::Value> {
+    crate::videos::take_wanted()
+}
+
+/// Ролики темы — по одному на раздел.
+#[tauri::command]
+pub async fn learn_videos(course: String, topic: String) -> Result<serde_json::Value, String> {
+    crate::platform::video_list(&course, &topic).await
+}
+
+#[tauri::command]
+pub async fn learn_video_status(id: String) -> Result<serde_json::Value, String> {
+    crate::platform::video_status(&id).await
+}
+
+/// Ролик (или обложка) строкой base64: окно делает из него Blob.
+#[tauri::command]
+pub async fn learn_video_file(app: AppHandle, id: String, poster: Option<bool>) -> Result<String, String> {
+    let bytes = crate::videos::file(&app, &id, poster.unwrap_or(false)).await?;
+    Ok(crate::practice::base64(&bytes))
+}
+
 /* ── Путеводители ──────────────────────────────────────────────────────── */
 
 /// Путеводители для лобби обучения — карточки без текста.

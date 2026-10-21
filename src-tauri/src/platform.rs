@@ -458,6 +458,113 @@ pub async fn build_course(goal: &str, quality: &str) -> Result<Value, String> {
     Ok(reply["build"].clone())
 }
 
+/* ── Ролики к урокам ──────────────────────────────────────────────────── */
+
+/// Заказать ролик: раздел урока (`section`) или вся тема (`None`).
+/// `again` — пересобрать, даже если готовый уже есть.
+pub async fn video_order(course: &str, topic: &str, section: Option<usize>, material: &str, again: bool) -> Result<Value, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Err("Ролики собираются на сервере — войдите в аккаунт NOAH.".into());
+    }
+    post(&url, "/api/noa/videos", &token, &json!({ "course": course, "topic": topic, "section": section, "material": material, "again": again })).await
+}
+
+/// Ролики темы — по одному на раздел, последний.
+pub async fn video_list(course: &str, topic: &str) -> Result<Value, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Ok(json!({ "videos": [] }));
+    }
+    // Метка в адресе — зеркалу: оно держит в памяти даже /api/.
+    let path = format!("/api/noa/videos?course={}&topic={}&_={}", urlencode(course), urlencode(topic), random_hex());
+    get_with(&url, &path, &token).await
+}
+
+pub async fn video_status(id: &str) -> Result<Value, String> {
+    let (url, token) = settings();
+    get_with(&url, &format!("/api/noa/videos/{}?_={}", urlencode(id), random_hex()), &token).await
+}
+
+/// Файл ролика. Канал из России рвёт длинные ответы, поэтому — кусками по
+/// диапазону байт, по шесть сразу, каждый своим соединением. Сперва крупно;
+/// рвётся — мелко.
+pub async fn video_bytes(id: &str, file: &str) -> Result<Vec<u8>, String> {
+    let (url, token) = settings();
+    let client = crate::net::client_builder()
+        .timeout(Duration::from_secs(20))
+        .pool_max_idle_per_host(0)
+        .build()
+        .map_err(|err| err.to_string())?;
+    // Свой сайт — сначала через зеркало: напрямую канал рвёт ответ на первых
+    // килобайтах, и 4 МБ мелкими кусками шли минуты, а зеркало отдаёт их
+    // целиком за пару секунд. Метка `_` — чтобы зеркало не держало копию.
+    let own = [crate::config::DEFAULT_PLATFORM_URL, crate::config::OLD_PLATFORM_URL, MIRROR_URL].contains(&url.as_str());
+    if own {
+        let whole = format!("{MIRROR_URL}/api/noa/videos/{}/{file}?_={}", urlencode(id), random_hex());
+        let sent = client.get(&whole).bearer_auth(&token).timeout(Duration::from_secs(90)).send().await;
+        match sent {
+            Ok(response) if response.status().is_success() => match response.bytes().await {
+                Ok(data) if !data.is_empty() => return Ok(data.to_vec()),
+                Ok(_) => log::info!("ролик через зеркало пришёл пустым"),
+                Err(err) => log::info!("ролик через зеркало оборвался: {err}"),
+            },
+            Ok(response) => log::info!("ролик через зеркало: сайт ответил {}", response.status()),
+            Err(err) => log::info!("ролик через зеркало не пришёл: {err}"),
+        }
+    }
+    let path = format!("{url}/api/noa/videos/{}/{file}", urlencode(id));
+    let fetch = {
+        let (client, path, token) = (client.clone(), path.clone(), token.clone());
+        move |start: usize, end: usize| {
+            let request = client.get(&path).bearer_auth(&token).header("Range", format!("bytes={start}-{end}"));
+            async move {
+                let response = request.send().await.map_err(|err| format!("ролик не скачался: {err}"))?;
+                let status = response.status().as_u16();
+                if status != 206 && status != 200 {
+                    return Err(format!("ролик не скачался: сайт ответил {status}"));
+                }
+                let total = response
+                    .headers()
+                    .get("content-range")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.rsplit('/').next())
+                    .and_then(|v| v.parse::<usize>().ok());
+                let data = response.bytes().await.map_err(|err| format!("кусок ролика оборвался: {err}"))?;
+                Ok::<_, String>((total, data.to_vec()))
+            }
+        }
+    };
+    let (total, first) = fetch(0, 0).await?;
+    let size = total.unwrap_or(first.len());
+    let mut out = vec![0u8; size];
+    for chunk in [512 * 1024, 12 * 1024] {
+        let offsets: Vec<usize> = (0..size).step_by(chunk).collect();
+        let mut ok = true;
+        'batches: for batch in offsets.chunks(6) {
+            let handles: Vec<_> = batch
+                .iter()
+                .map(|&at| tauri::async_runtime::spawn(fetch(at, (at + chunk).min(size) - 1)))
+                .collect();
+            for (at, handle) in batch.iter().zip(handles) {
+                let want = (at + chunk).min(size) - at;
+                match handle.await {
+                    Ok(Ok((_, data))) if data.len() == want => out[*at..*at + want].copy_from_slice(&data),
+                    _ => {
+                        ok = false;
+                        break 'batches;
+                    }
+                }
+            }
+        }
+        if ok {
+            return Ok(out);
+        }
+        log::info!("ролик: крупные куски не проходят — качаю мелкими");
+    }
+    Err("Ролик не скачался — канал рвёт соединение. Попробуйте ещё раз.".into())
+}
+
 /// Сборки курсов: что собирается и чем кончилось.
 pub async fn course_builds() -> Result<Value, String> {
     let (url, token) = settings();

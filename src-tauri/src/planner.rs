@@ -153,6 +153,10 @@ pub async fn handle(app: &AppHandle, said: &str) -> Option<String> {
     if let Some(show) = window_request(said) {
         return Some(crate::set_show_window(app, show));
     }
+    // «Сделай видео по этому разделу», «ролик про сервисы» — ролик к уроку.
+    if let Some(reply) = crate::videos::voice(app, said).await {
+        return Some(reply);
+    }
     // Простые команды — «открой», «закрой», «сверни», «громче», «таймер»,
     // «закройся» — сразу, без модели: она понимала их через раз и думала
     // по 6–20 секунд. Не уверены — дальше, к модели.
