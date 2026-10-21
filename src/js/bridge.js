@@ -11,10 +11,28 @@ export function tauri() {
   if (api?.core?.invoke) {
     return {
       invoke: (cmd, args) => api.core.invoke(cmd, args),
-      listen: (event, handler) => api.event.listen(event, handler),
+      // Событие программа вызывает из своего кода, и упавший обработчик на
+      // iPhone виден только как «Script error.» — без текста и места. Ловим
+      // сами и отдаём в журнал с именем события и стеком.
+      listen: (event, handler) =>
+        api.event.listen(event, (payload) => {
+          try {
+            const result = handler(payload);
+            if (result?.catch) result.catch((err) => report(`событие ${event}: ${err?.stack ?? err}`));
+            return result;
+          } catch (err) {
+            report(`событие ${event}: ${err?.stack ?? err}`);
+          }
+        }),
     };
   }
   return isWebNoa() ? webNoa() : null;
+}
+
+/** Ошибка окна — в журнал программы (и сервера, если это телефон). */
+function report(text) {
+  const page = globalThis.location?.pathname.split("/").pop() || "index";
+  globalThis.__TAURI__?.core?.invoke("window_error", { page, text: String(text).slice(0, 2000) }).catch(() => {});
 }
 
 /**

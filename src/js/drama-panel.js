@@ -119,6 +119,11 @@ export function dramaBox({ api, el, button, course, topic }) {
     label(scope);
     if (!box.isConnected) return;
     if (job.status === "failed" && shown?.scope === scope) say(job.message || "Аудиодрама не собралась.", true);
+    // Дописалась — ход сборки больше не показываем: на телефоне «Пишу
+    // сценарий» оставалось висеть рядом с готовой кнопкой «▶».
+    if (job.status === "done" && /Пишу|Правлю|Жду|Озвучиваю|Свожу|Заказываю|сценари/.test(status.textContent)) {
+      say(job.title ? `«${job.title}» готова — нажмите ▶` : "Готово — нажмите ▶");
+    }
     if (job.status !== "running") return;
     if (shown?.scope === scope || !shown) {
       const started = Date.parse(`${job.created?.replace(" ", "T")}Z`) || Date.now();

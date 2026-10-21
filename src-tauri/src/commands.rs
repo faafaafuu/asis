@@ -1909,6 +1909,22 @@ pub async fn learn_coach(
 #[tauri::command]
 pub fn window_error(page: String, text: String) {
     log::warn!("окно {page}: {text}");
+    // Журнал телефона владельцу не открыть — ошибка уходит в журнал сервера,
+    // одна и та же — раз в десять минут, а не на каждом повторе.
+    #[cfg(mobile)]
+    {
+        use std::collections::HashMap;
+        use std::sync::Mutex;
+        use std::time::{Duration, Instant};
+        static SENT: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
+        let key = format!("{page}: {}", text.chars().take(160).collect::<String>());
+        let mut sent = SENT.lock().unwrap_or_else(|err| err.into_inner());
+        let sent = sent.get_or_insert_with(HashMap::new);
+        if sent.get(&key).is_none_or(|at| at.elapsed() > Duration::from_secs(600)) {
+            sent.insert(key, Instant::now());
+            crate::platform::diag(format!("окно {page}: {}", text.chars().take(600).collect::<String>()));
+        }
+    }
 }
 
 /// Собрать новый курс на сервере через мост — курс придёт в окно сам.

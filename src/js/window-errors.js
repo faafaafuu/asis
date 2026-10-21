@@ -23,7 +23,18 @@
         box.addEventListener("click", () => box.remove());
         document.body.append(box);
       }
-      box.textContent += `${page}: ${text}\n`;
+      // Одна и та же ошибка — одной строкой со счётчиком, а не простынёй.
+      const line = `${page}: ${text}`;
+      const same = [...box.children].find((row) => row.dataset.line === line);
+      if (same) {
+        same.dataset.count = String(Number(same.dataset.count || 1) + 1);
+        same.textContent = `${line} ×${same.dataset.count}`;
+      } else {
+        const row = document.createElement("div");
+        row.dataset.line = line;
+        row.textContent = line;
+        box.append(row);
+      }
     };
     if (document.body) add();
     else addEventListener("DOMContentLoaded", add, { once: true });
@@ -36,7 +47,9 @@
     const where = event.filename ? ` (${event.filename.split("/").pop()}:${event.lineno})` : "";
     // Не загрузился файл — у события нет message, есть элемент.
     const failed = event.target?.src || event.target?.href;
-    send(failed ? `не загрузилось: ${failed}` : `${event.message}${where}`);
+    // Стек — если браузер его дал: по одному «Script error.» место не найти.
+    const stack = event.error?.stack ? `\n${String(event.error.stack).slice(0, 600)}` : "";
+    send(failed ? `не загрузилось: ${failed}` : `${event.message}${where}${stack}`);
   }, true);
   addEventListener("unhandledrejection", (event) => send(`без ответа: ${event.reason?.stack ?? event.reason}`));
 })();
