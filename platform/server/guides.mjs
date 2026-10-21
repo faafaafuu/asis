@@ -66,11 +66,11 @@ export function planRules(name) {
   return `Ты — ${name}, автор увлекательных путеводителей. Человек просит путеводитель — составь его план.
 Путеводитель — не курс: без задач и экзаменов. Его листают с интересом, как хороший научно-популярный журнал или энциклопедию для взрослых: разделы, особенности, виды, сравнения, цифры, советы, картинки. Не сухо, но и без воды.
 Ответь строго JSON, без текста вокруг:
-{"title": "…", "subtitle": "…", "emoji": "…", "intro": "…", "cover": "…", "sections": [{"title": "…", "emoji": "…", "about": "…"}]}
+{"title": "…", "subtitle": "…", "emoji": "…", "intro": "…", "cover": "…", "cover_en": "…", "sections": [{"title": "…", "emoji": "…", "about": "…"}]}
 - title — название путеводителя, 2–6 слов; subtitle — о чём он, до 12 слов.
 - emoji — один значок темы.
 - intro — 2–3 предложения, которые хочется дочитать: чем тема интересна и что человек узнает.
-- cover — точное название статьи русской Википедии, чья иллюстрация подойдёт для обложки.
+- cover — точное название статьи русской Википедии, чья иллюстрация подойдёт для обложки; cover_en — та же статья в английской Википедии.
 - sections — ${MIN_SECTIONS}–8 разделов, от общего к частному: title — 2–5 слов, emoji — один значок, about — что в разделе, до 25 слов. Если тема — набор видов (деревья, породы, устройства), отведи им разделы по группам. Последний раздел может быть практическим: с чего начать, где посмотреть, сколько стоит.
 Пиши по-русски.`;
 }
@@ -89,6 +89,7 @@ export function applyPlan(guide, raw) {
     emoji: clean(raw.emoji) || guide.emoji,
     intro: clean(raw.intro),
     coverHint: clean(raw.cover),
+    coverHintEn: clean(raw.cover_en),
     sections,
   };
 }
@@ -104,14 +105,14 @@ export function sectionRules(name, guide, at, added) {
 ${others}
 
 Ответь строго JSON, без текста вокруг:
-{"title": "…", "emoji": "…", "lead": "…", "image": "…", "text": ["…"], "facts": [{"label": "…", "value": "…"}], "items": [{"name": "…", "text": "…", "tags": ["…"], "image": "…"}], "tips": ["…"], "wow": "…"}
+{"title": "…", "emoji": "…", "lead": "…", "image": "…", "image_en": "…", "text": ["…"], "facts": [{"label": "…", "value": "…"}], "items": [{"name": "…", "text": "…", "tags": ["…"], "image": "…", "image_en": "…"}], "tips": ["…"], "wow": "…"}
 ${rename}- lead — одна фраза-подводка, до 25 слов.
 - text — 2–4 абзаца по 40–90 слов. Можно выделить главное **жирным**.
 - facts — 0–6 коротких характеристик: цифры, сроки, размеры, цены (label до 4 слов, value до 8). Пусто, если цифр по делу нет.
-- items — 0–8 карточек, если раздел перечисляет виды, породы, устройства, этапы, места: name — название, text — чем примечателен и как узнать, до 35 слов, tags — 1–3 коротких признака, image — точное название статьи русской Википедии с его изображением или "".
+- items — 0–8 карточек, если раздел перечисляет виды, породы, устройства, этапы, места: name — название, text — чем примечателен и как узнать, до 35 слов, tags — 1–3 коротких признака, image — точное название статьи русской Википедии именно про этот предмет, image_en — та же статья в английской Википедии. Нет такой статьи — "" (лучше без картинки, чем чужая).
 - tips — 0–4 практических совета, до 20 слов каждый.
 - wow — один удивительный факт по теме раздела, до 30 слов, или "".
-- image — точное название статьи русской Википедии, чья иллюстрация подойдёт разделу.
+- image — точное название статьи русской Википедии, чья иллюстрация подойдёт разделу; image_en — та же статья в английской Википедии. Не статьи о людях, если раздел не о них.
 Пиши живо и точно, без канцелярита. Не выдумывай факты, цифры и названия: не уверен — не пиши. По-русски.`;
 }
 
@@ -122,13 +123,14 @@ export function applySection(section, raw, added) {
   const items = list(raw.items)
     .filter((i) => clean(i?.name))
     .slice(0, 12)
-    .map((i) => ({ name: clean(i.name), text: clean(i.text), tags: list(i.tags).map(clean).filter(Boolean).slice(0, 3), imageHint: clean(i.image), picture: null }));
+    .map((i) => ({ name: clean(i.name), text: clean(i.text), tags: list(i.tags).map(clean).filter(Boolean).slice(0, 3), imageHint: clean(i.image), imageHintEn: clean(i.image_en), picture: null }));
   if (!text.length && !items.length) return null;
   return {
     ...section,
     ...(added && clean(raw.title) ? { title: clean(raw.title), emoji: clean(raw.emoji) || section.emoji } : {}),
     lead: clean(raw.lead),
     imageHint: clean(raw.image),
+    imageHintEn: clean(raw.image_en),
     text,
     facts: list(raw.facts)
       .filter((f) => clean(f?.label) && clean(f?.value))
@@ -165,39 +167,137 @@ export function imageUrl(page, width) {
   return thumb ?? null;
 }
 
-const wiki = (path) =>
-  fetch(`https://ru.wikipedia.org${path}`, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(20_000) })
+const getJson = (url) =>
+  fetch(url, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(20_000) })
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null);
 
 const title = (text) => encodeURIComponent(clean(text).replace(/ /g, "_"));
+const norm = (text) => clean(text).toLowerCase().replace(/ё/g, "е");
 
-async function summary(hint) {
-  const page = await wiki(`/api/rest_v1/page/summary/${title(hint)}`);
+/**
+ * Корень слова: длинному — длиннее. По пяти буквам «электропроводка»
+ * совпадала с «электромобилем»; без окончания — «лианозовский» с «Лианозово».
+ */
+const stemOf = (word) => {
+  const letters = [...word];
+  return letters.slice(0, Math.max(5, letters.length - 4)).join("");
+};
+const significant = (text) => norm(text).split(/[^\p{L}\d]+/u).filter((word) => [...word].length >= 4);
+
+export function stems(...texts) {
+  return [...new Set(texts.flatMap(significant).map(stemOf))];
+}
+
+/**
+ * О том ли статья: для какой-то из подсказок в названии есть корни
+ * большинства её слов. Уточнение в скобках («Балка (рельеф)») должно
+ * подходить к теме (`context`), иначе это другое значение слова.
+ */
+export function relevant(name, hints, context = "") {
+  const found = norm(name);
+  const match = hints.some((hint) => {
+    const words = significant(hint);
+    if (!words.length) return false;
+    const hit = words.filter((word) => found.includes(stemOf(word))).length;
+    return hit / words.length >= 0.6;
+  });
+  if (!match) return false;
+  const qualifier = /\(([^)]+)\)/.exec(clean(name))?.[1];
+  if (!qualifier || !clean(context)) return true;
+  // «Рыжик (гриб)» в путеводителе о грибах — да, «Балка (рельеф)» о стройке — нет.
+  const around = norm(`${context} ${hints.join(" ")}`);
+  return significant(qualifier).some((word) => around.includes(stemOf(word)));
+}
+
+// Статьи о людях — только если путеводитель о них: «Электропроводка» однажды
+// получила портрет Илона Маска — первый результат поиска.
+const PERSON = /(предпринимател|политик|актёр|актер|актрис|певец|певица|писател|футболист|режиссёр|режиссер|рэпер|блогер|журналист|инвестор|businessman|businesswoman|politician|actor|actress|singer|writer|footballer|entrepreneur|rapper|journalist|investor)/i;
+export const aboutPerson = (page, hints) => PERSON.test(clean(page?.description)) && !relevant(page?.title, hints);
+
+/** Говорит ли статья о теме путеводителя: в её описании — корень слова темы. */
+export function onTopic(page, context) {
+  const topic = significant(context);
+  if (!topic.length) return true;
+  const text = norm(`${page?.title ?? ""} ${page?.description ?? ""} ${page?.extract ?? ""}`);
+  return topic.some((word) => text.includes(stemOf(word)));
+}
+
+async function summaryOf(lang, hint) {
+  if (!clean(hint)) return null;
+  const page = await getJson(`https://${lang}.wikipedia.org/api/rest_v1/page/summary/${title(hint)}`);
   // Страница неоднозначности — не та статья, и картинки у неё нет.
   if (!page || page.type === "disambiguation" || !imageUrl(page, NARROW)) return null;
   return page;
 }
 
-async function search(text) {
-  const found = await wiki(`/w/api.php?action=query&list=search&srlimit=1&format=json&srsearch=${encodeURIComponent(clean(text))}`);
-  return found?.query?.search?.[0]?.title ?? null;
+async function searchOf(lang, text) {
+  if (!clean(text)) return [];
+  const found = await getJson(`https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srlimit=3&format=json&srsearch=${encodeURIComponent(clean(text))}`);
+  return list(found?.query?.search).map((hit) => hit.title);
+}
+
+/** Файл с Wikimedia Commons — когда у статей картинки нет. */
+async function commonsFile(query, hints, width, context = "") {
+  if (!clean(query)) return null;
+  const found = await getJson(
+    `https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url|mime&iiurlwidth=${width}&gsrsearch=${encodeURIComponent(`${clean(query)} filetype:bitmap`)}`,
+  );
+  const pages = Object.values(found?.query?.pages ?? {}).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  for (const page of pages) {
+    const info = page.imageinfo?.[0];
+    const name = clean(page.title).replace(/^File:/, "").replace(/\.\w+$/, "");
+    if (!info?.thumburl || !/^image\/(jpeg|png)$/.test(info.mime ?? "") || !relevant(name, hints, context)) continue;
+    return { url: info.thumburl, source: info.descriptionurl ?? "", caption: name };
+  }
+  return null;
+}
+
+/**
+ * Где взять картинку: статья русской Википедии, английской, поиск по ним —
+ * только если найденное о том же, — и файлы Commons. Не нашли уверенно —
+ * без картинки: пустая лучше чужой.
+ */
+export async function findPicture(wanted, width) {
+  const hint = typeof wanted === "string" ? { ru: wanted } : wanted ?? {};
+  const ru = clean(hint.ru);
+  const en = clean(hint.en);
+  const name = clean(hint.name);
+  const context = clean(hint.context);
+  // Тема путеводителя — для проверки смысла: разделы («Кофе мира») шумят.
+  const topic = clean(hint.topic) || context;
+  const hints = [ru, en, name].filter(Boolean);
+  if (!hints.length) return null;
+  const page = (found) => found && !aboutPerson(found, hints) && { url: imageUrl(found, width), source: found.content_urls?.desktop?.page ?? "", caption: found.title };
+  let picked = page(await summaryOf("ru", ru)) || page(await summaryOf("en", en));
+  if (!picked) {
+    for (const other of await searchOf("ru", ru || name)) {
+      if (!relevant(other, [ru, name].filter(Boolean), context)) continue;
+      // Найдено поиском — статья должна быть о теме путеводителя: «Гейша» в
+      // путеводителе о кофе — сорт, а не японские артистки.
+      const found = await summaryOf("ru", other);
+      if (found && onTopic(found, topic) && (picked = page(found))) break;
+    }
+  }
+  if (!picked && en) {
+    for (const other of await searchOf("en", en)) {
+      if (relevant(other, [en], context) && (picked = page(await summaryOf("en", other)))) break;
+    }
+  }
+  // Файлы Commons — только по названной статье: одно слово («Балка») там
+  // находит овраг на Украине.
+  if (!picked && (en || ru)) picked = await commonsFile(en || ru, [en, ru].filter(Boolean), width, context);
+  return picked?.url ? picked : null;
 }
 
 const KINDS = { "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/jpeg": "jpg" };
 
-/** Иллюстрация статьи — в папку путеводителя. Нет — путеводитель без неё. */
-export async function fetchPicture(dir, hint, base, width) {
-  if (!clean(hint)) return null;
-  let page = await summary(hint);
-  if (!page) {
-    const other = await search(hint);
-    page = other ? await summary(other) : null;
-  }
-  const url = page && imageUrl(page, width);
-  if (!url) return null;
+/** Иллюстрация — в папку путеводителя. Нет — путеводитель без неё. */
+export async function fetchPicture(dir, wanted, base, width) {
+  const picked = await findPicture(wanted, width);
+  if (!picked) return null;
   try {
-    const response = await fetch(url, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(20_000) });
+    const response = await fetch(picked.url, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(20_000) });
     const ext = KINDS[(response.headers.get("content-type") ?? "").split(";")[0]];
     if (!response.ok || !ext) return null;
     const bytes = Buffer.from(await response.arrayBuffer());
@@ -205,7 +305,7 @@ export async function fetchPicture(dir, hint, base, width) {
     await mkdir(dir, { recursive: true });
     const file = `${base}.${ext}`;
     await writeFile(join(dir, file), bytes);
-    return { file, source: page.content_urls?.desktop?.page ?? "", caption: page.title ?? clean(hint) };
+    return { file, source: picked.source, caption: picked.caption };
   } catch {
     return null;
   }
@@ -280,7 +380,7 @@ export function mountGuides({ route, db, Fail, readJson, chat, owner, need, data
       }
       if (!planned) throw new Error("План путеводителя не сложился — попробуйте ещё раз или опишите тему иначе.");
       guide = patch(userId, id, (fresh) => ({ ...fresh, ...planned, status: "building", message: "" }));
-      const cover = await fetchPicture(dir, guide.coverHint, "cover", WIDE);
+      const cover = await fetchPicture(dir, { ru: guide.coverHint, en: guide.coverHintEn, name: guide.title }, "cover", WIDE);
       if (cover) guide = patch(userId, id, (fresh) => ({ ...fresh, cover }));
     }
     const total = guide.sections.length;
@@ -295,11 +395,12 @@ export function mountGuides({ route, db, Fail, readJson, chat, owner, need, data
       }
       if (!section) throw new Error("Раздел не сложился. Попробуйте дописать путеводитель ещё раз.");
       const base = `s${at + 1}`;
-      section.picture = await fetchPicture(dir, section.imageHint, base, WIDE);
+      const context = `${guide.title} ${guide.sections[at].title}`;
+      section.picture = await fetchPicture(dir, { ru: section.imageHint, en: section.imageHintEn, context, topic: guide.title }, base, WIDE);
       let pictured = 0;
       for (const [n, item] of section.items.entries()) {
         if (pictured >= MAX_ITEM_PICTURES || control.stop) break;
-        item.picture = await fetchPicture(dir, item.imageHint, `${base}-${n + 1}`, NARROW);
+        item.picture = await fetchPicture(dir, { ru: item.imageHint, en: item.imageHintEn, name: item.name, context, topic: guide.title }, `${base}-${n + 1}`, NARROW);
         if (item.picture) pictured += 1;
       }
       guide = patch(userId, id, (fresh) => {
@@ -314,7 +415,7 @@ export function mountGuides({ route, db, Fail, readJson, chat, owner, need, data
     const control = { id, stop: false };
     running.set(String(userId), control);
     build(userId, id, added, control)
-      .then(() => patch(userId, id, (fresh) => ({ ...fresh, status: "ready", message: "" })))
+      .then(() => patch(userId, id, (fresh) => ({ ...fresh, status: "ready", message: "", picturesVersion: 4 })))
       .catch((err) => {
         if (!(err instanceof Stopped)) console.error("путеводитель:", err?.message ?? err);
         try {
@@ -339,6 +440,104 @@ export function mountGuides({ route, db, Fail, readJson, chat, owner, need, data
       throw new Fail(409, `Уже пишу путеводитель${other ? ` «${other.title}»` : ""} — дождитесь его или остановите.`);
     }
   };
+
+  /**
+   * Картинки готовых путеводителей — заново, где их нет или они не о том:
+   * до 21.10 поиск брал первую попавшуюся статью. Подсказки, которых модель
+   * не дала, она называет одним коротким вызовом. Новые файлы — с новыми
+   * именами: старая неверная картинка не всплывёт из копии на устройстве.
+   */
+  const PICTURES_VERSION = 4;
+  async function repairPictures(userId, id) {
+    const guide = load(userId, id);
+    if (!guide || guide.status === "building" || guide.picturesVersion >= PICTURES_VERSION) return;
+    const dir = folder(userId, id);
+    const entries = [];
+    entries.push({ path: ["cover"], name: guide.title, ru: guide.coverHint, en: guide.coverHintEn, picture: guide.cover, width: WIDE, base: "cover" });
+    list(guide.sections).forEach((section, at) => {
+      entries.push({ path: ["sections", at], name: section.title, ru: section.imageHint, en: section.imageHintEn, picture: section.picture, width: WIDE, base: `s${at + 1}` });
+      list(section.items).forEach((item, n) => {
+        entries.push({ path: ["sections", at, "items", n], name: item.name, ru: item.imageHint, en: item.imageHintEn, picture: item.picture, width: NARROW, base: `s${at + 1}-${n + 1}`, section: section.title });
+      });
+    });
+    // Найденная прямой статьёй (в том числе переадресацией: «Робуста» — «Кофе
+    // канефора») — верная; по поиску и не о том — меняем.
+    const doubtful = async (entry) => {
+      if (!entry.picture) return true;
+      // Найденное прошлыми починками — заново, по строгим правилам.
+      if (/-v[23]\./.test(entry.picture.file ?? "")) return true;
+      if (relevant(entry.picture.caption, [entry.ru, entry.en, entry.name].filter(Boolean), `${guide.title} ${entry.section ?? ""}`)) return false;
+      const direct = await summaryOf("ru", entry.ru);
+      return !direct || direct.title !== entry.picture.caption;
+    };
+    const redo = [];
+    for (const entry of entries) if (await doubtful(entry)) redo.push(entry);
+    if (redo.length) {
+      const unnamed = redo.filter((entry) => !entry.ru || !entry.en);
+      if (unnamed.length) {
+        try {
+          const asked = unnamed.map((entry, i) => `${i + 1}. ${entry.name}${entry.section ? ` (раздел «${entry.section}»)` : ""}`).join("\n");
+          const reply = await chat(
+            "claude-code-bridge",
+            [
+              {
+                role: "system",
+                content: `Путеводитель «${guide.title}». Для каждого пункта назови точное название статьи русской Википедии именно про этот предмет и ту же статью в английской Википедии. Нет такой статьи — "". Ответ строго JSON: {"items": [{"n": 1, "ru": "…", "en": "…"}]}`,
+              },
+              { role: "user", content: asked },
+            ],
+            false,
+            "haiku",
+          );
+          const named = jsonIn(reply);
+          for (const hit of Array.isArray(named) ? named : list(named?.items)) {
+            const entry = unnamed[Number(hit?.n) - 1];
+            if (!entry) continue;
+            entry.ru ||= clean(hit.ru);
+            entry.en ||= clean(hit.en);
+          }
+        } catch (err) {
+          console.error("путеводитель: подсказки картинок:", err?.message ?? err);
+        }
+      }
+      for (const entry of redo) {
+        entry.fresh = await fetchPicture(dir, { ru: entry.ru, en: entry.en, name: entry.name, context: `${guide.title} ${entry.section ?? entry.name}`, topic: guide.title }, `${entry.base}-v${PICTURES_VERSION}`, entry.width);
+      }
+    }
+    patch(userId, id, (fresh) => {
+      const next = structuredClone(fresh);
+      for (const entry of redo) {
+        let target = next;
+        for (const key of entry.path.slice(0, -1)) target = target?.[key];
+        const last = entry.path[entry.path.length - 1];
+        if (!target) continue;
+        if (entry.path.length === 1) {
+          next.cover = entry.fresh ?? null;
+          next.coverHint ||= entry.ru ?? "";
+          next.coverHintEn ||= entry.en ?? "";
+        } else {
+          const holder = target[last];
+          if (!holder) continue;
+          holder.picture = entry.fresh ?? null;
+          holder.imageHint ||= entry.ru ?? "";
+          holder.imageHintEn ||= entry.en ?? "";
+        }
+      }
+      return { ...next, picturesVersion: PICTURES_VERSION };
+    });
+    console.log(`путеводитель ${id}: картинки проверены — заменено ${redo.length}, найдено ${redo.filter((e) => e.fresh).length}`);
+  }
+
+  // Готовые путеводители — проверить картинки, по одному, в фоне.
+  setTimeout(async () => {
+    for (const row of db.prepare("SELECT user_id, id FROM noa_guides").all()) {
+      try {
+        await repairPictures(row.user_id, row.id);
+      } catch (err) {
+        if (!(err instanceof Stopped)) console.error("путеводитель: починка картинок:", err?.message ?? err);
+      }
+    }
+  }, 15_000);
 
   // Сервер перезапустили посреди сборки — недописанное останавливается,
   // дописать можно кнопкой.
@@ -474,15 +673,15 @@ export function mountGuides({ route, db, Fail, readJson, chat, owner, need, data
     const guide = load(userId, id);
     if (!guide) return;
     const hint = (picture, fallback) => clean(fallback) || clean(picture?.caption);
-    const cover = guide.cover || guide.coverHint ? await fetchPicture(dir, hint(guide.cover, guide.coverHint), "cover", WIDE) : null;
+    const cover = guide.cover || guide.coverHint ? await fetchPicture(dir, { ru: hint(guide.cover, guide.coverHint), name: guide.title }, "cover", WIDE) : null;
     const sections = [];
     for (const [at, section] of guide.sections.entries()) {
       const base = `s${at + 1}`;
-      const picture = section.picture || section.imageHint ? await fetchPicture(dir, hint(section.picture, section.imageHint), base, WIDE) : null;
+      const picture = section.picture || section.imageHint ? await fetchPicture(dir, { ru: hint(section.picture, section.imageHint) }, base, WIDE) : null;
       const items = [];
       for (const [n, item] of list(section.items).entries()) {
         const wanted = item.picture || item.imageHint;
-        items.push({ ...item, picture: wanted ? await fetchPicture(dir, hint(item.picture, item.imageHint), `${base}-${n + 1}`, NARROW) : null });
+        items.push({ ...item, picture: wanted ? await fetchPicture(dir, { ru: hint(item.picture, item.imageHint), name: item.name }, `${base}-${n + 1}`, NARROW) : null });
       }
       sections.push({ ...section, picture, items });
     }

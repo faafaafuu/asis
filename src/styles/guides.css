@@ -749,3 +749,48 @@
 .gsec {
   display: flow-root;
 }
+
+/* Путеводитель вслух (lesson-reader.js): панель чтеца над текстом и
+   подсветка того абзаца, что звучит. Один и тот же — на компьютере и в
+   приложении на телефоне, где стилей урока нет. */
+.guide .reader {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 0;
+  background: var(--bg-solid, #070a0f);
+}
+.guide .reader__where {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.guide__text.reader-focus :is(h2, h3, p, li, blockquote) {
+  transition: opacity 0.2s ease;
+}
+.guide__text.reader-focus :is(h2, h3, p, li, blockquote):not(.reader-now) {
+  opacity: 0.3;
+}
+.guide__text .reader-now {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: -4px 0 0 var(--accent);
+  border-radius: 2px;
+}
+.guide .reader__select {
+  position: fixed;
+  z-index: 70;
+}
+
+/* Карточка без картинки — текстовая: значок темы у названия, без пустого места. */
+.kind--text {
+  border-left: 3px solid color-mix(in oklch, oklch(0.62 0.13 var(--hue)) 60%, transparent);
+}
+.kind--text .kind__info {
+  padding-top: 14px;
+}

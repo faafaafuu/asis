@@ -5,6 +5,7 @@
 
 import { el, icon, button, label, loading, header, nav, register, sheet, call, toast, api, inline, plural } from "../core.js";
 import { guidePage, lazyImage, tint } from "../../guides.js";
+import { attachReader } from "../../lesson-reader.js";
 import { pressMenu } from "../gestures.js";
 
 /** Кнопка в стиле приложения: тихая — второстепенная. */
@@ -26,8 +27,8 @@ register("guide", (screen, { id }) => {
       el: (tag, className = "", text = "") => el(tag, className, text),
       button: btn,
       inline,
-      // Вслух на телефоне читает экран урока; здесь — только глазами.
-      attachReader: () => document.createComment("reader"),
+      // Вслух — тот же чтец, что в уроке: абзац за абзацем, с подсветкой.
+      attachReader,
       onBack: () => nav.back(),
       onDeleted: () => {
         toast("Путеводитель удалён");
@@ -58,6 +59,8 @@ register("guide", (screen, { id }) => {
   });
   return {
     cleanup: () => {
+      // Ушли со страницы — путеводитель вслух замолкает.
+      api?.invoke("voice_stop").catch(() => {});
       alive = false;
       unlisten?.();
     },

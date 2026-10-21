@@ -46,3 +46,18 @@ test("карточка полки и id без путей", () => {
   assert.ok(!validId("../x"));
   assert.ok(!validId(""));
 });
+
+test("картинка по поиску — только о том же, и не портрет чужого человека", async () => {
+  const { relevant, aboutPerson } = await import("./guides.mjs");
+  assert.equal(relevant("Маск, Илон", ["Электропроводка"]), false);
+  assert.equal(relevant("Лианозово (парк культуры и отдыха)", ["Лианозовский парк"]), true);
+  assert.equal(relevant("Electrical wiring", ["Electrical wiring", "Электропроводка"]), true);
+  assert.equal(aboutPerson({ title: "Маск, Илон", description: "американский предприниматель" }, ["Электропроводка"]), true);
+  assert.equal(aboutPerson({ title: "Цицин, Николай Васильевич", description: "советский ботаник" }, ["Цицин"]), false);
+});
+
+test("найденное поиском — о теме путеводителя", async () => {
+  const { onTopic } = await import("./guides.mjs");
+  assert.equal(onTopic({ title: "Гейша", extract: "Гейша — японская артистка, развлекающая гостей" }, "Кофе: от зерна до чашки"), false);
+  assert.equal(onTopic({ title: "Обработка кофе", extract: "Обработка кофейных ягод" }, "Кофе: от зерна до чашки"), true);
+});

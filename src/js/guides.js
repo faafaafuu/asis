@@ -49,7 +49,13 @@ export function lazyImage(api, id, picture, className) {
   img.addEventListener("load", () => img.classList.add("is-loaded"));
   img.addEventListener("error", () => img.remove());
   img.__load = async () => {
-    const src = await pictureOf(api, id, picture.file);
+    // Две попытки: канал до сервера моргает, и картинка пропадала до
+    // перезапуска окна.
+    let src = await pictureOf(api, id, picture.file);
+    if (!src) {
+      await new Promise((done) => setTimeout(done, 2500));
+      src = await pictureOf(api, id, picture.file);
+    }
     if (src) img.src = src;
     else img.remove();
   };
@@ -196,14 +202,12 @@ export function guidePage(guide, { api, el, button, inline, attachReader, onBack
     body.append(toc);
   }
 
-  // Читать вслух — те же абзацы, что глазами.
+  // Читать вслух — те же абзацы, что глазами. Чтец собирает абзацы при
+  // подключении, поэтому подключается к уже заполненному тексту: раньше он
+  // видел пустой блок, и «Слушать» сразу заканчивалось молча.
   const text = el("div", "guide__text");
-  if (written.length) {
-    const reader = attachReader(text, { api, el, button, label: "путеводитель", keys: false });
-    body.append(reader);
-  }
-
   for (const section of guide.sections) text.append(sectionNode(guide, section, { api, el, inline }));
+  if (written.length) body.append(attachReader(text, { api, el, button, label: "путеводитель", keys: false }));
   body.append(text);
   body.append(footer(guide, { api, el, button, onDeleted, onChanged }));
   page.append(body);
@@ -247,9 +251,10 @@ function sectionNode(guide, section, { api, el, inline }) {
   if (section.items.length) {
     const grid = el("div", "kinds");
     for (const item of section.items) {
-      const card = el("div", "kind");
+      // Без картинки — текстовая карточка, а не пустая плашка: для «светлой
+      // обжарки» снимка в Википедии нет, и плашка выглядела как «не загрузилось».
+      const card = el("div", item.picture ? "kind" : "kind kind--text");
       if (item.picture) card.append(lazyImage(api, guide.id, item.picture, "kind__img"));
-      else card.append(el("span", "kind__placeholder", section.emoji || "•"));
       const info = el("div", "kind__info");
       info.append(el("h3", "kind__name", item.name));
       if (item.tags.length) {
