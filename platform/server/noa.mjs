@@ -423,6 +423,9 @@ export function mountNoa({ route, db, Fail, readJson }) {
     const { data } = await readJson(req, MAX_PROGRESS + 1000);
     return { ok: true, ...writeProgress(db, user.id, data, Fail) };
   });
+
+  // Ролики к урокам (video.mjs) пишет та же модель через мост и только для владельца.
+  return { bridgeChat, bridgeUser };
 }
 
 /** Прогресс аккаунта: `{ data, savedAt }`, `data` — как learning.json. */

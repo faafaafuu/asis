@@ -1,0 +1,14 @@
+[Unit]
+Description=NOAH: рендер роликов обучения (Manim в контейнере)
+After=docker.service noah-voice.service
+Requires=docker.service
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/noah-video/worker.py
+WorkingDirectory=/opt/noah-video
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
