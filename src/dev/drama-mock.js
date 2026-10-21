@@ -30,7 +30,7 @@ const script = {
             { id: "l2", speaker: "lena", display: "Спокойно, Костя. Это CrashLoopBackOff: под падает, Kubernetes поднимает его снова и ждёт всё дольше." },
             { id: "l3", speaker: "palych", display: "Заповедь первая: сначала логи, потом паника." },
             { id: "l4", speaker: "junior", display: "А где их смотреть, если он уже умер?" },
-            { id: "l5", speaker: "lena", display: "kubectl logs --previous — логи прошлого запуска." },
+            { id: "l5", speaker: "lena", display: "Логи прошлого запуска — с ключом --previous.", command: "kubectl logs web-0 --previous", output: "panic: config: listen tcp :8080: bind: address already in use" },
           ],
         },
       ],

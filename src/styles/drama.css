@@ -268,3 +268,41 @@
     max-height: 220px;
   }
 }
+
+/* Разбор вслух: команда и вывод терминала у реплики. */
+.drama__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.drama__shell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.drama__shell:empty {
+  display: none;
+}
+.drama__cmd {
+  display: block;
+  padding: 4px 8px;
+  border-left: 2px solid var(--accent);
+  background: var(--code-bg, rgba(0, 0, 0, 0.35));
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  color: var(--accent);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.drama__out {
+  margin: 0;
+  padding: 4px 8px;
+  background: var(--code-bg, rgba(0, 0, 0, 0.35));
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

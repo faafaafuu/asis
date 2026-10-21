@@ -213,7 +213,9 @@ export function dramaBox({ api, el, button, course, topic }) {
     const setting = el("p", "drama__setting");
     const who = el("span", "drama__who");
     const said = el("p", "drama__said");
-    now.append(setting, who, said);
+    // Команда и что показал терминал — как в терминале, под репликой.
+    const shell = el("div", "drama__shell");
+    now.append(setting, who, said, shell);
 
     // Вся серия строками: щелчок — туда.
     const lines = new Map();
@@ -228,7 +230,9 @@ export function dramaBox({ api, el, button, course, topic }) {
       const line = lines.get(`${mark.scene}/${mark.line}`);
       const text = line?.display || (mark.line === "setting" ? scenes.get(mark.scene)?.setting : mark.line === "recap" ? episode.recap : mark.line === "hook" ? episode.hook : "");
       const item = el("li", `drama__line is-${mark.speaker}`);
-      item.append(el("span", "drama__name", names[mark.speaker] ?? mark.speaker), el("span", "drama__text", text ?? ""));
+      const body = el("span", "drama__body");
+      body.append(el("span", "drama__text", text ?? ""), ...terminal(line));
+      item.append(el("span", "drama__name", names[mark.speaker] ?? mark.speaker), body);
       item.addEventListener("click", () => {
         audio.currentTime = mark.start;
         audio.play().catch(() => {});
@@ -258,6 +262,7 @@ export function dramaBox({ api, el, button, course, topic }) {
       who.textContent = names[mark.speaker] ?? "";
       who.className = `drama__who is-${mark.speaker}`;
       said.textContent = rows[at]?.querySelector(".drama__text")?.textContent ?? "";
+      shell.replaceChildren(...terminal(lines.get(`${mark.scene}/${mark.line}`)));
     });
 
     const quizBox = el("div", "drama__quiz");
@@ -308,6 +313,14 @@ export function dramaBox({ api, el, button, course, topic }) {
     player.replaceChildren(head, audio, now, list, tools, quizBox, ...(terms.length ? [termsBox] : []), later(episode, job.id));
     player.hidden = false;
     audio.play().catch(() => {});
+  }
+
+  /** «$ команда» и вывод терминала у реплики, где их вводят и смотрят. */
+  function terminal(line) {
+    const out = [];
+    if (String(line?.command ?? "").trim()) out.push(el("code", "drama__cmd", `$ ${line.command.trim()}`));
+    if (String(line?.output ?? "").trim()) out.push(el("pre", "drama__out", line.output.trim()));
+    return out;
   }
 
   /** Вопросы по одному: верно — объяснение; нет — объяснение и «к сцене». */
