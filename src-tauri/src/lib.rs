@@ -1585,6 +1585,16 @@ const WAKE_REQUESTS: &[&str] = &[
     "сдела", "добав", "убер", "удал", "перенес", "отмет", "помог", "куп", "прочит", "останов",
     "сним", "заверш", "слыш", "поменя", "смени", "переключ", "дай", "подскаж", "спрос", "запомн",
     "повтор", "отправ", "напиш", "созда", "позов", "вруби", "выруб", "погоня", "давай",
+    "посмотр", "глян", "подбер", "собер", "сравн", "составь", "проч", "озвуч", "сыгра",
+];
+
+/// Вопросительные слова: «Но где хранятся секреты?» — это «Ноа, где…».
+/// Только с вопросительным знаком в конце: «но где же он» в обычной речи
+/// вопросом к помощнику не бывает, а распознавание ставит знак по интонации.
+#[cfg(desktop)]
+const WAKE_QUESTIONS: &[&str] = &[
+    "где", "что", "как", "кто", "когда", "сколько", "почему", "зачем", "какой", "какая", "какое", "какие",
+    "чем", "куда", "откуда", "чего", "можешь", "сможешь", "есть", "ты",
 ];
 
 /// Обращения между именем и просьбой: «Но, друг мой, поменяй модель».
@@ -1603,7 +1613,7 @@ const CALL_FILLERS: &[&str] = &["друг", "мой", "дружище", "бра�
 ///
 /// Отдаёт, где кончилось имя; дальше — вопрос.
 #[cfg(desktop)]
-fn clipped_name(words: &[(String, usize)]) -> Option<usize> {
+fn clipped_name(words: &[(String, usize)], asked: bool) -> Option<usize> {
     let first = words.first()?;
     if first.0 != "но" && first.0 != "ну" {
         return None;
@@ -1632,7 +1642,8 @@ fn clipped_name(words: &[(String, usize)]) -> Option<usize> {
         || (next == "как" && (after.starts_with("слыш") || after == "дела"))
         || WAKE_CHECKS.iter().any(|stem| next.starts_with(stem));
     let greeting = CALL_GREETINGS.iter().any(|stem| next.starts_with(stem));
-    (request || checking || greeting).then_some(name_end)
+    let question = asked && words.len() > next_at + 1 && WAKE_QUESTIONS.contains(&next.as_str());
+    (request || checking || greeting || question).then_some(name_end)
 }
 
 /// Проверка связи после имени: «приём», «проверка», «алло».
@@ -1834,7 +1845,7 @@ fn wake_split_default(text: &str) -> Option<String> {
     }
 
     // Имя, обрезанное распознаванием: «Но закрой телеграм», «Ну, а ты тут?».
-    if let Some(name_end) = clipped_name(&words) {
+    if let Some(name_end) = clipped_name(&words, text.trim_end().ends_with('?')) {
         return Some(tail(name_end));
     }
 
@@ -3464,6 +3475,11 @@ mod tests {
         // Имя, обрезанное распознаванием, — так оно и приходило вживую.
         assert_eq!(wake_split("Но закрой Телеграм.", "Ноа").as_deref(), Some("закрой Телеграм."));
         assert_eq!(wake_split("Ну, а ты тут?", "Ноа").as_deref(), Some("ты тут?"));
+        // Обрезанное имя и вопрос — по журналу 22.10 зов оставался без ответа.
+        assert_eq!(wake_split("Но где хранятся секреты Kubernetes?", "Ноа").as_deref(), Some("где хранятся секреты Kubernetes?"));
+        assert_eq!(wake_split("Ну, посмотри, что там есть бесплатного.", "Ноа").as_deref(), Some("посмотри, что там есть бесплатного."));
+        assert_eq!(wake_split("Но где же он был.", "Ноа"), None);
+        assert_eq!(wake_split("Ну где?", "Ноа"), None);
         assert_eq!(wake_split("Но, закажи семечки", "Ноа").as_deref(), Some("закажи семечки"));
         assert_eq!(
             wake_split("Эй, но а ты слышишь меня?", "Ноа").as_deref(),

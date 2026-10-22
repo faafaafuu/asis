@@ -32,6 +32,8 @@ pub enum Act {
     Media(Media),
     /// Таймер на столько секунд.
     Timer(u64),
+    /// «Найди на ютубе ролики про секреты в кубере» — поиск на сайте в браузере.
+    Search { site: &'static str, query: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,6 +162,9 @@ pub fn understand(said: &str, modules: &[(String, String)]) -> Vec<Act> {
     if wants_self_closed(&meaningful) {
         return vec![Act::CloseSelf];
     }
+    if let Some(act) = search_request(&all) {
+        return vec![act];
+    }
     // Команда — короткая фраза. Разбор по предложениям: «Открой телеграм.
     // Открой телеграм.» — одна команда, а не название из пяти слов.
     for sentence in said.split(|c: char| matches!(c, '!' | '?' | ';' | '…')) {
@@ -171,6 +176,73 @@ pub fn understand(said: &str, modules: &[(String, String)]) -> Vec<Act> {
         }
     }
     Vec::new()
+}
+
+/// Где искать: слово в просьбе — сайт и адрес поиска.
+const SEARCH_SITES: &[(&[&str], &str)] = &[
+    (&["ютуб", "ютубе", "ютуба", "ютюб", "ютюбе", "ютьюб", "ютьюбе", "youtube", "ютубчик"], "youtube"),
+    (&["гугл", "гугле", "google", "гуглу"], "google"),
+    (&["яндекс", "яндексе", "yandex"], "yandex"),
+    (&["интернете", "сети", "браузере", "инете"], "yandex"),
+];
+const SEARCH_VERBS: &[&str] = &[
+    "найди", "найти", "найдешь", "поищи", "поискать", "ищи", "покажи", "показать", "включи", "открой", "загугли", "глянь",
+    "посмотреть", "поставь", "запусти", "хочу",
+];
+/// Что выбросить из запроса: глагол, сайт, предлоги перед сайтом и слова-обёртки.
+const SEARCH_NOISE: &[&str] = &[
+    "мне", "пожалуйста", "ка", "плиз", "давай", "ролики", "ролик", "ролике", "роликов", "видео", "видос", "видосы", "видосик",
+    "клип", "клипы", "в", "на", "по", "запросу", "там", "нибудь", "можешь", "можно",
+];
+
+/// «Найди на ютубе ролики про секреты в кубере», «загугли что такое etcd»,
+/// «включи на YouTube лофай». Сайт назван словом; без сайта, но с «загугли» —
+/// поиск в интернете. Запрос — то, что осталось без глагола и обёрток.
+fn search_request(all: &[String]) -> Option<Act> {
+    let site = SEARCH_SITES.iter().find(|(names, _)| all.iter().any(|w| names.contains(&w.as_str()))).map(|(_, site)| *site);
+    let verb = all.iter().any(|w| SEARCH_VERBS.contains(&w.as_str()));
+    let video = all.iter().any(|w| w.starts_with("ролик") || w.starts_with("видео") || w.starts_with("видос"));
+    let googled = all.iter().any(|w| w.starts_with("загугл") || w.starts_with("погугл"));
+    let site = match site {
+        Some("yandex") if !verb => return None,
+        Some(site) if verb || video => site,
+        None if googled => "yandex",
+        _ => return None,
+    };
+    let site_words: Vec<&str> = SEARCH_SITES.iter().flat_map(|(names, _)| names.iter().copied()).collect();
+    let mut query: Vec<&str> = all
+        .iter()
+        .map(String::as_str)
+        .filter(|w| !SEARCH_VERBS.contains(w) && !site_words.contains(w) && !w.starts_with("загугл") && !w.starts_with("погугл"))
+        .collect();
+    // Обёртки — только в начале запроса: «секреты в кубере» своё «в» сохраняет.
+    while query.first().is_some_and(|w| SEARCH_NOISE.contains(w) || *w == "про" || *w == "о" || *w == "об") {
+        query.remove(0);
+    }
+    while query.last().is_some_and(|w| SEARCH_NOISE.contains(w)) {
+        query.pop();
+    }
+    if query.is_empty() {
+        return None;
+    }
+    Some(Act::Search { site, query: query.join(" ") })
+}
+
+/// Адрес поиска на сайте.
+fn search_url(site: &str, query: &str) -> String {
+    let q: String = query
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => (b as char).to_string(),
+            b' ' => "+".to_string(),
+            other => format!("%{other:02X}"),
+        })
+        .collect();
+    match site {
+        "youtube" => format!("https://www.youtube.com/results?search_query={q}"),
+        "google" => format!("https://www.google.com/search?q={q}"),
+        _ => format!("https://yandex.ru/search/?text={q}"),
+    }
 }
 
 /// Предложения по точке — но не по точке внутри адреса: «mail.ru».
@@ -628,6 +700,17 @@ async fn run(app: &tauri::AppHandle, act: Act) -> Option<String> {
         tauri::async_runtime::spawn_blocking(work).await.unwrap_or_else(|_| "Не вышло.".into())
     };
     Some(match act {
+        Act::Search { site, query } => {
+            let place = match site {
+                "youtube" => "на YouTube",
+                "google" => "в Google",
+                _ => "в Яндексе",
+            };
+            match crate::commands::open_externally(&search_url(site, &query)) {
+                Ok(()) => format!("Ищу {place}: «{query}»."),
+                Err(err) => format!("Браузер не открылся: {err}"),
+            }
+        }
         Act::CloseSelf => {
             crate::voice::stop();
             for label in [crate::overlay::POPUP_LABEL, crate::overlay::HUD_LABEL] {
@@ -923,6 +1006,20 @@ mod tests {
 
     fn mods() -> Vec<(String, String)> {
         vec![("pogodych".into(), "Погодыч".into())]
+    }
+
+    #[test]
+    fn web_search_goes_to_the_browser() {
+        let search = |site: &'static str, query: &str| vec![Act::Search { site, query: query.into() }];
+        assert_eq!(understand("Найди мне на YouTube ролики про секреты в кубере.", &mods()), search("youtube", "секреты в кубере"));
+        assert_eq!(understand("Найди на youtube ролике про секреты кубернетис.", &mods()), search("youtube", "секреты кубернетис"));
+        assert_eq!(understand("включи на ютубе лофай", &mods()), search("youtube", "лофай"));
+        assert_eq!(understand("загугли что такое etcd", &mods()), search("yandex", "что такое etcd"));
+        assert_eq!(understand("поищи в интернете курс доллара", &mods()), search("yandex", "курс доллара"));
+        // Открыть сам сайт — не поиск.
+        assert!(!matches!(understand("открой ютуб", &mods()).first(), Some(Act::Search { .. })));
+        assert!(understand("я вчера смотрел ютуб весь вечер", &mods()).iter().all(|a| !matches!(a, Act::Search { .. })));
+        assert_eq!(search_url("youtube", "секреты в k8s"), "https://www.youtube.com/results?search_query=%D1%81%D0%B5%D0%BA%D1%80%D0%B5%D1%82%D1%8B+%D0%B2+k8s");
     }
 
     fn u(said: &str) -> Vec<Act> {
