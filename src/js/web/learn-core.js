@@ -53,6 +53,41 @@ function normalizeQuestion(q) {
   };
 }
 
+/** Все вопросы с вариантами курса — в своём порядке. */
+export function dealCourse(course) {
+  return {
+    ...course,
+    final: course.final.map(dealt),
+    topics: course.topics.map((t) => ({ ...t, tasks: t.tasks.map(dealt), exam: t.exam.map(dealt) })),
+  };
+}
+
+/**
+ * Варианты ответов — в своём порядке (learning.rs, `deal`): модель почти
+ * всегда ставит верный первым. Порядок зависит только от вопроса — FNV-1a от
+ * id и текста, затем тасовка генератором, — и совпадает с программой.
+ */
+export function dealt(question) {
+  const count = question.options.length;
+  if (question.kind !== "choice" || count < 2 || !(question.answer == null || (question.answer >= 0 && question.answer < count))) return question;
+  let seed = 0x811c9dc5;
+  for (const byte of new TextEncoder().encode(`${question.id}\n${question.q}`)) {
+    seed ^= byte;
+    seed = Math.imul(seed, 0x01000193) >>> 0;
+  }
+  const order = [...Array(count).keys()];
+  for (let i = count - 1; i > 0; i--) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const j = seed % (i + 1);
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return {
+    ...question,
+    options: order.map((k) => question.options[k]),
+    answer: question.answer == null ? null : order.indexOf(question.answer),
+  };
+}
+
 function normalizeTopic(t) {
   return {
     id: str(t?.id),
@@ -435,7 +470,8 @@ export function createLearning({ courses, store, ai = null, name = "Ноа", clo
   store.data.courses ??= {};
   store.data.deep ??= {};
 
-  const all = () => courses().map(normalizeCourse);
+  // Варианты тасуются здесь, когда курс берут для занятий, — храним как есть.
+  const all = () => courses().map(normalizeCourse).map(dealCourse);
   const course = (id) => {
     const found = all().find((c) => c.id === id);
     if (!found) throw new Error("Такого курса нет.");

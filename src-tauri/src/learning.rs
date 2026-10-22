@@ -223,7 +223,9 @@ pub fn courses() -> Vec<Course> {
         all.retain(|known| known.id != course.id);
         all.push(course);
     }
-    all
+    // Варианты тасуются здесь, когда курс берут для занятий; на диске и в
+    // аккаунте курс лежит как есть.
+    all.into_iter().map(dealt).collect()
 }
 
 /// Папка своих курсов — рядом с файлом прогресса.
@@ -265,6 +267,44 @@ fn user_courses() -> Vec<Course> {
         .collect();
     found.sort_by(|a, b| a.title.cmp(&b.title));
     found
+}
+
+/// Варианты ответов — в своём порядке. Модель почти всегда ставит верный
+/// первым, и тест проходился нажатием на первую строку. Порядок зависит
+/// только от вопроса (FNV-1a от id и текста, затем тасовка генератором), и
+/// тот же разбор в learn-core.js (`dealt`): на всех устройствах вопрос
+/// выглядит одинаково, а ответ сверяется с тем же номером.
+fn dealt(mut course: Course) -> Course {
+    for question in course
+        .topics
+        .iter_mut()
+        .flat_map(|t| t.tasks.iter_mut().chain(t.exam.iter_mut()))
+        .chain(course.final_exam.iter_mut())
+    {
+        deal(question);
+    }
+    course
+}
+
+pub(crate) fn deal(question: &mut Question) {
+    let count = question.options.len();
+    if question.kind != "choice" || count < 2 || question.answer.is_some_and(|right| right >= count) {
+        return;
+    }
+    let mut seed: u32 = 0x811c_9dc5;
+    for byte in question.id.bytes().chain(std::iter::once(b'\n')).chain(question.q.bytes()) {
+        seed ^= u32::from(byte);
+        seed = seed.wrapping_mul(0x0100_0193);
+    }
+    let mut order: Vec<usize> = (0..count).collect();
+    for i in (1..count).rev() {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let j = (seed % (i as u32 + 1)) as usize;
+        order.swap(i, j);
+    }
+    let options = order.iter().map(|&k| question.options[k].clone()).collect();
+    question.answer = question.answer.and_then(|right| order.iter().position(|&k| k == right));
+    question.options = options;
 }
 
 pub(crate) fn course(id: &str) -> Result<Course, String> {
@@ -1784,5 +1824,39 @@ mod tests {
             "maps": maps,
         });
         std::fs::write(std::env::var("LEARN_FIXTURE_OUT").expect("LEARN_FIXTURE_OUT"), out.to_string()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod deal_tests {
+    use super::*;
+
+    fn question(id: &str) -> Question {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "kind": "choice", "q": "Что делает kubectl apply?",
+            "options": ["создаёт или обновляет", "только удаляет", "только читает", "перезапускает узел"], "answer": 0
+        }))
+        .expect("вопрос")
+    }
+
+    #[test]
+    fn options_are_dealt_the_same_way_as_in_the_browser() {
+        let mut q = question("k8s-e1");
+        deal(&mut q);
+        // Тот же вопрос в learn-core.test.js — тот же порядок.
+        assert_eq!(q.options, ["только удаляет", "перезапускает узел", "создаёт или обновляет", "только читает"]);
+        assert_eq!(q.options[q.answer.unwrap()], "создаёт или обновляет");
+    }
+
+    #[test]
+    fn right_answer_is_not_always_first() {
+        let firsts = (0..40)
+            .filter(|n| {
+                let mut q = question(&format!("t-{n}"));
+                deal(&mut q);
+                q.answer == Some(0)
+            })
+            .count();
+        assert!(firsts < 20, "верный первым в {firsts} из 40");
     }
 }

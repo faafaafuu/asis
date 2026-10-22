@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createLearning, validate, answerCard, newCardState, levelOf, sections, choiceOf, mergeProgress } from "./learn-core.js";
+import { createLearning, validate, answerCard, newCardState, levelOf, sections, choiceOf, mergeProgress, dealt } from "./learn-core.js";
 
 const lesson = [
   "# Сети",
@@ -59,6 +59,13 @@ function sampleCourse() {
   };
 }
 
+/** Номер варианта по тексту: варианты в занятиях идут в своём порядке (dealt). */
+function pick(id, text) {
+  const t = sampleCourse().topics[0];
+  const q = [...t.tasks, ...t.exam].find((x) => x.id === id);
+  return dealt({ ...q }).options.indexOf(text);
+}
+
 function setup({ ai = null, clock } = {}) {
   const store = { data: {}, saves: 0, save() { this.saves++; } };
   const learning = createLearning({ courses: () => [sampleCourse()], store, ai, clock });
@@ -106,10 +113,10 @@ test("расписание: удачные ответы отодвигают к�
 
 test("задача с вариантами засчитывается и попадает в прогресс", async () => {
   const { learning, store } = setup();
-  const verdict = await learning.check("net", "t1", 1);
+  const verdict = await learning.check("net", "t1", pick("t1", "порт"));
   assert.equal(verdict.score, 100);
   assert.equal(store.data.courses.net.topics.basics.tasks.t1, 100);
-  const wrong = await learning.check("net", "e1", 1);
+  const wrong = await learning.check("net", "e1", pick("e1", "кабель"));
   assert.equal(wrong.right, false);
   assert.deepEqual(store.data.courses.net.topics.basics.mistakes, ["e1"]);
 });
@@ -135,7 +142,7 @@ test("мини-экзамен без ответов в вопросах; сда�
   const exam = learning.exam("net", "basics");
   assert.equal(exam.questions.length, 2);
   assert.ok(exam.questions.every((q) => q.answer === null && !q.points.length));
-  const result = await learning.submit("net", "basics", { e1: 0, e2: 0 });
+  const result = await learning.submit("net", "basics", { e1: pick("e1", "книга имён"), e2: pick("e2", "номер устройства") });
   assert.equal(result.score, 100);
   assert.equal(learning.overview()[0].topics[0].status, "done");
 });
@@ -211,7 +218,7 @@ test("устный зачёт: вариант называют словом — 
   const { learning } = setup();
   learning.oralStart("net", "basics");
   // Первым спрашивается ошибка, если она есть: делаем ошибкой задачу с ответом «порт».
-  await learning.check("net", "t1", 0);
+  await learning.check("net", "t1", pick("t1", "IP"));
   learning.oralStop();
   learning.oralStart("net", "basics");
   const reply = await learning.oralAnswer("второй");
@@ -255,4 +262,12 @@ test("урок с Ноа: разбор пересказа и переход к �
   const last = await l.ask({ ...target, section: 2 }, "dns ищет адрес по имени", { voice: true });
   assert.match(last, /Урок пройден/);
   assert.equal(store.data.courses.net.topics.basics.read, true);
+});
+
+test("варианты теста тасуются так же, как в программе", async () => {
+  const { dealt } = await import("./learn-core.js");
+  const q = dealt({ id: "k8s-e1", kind: "choice", q: "Что делает kubectl apply?", options: ["создаёт или обновляет", "только удаляет", "только читает", "перезапускает узел"], answer: 0 });
+  // Тот же порядок — в learning.rs, deal_tests.
+  assert.deepEqual(q.options, ["только удаляет", "перезапускает узел", "создаёт или обновляет", "только читает"]);
+  assert.equal(q.options[q.answer], "создаёт или обновляет");
 });
