@@ -75,8 +75,33 @@ export const PRONOUNCE = [
   .map(([term, spoken]) => `${term} — «${spoken}»`)
   .join(", ");
 
+/**
+ * Где происходит серия. Раньше каждая начиналась одинаково — ночь, офис
+ * пуст, лежит прод, — и сериал звучал одной серией. Ситуация выбирается на
+ * серию и не повторяет прошлую.
+ */
+export const SITUATIONS = [
+  "утренняя планёрка: тимлид раздаёт задачи, джуну достаётся первая задача по теме урока, и она сразу оказывается не такой простой",
+  "код-ревью: Лена разбирает пул-реквест джуна, в нём ошибка как раз по теме урока",
+  "онбординг: в команду пришёл стажёр, джун впервые объясняет тему сам, Палыч поправляет",
+  "подготовка к релизу днём: проходят чек-лист и ищут, что может пойти не так",
+  "собеседование: Лена собеседует кандидата, джун сидит рядом и сам не уверен в ответах",
+  "созвон с заказчиком: нужно простыми словами объяснить, почему сделано именно так",
+  "переезд сервиса на новый сервер в выходные, всё по плану, пока план не ломается",
+  "учебный стенд: Палыч нарочно ломает систему, джун ищет причину",
+  "обед на кухне офиса: спор о том, как правильно, который проверяют прямо с ноутбука",
+  "разбор полётов после вчерашнего сбоя: восстанавливают по логам, что случилось",
+  "ночное дежурство: звонит мониторинг, что-то упало",
+];
+
+/** Ситуация для серии: случайная, но не та, что была в прошлой. */
+export function pickSituation(previous = "") {
+  const choices = SITUATIONS.filter((s) => s !== previous);
+  return choices[Math.floor(Math.random() * choices.length)];
+}
+
 /** Указания модели: одна серия за ответ. */
-export function rules({ level, junior, minutes, scope, total }) {
+export function rules({ level, junior, minutes, scope, total, situation = SITUATIONS[0], story = null }) {
   const words = minutes * 125;
   return `Ты — сценарист обучающих аудиодрам на технические темы. Превращаешь материал урока в живую сцену, которую слушают на разные голоса. Цель — чтобы слушатель запомнил через историю, а не заучивал.
 
@@ -88,12 +113,18 @@ export function rules({ level, junior, minutes, scope, total }) {
 Уровень слушателя: ${level === "middle" ? "middle — основы знает, нужны тонкости, компромиссы и разбор отказов" : "junior — объяснять с нуля, без жаргона без пояснения"}.
 
 ДРАМАТУРГИЯ
-1. Завязка — настоящий инцидент со ставкой: сайт лежит, звонят клиенты, ночью дедлайн.
+1. Завязка — ${situation}. Ставка понятна сразу: что будет, если не разберутся. Не делай из этого ночную аварию, если ситуация не про неё; время дня и обстановка — из ситуации.
 2. Объяснение — через действия и ошибки героев, не лекцией. Не больше двух реплик подряд без вопроса, ошибки или действия.
 3. В каждой серии: одна ошибка ${junior}, одна заповедь Палыча (короткой фразой, которую хочется запомнить), развязка.
 4. Ключевой термин серии звучит 2–3 раза в разных ситуациях.
 4а. Проблему решают вслух, как на настоящем дежурстве, шаг за шагом: догадка — «введи вот это» и что эта команда делает — что она показала — вывод — следующий шаг. Не меньше ${Math.max(3, minutes - 1)} таких шагов за серию; хотя бы один — ложный след: проверили, не то, и сказано почему. Слушатель должен уметь повторить этот разбор сам.
-${scope === "section" ? `5. Это сериал из ${total} серий со сквозным сюжетом. Серия со второй начинается с «В прошлой серии…» — пересказ прошлого материала внутри истории — и каждая кончается крючком к следующей.` : "5. Одна серия — законченная история."}
+${
+  scope === "section"
+    ? `5. Это сериал из ${total} серий со сквозным сюжетом. Серия со второй начинается с «В прошлой серии…» — пересказ прошлого материала внутри истории — и каждая кончается крючком к следующей.`
+    : story
+      ? `5. Это очередная серия сериала «${story.title}» по курсу: те же герои и их отношения. recap — одна-две фразы «В прошлой серии…» о прошлом уроке. Дальше история — только про материал ЭТОГО урока, не забегая к следующим темам. hook — короткий крючок, без спойлеров.`
+      : "5. Одна серия — законченная история."
+}
 
 ТОЧНОСТЬ — проверь до ответа
 - Каждое техническое утверждение верно. Не уверен — не пиши.
@@ -116,6 +147,8 @@ ${scope === "section" ? `5. Это сериал из ${total} серий со с
 
 ВОПРОСЫ
 - quiz — 5–8 вопросов после серии, все три типа: recall (вспомнить), scenario (что делать), compare (чем отличается).
+- Вопросы — на понимание, не на пересказ: что будет, если…; почему не так…; что выбрать в этой ситуации и почему. Хотя бы два — о случае, которого в серии не было, но который решается тем же рассуждением.
+- Неверные варианты — правдоподобные заблуждения по этой теме, которые новичок и правда выберет; той же длины и формы, что верный. Верный ничем не выделяется — ни длиной, ни словами из вопроса. Порядок вариантов случайный.
 - Каждый вопрос привязан к сцене и реплике (ref) — слушатель вспоминает момент истории. options — 3–4 варианта, answer — один из них дословно. explain — коротко, почему так, со ссылкой на момент истории.
 - delayed_quiz — ещё ровно 3 вопроса на повтор через день: без подсказок из сцены, ref не нужен.
 
@@ -320,18 +353,26 @@ export function mountDrama({ route, db, Fail, readJson, chat, owner }) {
           params.scope === "section"
             ? `Серия ${n} из ${total}. Урок этой серии: «${lessons[n - 1]?.title}».\nТезисы урока:\n${lessons[n - 1]?.theses ?? ""}\n\nВесь раздел по сериям:\n${lessons.map((l, i) => `${i + 1}. ${l.title}`).join("\n")}`
             : `Материал урока:\n${job.material}`;
-        const before = drama.episodes.length ? `\n\nЧто было раньше:\n${previously(drama.episodes)}` : "";
+        const story = params.scope === "lesson" ? params.story : null;
+        const before = drama.episodes.length
+          ? `\n\nЧто было раньше:\n${previously(drama.episodes)}`
+          : story
+            ? `\n\nПрошлая серия сериала «${story.title}» (по прошлому уроку):\n${story.text}`
+            : "";
+        if (story && !drama.title) drama.title = story.title;
+        const situation = pickSituation(drama.episodes.at(-1)?.situation ?? story?.situation ?? "");
         const messages = [
-          { role: "system", content: rules({ ...params, total }) },
+          { role: "system", content: rules({ ...params, total, situation, story }) },
           { role: "user", content: `Тема: ${params.topic}.\n${what}${before}` },
         ];
-        const parsed = await episode(job.id, messages, { n, total, minutes: params.minutes });
+        // Серия сериала по курсу начинается с «В прошлой серии…», как вторая.
+        const parsed = await episode(job.id, messages, story ? { n: 2, total: 2, minutes: params.minutes } : { n, total, minutes: params.minutes });
         if (!drama.title) drama.title = String(parsed.title || parsed.episode.title).slice(0, 120);
         for (const term of parsed.new_terms ?? []) {
           if (term?.term && !drama.new_terms.some((t) => t.term === term.term)) drama.new_terms.push(term);
           teach(term?.term, term?.spoken);
         }
-        drama.episodes.push({ n, ...parsed.episode });
+        drama.episodes.push({ n, situation, ...parsed.episode });
         update(job.id, { title: drama.title, stage: "queued" });
         await write(dir, "drama.json", drama);
         await write(dir, "ready", "");
@@ -381,8 +422,29 @@ export function mountDrama({ route, db, Fail, readJson, chat, owner }) {
     if (!course || !topic) throw new Fail(400, "Не указан урок.");
     if (scope === "lesson" && material.length < 40) throw new Fail(400, "Не из чего делать драму: нет материала урока.");
     if (scope === "section" && lessons.length < 2) throw new Fail(400, "Для сериала нужно хотя бы два урока.");
+    // Серия урока продолжает сериал курса: сюжет — от серии ближайшего
+    // прошлого урока, у которого она есть.
+    let story = null;
+    if (scope === "lesson") {
+      const earlier = (Array.isArray(body.previous) ? body.previous : []).map(String).slice(-40).reverse();
+      for (const prior of earlier) {
+        const done = db
+          .prepare("SELECT id FROM noa_dramas WHERE user_id = ? AND course_id = ? AND topic_id = ? AND scope = 'lesson' AND status = 'done' ORDER BY created DESC LIMIT 1")
+          .get(user.id, course, prior);
+        if (!done) continue;
+        try {
+          const told = JSON.parse(await readFile(join(JOBS, done.id, "drama.json"), "utf8"));
+          const last = told.episodes?.at(-1);
+          if (last) story = { title: told.title || last.title, text: previously([last]), situation: last.situation ?? "" };
+        } catch {
+          /* файла серии нет — начнём историю заново */
+        }
+        break;
+      }
+    }
     const params = {
       scope,
+      story,
       topic: String(body.topicTitle ?? topic).slice(0, 160),
       level: body.level === "middle" ? "middle" : "junior",
       junior: String(body.junior ?? "").trim().slice(0, 30) || "Костя",

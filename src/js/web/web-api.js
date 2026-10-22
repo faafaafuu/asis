@@ -404,6 +404,9 @@ async function learnApp(noa, cmd, args) {
       return site("/api/noa/builds", { goal: args.goal, quality: args.quality ?? "sonnet" });
     case "learn_build_stop":
       return site(`/api/noa/builds/${encodeURIComponent(args.id)}/stop`, {});
+    case "learn_commands":
+      if (!noa.user) throw new Error("Команды урока собирает сервер — войдите на сайт.");
+      return (await site("/api/noa/commands", { course: args.course, topic: args.topic })).commands;
     case "learn_build_resume":
       return (await site(`/api/noa/builds/${encodeURIComponent(args.id)}/resume`, {})).build;
     case "learn_build_remove":
@@ -563,6 +566,11 @@ async function run(cmd, args = {}) {
 ${concepts(t.concepts)}` });
         }
       } else {
+        // Уроки до этого — по ним сервер продолжит сериал курса.
+        const overview = await l.overview();
+        const course = (overview ?? []).find((c) => c.id === args.course);
+        const at = course?.topics.findIndex((t) => t.id === args.topic) ?? -1;
+        body.previous = at > 0 ? course.topics.slice(0, at).map((t) => t.id) : [];
         body.material = `Тема «${topic.title}». ${topic.summary ?? ""}
 
 Понятия:

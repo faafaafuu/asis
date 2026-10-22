@@ -79,6 +79,15 @@ pub async fn order(course: &str, topic: &str, scope: &str, settings: &Value, aga
         body["lessons"] = Value::Array(lessons(course, topic)?);
     } else {
         body["material"] = Value::String(material);
+        // Уроки до этого — по ним сервер продолжит сериал курса.
+        let course_view = crate::learning::course(course)?;
+        let previous: Vec<Value> = course_view
+            .topics
+            .iter()
+            .take_while(|t| t.id != topic)
+            .map(|t| Value::String(t.id.clone()))
+            .collect();
+        body["previous"] = Value::Array(previous);
     }
     crate::platform::drama_order(&body).await
 }
@@ -132,7 +141,8 @@ pub async fn voice(app: &AppHandle, said: &str) -> Option<String> {
     if !asks_drama(&lower) {
         return None;
     }
-    let scope = if lower.contains("сериал") || lower.contains("по курсу") || lower.contains("по разделу") { "section" } else { "lesson" };
+    // Серия — всегда про один урок; сериал складывается из серий уроков сам.
+    let scope = "lesson";
     let (named_course, named_topic) = crate::learning::find(said);
     let (course, topic) = match (named_course, named_topic) {
         (Some(course), Some(topic)) if !lower.contains("этому") && !lower.contains("этой") => (course.id, topic.id),

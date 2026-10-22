@@ -206,8 +206,27 @@
   flex-direction: column;
   gap: 6px;
 }
-.drama__options > button {
+/* Вариант — кнопка, а у кнопок телефона одна строка по центру и высота 44:
+   длинный вариант обрезался с обеих сторон. Здесь — перенос и высота по тексту. */
+.drama .drama__options > button,
+.drama .drama__result > button,
+.drama .drama__q > button {
+  justify-content: flex-start;
+  height: auto;
+  min-height: 44px;
+  padding: 10px 12px;
   text-align: left;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+.drama__q,
+.drama__ask,
+.drama__result p {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .drama__options > button.is-good,
 .drama__result .is-good {

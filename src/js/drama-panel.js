@@ -47,13 +47,14 @@ function clock(ms) {
 export function dramaBox({ api, el, button, course, topic }) {
   const box = el("div", "drama");
   const row = el("div", "drama__row");
+  // Одна серия на урок — про этот урок. Сериал складывается сам: серия
+  // продолжает сюжет серии прошлого урока (сервер, drama.mjs).
   const goLesson = button("🎧 Аудиодрама", () => pick("lesson"));
-  const goSeries = button("🎞 Сериал с этого урока", () => pick("section"));
   const gear = button("⚙", () => (tune.hidden = !tune.hidden));
   gear.title = "Уровень, имя джуна, длина серии";
   gear.classList.add("drama__gear");
   const status = el("span", "drama__status");
-  row.append(goLesson, goSeries, gear, status);
+  row.append(goLesson, gear, status);
 
   // Настройки: уровень, имя джуна, длина серии.
   const prefs = load(SETTINGS_KEY, { level: "junior", junior: "Костя", minutes: 5 });
@@ -88,7 +89,7 @@ export function dramaBox({ api, el, button, course, topic }) {
     return wrap;
   };
   tune.append(tuneLabel("Уровень", level), tuneLabel("Джун", junior), tuneLabel("Серия", minutes));
-  tune.append(el("p", "drama__hint", "Персонажи: джун паникует и спрашивает, Лена объясняет, Палыч ворчит и даёт заповеди. Настройки — для новых аудиодрам."));
+  tune.append(el("p", "drama__hint", "Персонажи: джун паникует и спрашивает, Лена объясняет, Палыч ворчит и даёт заповеди. Серия каждого урока продолжает историю прошлого. Настройки — для новых серий."));
 
   const player = el("div", "drama__player");
   player.hidden = true;
@@ -105,9 +106,10 @@ export function dramaBox({ api, el, button, course, topic }) {
 
   const label = (scope) => {
     const job = jobs[scope];
-    const node = scope === "lesson" ? goLesson : goSeries;
-    const base = scope === "lesson" ? "Аудиодрама" : "Сериал с этого урока";
-    if (!job) node.textContent = scope === "lesson" ? "🎧 Аудиодрама" : "🎞 Сериал с этого урока";
+    if (scope !== "lesson") return;
+    const node = goLesson;
+    const base = "Аудиодрама";
+    if (!job) node.textContent = "🎧 Аудиодрама";
     else if (job.status === "running" && !job.ready) node.textContent = `⏳ ${base}…`;
     else if (job.status === "failed") node.textContent = `↻ ${base} — ещё раз`;
     else node.textContent = `▶ ${base}${job.total > 1 ? ` · ${job.ready} из ${job.total}` : ""}`;
@@ -292,15 +294,6 @@ export function dramaBox({ api, el, button, course, topic }) {
       showQuiz();
     });
 
-    const terms = (script.new_terms ?? []).filter((t) => t?.term);
-    const termsBox = el("details", "drama__terms");
-    if (terms.length) {
-      termsBox.append(el("summary", "", `Как говорят · ${terms.length}`));
-      const dl = el("dl", "");
-      for (const term of terms) dl.append(el("dt", "", term.term), el("dd", "", term.spoken));
-      termsBox.append(dl);
-    }
-
     const tools = el("div", "drama__tools");
     tools.append(
       button("❓ Вопросы", showQuiz),
@@ -315,7 +308,7 @@ export function dramaBox({ api, el, button, course, topic }) {
       }),
     );
 
-    player.replaceChildren(head, audio, now, list, tools, quizBox, ...(terms.length ? [termsBox] : []), later(episode, job.id));
+    player.replaceChildren(head, audio, now, list, tools, quizBox, later(episode, job.id));
     player.hidden = false;
     audio.play().catch(() => {});
   }
@@ -354,7 +347,8 @@ export function dramaBox({ api, el, button, course, topic }) {
         if (!ok && q.ref) result.append(button("↺ Вернуться к сцене", () => replay(q.ref)));
         next.hidden = false;
       };
-      const options = Array.isArray(q.options) && q.options.length ? q.options : null;
+      // Модель любит ставить верный ответ первым — порядок свой.
+      const options = Array.isArray(q.options) && q.options.length ? shuffled(q.options) : null;
       if (options) {
         const choices = el("div", "drama__options");
         for (const option of options) {
@@ -376,6 +370,16 @@ export function dramaBox({ api, el, button, course, topic }) {
     return wrap;
   }
 
+  /** Варианты в случайном порядке. */
+  function shuffled(list) {
+    const out = [...list];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  }
+
   /** Повтор через день: три вопроса без подсказок из сцены. */
   function later(episode, id) {
     const box = el("div", "drama__later");
@@ -395,7 +399,7 @@ export function dramaBox({ api, el, button, course, topic }) {
   (async () => {
     try {
       const { dramas } = await api.invoke("learn_dramas", { course, topic });
-      for (const job of dramas ?? []) watch(job.scope === "section" ? "section" : "lesson", job);
+      for (const job of dramas ?? []) if (job.scope !== "section") watch("lesson", job);
     } catch {
       /* без связи — кнопки всё равно есть */
     }
