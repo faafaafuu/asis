@@ -27,6 +27,8 @@ const MODEL_URL: &str = "https://models.silero.ai/models/tts/ru/v5_5_ru.pt";
 const MODEL_FILE: &str = "v5_5_ru.pt";
 
 const SERVER_SCRIPT: &str = include_str!("../../assets/silero_server.py");
+/// Словарь произношения — рядом со скриптом: его читает разбор текста.
+const PRONOUNCE: &str = include_str!("../../assets/pronounce.json");
 
 /// Порт своего голосового сервера. Рядом с портом расшифровки, не ходовой.
 const PORT: u16 = 8644;
@@ -239,6 +241,7 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
     // Скрипт пишется при каждом запуске: так он всегда той же версии, что программа.
     let script = root.join("silero_server.py");
     std::fs::write(&script, SERVER_SCRIPT).map_err(|err| err.to_string())?;
+    std::fs::write(root.join("pronounce.json"), PRONOUNCE).map_err(|err| err.to_string())?;
     let log_path = root.join("server.log");
     let log = std::fs::File::create(&log_path).map_err(|err| err.to_string())?;
 

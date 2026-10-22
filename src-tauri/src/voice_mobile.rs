@@ -71,7 +71,9 @@ static READ_REQUEST: AtomicU64 = AtomicU64::new(0);
 /// (`voice.engine = "silero"`): так же звучит, но каждая фраза — секунда-пять
 /// на сервере. Не вышел один — говорит другой, не вышли оба — системный.
 pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<(), String> {
-    let text = text.trim().to_string();
+    // Числа, термины и аббревиатуры — словами: ни Ирина, ни Silero их сами
+    // не прочтут (src/speech.rs).
+    let text = crate::speech::readable(text.trim());
     if text.is_empty() {
         return Ok(());
     }

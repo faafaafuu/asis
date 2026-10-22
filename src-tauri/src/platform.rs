@@ -770,6 +770,7 @@ pub fn sync(app: &tauri::AppHandle) {
         let mut last_hello = std::time::Instant::now() - Duration::from_secs(3600);
         let mut last_progress = std::time::Instant::now() - Duration::from_secs(3600);
         let mut last_courses = std::time::Instant::now() - Duration::from_secs(3600);
+        let mut last_pronounce = std::time::Instant::now() - Duration::from_secs(3600);
         loop {
             let (url, token) = settings();
             if !token.is_empty() {
@@ -799,6 +800,23 @@ pub fn sync(app: &tauri::AppHandle) {
                     match hello {
                         Ok(_) => last_hello = std::time::Instant::now(),
                         Err(err) => log::debug!("площадка: не поздоровались ({err})"),
+                    }
+                }
+                // Произношение: прочитанные по звучанию слова — серверу,
+                // выученное им — голосу (src/speech.rs). Раз в десять минут.
+                if last_pronounce.elapsed() > Duration::from_secs(600) {
+                    last_pronounce = std::time::Instant::now();
+                    let unknown = crate::speech::take_unknown();
+                    if !unknown.is_empty() {
+                        let _ = tauri::async_runtime::block_on(post(&url, "/api/noa/pronounce/unknown", &token, &json!({ "words": unknown })));
+                    }
+                    match tauri::async_runtime::block_on(get_with(&url, &format!("/api/noa/pronounce?_={}", random_hex()), &token)) {
+                        Ok(reply) => {
+                            if let Ok(words) = serde_json::from_value(reply["words"].clone()) {
+                                crate::speech::learn(words);
+                            }
+                        }
+                        Err(err) => log::debug!("площадка: произношение не пришло ({err})"),
                     }
                 }
                 if let Err(err) = take_drafts(&url, &token) {

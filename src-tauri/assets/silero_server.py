@@ -11,6 +11,7 @@ GET /health -> 200, когда модель готова.
 import array
 import io
 import json
+import os
 import re
 import sys
 import threading
@@ -46,55 +47,219 @@ def rate_word(rate: float) -> str:
     return "x-fast"
 
 
-# Латиницу модель не знает вовсе: одно английское слово — и вся фраза
-# отвергается, а Суфлёр читает её другим голосом. Поэтому латиница
-# переписывается кириллицей: частые слова — как их произносят, остальные —
-# по буквосочетаниям.
-WORDS = {
-    "devops": "девопс", "linux": "линукс", "windows": "виндоус", "telegram": "телеграм",
-    "youtube": "ютуб", "google": "гугл", "chrome": "хром", "openrouter": "опенроутер",
-    "ollama": "оллама", "claude": "клод", "docker": "докер", "kubernetes": "кубернетис",
-    "git": "гит", "github": "гитхаб", "python": "пайтон", "mcp": "эм си пи",
-    "ai": "эй ай", "api": "апи", "vpn": "впн", "wi": "вай", "fi": "фай", "ok": "окей",
-    "iphone": "айфон", "apple": "эпл", "microsoft": "майкрософт", "steam": "стим",
-    "the": "зе", "and": "энд", "of": "оф", "to": "ту", "sre": "эс эр и", "ci": "си ай",
-    "cd": "си ди", "usd": "долларов", "eur": "евро", "btc": "биткоин",
-}
+# Текст для чтения вслух — то же, что src/speech.rs в программе. Модель
+# молча выбрасывает цифры («порт 443 открыт» звучит «порт открыт»), а
+# латиницу не знает вовсе. Числа — словами, с процентами и единицами;
+# термины — по словарю pronounce.json (рядом со скриптом) и выученным словам
+# (NOAH_PRONOUNCE_LEARNED); аббревиатуры — по английским буквам; пути и имена
+# команд — по частям; незнакомое слово — по звучанию.
+HERE = os.path.dirname(os.path.abspath(__file__))
+try:
+    with open(os.path.join(HERE, "pronounce.json"), encoding="utf-8") as source:
+        _DICT = json.load(source)
+except (OSError, ValueError):
+    _DICT = {"words": {}, "letters": {}}
+WORDS = {k.lower(): v for k, v in _DICT.get("words", {}).items()}
+LETTER_NAMES = _DICT.get("letters", {})
+LEARNED_PATH = os.environ.get("NOAH_PRONOUNCE_LEARNED", "")
+_learned = {"at": 0.0, "words": {}}
+
+
+def known(word: str):
+    lower = word.lower()
+    if lower in WORDS:
+        return WORDS[lower]
+    if LEARNED_PATH:
+        try:
+            at = os.path.getmtime(LEARNED_PATH)
+            if at != _learned["at"]:
+                with open(LEARNED_PATH, encoding="utf-8") as source:
+                    _learned["words"] = {k.lower(): v for k, v in json.load(source).items()}
+                _learned["at"] = at
+        except (OSError, ValueError):
+            pass
+    return _learned["words"].get(lower)
+
+
+ONES = ["ноль", "один", "два", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять", "одиннадцать",
+        "двенадцать", "тринадцать", "четырнадцать", "пятнадцать", "шестнадцать", "семнадцать", "восемнадцать", "девятнадцать"]
+TENS = ["", "", "двадцать", "тридцать", "сорок", "пятьдесят", "шестьдесят", "семьдесят", "восемьдесят", "девяносто"]
+HUNDREDS = ["", "сто", "двести", "триста", "четыреста", "пятьсот", "шестьсот", "семьсот", "восемьсот", "девятьсот"]
+
+
+def plural(n: int, one: str, few: str, many: str) -> str:
+    if 11 <= n % 100 <= 14:
+        return many
+    if n % 10 == 1:
+        return one
+    if 2 <= n % 10 <= 4:
+        return few
+    return many
+
+
+def _hundreds(n: int, feminine: bool, out: list):
+    h, rest = divmod(n, 100)
+    if h:
+        out.append(HUNDREDS[h])
+    unit = lambda d: ("одна" if d == 1 else "две" if d == 2 else ONES[d]) if feminine else ONES[d]
+    if rest >= 20:
+        out.append(TENS[rest // 10])
+        if rest % 10:
+            out.append(unit(rest % 10))
+    elif rest:
+        out.append(unit(rest))
+
+
+def number(n: int) -> str:
+    if n == 0:
+        return ONES[0]
+    out = []
+    for size, one, few, many, feminine in [
+        (10 ** 12, "триллион", "триллиона", "триллионов", False),
+        (10 ** 9, "миллиард", "миллиарда", "миллиардов", False),
+        (10 ** 6, "миллион", "миллиона", "миллионов", False),
+        (1000, "тысяча", "тысячи", "тысяч", True),
+    ]:
+        count, n = divmod(n, size)
+        if count:
+            _hundreds(count % 1000, feminine, out)
+            out.append(plural(count, one, few, many))
+    _hundreds(n, False, out)
+    return " ".join(out)
+
+
+UNITS = {}
+for _names, _forms in [
+    (["%"], ("процент", "процента", "процентов")),
+    (["ГБ", "Гб", "GB", "Gb", "G", "Gi", "GiB"], ("гигабайт", "гигабайта", "гигабайт")),
+    (["МБ", "Мб", "MB", "Mb", "M", "Mi", "MiB"], ("мегабайт", "мегабайта", "мегабайт")),
+    (["КБ", "Кб", "KB", "Kb", "K", "Ki", "KiB"], ("килобайт", "килобайта", "килобайт")),
+    (["ТБ", "Тб", "TB", "Tb"], ("терабайт", "терабайта", "терабайт")),
+    (["мс", "ms"], ("миллисекунда", "миллисекунды", "миллисекунд")),
+    (["ГГц", "GHz"], ("гигагерц", "гигагерца", "гигагерц")),
+    (["МГц", "MHz"], ("мегагерц", "мегагерца", "мегагерц")),
+    (["°C", "°С", "°"], ("градус", "градуса", "градусов")),
+    (["₽", "руб"], ("рубль", "рубля", "рублей")),
+    (["€"], ("евро", "евро", "евро")),
+    (["vCPU", "CPU"], ("ядро", "ядра", "ядер")),
+]:
+    for _name in _names:
+        UNITS[_name] = _forms
+
 PAIRS = [
-    ("sch", "ш"), ("tch", "ч"), ("sh", "ш"), ("ch", "ч"), ("zh", "ж"), ("th", "т"),
-    ("ph", "ф"), ("kh", "х"), ("ts", "ц"), ("ck", "к"), ("oo", "у"), ("ee", "и"),
-    ("ea", "и"), ("ou", "ау"), ("qu", "кв"), ("ya", "я"), ("yu", "ю"), ("yo", "ё"),
+    ("sch", "ш"), ("tch", "ч"), ("sh", "ш"), ("ch", "ч"), ("zh", "ж"), ("th", "т"), ("ph", "ф"), ("kh", "х"), ("ts", "ц"),
+    ("ck", "к"), ("oo", "у"), ("ee", "и"), ("ea", "и"), ("ou", "ау"), ("qu", "кв"), ("ya", "я"), ("yu", "ю"), ("yo", "ё"), ("wh", "в"),
 ]
-LETTERS = dict(zip("abcdefghijklmnopqrstuvwxyz", [
+LATIN = dict(zip("abcdefghijklmnopqrstuvwxyz", [
     "а", "б", "к", "д", "е", "ф", "г", "х", "и", "дж", "к", "л", "м",
     "н", "о", "п", "к", "р", "с", "т", "у", "в", "в", "кс", "и", "з",
 ]))
 
 
-def spell_word(word: str) -> str:
+def transliterate(word: str) -> str:
     lower = word.lower()
-    if lower in WORDS:
-        out = WORDS[lower]
-    else:
-        out, i = "", 0
-        while i < len(lower):
-            for latin, cyr in PAIRS:
-                if lower.startswith(latin, i):
-                    out += cyr
-                    i += len(latin)
-                    break
-            else:
-                ch = lower[i]
-                if ch == "c" and lower[i + 1:i + 2] in ("e", "i", "y"):
-                    out += "с"
-                else:
-                    out += LETTERS.get(ch, "")
-                i += 1
-    return out.capitalize() if word[:1].isupper() else out
+    if len(lower) > 3 and lower.endswith("e") and not lower.endswith("ee") and lower[-2] not in "aeiouy":
+        lower = lower[:-1]
+    out, i = "", 0
+    if lower.startswith("e") and not lower.startswith(("ee", "ea")):
+        out, i = "э", 1
+    while i < len(lower):
+        for latin, cyr in PAIRS:
+            if lower.startswith(latin, i):
+                out += cyr
+                i += len(latin)
+                break
+        else:
+            ch = lower[i]
+            out += "с" if ch == "c" and lower[i + 1:i + 2] in ("e", "i", "y") else LATIN.get(ch, "")
+            i += 1
+    return out
+
+
+def spell(word: str) -> str:
+    return "-".join(LETTER_NAMES[c] for c in word.lower() if c in LETTER_NAMES)
+
+
+def parts(word: str):
+    return re.findall(r"[0-9]+|[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[^A-Za-z0-9]+", word) or [word]
+
+
+def read_word(word: str) -> str:
+    found = known(word)
+    if found:
+        return found
+    if word.isdigit():
+        return number(int(word)) if len(word) <= 15 else " ".join(ONES[int(d)] for d in word)
+    pieces = [p for p in parts(word) if p]
+    if len(pieces) > 1:
+        return " ".join(read_word(p) for p in pieces)
+    letters = sum(c.isalpha() for c in word)
+    upper = sum(c.isupper() for c in word)
+    if letters == 1 or (upper == letters and letters <= 6):
+        return spell(word)
+    if not any(c in "aeiouy" for c in word.lower()):
+        return spell(word)
+    return transliterate(word)
+
+
+def read_chunk(chunk: str) -> str:
+    found = known(chunk)
+    if found:
+        return found
+    sides = chunk.split("/")
+    if len(sides) == 2 and not chunk.startswith("/") and all(s.isalpha() and s.isascii() for s in sides):
+        return " или ".join(read_word(s) for s in sides)
+    chunk = chunk.replace("++", " плюс плюс ").replace("+", " плюс ").replace("#", " шарп ")
+    return " ".join(read_word(p) if re.search(r"[A-Za-z0-9]", p) else p
+                    for p in re.split(r"[/._\-\\:~@=\s]+", chunk) if p)
+
+
+NUMBER = re.compile(r"(?<![A-Za-z0-9])(\$)?(-(?=\d))?(\d+(?:[.,:]\d+)*)(?:( ?)(%|°C|°С|°|[A-Za-zА-Яа-я₽€]+))?")
+CHUNK = re.compile(r"(?:[/~](?=[A-Za-z/]))?[A-Za-z0-9][A-Za-z0-9+#._\-/\\:~@=]*")
+
+
+def _number(match: re.Match) -> str:
+    dollar, minus, digits, space, unit = match.groups()
+    tail = ""
+    if unit and unit not in UNITS:
+        # Не единица — число приклеено к имени («3s», «2xx») или просто стоит
+        # перед словом: слово остаётся как было.
+        if not space:
+            return read_chunk(digits + unit)
+        tail = space + unit
+        unit = None
+    groups = re.split(r"([.,:])", digits)
+    spoken = ["минус"] if minus else []
+    for at in range(0, len(groups), 2):
+        group = groups[at]
+        spoken.append(" ".join(ONES[int(d)] for d in group) if (len(group) > 1 and group.startswith("0")) or len(group) > 15 else number(int(group)))
+        if at + 1 < len(groups) and groups[at + 1] != ":":
+            spoken.append("запятая" if groups[at + 1] == "," else "точка")
+    last = int(groups[0]) if len(groups) == 1 else 5
+    text = " ".join(spoken)
+    if dollar:
+        text += " " + plural(last, "доллар", "доллара", "долларов")
+    if unit:
+        text += " " + plural(last, *UNITS[unit])
+    return text + tail
+
+
+def _chunk(match: re.Match) -> str:
+    chunk = match.group(0)
+    trail = re.search(r"[.,:\-/=]+$", chunk)
+    end = trail.group(0) if trail else ""
+    core = chunk[: len(chunk) - len(end)] if end else chunk
+    if not re.search(r"[A-Za-z]", core):
+        return chunk
+    return read_chunk(core) + end
 
 
 def speakable(text: str) -> str:
-    return re.sub(r"[A-Za-z]+", lambda m: spell_word(m.group(0)), text)
+    text = NUMBER.sub(_number, text)
+    text = CHUNK.sub(_chunk, text)
+    text = text.replace("&", " и ").replace("→", " — ").replace("->", " — ").replace("№", "номер ")
+    text = re.sub(r"[|{}\[\]<>\\^]", " ", text)
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
 def chunks(text: str, limit: int = 800):

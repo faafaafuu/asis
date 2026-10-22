@@ -12,6 +12,7 @@
 // выходит MP3 и разметка реплик по времени — окно подсвечивает, кто говорит,
 // и по вопросу возвращает к нужной сцене.
 
+import { teach } from "./pronounce.mjs";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -328,6 +329,7 @@ export function mountDrama({ route, db, Fail, readJson, chat, owner }) {
         if (!drama.title) drama.title = String(parsed.title || parsed.episode.title).slice(0, 120);
         for (const term of parsed.new_terms ?? []) {
           if (term?.term && !drama.new_terms.some((t) => t.term === term.term)) drama.new_terms.push(term);
+          teach(term?.term, term?.spoken);
         }
         drama.episodes.push({ n, ...parsed.episode });
         update(job.id, { title: drama.title, stage: "queued" });

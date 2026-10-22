@@ -283,9 +283,11 @@ fn clean_line(line: &str) -> String {
     if out.chars().filter(|c| c.is_alphabetic()).count() > 3 && out.chars().filter(|c| c.is_alphabetic()).all(char::is_uppercase) {
         let lower = out.to_lowercase();
         let mut chars = lower.chars();
-        return chars.next().map(|first| first.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default();
+        let line = chars.next().map(|first| first.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default();
+        return crate::speech::readable(&line);
     }
-    out
+    // Числа, термины и аббревиатуры — словами (src/speech.rs).
+    crate::speech::readable(&out)
 }
 
 #[cfg(test)]
@@ -307,7 +309,7 @@ mod tests {
         let text = "ПО ШАГАМ\n- Go-приложение на порту 8080 выполняет основную работу\n- Sidecar-логгер перехватывает его stdout\n1. Логгер отправляет логи в CloudWatch";
         assert_eq!(
             clean(text),
-            "По шагам:\nGo-приложение на порту 8080 выполняет основную работу.\nSidecar-логгер перехватывает его stdout.\nЛоггер отправляет логи в CloudWatch."
+            "По шагам:\nгоу-приложение на порту восемь тысяч восемьдесят выполняет основную работу.\nсайдкар-логгер перехватывает его эс-ти-ди-аут.\nЛоггер отправляет логи в клауд вотч."
         );
         assert_eq!(clean("Короткий ответ без точки"), "Короткий ответ без точки");
     }

@@ -24,6 +24,7 @@ import { mountMcpAuth } from "./mcpauth.mjs";
 import { mountNoa } from "./noa.mjs";
 import { mountVideo } from "./video.mjs";
 import { mountGuides } from "./guides.mjs";
+import { mountPronounce } from "./pronounce.mjs";
 import { mountDrama } from "./drama.mjs";
 import { tunnel } from "./tunnel.mjs";
 
@@ -894,6 +895,7 @@ const noa = mountNoa({ route, db, Fail, readJson });
 mountVideo({ route, db, Fail, readJson, chat: noa.bridgeChat, owner: noa.bridgeUser });
 mountDrama({ route, db, Fail, readJson, chat: noa.bridgeChat, owner: noa.bridgeUser });
 mountGuides({ route, db, Fail, readJson, chat: noa.bridgeChat, owner: noa.bridgeUser, need: noa.need, dataDir: DATA });
+mountPronounce({ route, readJson, need: noa.need, chat: noa.bridgeChat, dataDir: DATA });
 const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY, publicUrl: PUBLIC_URL });
 
 async function handle(req, res) {

@@ -44,6 +44,7 @@ mod videos;
 mod dramas;
 mod tutor;
 mod practice;
+mod speech;
 mod spoken;
 mod ssh;
 mod glance;
