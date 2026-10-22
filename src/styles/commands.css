@@ -1,0 +1,125 @@
+/* Команды урока (lesson-commands.js) и путь темы (topic-flow.js): одни и те
+   же в окне обучения, в приложении на телефоне и в Ноа онлайн. */
+
+.commands {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--divider);
+  min-width: 0;
+}
+.commands__title {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+}
+.commands__list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.commands__item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.commands__line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.commands__code {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.commands__copy {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--divider);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.commands__about {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.commands__item.is-risky .commands__about {
+  color: var(--error, #ff9db4);
+}
+
+/* ── Путь темы: ролик → урок → аудиодрама → собеседование → дальше ─────── */
+
+.flow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 14px;
+  min-width: 0;
+}
+.flow__step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--divider);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+.flow__step.is-now {
+  border-color: var(--accent);
+  box-shadow: 0 0 22px -10px var(--accent);
+}
+.flow__n {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--divider);
+  border-radius: 50%;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.flow__step.is-done .flow__n {
+  border-color: var(--done, #7dfcc6);
+  color: var(--done, #7dfcc6);
+}
+.flow__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.flow__name {
+  font-weight: 600;
+}
+.flow__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flow__go {
+  color: var(--accent);
+  font-size: 18px;
+}
+.flow__panel {
+  min-width: 0;
+}

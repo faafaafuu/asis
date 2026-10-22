@@ -741,6 +741,16 @@ pub async fn stop_build(id: &str) -> Result<(), String> {
     post(&url, &format!("/api/noa/builds/{id}/stop"), &token, &json!({})).await.map(|_| ())
 }
 
+/// Команды урока для практики — их пишет модель по уроку из аккаунта.
+pub async fn lesson_commands(course: &str, topic: &str) -> Result<Value, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Err("Команды урока собирает сервер — войдите в аккаунт NOAH.".into());
+    }
+    let reply = post(&url, "/api/noa/commands", &token, &json!({ "course": course, "topic": topic })).await?;
+    Ok(reply["commands"].clone())
+}
+
 /// Продолжить остановленную или упавшую сборку — с последней готовой темы.
 pub async fn resume_build(id: &str) -> Result<Value, String> {
     let (url, token) = settings();

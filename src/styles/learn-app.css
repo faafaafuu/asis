@@ -2926,3 +2926,17 @@ button.plate:active,
   gap: 8px;
   margin-top: 8px;
 }
+
+/* «Ещё» на экране темы: режимы, кроме пути темы. */
+.more-modes {
+  margin: 4px 0 12px;
+}
+.more-modes > summary {
+  padding: 10px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.more-modes > .modes {
+  margin-top: 6px;
+}

@@ -1946,6 +1946,12 @@ pub async fn learn_build_stop(id: String) -> Result<(), String> {
     crate::platform::stop_build(&id).await
 }
 
+/// Команды урока для практики: команда, что делает, опасна ли.
+#[tauri::command]
+pub async fn learn_commands(course: String, topic: String) -> Result<serde_json::Value, String> {
+    crate::platform::lesson_commands(&course, &topic).await
+}
+
 /// Продолжить остановленную или упавшую сборку.
 #[tauri::command]
 pub async fn learn_build_resume(id: String) -> Result<serde_json::Value, String> {

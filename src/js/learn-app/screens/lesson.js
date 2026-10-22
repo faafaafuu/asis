@@ -6,6 +6,7 @@
 import { el, icon, label, loading, nav, register, iconButton, sections, sectionTitle, sectionBody, markdown, speakable, voice, call, sheet, steps, ring, toast, api } from "../core.js";
 import { store, topicCard } from "../store.js";
 import { videoBox } from "../../video-panel.js";
+import { commandsBox } from "../../lesson-commands.js";
 
 register("lesson", (screen, { course: courseId, topic: topicId }) => {
   const course = store.course(courseId);
@@ -81,6 +82,8 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
         section: at,
       }),
     );
+    // Последний раздел — команды урока, чтобы сразу попробовать руками.
+    if (at === parts.length - 1) content.append(commandsBox({ api, el, course: courseId, topic: topicId, lesson: parts.join("\n\n") }));
     content.scrollTop = 0;
     const following = parts[at + 1];
     next.replaceChildren(

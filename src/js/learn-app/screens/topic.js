@@ -1,10 +1,12 @@
-// 03 Тема — заголовок со свечением, шесть режимов плитками (как вкладки
-// окна обучения в программе), пояснение режима, чипы понятий и закреплённая
-// кнопка «Продолжить …» — в тот режим, где человек сейчас.
+// 03 Тема — заголовок и путь темы из пяти шагов: ролик, урок, аудиодрама,
+// собеседование, команды для практики. Остальные режимы — в «Ещё».
+// Закреплённая кнопка — следующий шаг, а пройдена тема — следующая тема.
 
 import { el, icon, label, loading, header, nav, register, iconButton, plural, sections, markdown, isWeb, sheet, prefs, api } from "../core.js";
 import { store, topicCard } from "../store.js";
 import { dramaBox } from "../../drama-panel.js";
+import { videoBox } from "../../video-panel.js";
+import { commandsBox } from "../../lesson-commands.js";
 
 const MODES = [
   { id: "lesson", name: "Урок с Ноа", icon: "chat", about: "Ноа ведёт урок по разделам: читает вслух, разбирает подробно и обсуждает с вами то, что непонятно." },
@@ -68,74 +70,94 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
       cards: card.conceptsTotal > 0 && card.conceptsMature >= card.conceptsTotal,
       check: card.examBest != null && card.examBest >= course.topicPass,
     };
-    // Где человек сейчас: начатая практика, иначе непрочитанный урок, иначе проверка.
-    // Порядок темы: урок → наизусть → проверка → собеседование → карточки.
-    const active =
-      own && !own.done
-        ? "practice"
-        : !card.read
-          ? "lesson"
-          : !drilled
-            ? "drill"
-            : card.examBest == null
-              ? "check"
-              : !interviewed
-                ? "interview"
-                : "cards";
-
     content.replaceChildren();
     const head = el("div", "course-head");
     head.append(el("span", "display topic-title", topic.title));
     if (topic.summary) head.append(el("span", "muted", topic.summary));
     content.append(head);
 
+    // Путь темы — пять шагов по порядку: посмотреть, прочитать, послушать,
+    // ответить вслух, попробовать руками. Остальное — в «Ещё».
+    const seen = prefs.get("flow", {});
+    const mark = (step) => {
+      const all = prefs.get("flow", {});
+      all[`${courseId}/${topicId}/${step}`] = Date.now();
+      prefs.set("flow", all);
+    };
+    const was = (step) => Boolean(seen[`${courseId}/${topicId}/${step}`]);
+    const button = (text, onClick) => {
+      const node = el("button", "btn btn--secondary", text);
+      node.addEventListener("click", onClick);
+      return node;
+    };
+    const STEPS = [
+      { id: "video", name: "Ролик", hint: "схема всей темы за пару минут", done: was("video"), panel: () => videoBox({ api, el, button, course: courseId, topic: topicId, section: null }) },
+      { id: "lesson", name: "Урок", hint: status.lesson, done: card.read, open: () => open("lesson") },
+      { id: "drama", name: "Аудиодрама", hint: "история по уроку на три голоса", done: was("drama"), panel: () => dramaBox({ api, el, button, course: courseId, topic: topicId }) },
+      { id: "interview", name: "Собеседование", hint: status.interview, done: Boolean(done.interview), open: () => open("interview") },
+      {
+        id: "commands",
+        name: "Команды для практики",
+        hint: "что попробовать руками и что делает каждая",
+        done: was("commands"),
+        panel: () => {
+          const wrap = el("div", "");
+          wrap.append(commandsBox({ api, el, course: courseId, topic: topicId, lesson: topic.lesson }));
+          if (!isWeb) wrap.append(button("Практика в терминале", () => open("practice")));
+          return wrap;
+        },
+      },
+    ];
+    const now = STEPS.find((step) => !step.done) ?? null;
+    const flow = el("div", "flow");
+    for (const [n, step] of STEPS.entries()) {
+      const row = el("button", `flow__step${step.done ? " is-done" : ""}${step === now ? " is-now" : ""}`);
+      const body = el("span", "flow__body");
+      body.append(el("span", "flow__name", step.name), el("span", "flow__hint", step.hint));
+      row.append(el("span", "flow__n", step.done ? "✓" : String(n + 1)), body, el("span", "flow__go", step.panel ? "▾" : "›"));
+      const panel = el("div", "flow__panel");
+      panel.hidden = true;
+      row.addEventListener("click", () => {
+        if (!step.panel) return step.open();
+        if (!panel.firstChild) panel.append(step.panel());
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden) mark(step.id);
+      });
+      flow.append(row, panel);
+    }
+    content.append(flow);
+
+    // Остальные режимы — для тех, кому нужно больше: материал, карточки,
+    // конспект, мини-экзамен, наизусть, практика.
+    const more = el("details", "more-modes");
+    more.append(el("summary", "", "Ещё: материал, карточки, конспект, мини-экзамен"));
     const grid = el("div", "modes");
-    for (const mode of MODES) {
-      const tile = el("button", `mode${mode.id === active ? " is-active" : ""}${done[mode.id] ? " is-done" : ""}`);
+    for (const mode of MODES.filter((m) => !["lesson", "interview"].includes(m.id))) {
+      const tile = el("button", `mode${done[mode.id] ? " is-done" : ""}`);
       tile.append(icon(mode.icon), el("span", "mode__name", mode.name), el("span", "mode__state", status[mode.id]));
       tile.addEventListener("click", () => open(mode.id));
       grid.append(tile);
     }
-    content.append(grid);
+    more.append(grid);
+    content.append(more);
 
-    const about = MODES.find((m) => m.id === active);
-    const note = el("div", "note");
-    note.append(label(`// ${about.name.toLowerCase()}`), el("span", "", about.about));
-    content.append(note);
-
-    // Аудиодрама по теме: живая сцена на три голоса, слушать — прямо здесь.
-    content.append(
-      dramaBox({
-        api,
-        el,
-        button: (text, onClick) => {
-          const node = el("button", "btn btn--secondary", text);
-          node.addEventListener("click", onClick);
-          return node;
-        },
-        course: courseId,
-        topic: topicId,
-      }),
-    );
-
-    const terms = (topic.concepts ?? []).slice(0, 8).map((c) => c.term);
-    if (terms.length) {
-      const chips = el("div", "chips");
-      for (const term of terms) chips.append(el("span", "chip", term));
-      content.append(chips);
-    }
-
+    // Внизу — следующий шаг, а пройдена тема — следующая тема.
+    const next = course.topics[course.topics.indexOf(card) + 1] ?? null;
     const cta = el("button", "btn btn--primary btn--big");
-    const text = {
-      practice: own ? `Продолжить практику · шаг ${own.step + 1}` : "Начать практику",
-      lesson: (card.step === "lesson" || card.step === "talk") && card.section > 0 ? `Продолжить урок · раздел ${card.section + 1}` : "Начать урок с Ноа",
-      check: "Проверить себя",
-      cards: "Повторить карточки",
-      drill: "Выучить наизусть",
-      interview: "Пройти собеседование",
-    }[active];
-    cta.append(icon("play", 20, 2.25), text);
-    cta.addEventListener("click", () => open(active));
+    if (now) {
+      cta.append(icon("play", 20, 2.25), now.id === "lesson" && card.section > 0 ? `Продолжить урок · раздел ${card.section + 1}` : `Дальше: ${now.name.toLowerCase()}`);
+      cta.addEventListener("click", () => {
+        const at = flow.children[STEPS.indexOf(now) * 2];
+        if (now.panel) at.scrollIntoView({ block: "center", behavior: "smooth" });
+        at.click();
+      });
+    } else if (next) {
+      cta.append(icon("play", 20, 2.25), `Следующая тема: ${next.title}`);
+      cta.addEventListener("click", () => nav.replace("topic", { course: courseId, topic: next.id }));
+    } else {
+      cta.append(icon("play", 20, 2.25), "Финальный экзамен курса");
+      cta.addEventListener("click", () => nav.push("check", { course: courseId, scope: "final" }));
+    }
     sticky.replaceChildren(cta);
   })();
 

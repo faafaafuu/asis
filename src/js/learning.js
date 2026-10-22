@@ -12,6 +12,7 @@ import { attachReader } from "./lesson-reader.js";
 import { guideCard, guidePage, tint } from "./guides.js";
 import { videoBox } from "./video-panel.js";
 import { dramaBox } from "./drama-panel.js";
+import { commandsBox } from "./lesson-commands.js";
 
 const api = tauri();
 const ui = {};
@@ -1209,6 +1210,38 @@ function renderTopic() {
   const groupOf = (key) => Object.keys(GROUPS).find((g) => GROUPS[g].includes(key)) ?? "material";
   const current = groupOf(view.step);
 
+  // Путь темы: посмотреть, прочитать, послушать, ответить вслух, попробовать
+  // руками — и дальше. Остальные вкладки — под «Ещё».
+  const FLOW = [
+    ["video", "🎬 Ролик"],
+    ["talk", "🎙 Урок"],
+    ["drama", "🎧 Аудиодрама"],
+    ["exam", "🎤 Собеседование"],
+    ["commands", "⌨ Команды"],
+  ];
+  const inFlow = FLOW.some(([key]) => key === view.step);
+  const flow = el("div", "steps steps--flow");
+  for (const [key, label] of FLOW) {
+    const node = el("button", "step", label);
+    node.setAttribute("aria-selected", String(view.step === key));
+    if (key === "talk" && card?.read) node.append(el("span", "step__badge", "✓"));
+    node.addEventListener("click", () => {
+      view.step = key;
+      exam = null;
+      renderTopic();
+    });
+    flow.append(node);
+  }
+  const at = course.topics.findIndex((t) => t.id === view.topic);
+  const next = course.topics[at + 1];
+  if (next) flow.append(button(`Дальше: ${next.title} →`, () => openTopic(next.id), true));
+  const moreToggle = button(view.more || !inFlow ? "Ещё ▴" : "Ещё ▾", () => {
+    view.more = !(view.more || !inFlow);
+    renderTopic();
+  }, true);
+  flow.append(moreToggle);
+  root.append(flow);
+
   const steps = el("div", "steps");
   const step = (key, label, badge = "", into = steps, selected = view.step === key) => {
     const node = el("button", "step", label);
@@ -1228,7 +1261,7 @@ function renderTopic() {
   if (topic.concepts?.length) step("review", "🃏 Карточки", `${card?.conceptsMature ?? 0}/${topic.concepts.length}`, steps, current === "cards");
   if (topicView.cheatsheet) step("sheet", "📝 Конспект", "", steps, current === "sheet");
   step("tasks", "Проверить себя", card?.examBest != null ? `${card.examBest}%` : "", steps, current === "check");
-  root.append(steps);
+  if (view.more || !inFlow) root.append(steps);
 
   // Внутри раздела — мелкая строка, только если в нём больше одного.
   const sub = el("div", "substeps");
@@ -1243,7 +1276,22 @@ function renderTopic() {
   }
   if (sub.childElementCount > 1) root.append(sub);
 
-  if (view.step === "talk") {
+  const small = (text, onClick) => button(text, onClick, true);
+  if (view.step === "video") {
+    root.append(el("p", "muted", "Ролик-схема по всей теме: что это, из чего состоит и как работает. Ролик по отдельному разделу — под разделом в уроке."));
+    root.append(videoBox({ api, el, button: small, course: course.id, topic: topic.id, section: null }));
+  } else if (view.step === "drama") {
+    root.append(el("p", "muted", "История по этому уроку на три голоса. Серия продолжает сюжет серии прошлого урока."));
+    root.append(dramaBox({ api, el, button: small, course: course.id, topic: topic.id }));
+  } else if (view.step === "commands") {
+    root.append(commandsBox({ api, el, course: course.id, topic: topic.id, lesson: topic.lesson }));
+    const go = el("div", "actions");
+    go.append(button("🖥 Практика в терминале", () => {
+      view.step = "practice";
+      renderTopic();
+    }));
+    root.append(go);
+  } else if (view.step === "talk") {
     renderLessonAgent(root, {
       api,
       course,
@@ -1400,9 +1448,7 @@ function renderLesson(root, topic) {
   });
   head.append(whole);
   root.append(head);
-  // Ролик и аудиодрама по всей теме — над уроком; ролик по разделу — под ним.
-  root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: null }));
-  root.append(dramaBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id }));
+  // Ролик по разделу — под ним; ролик и аудиодрама по всей теме — шаги пути темы.
 
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(parts[at]);
@@ -1676,8 +1722,6 @@ api?.listen("learn:talk", (event) => {
 function renderWholeLesson(root, topic) {
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(topic.lesson);
-  root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: null }));
-  root.append(dramaBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id }));
   root.append(attachReader(lesson, { api, el, button }));
   root.append(lesson);
   const actions = el("div", "actions");
