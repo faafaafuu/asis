@@ -156,8 +156,39 @@ class NoahScene(Scene):
             self.renderer._original_skipping_status = not mine
             if mine and self.part_t0 is None:
                 self.part_t0 = self.renderer.time
+        self.keep_in_frame([a.mobject for a in args if isinstance(a, Animation) and getattr(a, "mobject", None) is not None])
         super().play(*args, **kwargs)
         self.clock += self.duration
+
+    def keep_in_frame(self, coming=()):
+        """Схема — в кадре и над субтитром. Модель раскладывает блоки по
+        координатам и порой выносит крайние за рамку: тогда всё, кроме
+        субтитра, ужимается и сдвигается внутрь. Одинаково во всех кусках
+        рендера: состояние сцены у них общее."""
+        # И то, что анимация только добавит: FadeIn показывает блок, которого на
+        # сцене ещё нет, — иначе он полсекунды был бы за рамкой.
+        stage = []
+        for m in [*self.mobjects, *coming]:
+            if m is self.caption or m in stage or getattr(m, "z_index", 0) >= 20 or getattr(m, "backdrop", False):
+                continue
+            if any(m in other.get_family() for other in stage):
+                continue
+            stage.append(m)
+        if not stage:
+            return
+        group = Group(*stage)
+        if group.width < 1e-3 or group.height < 1e-3:
+            return
+        left, right = -config.frame_width / 2 + 0.3, config.frame_width / 2 - 0.3
+        bottom, top = -config.frame_height / 2 + 1.1, config.frame_height / 2 - 0.25
+        if group.get_left()[0] >= left and group.get_right()[0] <= right and group.get_bottom()[1] >= bottom and group.get_top()[1] <= top:
+            return
+        scale = min(1.0, (right - left) / group.width, (top - bottom) / group.height)
+        if scale < 1.0:
+            group.scale(scale)
+        dx = max(0.0, left - group.get_left()[0]) - max(0.0, group.get_right()[0] - right)
+        dy = max(0.0, bottom - group.get_bottom()[1]) - max(0.0, group.get_top()[1] - top)
+        group.shift(RIGHT * dx + UP * dy)
 
     def tear_down(self):
         if SPAN:
@@ -237,6 +268,7 @@ class NoahScene(Scene):
             self.lit = None
         if active:
             veil = Rectangle(width=40, height=24, stroke_width=0, fill_color=BG, fill_opacity=0.68).set_z_index(5)
+            veil.backdrop = True
             for mob in active:
                 mob.set_z_index(10)
             anims.append(FadeIn(veil))
