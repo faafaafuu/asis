@@ -13,6 +13,7 @@ import { guideCard, guidePage, tint } from "./guides.js";
 import { videoBox } from "./video-panel.js";
 import { dramaBox } from "./drama-panel.js";
 import { commandsBox } from "./lesson-commands.js";
+import { featuresBox, uses } from "./learn-features.js";
 
 const api = tauri();
 const ui = {};
@@ -608,6 +609,13 @@ async function renderLobby() {
 
   // 5. Путеводители — только в программе: пишет их модель на этом компьютере.
   if (guides) root.append(guidesBlock(false));
+
+  // 6. Что использовать в учёбе: выключенное пропадает из темы и урока.
+  const tune = el("details", "lh-block lh-tune");
+  const tuneHead = el("summary", "lh-block__head");
+  tuneHead.append(el("span", "lh-h lh-block__title", "Что использовать в учёбе"), el("span", "lh-block__note", "ролики, аудиодрамы, команды, практика…"));
+  tune.append(tuneHead, featuresBox({ el }));
+  root.append(tune);
 }
 
 /** Страница новой разметки: колонка блоков с полями 24/28. */
@@ -1210,38 +1218,6 @@ function renderTopic() {
   const groupOf = (key) => Object.keys(GROUPS).find((g) => GROUPS[g].includes(key)) ?? "material";
   const current = groupOf(view.step);
 
-  // Путь темы: посмотреть, прочитать, послушать, ответить вслух, попробовать
-  // руками — и дальше. Остальные вкладки — под «Ещё».
-  const FLOW = [
-    ["video", "🎬 Ролик"],
-    ["talk", "🎙 Урок"],
-    ["drama", "🎧 Аудиодрама"],
-    ["exam", "🎤 Собеседование"],
-    ["commands", "⌨ Команды"],
-  ];
-  const inFlow = FLOW.some(([key]) => key === view.step);
-  const flow = el("div", "steps steps--flow");
-  for (const [key, label] of FLOW) {
-    const node = el("button", "step", label);
-    node.setAttribute("aria-selected", String(view.step === key));
-    if (key === "talk" && card?.read) node.append(el("span", "step__badge", "✓"));
-    node.addEventListener("click", () => {
-      view.step = key;
-      exam = null;
-      renderTopic();
-    });
-    flow.append(node);
-  }
-  const at = course.topics.findIndex((t) => t.id === view.topic);
-  const next = course.topics[at + 1];
-  if (next) flow.append(button(`Дальше: ${next.title} →`, () => openTopic(next.id), true));
-  const moreToggle = button(view.more || !inFlow ? "Ещё ▴" : "Ещё ▾", () => {
-    view.more = !(view.more || !inFlow);
-    renderTopic();
-  }, true);
-  flow.append(moreToggle);
-  root.append(flow);
-
   const steps = el("div", "steps");
   const step = (key, label, badge = "", into = steps, selected = view.step === key) => {
     const node = el("button", "step", label);
@@ -1256,12 +1232,12 @@ function renderTopic() {
   };
   // Главный способ пройти тему — урок разговором с Ноа.
   step("talk", "🎙 Урок с Ноа", card?.read ? "✓" : "", steps, current === "talk");
-  step("practice", "🖥 Практика", "", steps, current === "practice");
+  if (uses("practice")) step("practice", "🖥 Практика", "", steps, current === "practice");
   step("lesson", "Материал", "", steps, current === "material");
-  if (topic.concepts?.length) step("review", "🃏 Карточки", `${card?.conceptsMature ?? 0}/${topic.concepts.length}`, steps, current === "cards");
-  if (topicView.cheatsheet) step("sheet", "📝 Конспект", "", steps, current === "sheet");
+  if (uses("cards") && topic.concepts?.length) step("review", "🃏 Карточки", `${card?.conceptsMature ?? 0}/${topic.concepts.length}`, steps, current === "cards");
+  if (uses("sheet") && topicView.cheatsheet) step("sheet", "📝 Конспект", "", steps, current === "sheet");
   step("tasks", "Проверить себя", card?.examBest != null ? `${card.examBest}%` : "", steps, current === "check");
-  if (view.more || !inFlow) root.append(steps);
+  root.append(steps);
 
   // Внутри раздела — мелкая строка, только если в нём больше одного.
   const sub = el("div", "substeps");
@@ -1276,22 +1252,7 @@ function renderTopic() {
   }
   if (sub.childElementCount > 1) root.append(sub);
 
-  const small = (text, onClick) => button(text, onClick, true);
-  if (view.step === "video") {
-    root.append(el("p", "muted", "Ролик-схема по всей теме: что это, из чего состоит и как работает. Ролик по отдельному разделу — под разделом в уроке."));
-    root.append(videoBox({ api, el, button: small, course: course.id, topic: topic.id, section: null }));
-  } else if (view.step === "drama") {
-    root.append(el("p", "muted", "История по этому уроку на три голоса. Серия продолжает сюжет серии прошлого урока."));
-    root.append(dramaBox({ api, el, button: small, course: course.id, topic: topic.id }));
-  } else if (view.step === "commands") {
-    root.append(commandsBox({ api, el, course: course.id, topic: topic.id, lesson: topic.lesson }));
-    const go = el("div", "actions");
-    go.append(button("🖥 Практика в терминале", () => {
-      view.step = "practice";
-      renderTopic();
-    }));
-    root.append(go);
-  } else if (view.step === "talk") {
+  if (view.step === "talk") {
     renderLessonAgent(root, {
       api,
       course,
@@ -1367,7 +1328,10 @@ function sections(lesson) {
     current.push(line);
   }
   if (current.join("").trim()) parts.push(current.join("\n"));
-  return parts.length ? parts : [lesson];
+  // Раздел вопросов собеседования («Что спрашивают») — не урок: это шаг
+  // «Собеседование». Так же — в tutor.rs, learn-app/core.js, learn-core.js.
+  const taught = parts.filter((part) => !/^##\s+(что\s+спрашива|вопросы\s+(на|с|для)\s+собесед|на\s+собеседовании)/im.test(part));
+  return taught.length ? taught : parts.length ? parts : [lesson];
 }
 
 /**
@@ -1448,7 +1412,9 @@ function renderLesson(root, topic) {
   });
   head.append(whole);
   root.append(head);
-  // Ролик по разделу — под ним; ролик и аудиодрама по всей теме — шаги пути темы.
+  // Ролик и аудиодрама по всей теме — над уроком; ролик по разделу — под ним.
+  if (uses("video")) root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: null }));
+  if (uses("drama")) root.append(dramaBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id }));
 
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(parts[at]);
@@ -1463,7 +1429,9 @@ function renderLesson(root, topic) {
   root.append(lesson);
 
   root.append(deepBox(topic, at));
-  root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: at }));
+  if (uses("video")) root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: at }));
+  // Последний раздел — команды для практики.
+  if (uses("commands") && at === parts.length - 1) root.append(commandsBox({ api, el, course: course.id, topic: topic.id, lesson: topic.lesson }));
 
   const concept = conceptOf(parts[at], at, topic);
   if (concept) {
@@ -1722,8 +1690,11 @@ api?.listen("learn:talk", (event) => {
 function renderWholeLesson(root, topic) {
   const lesson = el("div", "lesson");
   lesson.innerHTML = markdown(topic.lesson);
+  if (uses("video")) root.append(videoBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id, section: null }));
+  if (uses("drama")) root.append(dramaBox({ api, el, button: (text, onClick) => button(text, onClick, true), course: course.id, topic: topic.id }));
   root.append(attachReader(lesson, { api, el, button }));
   root.append(lesson);
+  if (uses("commands")) root.append(commandsBox({ api, el, course: course.id, topic: topic.id, lesson: topic.lesson }));
   const actions = el("div", "actions");
   actions.append(discussButton(root, { course: course.id, topic: topic.id, section: 0 }));
   actions.append(

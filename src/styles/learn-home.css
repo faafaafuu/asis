@@ -1167,3 +1167,23 @@ button.lh-row:hover {
 .lh * {
   box-sizing: border-box;
 }
+
+/* «Что использовать в учёбе» — свёрнутый блок внизу главной. */
+.lh-tune > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.lh-tune > summary::-webkit-details-marker {
+  display: none;
+}
+.lh-tune > summary::after {
+  content: "▾";
+  margin-left: auto;
+  color: var(--lh-t4);
+}
+.lh-tune[open] > summary::after {
+  content: "▴";
+}
+.lh-tune .features {
+  margin-top: 12px;
+}

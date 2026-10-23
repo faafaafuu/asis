@@ -2940,3 +2940,13 @@ button.plate:active,
 .more-modes > .modes {
   margin-top: 6px;
 }
+
+/* «Что использовать в учёбе» на главной. */
+.tune-link {
+  align-self: flex-start;
+  gap: 8px;
+  height: 40px;
+  padding: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}

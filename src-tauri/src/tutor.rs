@@ -81,7 +81,24 @@ pub fn sections(lesson: &str) -> Vec<String> {
     if parts.is_empty() {
         parts.push(lesson.to_string());
     }
-    parts
+    // Раздел вопросов собеседования («Что спрашивают») — не урок: это шаг
+    // «Собеседование». Так же — в learning.js, learn-app/core.js, learn-core.js.
+    let taught: Vec<String> = parts.iter().filter(|part| !interview_part(part)).cloned().collect();
+    if taught.is_empty() {
+        parts
+    } else {
+        taught
+    }
+}
+
+/// Раздел с вопросами собеседования: «## Что спрашивают», «## Вопросы на собеседовании».
+fn interview_part(part: &str) -> bool {
+    part.lines().filter_map(|line| line.strip_prefix("## ")).any(|title| {
+        let title = title.trim().to_lowercase();
+        title.starts_with("что спрашива")
+            || title.starts_with("на собеседовании")
+            || ["вопросы на собесед", "вопросы с собесед", "вопросы для собесед"].iter().any(|start| title.starts_with(start))
+    })
 }
 
 fn heading(section: &str) -> Option<String> {

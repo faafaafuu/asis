@@ -358,7 +358,10 @@ export function sections(lesson) {
   }
   if (current.join("").trim()) parts.push(current.join("\n"));
   if (!parts.length) parts.push(String(lesson));
-  return parts;
+  // Раздел вопросов собеседования («Что спрашивают») — не урок: это шаг
+  // «Собеседование». В уроке он выглядел как раздел без материала.
+  const taught = parts.filter((part) => !/^##\s+(что\s+спрашива|вопросы\s+(на|с|для)\s+собесед|на\s+собеседовании)/im.test(part));
+  return taught.length ? taught : parts;
 }
 
 const heading = (section) => {

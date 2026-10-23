@@ -7,6 +7,7 @@ import { el, icon, label, loading, nav, register, iconButton, sections, sectionT
 import { store, topicCard } from "../store.js";
 import { videoBox } from "../../video-panel.js";
 import { commandsBox } from "../../lesson-commands.js";
+import { uses } from "../../learn-features.js";
 
 register("lesson", (screen, { course: courseId, topic: topicId }) => {
   const course = store.course(courseId);
@@ -47,7 +48,9 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
       const view = await store.topic(courseId, topicId);
       if (!alive) return;
       parts = sections(view.topic.lesson);
-      at = Math.min(at, parts.length - 1);
+      // Урок дочитан до конца — открываем с начала: с последнего раздела он
+      // выглядел как одни вопросы без материала.
+      at = card?.read && at >= parts.length - 1 ? 0 : Math.min(at, parts.length - 1);
       paint();
     } catch (err) {
       content.replaceChildren(el("span", "error", String(err)));
@@ -68,7 +71,7 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
     pair.append(deep, talk);
     content.append(pair);
     // Ролик по разделу: собирается на сервере, смотрится прямо здесь.
-    content.append(
+    if (uses("video")) content.append(
       videoBox({
         api,
         el,
@@ -83,7 +86,7 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
       }),
     );
     // Последний раздел — команды урока, чтобы сразу попробовать руками.
-    if (at === parts.length - 1) content.append(commandsBox({ api, el, course: courseId, topic: topicId, lesson: parts.join("\n\n") }));
+    if (uses("commands") && at === parts.length - 1) content.append(commandsBox({ api, el, course: courseId, topic: topicId, lesson: parts.join("\n\n") }));
     content.scrollTop = 0;
     const following = parts[at + 1];
     next.replaceChildren(

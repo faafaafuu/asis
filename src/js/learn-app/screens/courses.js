@@ -3,6 +3,7 @@
 // пунктиром), закреплённая «Собрать курс».
 
 import { el, icon, button, label, progress, steps, loading, header, nav, register, prefs, plural, sheet, call, toast, isWeb } from "../core.js";
+import { featuresBox } from "../../learn-features.js";
 import { store, currentTopic, topicCard, greeting, isDone } from "../store.js";
 import { open as openAssistant } from "../assistant.js";
 import { removeCourse, topicActions } from "./course.js";
@@ -92,6 +93,16 @@ register("courses", (screen) => {
     const guides = el("div");
     content.append(guides);
     guideShelf().then((shelf) => alive && shelf && guides.replaceWith(shelf));
+    // Что использовать в учёбе: выключенное пропадает из темы и урока.
+    const tune = el("button", "btn btn--plain tune-link");
+    tune.append(icon("settings", 16, 2), "Что использовать в учёбе");
+    tune.addEventListener("click", () =>
+      sheet("Что использовать в учёбе", (box) => {
+        box.append(el("span", "muted", "Выключенное не показывается в темах и уроках. Включить можно здесь же."));
+        box.append(featuresBox({ el }));
+      }),
+    );
+    content.append(tune);
     if (!signed) return;
     const builds = await store.builds(true);
     if (!alive) return;
