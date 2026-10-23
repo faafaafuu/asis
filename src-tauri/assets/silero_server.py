@@ -392,11 +392,26 @@ def edge_speech(text: str, speaker: str, rate: float):
             return file.read(), "audio/wav"
 
 
+def edge_module():
+    """edge-tts — и тогда, когда её поставили уже после запуска сервера:
+    программа ставит Светлану в фоне, а сервер к тому времени уже работал и
+    молча читал Ксенией вместо неё."""
+    global edge_tts
+    if edge_tts is None:
+        try:
+            import edge_tts as module
+            edge_tts = module
+        except ImportError:
+            pass
+    return edge_tts
+
+
 def synthesize(text: str, speaker: str, rate: float):
     """Звук фразы и его тип. Нейроголос не вышел — Ксения, если Silero стоит."""
     neural = speaker in EDGE or speaker.endswith("Neural")
     if neural or model is None:
-        if edge_tts is None:
+        if edge_module() is None:
+            print("edge-tts не стоит — читает Ксения", file=sys.stderr, flush=True)
             speaker = "xenia"
         else:
             try:

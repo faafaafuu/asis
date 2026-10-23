@@ -143,8 +143,11 @@ pub fn usable(app: &AppHandle, voice: &str) -> Option<String> {
         let app = app.clone();
         let wanted = voice.to_string();
         tauri::async_runtime::spawn(async move {
-            if let Err(err) = install(app, &wanted).await {
-                log::warn!("нейроголос не поставился: {err}");
+            match install(app, &wanted).await {
+                // Сервер, поднятый до установки, нейроголоса не видит: следующая
+                // фраза поднимет его заново.
+                Ok(()) => restart_server(),
+                Err(err) => log::warn!("нейроголос не поставился: {err}"),
             }
             INSTALLING.store(false, Ordering::SeqCst);
         });
@@ -260,6 +263,15 @@ fn alive() -> bool {
         Duration::from_millis(300),
     )
     .is_ok()
+}
+
+/// Останавливает свой голосовой сервер: следующая фраза поднимет его заново.
+fn restart_server() {
+    if let Some(mut child) = SERVER.lock().unwrap_or_else(|err| err.into_inner()).take() {
+        let _ = child.kill();
+        let _ = child.wait();
+        log::info!("голосовой сервер перезапускается: поставлен нейроголос");
+    }
 }
 
 /// Поднимает сервер, если он не отвечает. Блокирующая: зовётся из отдельного потока.
