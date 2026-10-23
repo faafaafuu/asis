@@ -2,10 +2,10 @@
 // всплывает панель, кольцо слушает (зелёное), думает (смотрит по кругу),
 // говорит (пурпурные зубцы). Разговор идёт сам: ответила — снова слушает,
 // пока человек не замолчит или не попрощается. Можно и написать.
-// Путь вопроса тот же, что у голоса на компьютере (phone_ask): распоряжения,
+// Путь вопроса тот же, что у голоса на компьютере (phone_talk, потоком): распоряжения,
 // обсуждение урока, модель с памятью разговора.
 
-import { el, icon, iconButton, ring, voice, call, markdown } from "./core.js";
+import { el, icon, iconButton, ring, voice, call, markdown, api } from "./core.js";
 
 let fab = null;
 let panel = null;
@@ -72,27 +72,51 @@ export function open(first = "") {
     log.scrollTop = log.scrollHeight;
   };
 
-  /** Один обмен: вопрос — ответ вслух. true — можно слушать дальше. */
+  /** Один обмен: вопрос — ответ вслух. true — можно слушать дальше.
+   *  Ответ идёт потоком (phone_talk): текст растёт по мере того, как модель
+   *  пишет, а фразы звучат по готовности — Ноа заговаривает через пару секунд. */
   const exchange = async (text) => {
     say("me", text);
     mode("look");
-    let answer;
+    let live = null;
+    const unlisten = await api?.listen("phone:answer", ({ payload }) => {
+      if (!alive() || !payload?.text) return;
+      if (!live) {
+        live = el("div", "say");
+        log.append(live);
+        mode("speak");
+      }
+      live.replaceChildren(markdown(payload.text, "md md--small"));
+      log.scrollTop = log.scrollHeight;
+    });
+    let answer, spoken = false;
     try {
-      answer = await call("phone_ask", { text }, { slow: true });
+      const got = await call("phone_talk", { text, speak: true }, { slow: true }).catch(async (err) => {
+        // Старая программа без потока — прежний путь.
+        if (/phone_talk|not found|unknown command/i.test(String(err))) return { text: await call("phone_ask", { text }, { slow: true }), spoken: false };
+        throw err;
+      });
+      answer = got?.text ?? "";
+      spoken = Boolean(got?.spoken);
     } catch (err) {
+      unlisten?.();
       if (!alive()) return false;
       say("noa", String(err));
       mode("idle");
       return false;
     }
+    unlisten?.();
     if (!alive()) return false;
     if (!answer) {
       mode("idle");
       return false;
     }
-    say("noa", answer);
-    mode("speak");
-    await voice.speak(answer);
+    if (live) live.replaceChildren(markdown(answer, "md md--small"));
+    else say("noa", answer);
+    if (!spoken) {
+      mode("speak");
+      await voice.speak(answer);
+    }
     if (!alive()) return false;
     // Попрощались — разговор окончен.
     return !/^до связи/i.test(answer.trim());

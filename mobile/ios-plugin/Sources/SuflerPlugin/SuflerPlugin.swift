@@ -234,7 +234,7 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
             finishListening(error: "Распознавание речи сейчас недоступно.")
             return
         }
-        activateAudio()
+        activateAudio(listening: true)
         heard = ""
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -330,9 +330,17 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
         if resolve != nil || listening != nil { listening = nil }
     }
 
-    private func activateAudio() {
+    /// Звук голоса. Пока Ноа говорит — режим проигрывания: наушники Bluetooth
+    /// играют в полном качестве (A2DP). Режим «микрофон + динамик» держал их в
+    /// гарнитурном канале — 16 кГц моно, голос звучал как из телефонной трубки.
+    /// Слушает — включается микрофон, и только на это время.
+    private func activateAudio(listening: Bool = false) {
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth, .duckOthers])
+        if listening {
+            try? session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .duckOthers])
+        } else {
+            try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        }
         try? session.setActive(true, options: .notifyOthersOnDeactivation)
     }
 

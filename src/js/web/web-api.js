@@ -417,6 +417,9 @@ async function learnApp(noa, cmd, args) {
       return dictionaryClient().ask(args.term, args.context, args.thread ?? [], args.question);
     case "phone_ask":
       return assistantAnswer(String(args.text ?? ""));
+    // Потока в браузере нет: ответ целиком, вслух его читает окно.
+    case "phone_talk":
+      return { text: await assistantAnswer(String(args.text ?? "")), spoken: false };
     // Тренировки «Наизусть» и «Собеседование»: модель по указаниям экрана.
     case "learn_coach": {
       const model = loadModel();

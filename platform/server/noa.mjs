@@ -231,6 +231,150 @@ export function mountNoa({ route, db, Fail, readJson }) {
     });
   });
 
+  /* ── Ход разговора: ответ моста потоком, голос по предложениям ──────────
+     Телефон не ждёт ответ целиком: мост отдаёт его по кусочкам, каждое
+     законченное предложение тут же озвучивается, а телефон забирает текст
+     и звук по мере готовности (GET — проходит и через зеркало). Первое
+     слово звучит через пару секунд, а не после всего ответа. */
+
+  const turns = new Map();
+  const TURN_TTL = 5 * 60_000;
+  /** Конец первого законченного предложения в тексте или -1. Первое — короткое:
+   *  с него начинается звук. */
+  const sentenceEnd = (text, first) => {
+    const min = first ? 12 : 50;
+    const re = /[.!?…](?=\s)|\n/g;
+    let found;
+    while ((found = re.exec(text))) if (found.index + 1 >= min) return found.index + 1;
+    return -1;
+  };
+  async function voiceMp3(text, voice, rate) {
+    const response = await fetch(`${VOICE_URL}/tts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, speaker: voice, rate, format: "mp3" }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok) throw new Error(String(response.status));
+    const data = Buffer.from(await response.arrayBuffer());
+    return (response.headers.get("content-type") ?? "").includes("mpeg") ? data : toMp3(data, "64k");
+  }
+  function startTurn(user, { messages, model, voice, rate }) {
+    const turn = { id: randomUUID(), user: user.id, text: "", parts: [], audio: [], textDone: false, error: "", version: 0, created: Date.now(), waiters: [] };
+    turns.set(turn.id, turn);
+    const bump = () => {
+      turn.version += 1;
+      for (const wake of turn.waiters.splice(0)) wake();
+    };
+    const speaker = VOICES.has(voice) ? voice : "svetlana";
+    const speed = Math.min(Math.max(Number(rate) || 1.1, 0.6), 2);
+    let pending = "";
+    const speak = (sentence) => {
+      const index = turn.parts.push(sentence) - 1;
+      turn.audio[index] = null;
+      noteSpeech(sentence);
+      voiceMp3(sentence, speaker, speed).then((mp3) => { turn.audio[index] = mp3; }, () => { turn.audio[index] = false; }).finally(bump);
+    };
+    const flush = (all) => {
+      for (;;) {
+        const cut = sentenceEnd(pending, turn.parts.length === 0);
+        if (cut < 0) break;
+        const sentence = pending.slice(0, cut).trim();
+        pending = pending.slice(cut);
+        if (sentence) speak(sentence);
+      }
+      if (all && pending.trim()) speak(pending.trim());
+      if (all) pending = "";
+    };
+    (async () => {
+      try {
+        const response = await fetch(`${BRIDGE_URL}/v1/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${BRIDGE_TOKEN}` },
+          body: JSON.stringify({ model: String(model ?? ""), messages, noa_web: true, stream: true }),
+          signal: AbortSignal.timeout(BRIDGE_WAIT),
+        });
+        if (!response.ok) throw new Error(`мост ответил ${response.status}`);
+        if (!(response.headers.get("content-type") ?? "").includes("event-stream")) {
+          // Мост без потока — ответ целиком, голос всё равно по предложениям.
+          const data = await response.json();
+          turn.text = String(data.choices?.[0]?.message?.content ?? "");
+          pending = turn.text;
+        } else {
+          const decoder = new TextDecoder();
+          let buffer = "";
+          for await (const chunk of response.body) {
+            buffer += decoder.decode(chunk, { stream: true });
+            let at;
+            while ((at = buffer.indexOf("\n\n")) >= 0) {
+              const line = buffer.slice(0, at).split("\n").find((l) => l.startsWith("data: "));
+              buffer = buffer.slice(at + 2);
+              if (!line || line === "data: [DONE]") continue;
+              const event = JSON.parse(line.slice(6));
+              if (event.error) throw new Error(event.error);
+              const piece = event.choices?.[0]?.delta?.content ?? "";
+              if (!piece) continue;
+              turn.text += piece;
+              pending += piece;
+              flush(false);
+              bump();
+            }
+          }
+        }
+        flush(true);
+      } catch (err) {
+        turn.error = String(err?.message ?? err);
+      }
+      turn.textDone = true;
+      bump();
+    })();
+    return turn;
+  }
+  setInterval(() => {
+    const old = Date.now() - TURN_TTL;
+    for (const [id, turn] of turns) if (turn.created < old) turns.delete(id);
+  }, 60_000).unref();
+  const turnOf = (user, id) => {
+    const turn = turns.get(id);
+    if (!turn || turn.user !== user.id) throw new Fail(404, "Ответ уже не хранится.");
+    return turn;
+  };
+
+  route("POST", /^\/api\/noa\/turn$/, async ({ req, user, tokenUser }) => {
+    const who = bridgeUser(user ?? tokenUser);
+    const body = await readJson(req);
+    if (!Array.isArray(body.messages) || !body.messages.length) throw new Fail(400, "Нет сообщений.");
+    const hour = Date.now() - 3_600_000;
+    const recent = (spoke.get(who.id) ?? []).filter((at) => at > hour);
+    if (recent.length >= VOICE_PER_HOUR) throw new Fail(429, "Голоса на этот час хватит.");
+    spoke.set(who.id, [...recent, Date.now()]);
+    return { id: startTurn(who, body).id };
+  });
+
+  // Состояние хода. ?v=N — подождать (до 2 с), пока появится что-то новее.
+  route("GET", /^\/api\/noa\/turn\/([0-9a-f-]{36})$/, async ({ url, user, tokenUser, match }) => {
+    const turn = turnOf(bridgeUser(user ?? tokenUser), match[1]);
+    const seen = Number(url.searchParams.get("v") ?? -1);
+    if (turn.version <= seen && !turn.textDone) await new Promise((wake) => { turn.waiters.push(wake); setTimeout(wake, 2000); });
+    return {
+      text: turn.text,
+      parts: turn.parts,
+      textDone: turn.textDone,
+      error: turn.error,
+      version: turn.version,
+      audio: turn.audio.map((a) => (a === null ? 0 : a === false ? -1 : 1)),
+      done: turn.textDone && turn.audio.every((a) => a !== null),
+    };
+  });
+
+  route("GET", /^\/api\/noa\/turn\/([0-9a-f-]{36})\/(\d+)$/, ({ res, user, tokenUser, match }) => {
+    const turn = turnOf(bridgeUser(user ?? tokenUser), match[1]);
+    const mp3 = turn.audio[Number(match[2])];
+    if (!mp3) throw new Fail(404, "Фраза ещё не готова.");
+    res.writeHead(200, { "Content-Type": "audio/mpeg", "Content-Length": mp3.length, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+    res.end(mp3);
+  });
+
   /* ── Сборка курса на сервере — через мост ─────────────────────────────
      Идёт, даже если страницу закрыли: человек написал тему, ушёл, вернулся —
      курс уже дорастает. Переживает и перезапуск сервера: недособранный курс
@@ -403,21 +547,24 @@ export function mountNoa({ route, db, Fail, readJson }) {
     const recent = (spoke.get(user.id) ?? []).filter((at) => at > hour);
     if (recent.length >= VOICE_PER_HOUR) throw new Fail(429, "Голоса на этот час хватит — дальше читаю голосом браузера.");
     spoke.set(user.id, [...recent, Date.now()]);
-    let wav;
+    let wav, kind = "";
     try {
       const response = await fetch(`${VOICE_URL}/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: phrase, speaker: VOICES.has(voice) ? voice : "svetlana", rate: Math.min(Math.max(Number(rate) || 1.1, 0.6), 2) }),
+        body: JSON.stringify({ text: phrase, speaker: VOICES.has(voice) ? voice : "svetlana", rate: Math.min(Math.max(Number(rate) || 1.1, 0.6), 2), format: "mp3" }),
         signal: AbortSignal.timeout(60_000),
       });
       if (!response.ok) throw new Error(String(response.status));
       wav = Buffer.from(await response.arrayBuffer());
+      kind = response.headers.get("content-type") ?? "";
     } catch {
       throw new Fail(503, "Голос сейчас недоступен.");
     }
-    // lite — для телефона: 32 кбит/с вдвое легче, речь звучит так же.
-    const mp3 = await toMp3(wav, lite ? "32k" : "64k").catch(() => null);
+    // Нейроголос приходит MP3 96 кбит/с — отдаём как есть: пересжатие до 32
+    // кбит/с давало «телефонный» звук. Silero (WAV) по-прежнему сжимается;
+    // lite — для телефона.
+    const mp3 = kind.includes("mpeg") ? wav : await toMp3(wav, lite ? "48k" : "64k").catch(() => null);
     res.writeHead(200, {
       "Content-Type": mp3 ? "audio/mpeg" : "audio/wav",
       "Content-Length": (mp3 ?? wav).length,

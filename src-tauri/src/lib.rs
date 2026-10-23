@@ -320,6 +320,8 @@ pub fn run() {
             #[cfg(mobile)]
             phone_ask,
             #[cfg(mobile)]
+            phone_talk,
+            #[cfg(mobile)]
             phone_forget,
             #[cfg(mobile)]
             phone_voice,
@@ -654,6 +656,43 @@ fn phone_voice(app: tauri::AppHandle, state: tauri::State<'_, AppState>, voice: 
         commands::persist(&app, &state)?;
     }
     Ok(if voice::phone_voice_is_server(&state.config().voice) { "server".into() } else { "phone".into() })
+}
+
+/// Вопрос голосом с телефона — потоком: текст приходит событием
+/// `phone:answer` по мере появления, фразы звучат по готовности (см.
+/// `voice::talk`). Особые разговоры (прощание, репетитор, окно) и случаи, когда
+/// ход не начался, — прежним путём, целиком; тогда `spoken: false`, и окно
+/// озвучивает ответ само.
+#[cfg(mobile)]
+#[tauri::command]
+async fn phone_talk(app: tauri::AppHandle, text: String, speak: bool) -> Result<serde_json::Value, String> {
+    let text = text.trim().to_string();
+    let special = text.is_empty() || is_farewell(&text, &app.state::<AppState>().wake_name()) || tutor::active() || glance::active();
+    if !special {
+        let provider = app.state::<AppState>().provider();
+        let depth = thread_depth(&app);
+        let history = {
+            let mut thread = VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner());
+            if thread.1.is_some_and(|at| at.elapsed() > THREAD_TTL) {
+                thread.0.clear();
+            }
+            let skip = thread.0.len().saturating_sub(depth);
+            thread.0[skip..].to_vec()
+        };
+        if let Some((model, messages)) = provider.ask_payload("", "", &history, &text) {
+            log::info!("вопрос с телефона, потоком: «{text}»");
+            match voice::talk(&app, model, messages, speak).await {
+                Ok((answer, spoken)) => {
+                    remember_exchange(&text, &answer);
+                    return Ok(serde_json::json!({ "text": answer, "spoken": spoken }));
+                }
+                Err(err) => platform::diag(format!("ход разговора не начался: {err}")),
+            }
+        }
+    }
+    let answer = phone_answer(&app, text).await?;
+    let _ = tauri::async_runtime::spawn_blocking(sync_schedule).await;
+    Ok(serde_json::json!({ "text": answer, "spoken": false }))
 }
 
 #[cfg(mobile)]

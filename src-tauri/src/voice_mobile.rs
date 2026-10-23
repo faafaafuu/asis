@@ -362,6 +362,183 @@ fn phrases(text: &str, limit: usize) -> Vec<String> {
     out
 }
 
+/// Состояние хода разговора на сайте (`GET /api/noa/turn/<id>`).
+#[derive(Default, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct TurnState {
+    text: String,
+    parts: Vec<String>,
+    text_done: bool,
+    error: String,
+    version: i64,
+    /// 0 — фраза ещё синтезируется, 1 — готова, -1 — не вышла.
+    audio: Vec<i8>,
+    done: bool,
+}
+
+/// Метка в адресе: зеркало не кэширует ответ, у каждого запроса он свой.
+fn fresh() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or_default()
+}
+
+/// Разговор потоком: сайт получает ответ моста по кусочкам и озвучивает каждое
+/// законченное предложение, а телефон показывает текст по мере появления и
+/// играет фразы по готовности. Первая звучит через пару секунд — раньше
+/// телефон ждал ответ целиком, а потом ещё и голос каждой фразы.
+///
+/// Отдаёт (весь текст, прозвучал ли он целиком). Ошибка — ход не начался
+/// (нет ключа, не владелец моста, старый сайт): тогда говорит прежний путь.
+pub async fn talk(app: &AppHandle, model: String, messages: serde_json::Value, speak: bool) -> Result<(String, bool), String> {
+    use tauri::{Emitter, Manager};
+    let (base, token) = crate::platform::settings();
+    if token.is_empty() {
+        return Err("нет ключа площадки".into());
+    }
+    let voice = app.state::<crate::state::AppState>().config().voice.clone();
+    let speaker = if voice.silero_voice.trim().is_empty() { "svetlana".to_string() } else { voice.silero_voice.clone() };
+    let body = serde_json::json!({ "model": model, "messages": messages, "voice": speaker, "rate": voice.rate });
+    let (status, data) = crate::platform::site_call(&base, "POST", "/api/noa/turn", &token, Some(&body)).await?;
+    if !(200..300).contains(&status) {
+        return Err(format!("сайт ответил {status}"));
+    }
+    let id = serde_json::from_slice::<serde_json::Value>(&data)
+        .ok()
+        .and_then(|v| v["id"].as_str().map(String::from))
+        .ok_or("нет номера хода")?;
+
+    let request = READ_REQUEST.load(Ordering::SeqCst);
+    let state = std::sync::Arc::new(tokio::sync::Mutex::new(TurnState { version: -1, ..Default::default() }));
+    let changed = std::sync::Arc::new(tokio::sync::Notify::new());
+    // Опрос сайта — отдельно от проигрывания: пока звучит фраза, следующие готовятся.
+    let poller = {
+        let (state, changed, base, token, id, app) = (state.clone(), changed.clone(), base.clone(), token.clone(), id.clone(), app.clone());
+        tauri::async_runtime::spawn(async move {
+            let mut misses = 0;
+            loop {
+                let seen = state.lock().await.version;
+                let path = format!("/api/noa/turn/{id}?v={seen}&_={}", fresh());
+                let next = match crate::platform::site_call(&base, "GET", &path, &token, None).await {
+                    Ok((200, data)) => serde_json::from_slice::<TurnState>(&data).ok(),
+                    _ => None,
+                };
+                let Some(next) = next else {
+                    misses += 1;
+                    if misses > 5 {
+                        let mut s = state.lock().await;
+                        s.error = "сайт не отвечает".into();
+                        s.done = true;
+                        s.text_done = true;
+                        changed.notify_waiters();
+                        return;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                    continue;
+                };
+                misses = 0;
+                if next.text != state.lock().await.text {
+                    let _ = app.emit("phone:answer", serde_json::json!({ "text": next.text }));
+                }
+                let finished = next.done || (!next.error.is_empty() && next.text_done);
+                *state.lock().await = next;
+                changed.notify_waiters();
+                if finished || READ_REQUEST.load(Ordering::SeqCst) != request {
+                    return;
+                }
+            }
+        })
+    };
+
+    let mut spoken_all = speak;
+    if speak {
+        SPEAKING.store(true, Ordering::SeqCst);
+        let fetch = |n: usize| {
+            let (base, token, id) = (base.clone(), token.clone(), id.clone());
+            tauri::async_runtime::spawn(async move {
+                crate::platform::site_call(&base, "GET", &format!("/api/noa/turn/{id}/{n}?_={}", fresh()), &token, None)
+                    .await
+                    .and_then(|(status, data)| if status == 200 && !data.is_empty() { Ok(data) } else { Err(format!("фраза {n}: {status}")) })
+            })
+        };
+        let mut n = 0;
+        let mut ahead: Option<(usize, tauri::async_runtime::JoinHandle<Result<Vec<u8>, String>>)> = None;
+        loop {
+            if READ_REQUEST.load(Ordering::SeqCst) != request {
+                spoken_all = false;
+                break;
+            }
+            let wait = changed.notified();
+            let (ready, total, done, part) = {
+                let s = state.lock().await;
+                (s.audio.get(n).copied(), s.audio.len(), s.done || (s.text_done && !s.error.is_empty()), s.parts.get(n).cloned())
+            };
+            match ready {
+                Some(1) => {
+                    let task = match ahead.take() {
+                        Some((k, task)) if k == n => task,
+                        _ => fetch(n),
+                    };
+                    let audio = task.await.map_err(|err| err.to_string()).and_then(|got| got);
+                    // Следующая готова — качаем, пока звучит эта.
+                    if state.lock().await.audio.get(n + 1) == Some(&1) {
+                        ahead = Some((n + 1, fetch(n + 1)));
+                    }
+                    let played = match audio {
+                        Ok(bytes) => {
+                            let path = std::env::temp_dir().join(format!("noa-turn-{}.mp3", n % 2));
+                            std::fs::write(&path, &bytes).is_ok() && play(&path).await.is_ok()
+                        }
+                        Err(err) => {
+                            crate::platform::diag(format!("фраза хода не пришла: {err}"));
+                            false
+                        }
+                    };
+                    // Не скачалась или не проигралась — эту фразу скажет телефон сам.
+                    if !played {
+                        if let Some(part) = part {
+                            let _ = irina_or_system(&voice, &part, request).await;
+                        }
+                    }
+                    n += 1;
+                }
+                Some(-1) => {
+                    if let Some(part) = part {
+                        let _ = irina_or_system(&voice, &part, request).await;
+                    }
+                    n += 1;
+                }
+                None if done && n >= total => break,
+                _ => {
+                    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), wait).await;
+                }
+            }
+        }
+        SPEAKING.store(false, Ordering::SeqCst);
+    } else {
+        loop {
+            let wait = changed.notified();
+            if state.lock().await.text_done {
+                break;
+            }
+            let _ = tokio::time::timeout(std::time::Duration::from_millis(500), wait).await;
+        }
+    }
+    let _ = poller.await;
+    let last = state.lock().await;
+    if last.text.trim().is_empty() {
+        return Err(if last.error.is_empty() { "пустой ответ".into() } else { last.error.clone() });
+    }
+    Ok((last.text.trim().to_string(), spoken_all))
+}
+
+/// Фраза, которая не пришла с сервера: Ирина в телефоне, иначе системный голос.
+async fn irina_or_system(config: &VoiceConfig, text: &str, request: u64) -> Result<(), String> {
+    match irina::speak(config, text, request).await {
+        Ok(()) => Ok(()),
+        Err(rest) if rest.is_empty() => Ok(()),
+        Err(rest) => system_speak(config, &rest).await,
+    }
+}
+
 /// Фраза голосом Ноа — MP3 с сервера.
 async fn fetch_phrase(base: String, token: String, voice: String, phrase: String) -> Result<Vec<u8>, String> {
     // Через зеркало запись — туннелем (platform::site_call): это пара коротких

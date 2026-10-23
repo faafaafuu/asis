@@ -190,6 +190,9 @@
         return `Про «${args.term}»: уточняю — ответ на «${args.question}».`;
       case "plugin:sufler|stopListening":
         return null;
+      case "phone_talk":
+        await network();
+        return { text: "Сегодня по плану тема Docker: урок прочитан наполовину, две карточки ждут повторения.", spoken: false };
       case "phone_ask":
         await network();
         return "Сегодня по плану тема Docker: урок прочитан наполовину, две карточки ждут повторения.";

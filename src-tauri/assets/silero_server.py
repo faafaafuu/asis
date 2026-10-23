@@ -1,7 +1,7 @@
 """Голосовой сервер Суфлёра: Светлана (нейроголос Microsoft) и Silero.
 
 Каждая фраза — один HTTP-запрос:
-POST /tts {"text": ..., "speaker": ..., "rate": 1.0} -> звук.
+POST /tts {"text": ..., "speaker": ..., "rate": 1.0, "format": "mp3"?} -> звук.
 GET /health -> 200, когда сервер готов.
 
 Светлана и Дмитрий — нейроголоса Microsoft через edge-tts: живая интонация,
@@ -358,7 +358,36 @@ def upgrade_edge():
     threading.Thread(target=run, daemon=True).start()
 
 
-def edge_speech(text: str, speaker: str, rate: float):
+def better_quality():
+    """MP3 96 кбит/с вместо 48: edge-tts просит у Microsoft 48 кбит/с, и в
+    наушниках это слышно — шипящие и верха «как в телефонной трубке». Формат
+    вшит в библиотеку строкой — подменяем её в коде. Не нашли (библиотека
+    изменилась) — остаётся как было."""
+    target = "audio-24khz-48kbitrate-mono-mp3"
+
+    def patched(code):
+        consts = []
+        changed = False
+        for const in code.co_consts:
+            if isinstance(const, str) and target in const:
+                const, changed = const.replace(target, "audio-24khz-96kbitrate-mono-mp3"), True
+            elif hasattr(const, "co_consts"):
+                inner = patched(const)
+                changed = changed or inner is not const
+                const = inner
+            consts.append(const)
+        return code.replace(co_consts=tuple(consts)) if changed else code
+
+    try:
+        from edge_tts import communicate
+        for name, value in vars(communicate.Communicate).items():
+            if hasattr(value, "__code__"):
+                value.__code__ = patched(value.__code__)
+    except Exception as err:  # качество — не повод не говорить
+        print(f"качество MP3 не поднять: {err}", file=sys.stderr, flush=True)
+
+
+def edge_speech(text: str, speaker: str, rate: float, raw: bool = False):
     """Нейроголос Microsoft: MP3 от Microsoft, с ffmpeg рядом — WAV 48 кГц.
     Скорость — чуть бодрее заданной, тон чуть выше: так Светлана звучит живее."""
     # Пункты списка — с паузой: строка без точки в конце читалась слитно со следующей.
@@ -378,7 +407,9 @@ def edge_speech(text: str, speaker: str, rate: float):
     mp3 = asyncio.run(asyncio.wait_for(stream(), 40))
     if not mp3:
         raise ValueError("Microsoft не прислал звук")
-    if not FFMPEG:
+    # raw — как прислал Microsoft: телефону и браузеру MP3 и нужен, а
+    # перекодирование только портит звук.
+    if raw or not FFMPEG:
         return mp3, "audio/mpeg"
     # Через файлы, а не трубу: в трубу ffmpeg пишет WAV без длины, и чтение
     # длительности (ролики, аудиодрамы) ломается.
@@ -402,11 +433,14 @@ def edge_module():
             import edge_tts as module
             edge_tts = module
         except ImportError:
-            pass
+            return None
+    if not getattr(edge_module, "tuned", False):
+        better_quality()
+        edge_module.tuned = True
     return edge_tts
 
 
-def synthesize(text: str, speaker: str, rate: float):
+def synthesize(text: str, speaker: str, rate: float, raw: bool = False):
     """Звук фразы и его тип. Нейроголос не вышел — Ксения, если Silero стоит."""
     neural = speaker in EDGE or speaker.endswith("Neural")
     if neural or model is None:
@@ -415,7 +449,7 @@ def synthesize(text: str, speaker: str, rate: float):
             speaker = "xenia"
         else:
             try:
-                return edge_speech(text, speaker if neural else "svetlana", rate)
+                return edge_speech(text, speaker if neural else "svetlana", rate, raw)
             except Exception as err:
                 if model is None:
                     upgrade_edge()
@@ -465,7 +499,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")
-            sound, kind = synthesize(str(body.get("text", "")), str(body.get("speaker", "")), float(body.get("rate", 1.0)))
+            sound, kind = synthesize(str(body.get("text", "")), str(body.get("speaker", "")), float(body.get("rate", 1.0)),
+                                     body.get("format") == "mp3")
         except Exception as err:  # отказ — текстом, Суфлёр прочитает своим голосом
             message = str(err).encode("utf-8")
             self.send_response(500)

@@ -156,6 +156,13 @@ impl AiError {
 #[async_trait]
 pub trait AiProvider: Send + Sync {
     async fn explain(&self, term: &str, context: &str) -> Result<Explanation, AiError>;
+
+    /// Модель и сообщения вопроса — для хода разговора на сайте, где ответ
+    /// озвучивается по предложениям, пока модель пишет. `None` — этот способ
+    /// так не умеет (не мост сайта).
+    fn ask_payload(&self, _term: &str, _context: &str, _thread: &[ThreadItem], _question: &str) -> Option<(String, serde_json::Value)> {
+        None
+    }
     async fn ask(
         &self,
         term: &str,
@@ -463,6 +470,113 @@ struct Message<'a> {
 }
 
 impl HttpProvider {
+    /// Сообщения вопроса голосом: подсказка Ноа, контекст, прежние обмены и
+    /// сам вопрос. Отдельно от `ask` — их же шлёт телефон в ход разговора на
+    /// сайте (`AiProvider::ask_payload`).
+    fn ask_messages(&self, term: &str, context: &str, thread: &[ThreadItem], question: &str) -> Vec<Message<'static>> {
+        let mut messages = vec![
+            Message {
+                role: "system",
+                content: {
+                    let name = self.wake_name.as_str();
+                    let persona = match self.language.as_str() {
+                    "en" if term.trim().is_empty() => format!(
+                        "Your name is {name}, you are a voice assistant talking out loud. \
+                         Get to the point: usually one or two short sentences, casual \
+                         and relaxed, like a friend. Never offer further help or ask \
+                         what else you can do, no intros, caveats, summaries or \
+                         lectures. If it calls for an estimate, estimate and name a \
+                         number. Do not restate the question. Plain text, no lists, \
+                         in English."
+                    ),
+                    "en" => format!(
+                        "Your name is {name}. The user is asking a follow-up about \
+                         “{term}”. Answer in one or two short casual sentences, plain \
+                         text, no JSON, no offers of further help. \
+                         Answer in English, even if the term itself is in another language."
+                    ),
+                    // Пустой термин означает вопрос с чистого места: его
+                    // задали голосом, ничего не выделяя. Отвечать на такой
+                    // определением — не то, что просили: на «сколько раз
+                    // отжаться, чтобы устать» ждут прикидку, а не толкование
+                    // самого вопроса.
+                    // Ответ звучит вслух, поэтому короче, чем текст: одна-две
+                    // фразы. «Чем ещё помочь?» и вступления в голосе раздражают —
+                    // запрет на них назван прямо, иначе модели добавляют их сами.
+                    _ if term.trim().is_empty() => format!(
+                        "Тебя зовут {name}, ты голосовой помощник на компьютере человека \
+                         (программа NOAH, Windows); говоришь с ним голосом или в \
+                         Telegram. Действия на компьютере — открыть и закрыть программы, \
+                         искать в интернете и на YouTube, найти и прислать файл или снимок \
+                         экрана, напомнить, заказать — ты выполняешь командами, а сюда, в \
+                         этот ответ, доходят только разговорные вопросы. Никакой другой \
+                         программы или помощника, который делает это вместо тебя, нет — \
+                         не ссылайся на них. Никогда не говори, что у тебя нет доступа к \
+                         компьютеру или что ты на сервере: ты — часть программы на его \
+                         компьютере и управляешь им через неё; спросят про доступ — отвечай, что да, \
+                         и что умеешь. Если просьба похожа на действие, скажи коротко, что \
+                         не разобрал её как команду, и предложи сказать проще, например \
+                         «пришли последний скриншот» или «найди файл договор». Одну и ту \
+                         же подсказку дважды подряд не повторяй и человека не поучай. \
+                         В этом ответе ты сама ничего не выполняешь и ничего не видишь на \
+                         экране: никогда не говори «закрываю», «открываю», «проверяю», \
+                         «сделала», «закрыл» — это была бы неправда. Жалуются, что \
+                         команда не сработала, — честно скажи, что проверить отсюда не \
+                         можешь, и назови точную команду, например «сними задачу Chrome». \
+                         Отвечай по делу и коротко — обычно одной-двумя фразами, \
+                         живым разговорным языком, легко и непринуждённо, как друг. \
+                         Не предлагай помощь и не спрашивай, чем ещё помочь; без \
+                         вступлений, оговорок, выводов и нравоучений, не спорь. \
+                         Если вопрос требует прикидки, прикинь и назови число. \
+                         Не пересказывай вопрос. Обычный текст, без списков и разметки, \
+                         по-русски."
+                    ),
+                    _ => format!(
+                        "Тебя зовут {name}. Пользователь уточняет то, о чём шла речь, — \
+                         «{term}». Отвечай одной-двумя короткими фразами, разговорно, \
+                         обычным текстом, без JSON и без предложений помочь ещё. \
+                         Отвечай по-русски, даже если сам термин на другом языке."
+                    ),
+                    };
+                    format!("{persona} {} {}", today_line(&self.language), crate::profile::prompt_line())
+                },
+            },
+        ];
+
+        // Контекст — только когда он есть. Вопрос, заданный голосом с чистого
+        // места, приходит без выделенного текста, и раньше модель получала
+        // пустую реплику «Исходный контекст:» перед самим вопросом. Модели
+        // покрупнее её просто игнорировали, а те, что поменьше, принимали за
+        // начало разговора и отвечали «Есть вопрос?» вместо ответа — вживую
+        // так и было, на каждую фразу подряд.
+        if !context.trim().is_empty() {
+            messages.push(Message {
+                role: "user",
+                content: match self.language.as_str() {
+                    "en" => format!("Original context: {context}"),
+                    _ => format!("Исходный контекст: {context}"),
+                },
+            });
+        }
+        // Сколько обменов брать, решает вызывающий: своей маленькой модели
+        // — три, облачной — больше (см. `thread_depth`).
+        for item in thread {
+            messages.push(Message {
+                role: "user",
+                content: item.q.clone(),
+            });
+            messages.push(Message {
+                role: "assistant",
+                content: item.a.clone(),
+            });
+        }
+        messages.push(Message {
+            role: "user",
+            content: question.to_string(),
+        });
+        messages
+    }
+
     pub fn new(config: &AiConfig, language: &str, wake_name: &str) -> Result<Self, AiError> {
         if config.endpoint.is_empty() {
             return Err(AiError::Config("не задан endpoint AI-провайдера".into()));
@@ -1280,6 +1394,14 @@ fn strip_foreign(text: &str) -> String {
 
 #[async_trait]
 impl AiProvider for HttpProvider {
+    fn ask_payload(&self, term: &str, context: &str, thread: &[ThreadItem], question: &str) -> Option<(String, serde_json::Value)> {
+        if !self.endpoint.ends_with("/api/noa/bridge/chat/completions") {
+            return None;
+        }
+        let messages = serde_json::to_value(self.ask_messages(term, context, thread, question)).ok()?;
+        Some((self.model.clone(), messages))
+    }
+
     async fn converse(
         &self,
         rules: &str,
@@ -1387,109 +1509,7 @@ impl AiProvider for HttpProvider {
         thread: &[ThreadItem],
         question: &str,
     ) -> Result<String, AiError> {
-        let messages = || {
-            let mut messages = vec![
-                Message {
-                    role: "system",
-                    content: {
-                        let name = self.wake_name.as_str();
-                        let persona = match self.language.as_str() {
-                        "en" if term.trim().is_empty() => format!(
-                            "Your name is {name}, you are a voice assistant talking out loud. \
-                             Get to the point: usually one or two short sentences, casual \
-                             and relaxed, like a friend. Never offer further help or ask \
-                             what else you can do, no intros, caveats, summaries or \
-                             lectures. If it calls for an estimate, estimate and name a \
-                             number. Do not restate the question. Plain text, no lists, \
-                             in English."
-                        ),
-                        "en" => format!(
-                            "Your name is {name}. The user is asking a follow-up about \
-                             “{term}”. Answer in one or two short casual sentences, plain \
-                             text, no JSON, no offers of further help. \
-                             Answer in English, even if the term itself is in another language."
-                        ),
-                        // Пустой термин означает вопрос с чистого места: его
-                        // задали голосом, ничего не выделяя. Отвечать на такой
-                        // определением — не то, что просили: на «сколько раз
-                        // отжаться, чтобы устать» ждут прикидку, а не толкование
-                        // самого вопроса.
-                        // Ответ звучит вслух, поэтому короче, чем текст: одна-две
-                        // фразы. «Чем ещё помочь?» и вступления в голосе раздражают —
-                        // запрет на них назван прямо, иначе модели добавляют их сами.
-                        _ if term.trim().is_empty() => format!(
-                            "Тебя зовут {name}, ты голосовой помощник на компьютере человека \
-                             (программа NOAH, Windows); говоришь с ним голосом или в \
-                             Telegram. Действия на компьютере — открыть и закрыть программы, \
-                             искать в интернете и на YouTube, найти и прислать файл или снимок \
-                             экрана, напомнить, заказать — ты выполняешь командами, а сюда, в \
-                             этот ответ, доходят только разговорные вопросы. Никакой другой \
-                             программы или помощника, который делает это вместо тебя, нет — \
-                             не ссылайся на них. Никогда не говори, что у тебя нет доступа к \
-                             компьютеру или что ты на сервере: ты — часть программы на его \
-                             компьютере и управляешь им через неё; спросят про доступ — отвечай, что да, \
-                             и что умеешь. Если просьба похожа на действие, скажи коротко, что \
-                             не разобрал её как команду, и предложи сказать проще, например \
-                             «пришли последний скриншот» или «найди файл договор». Одну и ту \
-                             же подсказку дважды подряд не повторяй и человека не поучай. \
-                             В этом ответе ты сама ничего не выполняешь и ничего не видишь на \
-                             экране: никогда не говори «закрываю», «открываю», «проверяю», \
-                             «сделала», «закрыл» — это была бы неправда. Жалуются, что \
-                             команда не сработала, — честно скажи, что проверить отсюда не \
-                             можешь, и назови точную команду, например «сними задачу Chrome». \
-                             Отвечай по делу и коротко — обычно одной-двумя фразами, \
-                             живым разговорным языком, легко и непринуждённо, как друг. \
-                             Не предлагай помощь и не спрашивай, чем ещё помочь; без \
-                             вступлений, оговорок, выводов и нравоучений, не спорь. \
-                             Если вопрос требует прикидки, прикинь и назови число. \
-                             Не пересказывай вопрос. Обычный текст, без списков и разметки, \
-                             по-русски."
-                        ),
-                        _ => format!(
-                            "Тебя зовут {name}. Пользователь уточняет то, о чём шла речь, — \
-                             «{term}». Отвечай одной-двумя короткими фразами, разговорно, \
-                             обычным текстом, без JSON и без предложений помочь ещё. \
-                             Отвечай по-русски, даже если сам термин на другом языке."
-                        ),
-                        };
-                        format!("{persona} {} {}", today_line(&self.language), crate::profile::prompt_line())
-                    },
-                },
-            ];
-
-            // Контекст — только когда он есть. Вопрос, заданный голосом с чистого
-            // места, приходит без выделенного текста, и раньше модель получала
-            // пустую реплику «Исходный контекст:» перед самим вопросом. Модели
-            // покрупнее её просто игнорировали, а те, что поменьше, принимали за
-            // начало разговора и отвечали «Есть вопрос?» вместо ответа — вживую
-            // так и было, на каждую фразу подряд.
-            if !context.trim().is_empty() {
-                messages.push(Message {
-                    role: "user",
-                    content: match self.language.as_str() {
-                        "en" => format!("Original context: {context}"),
-                        _ => format!("Исходный контекст: {context}"),
-                    },
-                });
-            }
-            // Сколько обменов брать, решает вызывающий: своей маленькой модели
-            // — три, облачной — больше (см. `thread_depth`).
-            for item in thread {
-                messages.push(Message {
-                    role: "user",
-                    content: item.q.clone(),
-                });
-                messages.push(Message {
-                    role: "assistant",
-                    content: item.a.clone(),
-                });
-            }
-            messages.push(Message {
-                role: "user",
-                content: question.to_string(),
-            });
-            messages
-        };
+        let messages = || self.ask_messages(term, context, thread, question);
 
         let answer = self.answer_once(messages()).await?;
         if !has_foreign_script(&answer) {
