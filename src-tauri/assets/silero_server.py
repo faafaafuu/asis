@@ -1,26 +1,44 @@
-"""Голосовой сервер Silero для Суфлёра.
+"""Голосовой сервер Суфлёра: Светлана (нейроголос Microsoft) и Silero.
 
-Модель грузится один раз; дальше каждая фраза — один HTTP-запрос:
-POST /tts {"text": ..., "speaker": ..., "rate": 1.0} -> WAV (48 кГц, моно, 16 бит).
-GET /health -> 200, когда модель готова.
+Каждая фраза — один HTTP-запрос:
+POST /tts {"text": ..., "speaker": ..., "rate": 1.0} -> звук.
+GET /health -> 200, когда сервер готов.
+
+Светлана и Дмитрий — нейроголоса Microsoft через edge-tts: живая интонация,
+нужен интернет. Остальные — Silero на этом компьютере (PyTorch и модель).
+Нет PyTorch — работают только нейроголоса; Microsoft не ответил — фразу
+читает Ксения, если Silero стоит. Звук — WAV 48 кГц; нейроголос без ffmpeg
+рядом — MP3, как его отдаёт Microsoft (программа разбирает оба).
 
 Слушает только 127.0.0.1. Через IDLE_SECONDS без запросов выходит сам —
 держать сотни мегабайт памяти, когда голос не нужен, незачем.
 """
 
 import array
+import asyncio
 import io
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib import metadata
 from xml.sax.saxutils import escape
 
-import torch
+try:
+    import torch
+except ImportError:  # поставлены только нейроголоса — без PyTorch
+    torch = None
+try:
+    import edge_tts
+except ImportError:
+    edge_tts = None
 
 MODEL_PATH, PORT = sys.argv[1], int(sys.argv[2])
 # Третий параметр — сколько ждать без запросов; 0 — не уходить вовсе. Так
@@ -28,12 +46,21 @@ MODEL_PATH, PORT = sys.argv[1], int(sys.argv[2])
 IDLE_SECONDS = int(sys.argv[3]) if len(sys.argv) > 3 else 600
 SAMPLE_RATE = 48000
 SPEAKERS = {"aidar", "baya", "kseniya", "xenia", "eugene"}
+EDGE = {"svetlana": "ru-RU-SvetlanaNeural", "dmitry": "ru-RU-DmitryNeural"}
+FFMPEG = shutil.which("ffmpeg")
 
-torch.set_num_threads(4)
-model = torch.package.PackageImporter(MODEL_PATH).load_pickle("tts_models", "model")
-model.to(torch.device("cpu"))
+model = None
+if torch is not None and os.path.exists(MODEL_PATH):
+    torch.set_num_threads(4)
+    model = torch.package.PackageImporter(MODEL_PATH).load_pickle("tts_models", "model")
+    model.to(torch.device("cpu"))
+if model is None and edge_tts is None:
+    sys.exit("нет голосов: ни Silero (PyTorch и модель), ни edge-tts")
 lock = threading.Lock()
 last_used = time.monotonic()
+# Обновили edge-tts — сервер уходит, новая версия подхватится при запуске.
+restart = threading.Event()
+upgrading = threading.Event()
 
 
 def rate_word(rate: float) -> str:
@@ -309,7 +336,82 @@ def tts(ssml: str, speaker: str):
         return model.apply_tts(ssml_text=ssml, speaker=speaker, sample_rate=SAMPLE_RATE)
 
 
-def synthesize(text: str, speaker: str, rate: float) -> bytes:
+def upgrade_edge():
+    """Microsoft время от времени меняет подпись запросов, и edge-tts догоняет
+    её новой версией. Отказ — раз за запуск пробуем обновить библиотеку;
+    вышла новая — сервер перезапускается (программа или служба поднимут)."""
+    if upgrading.is_set():
+        return
+    upgrading.set()
+
+    def run():
+        before = metadata.version("edge-tts")
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "-U", "--disable-pip-version-check",
+             "--no-warn-script-location", "edge-tts"],
+            capture_output=True, timeout=300,
+        )
+        if metadata.version("edge-tts") != before:
+            print(f"edge-tts {before} -> {metadata.version('edge-tts')}, перезапуск", file=sys.stderr, flush=True)
+            restart.set()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def edge_speech(text: str, speaker: str, rate: float):
+    """Нейроголос Microsoft: MP3 от Microsoft, с ffmpeg рядом — WAV 48 кГц.
+    Скорость — чуть бодрее заданной, тон чуть выше: так Светлана звучит живее."""
+    # Пункты списка — с паузой: строка без точки в конце читалась слитно со следующей.
+    words = re.sub(r"(?<![.!?…:;,])\n", ".\n", speakable(text))
+    if not words:
+        raise ValueError("пустой текст")
+    percent = round((rate - 1) * 60 + 6)
+
+    async def stream():
+        audio = bytearray()
+        talk = edge_tts.Communicate(words, EDGE.get(speaker, speaker), rate=f"{percent:+d}%", pitch="+2Hz")
+        async for chunk in talk.stream():
+            if chunk["type"] == "audio":
+                audio += chunk["data"]
+        return bytes(audio)
+
+    mp3 = asyncio.run(asyncio.wait_for(stream(), 40))
+    if not mp3:
+        raise ValueError("Microsoft не прислал звук")
+    if not FFMPEG:
+        return mp3, "audio/mpeg"
+    # Через файлы, а не трубу: в трубу ffmpeg пишет WAV без длины, и чтение
+    # длительности (ролики, аудиодрамы) ломается.
+    with tempfile.TemporaryDirectory() as folder:
+        source, target = os.path.join(folder, "in.mp3"), os.path.join(folder, "out.wav")
+        with open(source, "wb") as file:
+            file.write(mp3)
+        subprocess.run([FFMPEG, "-loglevel", "error", "-y", "-i", source, "-ar", str(SAMPLE_RATE), "-ac", "1", target],
+                       check=True, timeout=60)
+        with open(target, "rb") as file:
+            return file.read(), "audio/wav"
+
+
+def synthesize(text: str, speaker: str, rate: float):
+    """Звук фразы и его тип. Нейроголос не вышел — Ксения, если Silero стоит."""
+    neural = speaker in EDGE or speaker.endswith("Neural")
+    if neural or model is None:
+        if edge_tts is None:
+            speaker = "xenia"
+        else:
+            try:
+                return edge_speech(text, speaker if neural else "svetlana", rate)
+            except Exception as err:
+                if model is None:
+                    upgrade_edge()
+                    raise
+                print(f"нейроголос не вышел ({err}) — читает Ксения", file=sys.stderr, flush=True)
+                upgrade_edge()
+                speaker = "xenia"
+    return silero_wav(text, speaker, rate), "audio/wav"
+
+
+def silero_wav(text: str, speaker: str, rate: float) -> bytes:
     speaker = speaker if speaker in SPEAKERS else "xenia"
     pieces = []
     with lock:
@@ -348,7 +450,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length) or b"{}")
-            wav = synthesize(str(body.get("text", "")), str(body.get("speaker", "")), float(body.get("rate", 1.0)))
+            sound, kind = synthesize(str(body.get("text", "")), str(body.get("speaker", "")), float(body.get("rate", 1.0)))
         except Exception as err:  # отказ — текстом, Суфлёр прочитает своим голосом
             message = str(err).encode("utf-8")
             self.send_response(500)
@@ -359,16 +461,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         last_used = time.monotonic()
         self.send_response(200)
-        self.send_header("Content-Type", "audio/wav")
-        self.send_header("Content-Length", str(len(wav)))
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(sound)))
         self.end_headers()
-        self.wfile.write(wav)
+        self.wfile.write(sound)
 
 
 def watch_idle(server):
     while True:
         time.sleep(15)
-        if IDLE_SECONDS and time.monotonic() - last_used > IDLE_SECONDS:
+        if restart.is_set() or IDLE_SECONDS and time.monotonic() - last_used > IDLE_SECONDS:
             server.shutdown()
             return
 
@@ -376,3 +478,5 @@ def watch_idle(server):
 server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
 threading.Thread(target=watch_idle, args=(server,), daemon=True).start()
 server.serve_forever()
+# Ушли ради новой edge-tts — с кодом ошибки: служба на сайте поднимет заново.
+sys.exit(3 if restart.is_set() else 0)

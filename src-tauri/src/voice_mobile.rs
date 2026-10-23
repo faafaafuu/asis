@@ -65,11 +65,10 @@ static READ_REQUEST: AtomicU64 = AtomicU64::new(0);
 
 /// Произносит текст и ждёт конца фразы.
 ///
-/// На iPhone по умолчанию говорит Ирина (Piper), встроенная в приложение:
-/// фраза готова за доли секунды и без сети. Голос Ноа с компьютера (Silero
-/// «xenia») — с сервера по фразам, если его выбрали в профиле
-/// (`voice.engine = "silero"`): так же звучит, но каждая фраза — секунда-пять
-/// на сервере. Не вышел один — говорит другой, не вышли оба — системный.
+/// На iPhone по умолчанию говорит голос Ноа с сервера — Светлана, нейроголос
+/// Microsoft (`voice.engine = "silero"`), по фразам: каждая — секунда-две.
+/// Выключили в профиле — Ирина (Piper), встроенная в приложение: сразу и без
+/// сети. Не вышел один — говорит другой, не вышли оба — системный.
 pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<(), String> {
     // Числа, термины и аббревиатуры — словами: ни Ирина, ни Silero их сами
     // не прочтут (src/speech.rs).
@@ -388,7 +387,7 @@ async fn noa_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(),
         crate::platform::diag("голос Ноа: нет ключа площадки — говорит системный");
         return Err(text.to_string());
     }
-    let voice = if config.silero_voice.trim().is_empty() { "xenia".to_string() } else { config.silero_voice.clone() };
+    let voice = if config.silero_voice.trim().is_empty() { "svetlana".to_string() } else { config.silero_voice.clone() };
     let list = quick_start(phrases(text, 180));
     let start = |phrase: &String| tauri::async_runtime::spawn(fetch_phrase(base.clone(), token.clone(), voice.clone(), phrase.clone()));
     let mut next = list.first().map(start);
@@ -464,11 +463,11 @@ pub fn silero_voices() -> &'static [(&'static str, &'static str)] {
     &[]
 }
 
-pub fn silero_ready(_app: &AppHandle) -> bool {
+pub fn silero_ready(_app: &AppHandle, _voice: &str) -> bool {
     false
 }
 
-pub async fn silero_install(_app: AppHandle) -> Result<(), String> {
+pub async fn silero_install(_app: AppHandle, _voice: String) -> Result<(), String> {
     Err("На телефоне говорит системный синтезатор — ставить нечего.".into())
 }
 

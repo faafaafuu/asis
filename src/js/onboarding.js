@@ -885,7 +885,7 @@ async function loadChips() {
     const [ai, voice] = await Promise.all([api.invoke("ai_settings"), api.invoke("voice_settings")]);
     const local = /127\.0\.0\.1|localhost/.test(ai.endpoint || "");
     const brain = ai.provider === "wikipedia" ? "Википедия" : `${ai.model || "модель"}${local ? "" : " · облако"}`;
-    const engines = { piper: "голос Piper", silero: "голос Silero", azure: "голос Azure" };
+    const engines = { piper: "голос Piper", silero: "живой голос", azure: "голос Azure" };
     // На телефоне говорит системный синтезатор, а имя вслух не слушается —
     // микрофон включают кнопкой, жестом помощника или плиткой.
     ui.chips.replaceChildren(

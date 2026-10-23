@@ -33,10 +33,14 @@ pub async fn speak(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<
     match config.engine.as_str() {
         "silero" => {
             stop();
-            match silero::speak(app, &config.silero_voice, config.rate, &text).await {
+            // Светлана ещё ставится — пока Ксения или свой голос.
+            let Some(voice) = silero::usable(app, &config.silero_voice) else {
+                return piper::speak(app, &config.voice, config.rate, &text);
+            };
+            match silero::speak(app, &voice, config.rate, &text).await {
                 Ok(()) => Ok(()),
                 Err(err) => {
-                    log::warn!("голос Silero: {err}; читаю своим голосом");
+                    log::warn!("живой голос: {err}; читаю своим голосом");
                     piper::speak(app, &config.voice, config.rate, &text)
                 }
             }
@@ -78,23 +82,24 @@ pub fn silero_voices() -> &'static [(&'static str, &'static str)] {
     silero::VOICES
 }
 
-/// Скачаны ли голоса Silero.
-pub fn silero_ready(app: &AppHandle) -> bool {
-    silero::ready(app)
+/// Готов ли живой голос: Светлане нужен Python с edge-tts, Silero — ещё
+/// PyTorch и модель.
+pub fn silero_ready(app: &AppHandle, voice: &str) -> bool {
+    silero::ready(app, voice)
 }
 
-/// Скачивает Python, PyTorch и голоса Silero.
-pub async fn silero_install(app: AppHandle) -> Result<(), String> {
-    silero::install(app).await
+/// Ставит то, что нужно этому живому голосу.
+pub async fn silero_install(app: AppHandle, voice: String) -> Result<(), String> {
+    silero::install(app, &voice).await
 }
 
 /// Готовит голос заранее, пока человек ещё говорит: Silero поднимает сервер
 /// и прогревает модель, остальным способам готовиться не нужно.
 pub fn warm(app: &AppHandle) {
     use tauri::Manager;
-    let engine = app.state::<crate::state::AppState>().config().voice.engine.clone();
-    if engine == "silero" {
-        silero::warm(app);
+    let voice = app.state::<crate::state::AppState>().config().voice.clone();
+    if voice.engine == "silero" {
+        silero::warm(app, &voice.silero_voice);
     }
 }
 

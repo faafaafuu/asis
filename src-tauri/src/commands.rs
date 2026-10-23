@@ -401,7 +401,7 @@ pub fn voice_settings(app: AppHandle, state: State<'_, AppState>) -> VoiceSettin
         speak_answers: config.voice.speak_answers,
         // Готовность — того способа, что выбран: кнопка «Скачать» относится к нему.
         ready: match config.voice.engine.as_str() {
-            "silero" => crate::voice::silero_ready(&app),
+            "silero" => crate::voice::silero_ready(&app, &config.voice.silero_voice),
             "azure" => true,
             _ => crate::voice::assets::ready(&app, &config.voice.voice),
         },
@@ -481,10 +481,12 @@ pub fn voice_list() -> serde_json::Value {
     })
 }
 
-/// Скачивает Python, PyTorch и голоса Silero. Ход — событием `voice:install`.
+/// Ставит выбранный живой голос: Светлане — Python и edge-tts, Silero — ещё
+/// PyTorch и модель. Ход — событием `voice:install`.
 #[tauri::command]
-pub async fn silero_install(app: AppHandle) -> Result<(), String> {
-    crate::voice::silero_install(app).await
+pub async fn silero_install(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let voice = state.config().voice.silero_voice.clone();
+    crate::voice::silero_install(app, voice).await
 }
 
 /// Расход модели для виджета.

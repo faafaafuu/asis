@@ -465,18 +465,23 @@ pub struct VoiceConfig {
     pub show_window: bool,
     /// Что включать на «включи музыку» без уточнений — адрес станции.
     pub music_url: String,
+    /// Какой переход голоса уже сделан. 0 — настройки старше Светланы: при
+    /// загрузке основным станет она (`normalize`), дальше выбор человека.
+    pub revision: u32,
 }
 
 impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            engine: "piper".into(),
+            // Живой голос: Светлана, нейроголос Microsoft. Нет сети — Ксения
+            // или Ирина на этом компьютере (voice/mod.rs).
+            engine: "silero".into(),
             // Строкой, а не ссылкой на voice::assets: модуль голоса собирается
             // только для настольных систем, а настройки общие для всех.
             voice: "ru_RU-irina-medium".into(),
             edge_voice: "ru-RU-SvetlanaNeural".into(),
-            silero_voice: "xenia".into(),
+            silero_voice: "svetlana".into(),
             azure_key: String::new(),
             azure_region: "westeurope".into(),
             wake_word: true,
@@ -489,6 +494,7 @@ impl Default for VoiceConfig {
             speak_answers: false,
             show_window: true,
             music_url: "https://www.youtube.com/watch?v=tRsQsTMvPNg".into(),
+            revision: 0,
         }
     }
 }
@@ -588,6 +594,13 @@ impl Config {
         // шла с предупреждением в журнал и всё равно своим голосом.
         if self.voice.engine == "edge" {
             self.voice.engine = "piper".into();
+        }
+        // Светлана — основной голос везде: один раз переводим на неё и тех,
+        // у кого записан прежний. Дальше выбор человека сильнее.
+        if self.voice.revision < 1 {
+            self.voice.engine = "silero".into();
+            self.voice.silero_voice = "svetlana".into();
+            self.voice.revision = 1;
         }
         // Облачный сервис без имени модели запрос не примет — OpenRouter
         // отвечает 400, и Ноа молчала. Пустое имя подставляется рабочим.

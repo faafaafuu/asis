@@ -26,7 +26,7 @@ ROOT = os.environ.get("NOAH_VIDEO_DIR", "/opt/noah-video")
 JOBS = os.path.join(ROOT, "jobs")
 KIT = os.path.join(ROOT, "kit")
 VOICE = os.environ.get("NOAH_VOICE_URL", "http://127.0.0.1:8644") + "/tts"
-SPEAKER = os.environ.get("NOAH_VIDEO_SPEAKER", "xenia")
+SPEAKER = os.environ.get("NOAH_VIDEO_SPEAKER", "svetlana")
 PAD = 0.6
 RENDER_LIMIT = 480
 # Рендер кусками: Manim рисует кадры в один поток, и минутный ролик шёл
@@ -244,12 +244,12 @@ def mux(job):
 # рассказчик. Серия — episode-N.mp3 и timeline-N.json: кто и когда говорит,
 # чтобы окно подсвечивало реплику и по вопросу возвращало к сцене.
 
-# Голос: (диктор Silero, темп, высота).
+# Голос: (диктор голосового сервера, темп, высота).
 CAST = {
     "junior": ("aidar", 1.10, 1.03),
     "lena": ("baya", 1.0, 1.0),
     "palych": ("eugene", 0.93, 0.88),
-    "narrator": ("xenia", 0.96, 1.0),
+    "narrator": ("svetlana", 0.96, 1.0),
 }
 # Подача: (темп, высота, громкость).
 DELIVERY = {

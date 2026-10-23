@@ -1,7 +1,7 @@
 // Голос Ноа в браузере: говорит тем же голосом, что программа, и слушает,
 // не перебивая саму себя.
 //
-// Говорит — голосом Silero с сервера сайта (/api/noa/tts), для вошедших; нет
+// Говорит — голосом Светланы (нейроголос) с сервера сайта (/api/noa/tts), для вошедших; нет
 // входа или сервер занят — голосом браузера.
 //
 // Слушает двумя способами. Chrome и Edge распознают речь сами — быстро и без
@@ -142,7 +142,7 @@ async function fetchVoice(text) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify({ text, voice: read("noa.voice", "xenia"), rate: Number(read("noa.rate", "1.2")) }),
+      body: JSON.stringify({ text, voice: read("noa.voice", "svetlana"), rate: Number(read("noa.rate", "1.2")) }),
     });
     // Не вошли — голос сервера не для гостей: дальше без него.
     if (response.status === 401) serverVoice = false;

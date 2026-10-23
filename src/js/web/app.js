@@ -299,7 +299,12 @@ const setPref = (key, value) => {
 };
 
 ui.theme.value = pref("noa.theme", "noah");
-ui.voice.value = pref("noa.voice", "xenia");
+// Светлана — основной голос: прежний выбор один раз переводим на неё.
+if (pref("noa.voice.v2", "") !== "1") {
+  setPref("noa.voice", "svetlana");
+  setPref("noa.voice.v2", "1");
+}
+ui.voice.value = pref("noa.voice", "svetlana");
 ui.rate.value = pref("noa.rate", "1.2");
 if (!ui.rate.value) ui.rate.value = "1.2";
 

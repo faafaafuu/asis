@@ -52,7 +52,8 @@ const BRIDGE_WAIT = 200_000;
  * сотню килобайт на секунду речи, для телефона и медленной сети это много.
  */
 const VOICE_URL = (process.env.NOAH_VOICE_URL ?? "http://127.0.0.1:8644").replace(/\/$/, "");
-const VOICES = new Set(["xenia", "baya", "kseniya", "aidar", "eugene"]);
+// Светлана и Дмитрий — нейроголоса Microsoft (edge-tts в голосовом сервере), остальные — Silero.
+const VOICES = new Set(["svetlana", "dmitry", "xenia", "baya", "kseniya", "aidar", "eugene"]);
 /** Сколько фраз в час одному человеку: голос считает процессор сервера. */
 const VOICE_PER_HOUR = 600;
 const MAX_PHRASE = 1500;
@@ -407,7 +408,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
       const response = await fetch(`${VOICE_URL}/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: phrase, speaker: VOICES.has(voice) ? voice : "xenia", rate: Math.min(Math.max(Number(rate) || 1.1, 0.6), 2) }),
+        body: JSON.stringify({ text: phrase, speaker: VOICES.has(voice) ? voice : "svetlana", rate: Math.min(Math.max(Number(rate) || 1.1, 0.6), 2) }),
         signal: AbortSignal.timeout(60_000),
       });
       if (!response.ok) throw new Error(String(response.status));

@@ -1,10 +1,15 @@
-//! Живые голоса Silero на этом компьютере.
+//! Живые голоса: Светлана (нейроголос Microsoft) и Silero на этом компьютере.
 //!
-//! Silero — лучшие свободные русские голоса, но работают они только через
-//! PyTorch. Поэтому рядом с программой ставится свой Python (встраиваемая
-//! сборка, без установки в систему), в него — PyTorch для процессора, и
-//! запускается маленький сервер (`assets/silero_server.py`): модель грузится
-//! один раз, дальше каждая фраза — один запрос, доли секунды.
+//! Рядом с программой ставится свой Python (встраиваемая сборка, без
+//! установки в систему) и запускается маленький сервер
+//! (`assets/silero_server.py`), каждая фраза — один запрос.
+//!
+//! Светлана и Дмитрий — нейроголоса Microsoft через edge-tts: живая
+//! интонация, нужен интернет, ставятся лёгкими — Python и библиотека, около
+//! 20 МБ. Microsoft время от времени меняет подпись запросов; библиотека её
+//! догоняет, и сервер обновляет её сам. Поэтому голос — через неё, а не
+//! своим кодом в программе. Silero — свободные голоса без сети, но только
+//! через PyTorch: ~850 МБ на диске.
 //!
 //! Сервер сам уходит через десять минут без запросов и вместе с программой —
 //! сотни мегабайт памяти без дела не держатся.
@@ -25,6 +30,9 @@ const TORCH: &str = "torch==2.14.0";
 const TORCH_INDEX: &str = "https://download.pytorch.org/whl/cpu";
 const MODEL_URL: &str = "https://models.silero.ai/models/tts/ru/v5_5_ru.pt";
 const MODEL_FILE: &str = "v5_5_ru.pt";
+/// Нейроголоса Microsoft. Первая версия закреплена, дальше сервер обновляет
+/// её сам, когда Microsoft перестаёт её принимать.
+const EDGE_TTS: &str = "edge-tts==7.3.1";
 
 const SERVER_SCRIPT: &str = include_str!("../../assets/silero_server.py");
 /// Словарь произношения — рядом со скриптом: его читает разбор текста.
@@ -34,6 +42,8 @@ const PRONOUNCE: &str = include_str!("../../assets/pronounce.json");
 const PORT: u16 = 8644;
 
 pub const VOICES: &[(&str, &str)] = &[
+    ("svetlana", "Светлана — нейроголос, живой (нужен интернет)"),
+    ("dmitry", "Дмитрий — нейроголос, мужской (нужен интернет)"),
     ("xenia", "Ксения — женский, живой"),
     ("baya", "Байя — женский, мягкий"),
     ("kseniya", "Ксения-2 — женский, ровный"),
@@ -41,7 +51,15 @@ pub const VOICES: &[(&str, &str)] = &[
     ("eugene", "Евгений — мужской"),
 ];
 
-pub const DEFAULT_VOICE: &str = "xenia";
+pub const DEFAULT_VOICE: &str = "svetlana";
+
+/// Нейроголос Microsoft: ему не нужны PyTorch и модель.
+pub fn is_neural(voice: &str) -> bool {
+    matches!(voice, "svetlana" | "dmitry")
+}
+
+/// Ставится ли сейчас что-то: фоновую установку Светланы не начинаем дважды.
+static INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Номер последней фразы: ответ, пришедший после остановки, не звучит.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -88,24 +106,60 @@ fn has_torch(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+fn has_edge(app: &AppHandle) -> bool {
+    root(app)
+        .map(|root| root.join("python").join("Lib").join("site-packages").join("edge_tts").join("__init__.py").exists())
+        .unwrap_or(false)
+}
+
 fn model(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(root(app)?.join(MODEL_FILE))
 }
 
-/// Всё ли скачано.
-pub fn ready(app: &AppHandle) -> bool {
+/// Скачаны ли голоса Silero: Python, PyTorch и модель.
+fn silero_ready(app: &AppHandle) -> bool {
     python(app).map(|p| p.exists()).unwrap_or(false)
         && has_torch(app)
         && model(app).map(|p| p.exists()).unwrap_or(false)
+}
+
+fn neural_ready(app: &AppHandle) -> bool {
+    python(app).map(|p| p.exists()).unwrap_or(false) && has_edge(app)
+}
+
+/// Готов ли этот голос.
+pub fn ready(app: &AppHandle, voice: &str) -> bool {
+    if is_neural(voice) { neural_ready(app) } else { silero_ready(app) }
+}
+
+/// Каким голосом говорить сейчас. Светланы ещё нет — она тихо ставится в
+/// фоне, а пока говорит Ксения, если Silero стоит. `None` — своим голосом.
+pub fn usable(app: &AppHandle, voice: &str) -> Option<String> {
+    let voice = if voice.trim().is_empty() { DEFAULT_VOICE } else { voice.trim() };
+    if ready(app, voice) {
+        return Some(voice.to_string());
+    }
+    if is_neural(voice) && !INSTALLING.swap(true, Ordering::SeqCst) {
+        let app = app.clone();
+        let wanted = voice.to_string();
+        tauri::async_runtime::spawn(async move {
+            if let Err(err) = install(app, &wanted).await {
+                log::warn!("нейроголос не поставился: {err}");
+            }
+            INSTALLING.store(false, Ordering::SeqCst);
+        });
+    }
+    (is_neural(voice) && silero_ready(app)).then(|| "xenia".to_string())
 }
 
 fn progress(app: &AppHandle, percent: u8, status: &str) {
     assets::emit_to(app, assets::EVENT, percent, status, false, None);
 }
 
-/// Скачивает и ставит всё нужное: около 350 МБ загрузки, ~850 МБ на диске.
-pub async fn install(app: AppHandle) -> Result<(), String> {
-    let result = install_steps(&app).await;
+/// Ставит то, что нужно голосу: нейроголосу — Python и edge-tts (около
+/// 20 МБ), Silero — ещё PyTorch и модель (~350 МБ загрузки, ~850 МБ на диске).
+pub async fn install(app: AppHandle, voice: &str) -> Result<(), String> {
+    let result = install_steps(&app, !is_neural(voice)).await;
     match &result {
         Ok(()) => assets::emit_to(&app, assets::EVENT, 100, "готово", true, None),
         Err(err) => assets::emit_to(&app, assets::EVENT, 0, "ошибка", false, Some(err.clone())),
@@ -113,7 +167,7 @@ pub async fn install(app: AppHandle) -> Result<(), String> {
     result
 }
 
-async fn install_steps(app: &AppHandle) -> Result<(), String> {
+async fn install_steps(app: &AppHandle, silero: bool) -> Result<(), String> {
     let root = root(app)?;
     let python_dir = root.join("python");
     std::fs::create_dir_all(&python_dir).map_err(|err| err.to_string())?;
@@ -137,6 +191,15 @@ async fn install_steps(app: &AppHandle) -> Result<(), String> {
         let args = [get_pip.to_string_lossy().to_string(), "--no-warn-script-location".into()];
         run_python(app, args.to_vec()).await?;
         let _ = std::fs::remove_file(&get_pip);
+    }
+
+    if !has_edge(app) {
+        progress(app, 7, "ставлю нейроголоса");
+        let args = ["-m", "pip", "install", "--no-warn-script-location", "--disable-pip-version-check", EDGE_TTS];
+        run_python(app, args.iter().map(|arg| arg.to_string()).collect()).await?;
+    }
+    if !silero {
+        return Ok(());
     }
 
     if !has_torch(app) {
@@ -208,8 +271,8 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
     if alive() {
         return Ok(());
     }
-    if !ready(app) {
-        return Err("голоса Silero ещё не скачаны".into());
+    if !silero_ready(app) && !neural_ready(app) {
+        return Err("голоса ещё не скачаны".into());
     }
     // Прежний сервер убиваем, только если он умер или завис насовсем. Живой,
     // но ещё поднимающийся сервер не трогаем: раньше вторая фраза убивала его
@@ -289,10 +352,11 @@ fn ensure_server(app: &AppHandle) -> Result<(), String> {
 
 /// Поднимает сервер заранее — пока человек ещё говорит, — и прогревает модель:
 /// первая фраза после загрузки синтезируется втрое дольше остальных.
-pub fn warm(app: &AppHandle) {
-    if alive() || !ready(app) {
+pub fn warm(app: &AppHandle, voice: &str) {
+    if alive() || !(silero_ready(app) || neural_ready(app)) {
         return;
     }
+    let voice = if ready(app, voice) { voice.to_string() } else { DEFAULT_VOICE.to_string() };
     let app = app.clone();
     let _ = std::thread::Builder::new()
         .name("sufler-silero-warm".into())
@@ -301,7 +365,7 @@ pub fn warm(app: &AppHandle) {
                 log::warn!("голосовой сервер не поднялся заранее: {err}");
                 return;
             }
-            let _ = tauri::async_runtime::block_on(request(DEFAULT_VOICE, 1.0, "Готово."));
+            let _ = tauri::async_runtime::block_on(request(&voice, 1.0, "Готово."));
         });
 }
 
@@ -324,7 +388,7 @@ async fn request(voice: &str, rate: f32, text: &str) -> Result<Vec<u8>, String> 
     Ok(response.bytes().await.map_err(|err| err.to_string())?.to_vec())
 }
 
-/// Говорит текст голосом Silero. Возвращается, когда звук поставлен в очередь.
+/// Говорит текст голосом сервера. Возвращается, когда звук поставлен в очередь.
 pub async fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Result<(), String> {
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     SYNTHESIZING.store(generation, Ordering::SeqCst);
@@ -348,7 +412,7 @@ pub async fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Resul
             if GENERATION.load(Ordering::SeqCst) != generation {
                 return Ok(());
             }
-            let (samples, hz) = super::azure::decode_wav(&wav)?;
+            let (samples, hz) = if wav.starts_with(b"RIFF") { super::azure::decode_wav(&wav)? } else { decode_mp3(wav)? };
             super::audio::play(samples, hz);
         }
         Ok(())
@@ -356,6 +420,18 @@ pub async fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Resul
     .await;
     done(generation);
     outcome
+}
+
+/// MP3 нейроголоса (рядом нет ffmpeg, и сервер отдаёт как прислал Microsoft)
+/// — в отсчёты одним каналом.
+fn decode_mp3(data: Vec<u8>) -> Result<(Vec<f32>, u32), String> {
+    use rodio::Source;
+    let decoder = rodio::Decoder::new(std::io::Cursor::new(data)).map_err(|err| format!("звук не разобрался: {err}"))?;
+    let channels = usize::from(decoder.channels().max(1));
+    let hz = decoder.sample_rate();
+    let all: Vec<f32> = decoder.collect();
+    let samples = all.chunks(channels).map(|frame| frame.iter().sum::<f32>() / frame.len() as f32).collect();
+    Ok((samples, hz))
 }
 
 /// Куски для озвучки: первый — одно предложение (чтобы начать сразу),
