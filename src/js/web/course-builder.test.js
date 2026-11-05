@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { buildCourse, shapeTopic, shapePlan, slug, cut, jsonIn, Stopped } from "./course-builder.js";
+import { buildCourse, shapeTopic, shapePlan, slug, cut, jsonIn, Stopped, Fatal, passing, plainError } from "./course-builder.js";
 import { validate } from "./learn-core.js";
 
 const FORMAT = readFileSync(new URL("../../../src-tauri/src/course_format.md", import.meta.url), "utf8");
@@ -138,6 +138,29 @@ test("остановка: после первой темы сборка прек
   );
   assert.equal(saves.length, 1);
   assert.equal(saves[0].topics.length, 1);
+});
+
+test("модель заблокирована — сборка встаёт сразу, без повторов и пропуска тем", async () => {
+  const { chat } = fakeModel({ planTopics: 3 });
+  let lessons = 0;
+  const blocked = async (messages, opts) => {
+    if (messages[0].content.includes("пишешь урок")) {
+      lessons += 1;
+      throw new Error("API Error: Your account can't receive replies from Claude right now. You can find the next step in the Anthropic Verification Portal");
+    }
+    return chat(messages, opts);
+  };
+  const started = Date.now();
+  await assert.rejects(buildCourse({ goal: "x", format: FORMAT, chat: blocked, save: () => {} }), (err) => err instanceof Fatal && /приостановил аккаунт/.test(err.message));
+  assert.ok(Date.now() - started < 3000, "без пауз перед повторами");
+  assert.ok(lessons <= 2, "урок не переспрашивается по кругу");
+});
+
+test("лимит подписки и вход — не проходят сами; перегрузка — проходит", () => {
+  assert.equal(passing(new Error("You've hit your session limit · resets 3pm")), false);
+  assert.equal(passing(new Error("Failed to authenticate: OAuth session expired")), false);
+  assert.equal(passing(new Error("529 overloaded")), true);
+  assert.match(plainError(new Error("You've hit your session limit")), /лимит подписки/);
 });
 
 test("плохие вопросы переспрашиваются отдельно — понятия второй раз не пишутся", async () => {

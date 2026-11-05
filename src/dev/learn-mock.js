@@ -87,6 +87,8 @@
   const publish = (say = "") => emit("practice:state", { practice: structuredClone(practice), say, spoken: false });
 
   let speakingUntil = 0;
+  /** Сборка курса на витрине: остановили, продолжили, убрали. */
+  let buildState = "";
   let phoneVoice = "phone";
   const stats = { today: 25, week: 110, streak: 5, sessionsToday: 1 };
 
@@ -199,9 +201,20 @@
       case "learn_build":
         await network();
         return { build: { id: "b1", status: "running" } };
+      // ?build=1 — идёт сборка, ?build=failed — встала из-за модели.
       case "learn_builds":
-        return params.get("build") ? [{ id: "b1", status: "running", stage: "topics", done: 3, total: 9, title: "Kubernetes в проде", courseId: "k8s", message: "Пишу тему 4 из 9", goal: "", updated: "" }] : [];
+        if (buildState === "removed") return [];
+        if ((params.get("build") === "failed" && buildState !== "running") || buildState === "stopped")
+          return [{ id: "b1", status: buildState === "stopped" ? "stopped" : "failed", stage: "lesson", done: 2, total: 6, title: "Эндуро на большом мотоцикле", courseId: "enduro", message: buildState === "stopped" ? "Сборка остановлена — готовые темы остались." : "Модель недоступна: Anthropic приостановил аккаунт Claude, через который работает мост, до проверки (Verification Portal). Пока его не разблокируют, курсы не собираются.", goal: "", updated: "" }];
+        return params.get("build") || buildState === "running" ? [{ id: "b1", status: "running", stage: "topics", done: 3, total: 9, title: "Kubernetes в проде", courseId: "k8s", message: "Пишу урок «Сети в кластере» (4 из 9)", goal: "", updated: "" }] : [];
       case "learn_build_stop":
+        buildState = "stopped";
+        return null;
+      case "learn_build_resume":
+        buildState = "running";
+        return null;
+      case "learn_build_remove":
+        buildState = "removed";
         return null;
       case "learn_focus_done":
         stats.today += args.session.minutes;

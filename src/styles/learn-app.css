@@ -2950,3 +2950,19 @@ button.plate:active,
   font-size: 13px;
   color: var(--text-muted);
 }
+
+/* Сборка курса на главной: идёт — пунктир; встала — причина и что делать. */
+.build-shelf {
+  gap: 8px;
+}
+.build-card.is-stopped {
+  border-color: rgba(255, 157, 180, 0.35);
+}
+.build-card__why {
+  color: var(--c-bad);
+}
+.build-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

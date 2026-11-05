@@ -350,22 +350,36 @@ export function shapePlan(raw, taken = new Set()) {
 
 export class Stopped extends Error {}
 
+/**
+ * Отказ модели, который сам не пройдёт: аккаунт не вошёл, заблокирован,
+ * кончился лимит подписки. Сборка останавливается сразу и пишет причину —
+ * повторять запросы и пропускать темы бессмысленно: раньше на этом курс
+ * «собирался» десятки минут и падал без внятной причины.
+ */
+export class Fatal extends Error {}
+
 /** Паузы перед повторами запроса к модели, мс. */
 const RETRY_PAUSES = [5_000, 20_000, 60_000];
 
 const LOGIN = /authenticat|oauth|\/login|not logged|unauthori[sz]ed|invalid api key|401/i;
-const LIMIT = /usage limit|rate.?limit|overloaded|529|429|quota/i;
+const BLOCKED = /can'?t receive replies|verification portal|portal\.anthropic\.com\/verify|account (has been )?(disabled|suspended|banned)/i;
+const SPENT = /session limit|usage limit|hit your (usage )?limit|limit (will )?reset|out of (extra )?usage|credit balance/i;
+const LIMIT = /rate.?limit|overloaded|529|429|quota/i;
 
-/** Пройдёт ли отказ сам: всё, кроме отказа входа. */
+/** Пройдёт ли отказ сам: перегрузка и обрыв — да; вход, блокировка, лимит — нет. */
 export function passing(err) {
-  return !LOGIN.test(String(err?.message ?? err));
+  const text = String(err?.message ?? err);
+  return !LOGIN.test(text) && !BLOCKED.test(text) && !SPENT.test(text);
 }
 
 /** Причина отказа словами — её видит человек в списке сборок. */
 export function plainError(err) {
   const text = String(err?.message ?? err);
+  if (BLOCKED.test(text))
+    return "Модель недоступна: Anthropic приостановил аккаунт Claude, через который работает мост, до проверки (Verification Portal). Пока его не разблокируют, курсы не собираются.";
   if (LOGIN.test(text)) return "Мост к Claude не вошёл в аккаунт — войдите в Claude Code на сервере и нажмите «Продолжить».";
-  if (LIMIT.test(text)) return "Claude перегружен или кончился лимит — нажмите «Продолжить» чуть позже, готовые темы останутся.";
+  if (SPENT.test(text)) return "Кончился лимит подписки Claude — нажмите «Продолжить», когда он обновится (обычно через несколько часов). Готовые темы останутся.";
+  if (LIMIT.test(text)) return "Claude перегружен — нажмите «Продолжить» чуть позже, готовые темы останутся.";
   if (/claude завершился с ошибкой/.test(text)) return "Модель не ответила — нажмите «Продолжить», сборка пойдёт с того же места.";
   return text;
 }
@@ -411,7 +425,8 @@ export async function buildCourse({ goal, format, chat, save, progress = () => {
         return await chat(messages, opts);
       } catch (err) {
         check();
-        if (attempt >= RETRY_PAUSES.length || !passing(err)) throw new Error(plainError(err));
+        if (!passing(err)) throw new Fatal(plainError(err));
+        if (attempt >= RETRY_PAUSES.length) throw new Error(plainError(err));
         await pause(RETRY_PAUSES[attempt], check);
       }
     }
@@ -469,7 +484,8 @@ export async function buildCourse({ goal, format, chat, save, progress = () => {
    */
   let ahead = null;
   const startLesson = (planTopic) => {
-    const promise = writeLesson(planTopic, knownConcepts()).catch((err) => (err instanceof Stopped ? Promise.reject(err) : ""));
+    // Сбой урока — тема пропускается; остановка и фатальный отказ — вся сборка.
+    const promise = writeLesson(planTopic, knownConcepts()).catch((err) => (err instanceof Stopped || err instanceof Fatal ? Promise.reject(err) : ""));
     // Отказ дождётся своей очереди — а до тех пор не считается «необработанным».
     promise.catch(() => {});
     return { id: planTopic.id, promise };

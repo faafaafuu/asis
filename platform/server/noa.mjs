@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 
 import { validate, advice, normalizeCourse, mergeProgress } from "../../src/js/web/learn-core.js";
-import { buildCourse, Stopped } from "../../src/js/web/course-builder.js";
+import { buildCourse, Stopped, Fatal } from "../../src/js/web/course-builder.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 /** Методика курса — та же, что отдаёт нейросети MCP (course_format). */
@@ -90,6 +90,28 @@ function toMp3(wav, bitrate = "64k") {
     ff.stdin.on("error", () => {});
     ff.stdin.end(wav);
   });
+}
+
+/**
+ * Идущие сборки курсов: id → { stop, abort }. На уровне модуля — до них
+ * дотягивается и удаление курса: удалили собирающийся курс — сборка
+ * останавливается, иначе следующая готовая тема вернула бы его обратно.
+ */
+const runningBuilds = new Map();
+
+/**
+ * Остановить сборку сразу: отметка в базе, обрыв запроса к модели. Раньше
+ * сборка ждала текущий ответ модели (до десяти минут) и всё это время
+ * числилась идущей — новая сборка отвечала «уже собирается».
+ */
+export function haltBuild(db, id, message = "Сборка остановлена — готовые темы остались.") {
+  const control = runningBuilds.get(id);
+  if (control) {
+    control.stop = true;
+    control.abort.abort();
+    runningBuilds.delete(id);
+  }
+  db.prepare("UPDATE noa_builds SET status = 'stopped', message = ?, updated = datetime('now') WHERE id = ? AND status = 'running'").run(message, id);
 }
 
 export function mountNoa({ route, db, Fail, readJson }) {
@@ -193,13 +215,13 @@ export function mountNoa({ route, db, Fail, readJson }) {
     return user;
   };
 
-  const bridge = async (path, init = {}, wait = BRIDGE_WAIT) => {
+  const bridge = async (path, init = {}, wait = BRIDGE_WAIT, stop = null) => {
     let response;
     try {
       response = await fetch(`${BRIDGE_URL}${path}`, {
         ...init,
         headers: { ...(init.headers ?? {}), Authorization: `Bearer ${BRIDGE_TOKEN}` },
-        signal: AbortSignal.timeout(wait),
+        signal: stop ? AbortSignal.any([stop, AbortSignal.timeout(wait)]) : AbortSignal.timeout(wait),
       });
     } catch {
       throw new Fail(502, "Мост не отвечает — служба noa-bridge на сервере остановлена или занята.");
@@ -380,12 +402,16 @@ export function mountNoa({ route, db, Fail, readJson }) {
      курс уже дорастает. Переживает и перезапуск сервера: недособранный курс
      лежит в аккаунте вместе с планом, и сборка продолжается с него. */
 
-  const running = new Map();
+  const running = runningBuilds;
 
-  /** Урок на тысячи слов модель пишет минуты: большим ответам — до 10 минут. */
-  const LONG_ANSWER = 600;
+  /**
+   * Урок на тысячи слов модель пишет минуту-полторы: большим ответам — до
+   * пяти минут. Дольше — мост завис, и ждать его десять минут (как было)
+   * значит держать сборку «идущей» впустую.
+   */
+  const LONG_ANSWER = 300;
 
-  const bridgeChat = async (model, messages, long = false, quality = "") => {
+  const bridgeChat = async (model, messages, long = false, quality = "", stop = null) => {
     const data = await bridge(
       "/v1/chat/completions",
       {
@@ -400,6 +426,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
         }),
       },
       long ? (LONG_ANSWER + 30) * 1000 : BRIDGE_WAIT,
+      stop,
     );
     const text = data?.choices?.[0]?.message?.content;
     if (typeof text !== "string" || !text.trim()) throw new Error("Мост прислал пустой ответ.");
@@ -426,8 +453,10 @@ export function mountNoa({ route, db, Fail, readJson }) {
 
   const runBuild = (job) => {
     if (running.has(job.id)) return;
-    const control = { stop: false };
+    const control = { stop: false, abort: new AbortController() };
     running.set(job.id, control);
+    /** Остановленный запуск в базу больше не пишет: там уже «остановлено» или новый запуск. */
+    const mine = () => !control.stop && running.get(job.id) === control;
     const saved = job.course_id
       ? db.prepare("SELECT body FROM noa_courses WHERE user_id = ? AND course_id = ?").get(job.user_id, job.course_id)
       : null;
@@ -439,12 +468,14 @@ export function mountNoa({ route, db, Fail, readJson }) {
       chat: (messages, opts) => {
         const engine = job.model || "claude-code-bridge";
         // Модель Claude выбирается только у Claude; у Codex, Gemini, Qwen — своя.
-        return bridgeChat(engine, messages, Boolean(opts?.long), engine.startsWith("claude") ? job.quality : "");
+        return bridgeChat(engine, messages, Boolean(opts?.long), engine.startsWith("claude") ? job.quality : "", control.abort.signal);
       },
       save: (course) => {
+        if (!mine()) throw new Stopped("Сборка остановлена.");
         saveCourse(db, job.user_id, course, { forApp: true });
       },
       progress: (p) =>
+        mine() &&
         updateBuild(job.id, {
           stage: p.stage,
           done: p.done,
@@ -457,16 +488,19 @@ export function mountNoa({ route, db, Fail, readJson }) {
       resume: resume?.building ? resume : null,
       taken,
     })
-      .then(() => updateBuild(job.id, { status: "done", stage: "done" }))
+      .then(() => mine() && updateBuild(job.id, { status: "done", stage: "done" }))
       .catch((err) => {
+        if (!mine()) return;
         const halted = err instanceof Stopped;
-        if (!halted) console.error("сборка курса:", err?.message ?? err);
+        if (!halted) console.error(`сборка курса${err instanceof Fatal ? " (стоп)" : ""}:`, err?.message ?? err);
         updateBuild(job.id, {
           status: halted ? "stopped" : "failed",
           message: halted ? "Сборка остановлена — готовые темы остались." : String(err?.message ?? err),
         });
       })
-      .finally(() => running.delete(job.id));
+      .finally(() => {
+        if (running.get(job.id) === control) running.delete(job.id);
+      });
   };
 
   // Сервер перезапустили посреди сборки — продолжаем с того, что сохранено.
@@ -506,10 +540,8 @@ export function mountNoa({ route, db, Fail, readJson }) {
     const user = need(who ?? tokenUser);
     const row = db.prepare("SELECT * FROM noa_builds WHERE id = ? AND user_id = ?").get(match[1], user.id);
     if (!row) throw new Fail(404, "Такой сборки нет.");
-    const control = running.get(row.id);
-    if (control) control.stop = true;
-    else if (row.status === "running") updateBuild(row.id, { status: "stopped", message: "Сборка остановлена." });
-    return { ok: true };
+    haltBuild(db, row.id);
+    return { build: buildRow(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(row.id)) };
   });
 
   // Продолжить остановленную или упавшую — с последней готовой темы.
@@ -666,6 +698,13 @@ function queueForApp(db, userId, courseId, body) {
 /** Удаляет курс из аккаунта и оставляет отметку для других устройств. */
 export function removeCourse(db, owner, courseId) {
   const userId = String(owner);
+  try {
+    for (const row of db.prepare("SELECT id FROM noa_builds WHERE user_id = ? AND course_id = ? AND status = 'running'").all(userId, courseId)) {
+      haltBuild(db, row.id, "Курс удалён — сборка остановлена.");
+    }
+  } catch {
+    /* таблицы сборок нет (проверки) — сборок нет и подавно */
+  }
   db.prepare("DELETE FROM noa_courses WHERE user_id = ? AND course_id = ?").run(userId, courseId);
   db.prepare("INSERT INTO noa_removed (user_id, course_id) VALUES (?, ?) ON CONFLICT(user_id, course_id) DO UPDATE SET at = datetime('now')").run(userId, courseId);
 }

@@ -9,6 +9,7 @@ import { open as openAssistant } from "../assistant.js";
 import { removeCourse, topicActions } from "./course.js";
 import { swipeRow, pressMenu, collapse, pullToRefresh } from "../gestures.js";
 import { guideShelf } from "./guide.js";
+import { confirmAction } from "../gestures.js";
 
 register("courses", (screen) => {
   screen.append(header({ home: true, onMic: () => openAssistant() }));
@@ -31,6 +32,7 @@ register("courses", (screen) => {
 
   let alive = true;
   let waitTimer = 0;
+  let buildTimer = 0;
   (async () => {
     // Курсы, практика и вход — с устройства, без сети: экран рисуется сразу.
     // Сборки на сайте — сетевой запрос, их дорисовываем, когда придут.
@@ -104,22 +106,41 @@ register("courses", (screen) => {
     );
     content.append(tune);
     if (!signed) return;
-    const builds = await store.builds(true);
-    if (!alive) return;
-    const running = builds.filter((b) => b.status === "running" && !courses.some((c) => c.id === b.courseId));
-    if (!running.length) return;
-    for (const build of running) {
-      const card = el("div", "plate plate--building");
-      const top = el("div", "course-card__top");
-      top.append(el("span", "course-card__title", build.title || "Новый курс"), el("span", "building", "собираю"));
-      card.append(top, el("span", "small muted", build.total ? `Готово ${build.done} из ${build.total} тем` : "Составляю план курса"));
-      list.append(card);
+    // Сборки — над списком курсов: идущая с «Остановить», упавшая или
+    // остановленная — с причиной, «Продолжить» и «Убрать». Раньше упавшая
+    // сборка просто исчезала, и было не понять, что случилось.
+    const shelf = el("div", "list build-shelf");
+    list.before(shelf);
+    const paint = (builds) => {
+      const shown = builds.filter((b) => b.status !== "done").slice(0, 2);
+      shelf.replaceChildren(...shown.map((b) => buildCard(b, refreshBuilds)));
+      shelf.hidden = !shown.length;
+      return shown;
+    };
+    let seen = "";
+    async function refreshBuilds() {
+      clearTimeout(buildTimer);
+      const builds = await store.builds(true);
+      if (!alive) return;
+      // Тема дописалась или сборка кончилась — курсы перечитываются: новый
+      // курс появляется в списке сам.
+      const mark = builds.map((b) => `${b.id}:${b.status}:${b.done}`).join("|");
+      if (seen && mark !== seen) {
+        store.forget();
+        await store.courses(true);
+        if (alive && nav.current === "courses" && nav.depth === 1) return nav.refresh();
+      }
+      seen = mark;
+      const shown = paint(builds);
+      if (shown.some((b) => b.status === "running")) buildTimer = setTimeout(refreshBuilds, 8000);
     }
+    refreshBuilds();
   })();
   return {
     cleanup: () => {
       alive = false;
       clearTimeout(waitTimer);
+      clearTimeout(buildTimer);
     },
   };
 });
@@ -307,18 +328,81 @@ export function buildCourse() {
       go.disabled = true;
       error.textContent = "";
       try {
-        await call("learn_build", { goal: text, quality: level }, { slow: true });
+        await call("learn_build", { goal: text, quality: level }, { slow: true, retries: 0 });
         close();
-        toast("Курс собирается — первая тема появится через пару минут");
-        nav.refresh();
+        toast("Курс собирается — первая тема появится через несколько минут");
+        store.forget();
+        nav.home();
       } catch (err) {
-        error.textContent = String(err);
+        // Уже идёт сборка — её карточка на главной, с «Остановить».
+        if (/уже собирается/i.test(String(err))) {
+          close();
+          toast(String(err).replace(/^Error:\s*/, ""), 5000);
+          store.forget();
+          nav.home();
+          return;
+        }
+        error.textContent = String(err).replace(/^Error:\s*/, "");
         go.disabled = false;
       }
     }, "btn btn--primary btn--big");
     content.append(goal, quality, error, go);
     goal.focus();
   });
+}
+
+/**
+ * Карточка сборки курса: что сейчас делается, сколько тем готово, а если
+ * сборка встала — почему, словами, и что можно сделать.
+ */
+function buildCard(build, changed) {
+  const running = build.status === "running";
+  const card = el("div", running ? "plate plate--building build-card" : "plate build-card is-stopped");
+  const top = el("div", "course-card__top");
+  const state = { running: "собираю", failed: "не собрался", stopped: "остановлен" }[build.status] ?? build.status;
+  top.append(el("span", "course-card__title", build.title || build.goal || "Новый курс"), el("span", running ? "building" : "small dim", state));
+  card.append(top);
+  if (build.total) card.append(progress((build.done / build.total) * 100, "m-bar"));
+  const what = running ? build.message || (build.total ? `Готово ${build.done} из ${build.total} тем` : "Составляю план курса") : build.message;
+  if (what) card.append(el("span", running ? "small muted" : "small build-card__why", what));
+  if (build.total && !running) card.append(el("span", "small dim", `Готово ${build.done} из ${build.total} тем — по ним уже можно учиться`));
+  const tools = el("div", "build-tools");
+  const act = (text, run, kind = "btn btn--secondary") => {
+    const btn = el("button", kind, text);
+    btn.style.cssText = "height:40px;padding:0 14px";
+    btn.addEventListener("click", async () => {
+      for (const one of tools.children) one.disabled = true;
+      try {
+        await run();
+        await changed();
+      } catch (err) {
+        const text = String(err?.message ?? err).replace(/^Error:\s*/, "");
+        if (text) toast(text);
+        for (const one of tools.children) one.disabled = false;
+      }
+    });
+    return btn;
+  };
+  if (running) {
+    tools.append(
+      act("Остановить", async () => {
+        const sure = await confirmAction({ title: "Остановить сборку?", text: "Готовые темы останутся — по ним можно учиться. Продолжить можно потом.", ok: "Остановить" });
+        if (!sure) throw new Error("");
+        await call("learn_build_stop", { id: build.id }, { slow: true });
+        toast("Сборка остановлена");
+      }),
+    );
+  } else {
+    tools.append(
+      act("Продолжить", async () => {
+        await call("learn_build_resume", { id: build.id }, { slow: true, retries: 0 });
+        toast("Сборка продолжается — с последней готовой темы");
+      }, "btn btn--primary"),
+      act("Убрать", () => call("learn_build_remove", { id: build.id }, { slow: true }), "btn btn--plain"),
+    );
+  }
+  card.append(tools);
+  return card;
 }
 
 export { topicCard };
