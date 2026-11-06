@@ -2025,6 +2025,27 @@ pub async fn learn_build(goal: String, quality: Option<String>) -> Result<serde_
     crate::platform::build_course(goal.trim(), &quality).await
 }
 
+/// Мост аккаунта: какой Claude отвечает — sonnet (точнее) или haiku
+/// (быстрее). Хранится хвостом имени модели: «claude-code-bridge:haiku».
+#[tauri::command]
+pub fn bridge_level(app: AppHandle, state: State<'_, AppState>, level: String) -> Result<String, String> {
+    if !["sonnet", "haiku"].contains(&level.as_str()) {
+        return Err("Такого уровня нет.".into());
+    }
+    {
+        let mut config = state.config_mut();
+        if !config.ai.endpoint.contains("/api/noa/bridge") {
+            return Err("Уровень Claude выбирается только у моста NOAH.".into());
+        }
+        config.ai.model = format!("claude-code-bridge:{level}");
+        config.ai.chosen = true;
+    }
+    persist(&app, &state)?;
+    let config = state.config();
+    state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
+    Ok(format!("Мост: Claude {}", if level == "haiku" { "Haiku" } else { "Sonnet" }))
+}
+
 /// Стандарт курса — для сборки моделью человека прямо в приложении.
 #[tauri::command]
 pub fn learn_course_format() -> String {

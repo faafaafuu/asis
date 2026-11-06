@@ -513,7 +513,9 @@ async function learnApp(noa, cmd, args) {
     // Тренировки «Наизусть» и «Собеседование»: модель по указаниям экрана.
     case "ai_settings": {
       const model = loadModel();
-      return model?.model ? { provider: "http", endpoint: endpointOf(model), model: model.model, apiKey: "" } : null;
+      // У моста уровень Claude — хвостом имени, как в программе.
+      const name = model?.kind === "bridge" && model.quality ? `${String(model.model).split(":")[0]}:${model.quality}` : model?.model;
+      return model?.model ? { provider: "http", endpoint: endpointOf(model), model: name, apiKey: "" } : null;
     }
     case "brains_list": {
       const now = loadModel();
@@ -526,6 +528,15 @@ async function learnApp(noa, cmd, args) {
         kind: { bridge: "мост", ollama: "этот компьютер", openrouter: "облако" }[m.kind] ?? "облако",
         current: Boolean(now && endpointOf(now) === endpointOf(m) && now.model === m.model),
       }));
+    }
+    case "bridge_level": {
+      const model = loadModel();
+      if (model?.kind !== "bridge") throw new Error("Уровень Claude выбирается только у моста NOAH.");
+      if (!["sonnet", "haiku"].includes(args.level)) throw new Error("Такого уровня нет.");
+      const next = { ...model, quality: String(args.level) };
+      saveModel(next);
+      rememberModel(next);
+      return `Мост: Claude ${args.level === "haiku" ? "Haiku" : "Sonnet"}`;
     }
     case "brains_use": {
       const found = [...rememberedModels(), ...(loadModel() ? [loadModel()] : [])].find((m) => endpointOf(m) === args.endpoint && m.model === args.model) ?? webModel(args.endpoint, "", args.model);

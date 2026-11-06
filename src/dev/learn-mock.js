@@ -327,6 +327,9 @@
           code: "demo",
           options: ["Google", "Яндекс", "VK", "GitHub", "Telegram"].map((title) => ({ id: { Google: "google", Яндекс: "yandex", VK: "vk", GitHub: "github", Telegram: "telegram" }[title], title, link: "" })),
         };
+      case "bridge_level":
+        aiNow = { ...aiNow, model: `claude-code-bridge:${args.level}` };
+        return `Мост: Claude ${args.level === "haiku" ? "Haiku" : "Sonnet"}`;
       case "account_login_open":
         return null;
       case "account_logout":

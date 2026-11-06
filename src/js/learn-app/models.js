@@ -71,10 +71,17 @@ const BRIDGES = {
 };
 
 /** Имя модели по-человечески: мост — словами, остальное — без владельца. */
+/** Уровень Claude у моста: хвост имени «claude-code-bridge:haiku». */
+export function bridgeLevel(model = "") {
+  const tail = String(model).split(":")[1] ?? "";
+  return tail === "haiku" ? "haiku" : "sonnet";
+}
+const LEVEL_NAME = { sonnet: "Sonnet", haiku: "Haiku" };
+
 export function modelName(model = "", endpoint = "") {
-  const bare = String(model).replace(/:free$/, "");
+  const bare = String(model).replace(/:(free|sonnet|haiku|opus)$/, "");
+  if (bare === "claude-code-bridge" || (!BRIDGES[bare] && /\/api\/noa\/bridge/.test(endpoint))) return `Claude ${LEVEL_NAME[bridgeLevel(model)]} через NOAH (мост)`;
   if (BRIDGES[bare]) return BRIDGES[bare];
-  if (/\/api\/noa\/bridge/.test(endpoint)) return "Claude через NOAH (мост)";
   return bare.split("/").pop() || "не выбрана";
 }
 
@@ -137,6 +144,37 @@ export function openModels(changed = () => {}) {
       list.append(row);
     }
     if (!brains.length) list.append(el("span", "small dim", "Пока ни одной — подключите ниже."));
+
+    // Мост с Claude: какой Claude отвечает — точнее или быстрее.
+    const now = await call("ai_settings").catch(() => null);
+    if (now?.endpoint && /\/api\/noa\/bridge/.test(now.endpoint) && String(now.model).startsWith("claude")) {
+      content.append(label("// какой claude"));
+      const levels = el("div", "seg");
+      let active = bridgeLevel(now.model);
+      for (const [value, text] of [
+        ["sonnet", "Sonnet — точнее"],
+        ["haiku", "Haiku — быстрее"],
+      ]) {
+        const option = el("button", "", text);
+        option.type = "button";
+        option.setAttribute("aria-pressed", String(value === active));
+        option.addEventListener("click", async () => {
+          if (value === active) return;
+          status.textContent = "Переключаю…";
+          try {
+            status.textContent = await call("bridge_level", { level: value }, { retries: 0 });
+            active = value;
+            for (const other of levels.children) other.setAttribute("aria-pressed", String(other === option));
+            await changed();
+            toast(status.textContent);
+          } catch (err) {
+            status.textContent = String(err?.message ?? err).replace(/^Error:\s*/, "");
+          }
+        });
+        levels.append(option);
+      }
+      content.append(levels, el("span", "small dim", "Haiku отвечает в 2–3 раза быстрее — курс собирается скорее. Sonnet пишет подробнее и точнее."));
+    }
 
     content.append(label("// подключить"));
     const pick = el("div", "chips");

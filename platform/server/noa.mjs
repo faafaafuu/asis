@@ -241,10 +241,16 @@ export function mountNoa({ route, db, Fail, readJson }) {
 
   route("POST", /^\/api\/noa\/bridge\/chat\/completions$/, async ({ req, user, tokenUser }) => {
     bridgeUser(user ?? tokenUser);
-    const { model, messages, noa_model: level } = await readJson(req);
+    const body = await readJson(req);
+    const { messages } = body;
     if (!Array.isArray(messages) || !messages.length) throw new Fail(400, "Нет сообщений.");
+    // Уровень Claude — полем noa_model или хвостом имени: «claude-code-bridge:haiku».
+    // Так его передают приложения: у них модель — одна строка в настройках.
+    const [base, suffix = ""] = String(body.model ?? "").split(":");
+    const model = base;
+    const level = body.noa_model ?? suffix;
     // Модель Claude выбирается только у Claude; у Codex, Gemini, Qwen — своя.
-    const quality = String(model ?? "").startsWith("claude") && ["haiku", "sonnet", "opus"].includes(level) ? level : "";
+    const quality = model.startsWith("claude") && ["haiku", "sonnet", "opus"].includes(level) ? level : "";
     // noa_web — мост ответит разово, не трогая сессию Ноа на компьютере.
     return bridge("/v1/chat/completions", {
       method: "POST",

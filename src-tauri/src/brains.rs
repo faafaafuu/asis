@@ -296,7 +296,7 @@ pub fn adopt_site_bridge(config: &mut Config) -> bool {
     let ours = config.ai.endpoint.contains("/api/noa/bridge");
     let picked = !(cfg!(target_os = "ios") || cfg!(feature = "qrack")) || config.ai.chosen;
     let has_model = picked && config.ai.provider == "http" && !config.ai.endpoint.trim().is_empty() && !ours;
-    if ours && config.ai.provider == "http" && config.ai.model == "claude-code-bridge:free" {
+    if ours && config.ai.provider == "http" && config.ai.model.starts_with("claude-code-bridge:") {
         return false;
     }
     let Some(brain) = (!has_model).then(|| site_bridge(config)).flatten() else { return false };
