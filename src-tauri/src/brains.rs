@@ -294,7 +294,7 @@ pub fn adopt_site_bridge(config: &mut Config) -> bool {
     // ключом), и Ноа отвечала «не принял ключ». Выбранная в настройках
     // приложения (`chosen`) остаётся.
     let ours = config.ai.endpoint.contains("/api/noa/bridge");
-    let picked = !cfg!(target_os = "ios") || config.ai.chosen;
+    let picked = !(cfg!(target_os = "ios") || cfg!(feature = "qrack")) || config.ai.chosen;
     let has_model = picked && config.ai.provider == "http" && !config.ai.endpoint.trim().is_empty() && !ours;
     if ours && config.ai.provider == "http" && config.ai.model == "claude-code-bridge:free" {
         return false;

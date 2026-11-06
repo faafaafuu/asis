@@ -606,8 +606,10 @@ export function mountNoa({ route, db, Fail, readJson }) {
     res.end(mp3 ?? wav);
   });
 
-  route("POST", /^\/api\/noa\/stt$/, async ({ req, user: who }) => {
-    const user = need(who);
+  // Распознавание — и по входу на сайт, и по ключу программы: Qrack на
+  // компьютере без своего распознавания шлёт фразу сюда.
+  route("POST", /^\/api\/noa\/stt$/, async ({ req, user: who, tokenUser }) => {
+    const user = need(who ?? tokenUser);
     const hour = Date.now() - 3_600_000;
     const recent = (heard.get(user.id) ?? []).filter((at) => at > hour);
     if (recent.length >= VOICE_PER_HOUR) throw new Fail(429, "Распознавания на этот час хватит — напишите текстом.");

@@ -1365,11 +1365,12 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
         return Ok(());
     }
 
+    // На iPhone и в Qrack для компьютера программа — только обучение: окно Qrack.
+    let qrack = cfg!(target_os = "ios") || cfg!(feature = "qrack");
     let builder = WebviewWindowBuilder::new(
         app,
         ONBOARDING_LABEL,
-        // На iPhone программа — только обучение: приложение «NOAH Учёба».
-        WebviewUrl::App(if cfg!(target_os = "ios") { "learn.html" } else { "onboarding.html" }.into()),
+        WebviewUrl::App(if qrack { "learn.html" } else { "onboarding.html" }.into()),
     )
     // Тема проставляется до того, как страница начнёт рисоваться.
     //
@@ -1377,12 +1378,12 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
     // запросом к Rust уже после загрузки — и на секунду показывало чужую.
     // Здесь скрипт выполняется в момент создания документа, до первого кадра.
     .initialization_script(&theme_script(app))
-    .title("NOAH — Настройка и проверка");
+    .title(if qrack { "Qrack" } else { "NOAH — Настройка и проверка" });
     // Размер, положение и рамка — только на компьютере. На iPhone размер
     // окна задаёт рамку UIWindow: 560×720 со сдвигом — и приложение было
     // шире экрана и короче его, а касания уходили мимо кнопок. Там окно —
     // весь экран.
-    #[cfg(desktop)]
+    #[cfg(all(desktop, not(feature = "qrack")))]
     let builder = builder
         // Окно выросло: кроме разрешений в нём теперь живая проверка перехвата и выбор
         // источника объяснений. На ноутбуке с невысоким экраном фиксированная высота
@@ -1393,9 +1394,13 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
         // Рамку рисует само окно: заголовок NOAH со своими «Свернуть» и «Закрыть»
         // (дизайн-система, главное окно). Двигают за заголовок, тянут за края.
         .decorations(false);
+    // Qrack — окно приложения в рост телефона, с обычной рамкой системы:
+    // своей шапки-заголовка у приложения обучения нет. Шире — колонка по центру.
+    #[cfg(all(desktop, feature = "qrack"))]
+    let builder = builder.inner_size(480.0, 900.0).min_inner_size(380.0, 620.0).resizable(true).center();
     let window = builder.build()?;
 
-    #[cfg(desktop)]
+    #[cfg(all(desktop, not(feature = "qrack")))]
     window.set_position(LogicalPosition::new(120.0, 120.0))?;
     bring_forward(&window);
     Ok(())

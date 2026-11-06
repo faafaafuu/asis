@@ -23,13 +23,27 @@ use windows::Win32::System::Threading::{
 /// Имена в пространстве `Local\` — то есть в пределах сеанса пользователя.
 /// `Global\` было бы неверно: на общем компьютере два человека вправе одновременно
 /// пользоваться программой каждый в своём сеансе.
+// У Qrack свои имена: иначе он, запущенный рядом с Ноа, считал бы себя её
+// второй копией и уходил, не открыв окна.
+#[cfg(not(feature = "qrack"))]
 const MUTEX_NAME: windows::core::PCWSTR = w!("Local\\app.sufler.popup.instance");
+#[cfg(feature = "qrack")]
+const MUTEX_NAME: windows::core::PCWSTR = w!("Local\\ru.noahlab.qrack.instance");
+#[cfg(not(feature = "qrack"))]
 const EVENT_NAME: windows::core::PCWSTR = w!("Local\\app.sufler.popup.show");
+#[cfg(feature = "qrack")]
+const EVENT_NAME: windows::core::PCWSTR = w!("Local\\ru.noahlab.qrack.show");
 /// Просьба закрыться. Нужна установщику: он обновляет файлы поверх работающей
 /// программы и обязан её сначала остановить.
+#[cfg(not(feature = "qrack"))]
 const QUIT_EVENT_NAME: windows::core::PCWSTR = w!("Local\\app.sufler.popup.quit");
+#[cfg(feature = "qrack")]
+const QUIT_EVENT_NAME: windows::core::PCWSTR = w!("Local\\ru.noahlab.qrack.quit");
 /// Фраза из командной строки: `sufler.exe --ask "сколько стоит биткоин"`.
+#[cfg(not(feature = "qrack"))]
 const ASK_EVENT_NAME: windows::core::PCWSTR = w!("Local\\app.sufler.popup.ask");
+#[cfg(feature = "qrack")]
+const ASK_EVENT_NAME: windows::core::PCWSTR = w!("Local\\ru.noahlab.qrack.ask");
 
 /// Где лежит фраза, пока работающая копия её не забрала.
 fn ask_file() -> Option<std::path::PathBuf> {

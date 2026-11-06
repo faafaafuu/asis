@@ -601,6 +601,25 @@ async fn through_mirror(url: &str, path: &str, token: &str) -> Option<Vec<u8>> {
 
 /* ── Путеводители ─────────────────────────────────────────────────────── */
 
+/// Фраза голосом — распознавание на сервере (faster-whisper): у Qrack на
+/// компьютере своё распознавание обычно не установлено. Пусто — не вышло.
+#[cfg(desktop)]
+pub async fn server_stt(wav: Vec<u8>) -> Result<String, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Err("Распознавание на сервере — после входа в аккаунт.".into());
+    }
+    let response = client()?
+        .post(format!("{url}/api/noa/stt"))
+        .bearer_auth(&token)
+        .header("Content-Type", "audio/wav")
+        .body(wav)
+        .send()
+        .await
+        .map_err(|err| format!("площадка недоступна: {err}"))?;
+    Ok(read(response).await?["text"].as_str().unwrap_or_default().to_string())
+}
+
 /// Удалить аккаунт со всем, что в нём: курсы, прогресс, цели, ключи.
 pub async fn account_delete() -> Result<(), String> {
     let (url, token) = settings();

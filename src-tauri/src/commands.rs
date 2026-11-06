@@ -739,7 +739,7 @@ pub async fn account_login(app: AppHandle, state: State<'_, AppState>) -> Result
     {
         let mut config = state.config_mut();
         config.platform.token = crate::secret::protect(&token);
-        #[cfg(mobile)]
+        #[cfg(any(mobile, feature = "qrack"))]
         if crate::brains::adopt_site_bridge(&mut config) {
             let (language, wake) = (config.ui.language.clone(), config.voice.wake_name.clone());
             state.rebuild_provider(&config.ai, &language, &wake);
@@ -804,7 +804,7 @@ pub async fn save_platform_settings(
         }
         // Телефону туннеля к мосту не дано: с ключом площадки он отвечает
         // через мост на сайте, если своей модели ещё не выбрали.
-        #[cfg(mobile)]
+        #[cfg(any(mobile, feature = "qrack"))]
         if crate::brains::adopt_site_bridge(&mut config) {
             let (language, wake) = (config.ui.language.clone(), config.voice.wake_name.clone());
             state.rebuild_provider(&config.ai, &language, &wake);

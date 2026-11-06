@@ -204,7 +204,37 @@ pub fn run() {
                 }
             }
 
-            #[cfg(desktop)]
+            // Qrack для компьютера: окно приложения обучения, аккаунт и голос.
+            // Трей, горячие клавиши, попап выделения и прочее Ноа — не здесь.
+            #[cfg(all(desktop, feature = "qrack"))]
+            {
+                #[cfg(target_os = "windows")]
+                instance::listen(app.handle().clone());
+                voice::claim_devices();
+                {
+                    let state = app.state::<AppState>();
+                    let adopted = {
+                        let mut config = state.config_mut();
+                        let adopted = brains::adopt_site_bridge(&mut config);
+                        if adopted {
+                            let (language, wake) = (config.ui.language.clone(), config.voice.wake_name.clone());
+                            state.rebuild_provider(&config.ai, &language, &wake);
+                        }
+                        adopted
+                    };
+                    if adopted {
+                        if let Err(err) = commands::persist(app.handle(), &state) {
+                            log::warn!("настройки не сохранились: {err}");
+                        }
+                    }
+                }
+                if let Err(err) = overlay::show_onboarding(app.handle()) {
+                    log::error!("не удалось открыть окно Qrack: {err}");
+                }
+                platform::sync(app.handle());
+            }
+
+            #[cfg(all(desktop, not(feature = "qrack")))]
             {
                 setup_tray(app.handle())?;
                 update::watch(app.handle());
@@ -317,12 +347,16 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            #[cfg(mobile)]
+            #[cfg(any(mobile, feature = "qrack"))]
             phone_ask,
             #[cfg(mobile)]
             phone_talk,
-            #[cfg(mobile)]
+            #[cfg(any(mobile, feature = "qrack"))]
             phone_forget,
+            #[cfg(desktop)]
+            learn_listen,
+            #[cfg(desktop)]
+            learn_listen_cancel,
             #[cfg(mobile)]
             phone_voice,
             commands::runtime_config,
@@ -548,7 +582,8 @@ pub fn run() {
             // «Выйти» в трее зовёт `app.exit(0)`, и там код проставлен — такой
             // выход мы не отменяем.
             tauri::RunEvent::ExitRequested { api, code, .. } => {
-                if code.is_none() {
+                // В Qrack трея нет: закрыли окно — программа выходит.
+                if code.is_none() && !cfg!(feature = "qrack") {
                     api.prevent_exit();
                 }
             }
@@ -698,15 +733,52 @@ async fn phone_talk(app: tauri::AppHandle, text: String, speak: bool) -> Result<
     Ok(serde_json::json!({ "text": answer, "spoken": false }))
 }
 
-#[cfg(mobile)]
+#[cfg(any(mobile, feature = "qrack"))]
 #[tauri::command]
 async fn phone_ask(app: tauri::AppHandle, text: String) -> Result<String, String> {
     let answer = phone_answer(&app, text).await;
+    #[cfg(mobile)]
     let _ = tauri::async_runtime::spawn_blocking(sync_schedule).await;
     answer
 }
 
-#[cfg(mobile)]
+/// Одна фраза голосом в окне приложения обучения на компьютере — то же, что
+/// `plugin:sufler|listen` на телефоне: микрофон до паузы в речи, затем
+/// расшифровка. Своего распознавания на компьютере нет (не установлено) —
+/// фраза уходит на сервер. Ответ — `{ text }`.
+#[cfg(desktop)]
+#[tauri::command]
+async fn learn_listen(app: tauri::AppHandle, idle: Option<f64>) -> Result<serde_json::Value, String> {
+    let device = app.state::<AppState>().config().voice.input_device.clone();
+    let heard = voice::stt::start_conversation(&device, voice::stt::Listening::Talk).ok_or("Микрофон не открылся.")?;
+    let wait = std::time::Duration::from_secs_f64(idle.unwrap_or(12.0).clamp(3.0, 60.0) + 45.0);
+    let phrase = tauri::async_runtime::spawn_blocking(move || heard.recv_timeout(wait))
+        .await
+        .map_err(|err| err.to_string())?;
+    voice::stt::stop_conversation();
+    let wav = match phrase {
+        Ok(voice::stt::Heard::Phrase(wav)) => wav,
+        _ => return Ok(serde_json::json!({ "text": "" })),
+    };
+    let local = {
+        let (app, wav) = (app.clone(), wav.clone());
+        tauri::async_runtime::spawn_blocking(move || hear_quietly(&app, wav)).await.unwrap_or(None)
+    };
+    let text = match local.filter(|text| !text.trim().is_empty()) {
+        Some(text) => text,
+        None => platform::server_stt(wav).await.unwrap_or_default(),
+    };
+    Ok(serde_json::json!({ "text": text.trim() }))
+}
+
+/// Перестать слушать: фраза, которую ждут, придёт пустой.
+#[cfg(desktop)]
+#[tauri::command]
+fn learn_listen_cancel() {
+    voice::stt::stop_conversation();
+}
+
+#[cfg(any(mobile, feature = "qrack"))]
 async fn phone_answer(app: &tauri::AppHandle, text: String) -> Result<String, String> {
     let app = app.clone();
     let text = text.trim().to_string();
@@ -727,10 +799,10 @@ async fn phone_answer(app: &tauri::AppHandle, text: String) -> Result<String, St
         return Ok(if said.is_empty() { "До связи.".into() } else { said.join(" ") });
     }
 
-    // На iPhone программа — только обучение: распоряжения компьютера (окна,
-    // таймеры, Telegram, модели) там не нужны, а их разбор — лишний запрос к
-    // модели перед каждым ответом. Вопрос идёт сразу в мост.
-    if !cfg!(target_os = "ios") {
+    // На iPhone и в Qrack программа — только обучение: распоряжения компьютера
+    // (окна, таймеры, Telegram, модели) там не нужны, а их разбор — лишний
+    // запрос к модели перед каждым ответом. Вопрос идёт сразу в модель.
+    if !cfg!(target_os = "ios") && !cfg!(feature = "qrack") {
         if let Some(reply) = review::answer(&app, &text) {
             return Ok(reply);
         }
@@ -787,7 +859,7 @@ async fn phone_answer(app: &tauri::AppHandle, text: String) -> Result<String, St
 }
 
 /// Забыть разговор — кнопка «Новый разговор».
-#[cfg(mobile)]
+#[cfg(any(mobile, feature = "qrack"))]
 #[tauri::command]
 fn phone_forget() {
     VOICE_THREAD.lock().unwrap_or_else(|err| err.into_inner()).0.clear();

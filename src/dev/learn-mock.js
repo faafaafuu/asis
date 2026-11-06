@@ -91,6 +91,35 @@
   let speakingUntil = 0;
   /** Сборка курса на витрине: остановили, продолжили, убрали. */
   let buildState = "";
+  /** Выдуманный путеводитель для снимков — без картинок. */
+  const DEMO_GUIDE = {
+    id: "g1",
+    title: "Птицы большого города",
+    subtitle: "Кого слышно во дворе и в парке",
+    emoji: "🐦",
+    intro: "В большом городе живёт больше сотни видов птиц, но узнавать достаточно десятка — и утренняя прогулка звучит иначе: **синица** звенит с февраля, **дрозд** поёт на закате, а **стриж** почти никогда не садится на землю.",
+    cover: null,
+    status: "ready",
+    message: "",
+    sections: [
+      {
+        id: "s1", title: "Кто поёт по утрам", emoji: "🎶", about: "Синица, зяблик, дрозд — голоса, которые слышно в любом дворе",
+        lead: "Пять голосов дают почти весь утренний хор — их стоит знать на слух.",
+        text: ["Большая синица начинает петь ещё в феврале: её «ци-ци-пи» — первый знак весны.", "Певчий дрозд повторяет каждую фразу два-три раза — по этому его и узнают."],
+        facts: [{ label: "Видов в городе", value: "больше 100" }, { label: "Начало хора", value: "за час до рассвета" }],
+        items: [
+          { name: "Большая синица", text: "Жёлтая грудь с чёрной полосой. Звонкое «ци-ци-пи».", tags: ["дворы", "зимует"], picture: null },
+          { name: "Певчий дрозд", text: "Пёстрая грудь, повторяет фразы по нескольку раз.", tags: ["парки"], picture: null },
+        ],
+        tips: ["Слушайте с открытым окном в шесть утра — хор громче всего."],
+        wow: "Стриж может провести в воздухе почти год, не садясь.",
+        imageHint: "", picture: null,
+      },
+      { id: "s2", title: "Зимой у кормушки", emoji: "❄️", about: "Кто остаётся на зиму и чем их кормить", lead: "", text: ["Несолёные семечки и сало — лучшее, что можно повесить зимой."], facts: [], items: [], tips: [], wow: "", imageHint: "", picture: null },
+      { id: "s3", title: "Где посмотреть", emoji: "📍", about: "Парки, пруды и набережные", lead: "", text: ["У воды птиц больше всего: утки, чайки, иногда цапли."], facts: [], items: [], tips: [], wow: "", imageHint: "", picture: null },
+      { id: "s4", title: "Как помочь птицам", emoji: "🪺", about: "Скворечники, вода летом, тишина весной", lead: "", text: [], facts: [], items: [], tips: [], wow: "", imageHint: "", picture: null },
+    ],
+  };
   /** Цели «в аккаунте» на витрине — одна поставлена нейросетью по MCP. */
   const serverGoals = [{ id: "mcp-week-1", period: "week", start: (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })(), kind: "topics", course: "", topic: "", target: 2, title: "Пройти 2 темы за неделю", by: "ai", created: Date.now() - 86400000, updated: Date.now() - 86400000 }];
   /** Модель на витрине: текущая и запомненные. */
@@ -294,6 +323,7 @@
         return null;
       case "voice_busy":
         return Date.now() < speakingUntil;
+      case "learn_listen":
       case "plugin:sufler|listen":
         await wait(1200);
         // Реплики для прогона разговора: window.__heard = ["…", "…"].
@@ -344,6 +374,7 @@
         return null;
       case "plugin:sufler|insets":
         return { top: 0, bottom: 0, left: 0, right: 0, keyboard: 0 };
+      case "learn_listen_cancel":
       case "plugin:sufler|haptic":
       case "plugin:sufler|systemMenu":
       case "learn_diag":
@@ -441,6 +472,7 @@
             { id: "g2", title: "Кофе: от зерна до чашки", subtitle: "Сорта, обжарка и заваривание", emoji: "☕", cover: null, sections: 5, written: 2, status: "building", message: "", created: 2 },
             { id: "g1", title: "Птицы большого города", subtitle: "Кого слышно во дворе и в парке", emoji: "🐦", cover: null, sections: 4, written: 4, status: "ready", message: "", created: 1 },
           ];
+        if (params.get("demo") && cmd === "guide_get") return structuredClone(DEMO_GUIDE);
         const guided = (await import("/dev/guides-mock.js")).mockGuides(cmd, args);
         if (guided !== undefined) return guided;
         console.warn("витрина: нет подмены для", cmd, args);

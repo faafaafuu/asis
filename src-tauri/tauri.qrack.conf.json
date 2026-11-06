@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Qrack",
+  "mainBinaryName": "qrack",
+  "identifier": "ru.noahlab.qrack",
+  "bundle": {
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": false,
+    "category": "Education",
+    "shortDescription": "Qrack — учёба с ИИ-наставником",
+    "longDescription": "Qrack собирает курс под цель, объясняет голосом, гоняет до «наизусть», ведёт практику в терминале, проводит собеседование и экзамен разговором и ставит цели на день, неделю, месяц и год.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": null
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://noahlab.ru/qrack/latest.json"]
+    }
+  }
+}

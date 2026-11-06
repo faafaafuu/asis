@@ -7,6 +7,8 @@ import { tauri, isWebNoa } from "../bridge.js";
 export const api = tauri();
 /** Открыто в браузере (noahlab.ru/learn): команды — Ноа онлайн, терминала нет. */
 export const isWeb = isWebNoa();
+/** Qrack на компьютере: окно программы, а не телефон и не браузер. */
+export const isDesktop = !isWeb && Boolean(api) && !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
 /* ── Элементы ──────────────────────────────────────────────────────────── */
 
@@ -213,11 +215,16 @@ export const voice = {
    * фраза отдаётся сразу; `asks` — начала коротких встречных вопросов.
    */
   async listen({ pause, ...more } = {}) {
+    // Qrack на компьютере: микрофон и распознавание — у программы, не у телефона.
+    if (isDesktop) {
+      const heard = await api.invoke("learn_listen", { idle: more.idle ?? 12 });
+      return String(heard?.text ?? "").trim();
+    }
     const heard = await api.invoke("plugin:sufler|listen", { lang: "ru-RU", ...(pause ? { pause } : {}), ...more });
     return String(heard?.text ?? "").trim();
   },
   cancel() {
-    api?.invoke("plugin:sufler|cancelListening").catch(() => {});
+    api?.invoke(isDesktop ? "learn_listen_cancel" : "plugin:sufler|cancelListening").catch(() => {});
   },
 };
 
