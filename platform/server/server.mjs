@@ -936,7 +936,7 @@ async function handle(req, res) {
     const pageOnIp =
       req.method === "GET" &&
       /^[\d.]+(:\d+)?$/.test(String(req.headers.host ?? "")) &&
-      (url.pathname === "/" || url.pathname === "/app" || url.pathname === "/app/" || ["/learn", "/learn/", "/learn/app", "/learn/app/"].includes(url.pathname) || /^\/app\/[\w-]+\.html$/.test(url.pathname));
+      (url.pathname === "/" || url.pathname === "/app" || url.pathname === "/app/" || ["/learn", "/learn/", "/learn/app", "/learn/app/", "/qrack", "/qrack/", "/qrack/app", "/qrack/app/"].includes(url.pathname) || /^\/app\/[\w-]+\.html$/.test(url.pathname));
     const mirrorHost = [...MIRRORS].find((host) => !/^[\d.]+(:\d+)?$/.test(host));
     if (pageOnIp && mirrorHost) {
       const search = url.pathname.startsWith("/app") && !url.search ? `?v=${appStamp()}` : url.search;
@@ -951,9 +951,17 @@ async function handle(req, res) {
     const host = String(req.headers.host ?? "").toLowerCase();
     const viaCdn = Boolean(req.headers["x-forwarded-for"]);
     const russian = /(^|,)\s*ru\b/i.test(String(req.headers["accept-language"] ?? ""));
-    const entry = ["/", "/app", "/app/", "/noa", "/noa/", "/learn", "/learn/", "/learn/app", "/learn/app/"].includes(url.pathname);
+    const entry = ["/", "/app", "/app/", "/noa", "/noa/", "/learn", "/learn/", "/learn/app", "/learn/app/", "/qrack", "/qrack/", "/qrack/app", "/qrack/app/"].includes(url.pathname);
     if (req.method === "GET" && entry && mirrorHost && (host === "noahlab.ru" || host === "www.noahlab.ru") && !viaCdn && russian && !url.searchParams.has("direct")) {
-      const path = url.pathname.startsWith("/app") ? "/noa" : url.pathname.startsWith("/learn/app") ? "/learn/app/" : url.pathname.startsWith("/learn") ? "/learn/" : url.pathname;
+      const path = url.pathname.startsWith("/app")
+        ? "/noa"
+        : url.pathname.startsWith("/qrack/app")
+          ? "/qrack/app/"
+          : url.pathname.startsWith("/qrack") || url.pathname === "/learn" || url.pathname === "/learn/"
+            ? "/qrack/"
+            : url.pathname.startsWith("/learn/app")
+              ? "/learn/app/"
+              : url.pathname;
       const search = path === "/" ? `?v=${Date.now().toString(36)}` : "";
       res.writeHead(302, { Location: `https://${mirrorHost}${path}${search}`, "Cache-Control": "no-store" });
       return res.end();
@@ -967,16 +975,22 @@ async function handle(req, res) {
     // та же пересылка с меткой версии, на /app/learn.html.
     // /learn/ — сайт «NOAH Учёба» (репозиторий noah-learn, файлы в
     // LEARN_SITE), /learn/app/ — само приложение.
-    if (req.method === "GET" && url.pathname === "/learn") {
-      res.writeHead(302, { Location: `/learn/${url.search}`, "Cache-Control": "no-store" });
+    // Qrack — так теперь называется приложение обучения: сайт — /qrack/,
+    // приложение — /qrack/app/. Прежний сайт /learn/ ведёт сюда; прежний
+    // адрес приложения /learn/app/ работает как был.
+    if (req.method === "GET" && (url.pathname === "/learn" || url.pathname === "/learn/" || url.pathname === "/qrack")) {
+      res.writeHead(302, { Location: `/qrack/${url.search}`, "Cache-Control": "no-store" });
       return res.end();
+    }
+    if (req.method === "GET" && url.pathname.startsWith("/qrack/") && !url.pathname.startsWith("/qrack/app") && url.pathname !== "/qrack/mcp") {
+      if (await serveLearnSite(req, res, url.pathname.slice("/qrack/".length) || "index.html")) return;
     }
     if (req.method === "GET" && url.pathname.startsWith("/learn/") && !url.pathname.startsWith("/learn/app")) {
       if (await serveLearnSite(req, res, url.pathname.slice("/learn/".length) || "index.html")) return;
     }
-    if (req.method === "GET" && ["/learn/app", "/learn/app/"].includes(url.pathname) && !url.search) {
+    if (req.method === "GET" && ["/learn/app", "/learn/app/", "/qrack/app", "/qrack/app/"].includes(url.pathname) && !url.search) {
       const body =
-        '<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>NOAH Учёба</title>' +
+        '<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Qrack</title>' +
         '<script src="/app/go-learn.js"></script></head><body></body></html>';
       res.writeHead(200, { ...SECURITY_HEADERS, "Content-Security-Policy": APP_CSP, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
       return res.end(body);
