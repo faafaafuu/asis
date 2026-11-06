@@ -23,8 +23,9 @@ pub fn settings() -> (String, String) {
     let token = crate::secret::reveal(config["platform"]["token"].as_str().unwrap_or_default());
     let url = if url.is_empty() || url == crate::config::OLD_PLATFORM_URL { DEFAULT_PLATFORM_URL.to_string() } else { url };
     // iPhone — через зеркало: прямой путь режется на длинных запросах.
+    // Зеркало не отвечает — по IP: короткие запросы по нему доходят.
     if use_mirror() && url == DEFAULT_PLATFORM_URL {
-        return (MIRROR_URL.to_string(), token);
+        return (if mirror_ok() { MIRROR_URL } else { DIRECT_URL }.to_string(), token);
     }
     (reachable(url), token)
 }
@@ -44,6 +45,65 @@ pub const MIRROR_URL: &str = "https://m.noahlab.ru";
 /// Всё — через зеркало: на iPhone (мобильная сеть).
 fn use_mirror() -> bool {
     cfg!(target_os = "ios")
+}
+
+/// Сайт напрямую по IP, HTTPS — запасной путь, когда зеркало лежит (CDN
+/// остался без сертификата — 5.11.2026 телефон неделю был «без сети»).
+/// Имя noahlab.ru мобильные операторы режут, IP — нет; длинный ответ по нему
+/// замирает на ~16 КБ, но запросы приложения короткие, а курс идёт кусками
+/// по 6000 знаков.
+pub const DIRECT_URL: &str = "https://84.247.166.53:8795";
+
+/// Отвечает ли зеркало — и когда это проверяли.
+static MIRROR_OK: std::sync::Mutex<Option<(bool, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+/// Зеркало работает? Проверка — раз в три минуты, в своём потоке; ответ
+/// нужен сразу, поэтому до первой проверки — «работает».
+fn mirror_ok() -> bool {
+    let known = *MIRROR_OK.lock().unwrap_or_else(|err| err.into_inner());
+    let fresh = known.filter(|(_, at)| at.elapsed() < Duration::from_secs(180));
+    if fresh.is_none() {
+        let was = known.is_none_or(|(ok, _)| ok);
+        *MIRROR_OK.lock().unwrap_or_else(|err| err.into_inner()) = Some((was, std::time::Instant::now()));
+        let _ = std::thread::Builder::new().name("sufler-mirror-probe".into()).spawn(move || {
+            let ok = tauri::async_runtime::block_on(async {
+                let Ok(client) = crate::net::client_builder().timeout(Duration::from_secs(8)).build() else {
+                    return false;
+                };
+                client
+                    .get(format!("{MIRROR_URL}/api/health?_={}", random_hex()))
+                    .send()
+                    .await
+                    .is_ok_and(|response| response.status().is_success())
+            });
+            *MIRROR_OK.lock().unwrap_or_else(|err| err.into_inner()) = Some((ok, std::time::Instant::now()));
+            if ok != was {
+                log::info!("зеркало {}", if ok { "снова отвечает" } else { "не отвечает — хожу по IP" });
+                if !ok {
+                    diag("зеркало не отвечает — телефон ходит по IP");
+                }
+            }
+        });
+    }
+    fresh.or(known).is_none_or(|(ok, _)| ok)
+}
+
+/// Зеркало не соединилось — до следующей проверки ходим по IP.
+fn mirror_failed(err: &str) {
+    log::info!("зеркало не соединилось ({err}) — по IP");
+    *MIRROR_OK.lock().unwrap_or_else(|err| err.into_inner()) = Some((false, std::time::Instant::now()));
+}
+
+/// Метка ошибки «запрос не ушёл»: соединение не установилось, сервер его
+/// не видел — повторить по другому пути безопасно.
+const NO_LINK: &str = "\u{1}нет связи\u{1}";
+
+fn link_error(prefix: &str, err: &reqwest::Error) -> String {
+    if err.is_connect() {
+        format!("{NO_LINK}{prefix}: {err}")
+    } else {
+        format!("{prefix}: {err}")
+    }
 }
 
 /// Байт тела на один кусок: в base64 это ~4 КБ адреса — в пределах CDN.
@@ -84,18 +144,35 @@ fn base64url(bytes: &[u8]) -> String {
 /// туннелем, чтение — обычным GET; иначе — обычный запрос.
 pub async fn site_call(url: &str, method: &str, path: &str, token: &str, body: Option<&Value>) -> Result<(u16, Vec<u8>), String> {
     let bytes = body.map(|value| serde_json::to_vec(value).unwrap_or_default()).unwrap_or_default();
-    if url == MIRROR_URL && method != "GET" {
-        return tunnel(path, method, token, &bytes).await;
+    if url != MIRROR_URL {
+        return direct_call(url, method, path, token, body.is_some(), bytes).await.map_err(|err| err.replace(NO_LINK, ""));
     }
+    // Через зеркало; не соединилось — тот же запрос по IP (сервер его не видел).
+    let first = if method != "GET" {
+        tunnel(path, method, token, &bytes).await
+    } else {
+        direct_call(MIRROR_URL, method, path, token, body.is_some(), bytes.clone()).await
+    };
+    match first {
+        Err(err) if err.starts_with(NO_LINK) => {
+            mirror_failed(&err.replace(NO_LINK, ""));
+            direct_call(DIRECT_URL, method, path, token, body.is_some(), bytes).await.map_err(|err| err.replace(NO_LINK, ""))
+        }
+        other => other.map_err(|err| err.replace(NO_LINK, "")),
+    }
+}
+
+/// Обычный запрос без туннеля: `(статус, тело)`.
+async fn direct_call(url: &str, method: &str, path: &str, token: &str, has_body: bool, bytes: Vec<u8>) -> Result<(u16, Vec<u8>), String> {
     let client = client()?;
     let mut request = if method == "GET" { client.get(format!("{url}{path}")) } else { client.post(format!("{url}{path}")) };
     if !token.is_empty() {
         request = request.bearer_auth(token);
     }
-    if body.is_some() {
+    if has_body {
         request = request.header("Content-Type", "application/json").body(bytes);
     }
-    let response = request.send().await.map_err(|err| format!("площадка недоступна: {err}"))?;
+    let response = request.send().await.map_err(|err| link_error("площадка недоступна", &err))?;
     let status = response.status().as_u16();
     let data = response.bytes().await.map_err(|err| format!("ответ не дошёл: {err}"))?;
     Ok((status, data.to_vec()))
@@ -143,7 +220,8 @@ async fn tunnel(path: &str, method: &str, token: &str, body: &[u8]) -> Result<(u
                 let response = handle
                     .await
                     .map_err(|err| err.to_string())?
-                    .map_err(|err| format!("кусок запроса не ушёл: {err}"))?;
+                    // Не соединился первый же кусок — запрос не начат, его можно повторить по IP.
+                    .map_err(|err| if batch_at == 0 { link_error("кусок запроса не ушёл", &err) } else { format!("кусок запроса не ушёл: {err}") })?;
                 if !response.status().is_success() {
                     let status = response.status().as_u16();
                     let data = response.bytes().await.unwrap_or_default();
@@ -161,7 +239,7 @@ async fn tunnel(path: &str, method: &str, token: &str, body: &[u8]) -> Result<(u
     let mut response = get(format!("{MIRROR_URL}/api/tunnel/go?{query}"))
         .send()
         .await
-        .map_err(|err| format!("площадка недоступна: {err}"))?;
+        .map_err(|err| if body.len() <= TUNNEL_PART { link_error("площадка недоступна", &err) } else { format!("площадка недоступна: {err}") })?;
     // «Ещё работаю» (202): долгий ответ (модель) — короткими запросами.
     let mut failures = 0;
     loop {
@@ -908,12 +986,21 @@ fn sync_progress(url: &str, token: &str) -> Result<bool, String> {
 }
 
 async fn get_with(url: &str, path: &str, token: &str) -> Result<Value, String> {
-    let response = client()?
-        .get(format!("{url}{path}"))
-        .bearer_auth(token)
-        .send()
-        .await
-        .map_err(|err| err.to_string())?;
+    let sent = client()?.get(format!("{url}{path}")).bearer_auth(token).send().await;
+    let response = match sent {
+        Ok(response) => response,
+        // Зеркало не соединилось — то же чтение по IP.
+        Err(err) if url == MIRROR_URL && err.is_connect() => {
+            mirror_failed(&err.to_string());
+            client()?
+                .get(format!("{DIRECT_URL}{path}"))
+                .bearer_auth(token)
+                .send()
+                .await
+                .map_err(|err| err.to_string())?
+        }
+        Err(err) => return Err(err.to_string()),
+    };
     read(response).await
 }
 
@@ -1170,6 +1257,22 @@ mod live {
             super::post(&url, &format!("/api/app/courses/{course}/remove"), &token, &serde_json::json!({})).await.expect("remove");
         });
         println!("removed on server");
+    }
+
+    /// Зеркало не соединяется — запись и чтение доходят до сайта по IP.
+    #[test]
+    #[ignore]
+    fn mirror_down_falls_back_to_ip() {
+        tauri::async_runtime::block_on(async {
+            let write = super::site_call(super::MIRROR_URL, "POST", "/api/app/diag", "noah_tunneltest000000000000", Some(&serde_json::json!({ "lines": [] })))
+                .await
+                .expect("запись по IP");
+            println!("запись: {} {}", write.0, String::from_utf8_lossy(&write.1));
+            assert!(write.0 > 0);
+            let read = super::get_with(super::MIRROR_URL, "/api/health", "").await;
+            println!("чтение: {read:?}");
+            assert!(read.is_ok(), "чтение по IP");
+        });
     }
 
     /// Туннель через зеркало против настоящего сайта: маленький запрос и

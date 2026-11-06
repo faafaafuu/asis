@@ -126,6 +126,14 @@ function hideNet() {
 }
 
 const NETWORK = /сет|связ|недоступн|timeout|таймаут|не успел|не ответил|connection|network|error sending|отвечает|502|503|504/i;
+/**
+ * Отказ модели, а не сети: аккаунт приостановлен, кончился лимит, вход не
+ * выполнен. Его не повторяют с плашкой «Нет связи» — сеть в порядке, и
+ * повтор ничего не даст; причина уходит наверх словами.
+ */
+const REFUSED = /модель недоступна|аккаунт claude|лимит подписки|can'?t receive replies|verification portal|session limit|usage limit|не вошёл|authenticat|ключ .*не (подошёл|принят)/i;
+
+export const isNetworkError = (err) => NETWORK.test(String(err)) && !REFUSED.test(String(err));
 
 /**
  * Вызов программы. `slow` — запрос к модели или сайту: через 15 с видно
@@ -146,7 +154,7 @@ export async function call(cmd, args = {}, { slow = false, retries = 4 } = {}) {
     } catch (err) {
       clearTimeout(timer);
       hideNet();
-      if (attempt >= retries || !NETWORK.test(String(err))) throw err;
+      if (attempt >= retries || !isNetworkError(err)) throw err;
       const wait = [5, 10, 20, 40][Math.min(attempt, 3)];
       await new Promise((resolve) => {
         let left = wait;
