@@ -16,6 +16,7 @@ import "./screens/focus.js";
 import "./screens/profile.js";
 import "./screens/drill.js";
 import "./screens/interview.js";
+import "./screens/goals.js";
 import "./screens/guide.js";
 
 async function sprite() {

@@ -367,6 +367,8 @@ pub fn run() {
             commands::account_status,
             commands::learn_build,
             commands::learn_builds,
+            commands::learn_goals,
+            commands::learn_goals_save,
             commands::learn_build_stop,
             commands::learn_build_resume,
             commands::learn_commands,

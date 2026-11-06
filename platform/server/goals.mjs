@@ -119,6 +119,8 @@ export function cleanGoal(raw, courses, { by = "user", now = Date.now() } = {}) 
     title: text(raw.title, 140),
     note: text(raw.note, 400),
     parent: /^[A-Za-z0-9_-]{6,64}$/.test(String(raw.parent ?? "")) ? String(raw.parent) : "",
+    // «Пройти N тем»: сколько тем было пройдено, когда цель поставили.
+    base: raw.base === undefined || raw.base === null || !Number.isFinite(Number(raw.base)) ? undefined : Math.max(0, Math.round(Number(raw.base))),
     done: Boolean(raw.done),
     doneAt: raw.done ? Number(raw.doneAt) || now : 0,
     by: ["user", "noa", "ai"].includes(raw.by) ? raw.by : by,
@@ -178,7 +180,8 @@ export function mountGoals({ route, db, Fail, readJson, need }) {
 
   route("GET", /^\/api\/noa\/goals$/, ({ user, tokenUser }) => {
     const who = need(user ?? tokenUser);
-    return { goals: readGoals(db, who.id).filter((g) => !g.deleted), kinds: KINDS };
+    // С отметками удалённых: устройство сливает их со своим списком, а не заменяет его.
+    return { goals: readGoals(db, who.id), kinds: KINDS };
   });
 
   // Правки с устройства: новые, изменённые и удалённые (deleted) — слиянием.
@@ -205,6 +208,6 @@ export function mountGoals({ route, db, Fail, readJson, need }) {
     } catch (err) {
       throw new Fail(413, err.message);
     }
-    return { goals: merged.filter((g) => !g.deleted) };
+    return { goals: merged };
   });
 }

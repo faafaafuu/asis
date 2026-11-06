@@ -399,6 +399,13 @@ async function learnApp(noa, cmd, args) {
     }
     case "learn_builds":
       return noa.user ? ((await site("/api/noa/builds")).builds ?? []) : [];
+    // Цели обучения — в аккаунте, как на телефоне.
+    case "learn_goals":
+      if (!noa.user) throw new Error("Цели живут в аккаунте — войдите на сайт.");
+      return (await site(`/api/noa/goals?_=${Date.now()}`)).goals ?? [];
+    case "learn_goals_save":
+      if (!noa.user) throw new Error("Цели живут в аккаунте — войдите на сайт.");
+      return (await site("/api/noa/goals", { goals: args.goals ?? [] })).goals ?? [];
     case "learn_build":
       if (!noa.user) throw new Error("Сборка курса — после входа на сайт.");
       return site("/api/noa/builds", { goal: args.goal, quality: args.quality ?? "sonnet" });

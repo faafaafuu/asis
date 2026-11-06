@@ -52,6 +52,11 @@ export const store = {
     return Array.isArray(builds) ? builds : [];
   },
 
+  /** Курсы, уже прочитанные с устройства, — без ожидания. */
+  list() {
+    return overview ?? [];
+  },
+
   forget() {
     overview = null;
     practice = null;

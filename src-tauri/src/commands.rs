@@ -1937,6 +1937,18 @@ pub async fn learn_build(goal: String, quality: Option<String>) -> Result<serde_
     crate::platform::build_course(goal.trim(), &quality).await
 }
 
+/// Цели обучения аккаунта (Qrack).
+#[tauri::command]
+pub async fn learn_goals() -> Result<serde_json::Value, String> {
+    crate::platform::goals_get().await
+}
+
+/// Правки целей — новые, изменённые, удалённые; ответ — цели после слияния.
+#[tauri::command]
+pub async fn learn_goals_save(goals: serde_json::Value) -> Result<serde_json::Value, String> {
+    crate::platform::goals_save(goals).await
+}
+
 /// Сборки курсов: идёт ли, на какой теме, чем кончилась.
 #[tauri::command]
 pub async fn learn_builds() -> Result<serde_json::Value, String> {

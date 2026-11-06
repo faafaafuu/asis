@@ -10,6 +10,8 @@ import { removeCourse, topicActions } from "./course.js";
 import { swipeRow, pressMenu, collapse, pullToRefresh } from "../gestures.js";
 import { guideShelf } from "./guide.js";
 import { confirmAction } from "../gestures.js";
+import { todayCard } from "./goals.js";
+import { goals } from "../goals.js";
 
 register("courses", (screen) => {
   screen.append(header({ home: true, onMic: () => openAssistant() }));
@@ -73,6 +75,11 @@ register("courses", (screen) => {
       content.append(empty);
     } else {
       content.append(continueCard(course));
+      // Цели на сегодня — сразу под «Продолжить»: шаг дня тянет за собой курс.
+      if (signed) {
+        content.append(todayCard());
+        goals.pull();
+      }
       content.append(tiles(course));
     }
 

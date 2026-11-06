@@ -253,6 +253,7 @@ const PARALLAX = 28;
 
 const TABS = [
   { id: "courses", label: "Обучение", icon: "learn", root: "courses" },
+  { id: "goals", label: "Цели", icon: "target", root: "goals" },
   { id: "review", label: "Повторение", icon: "cards", root: "review" },
   { id: "focus", label: "Фокус", icon: "timer", root: "focus" },
   { id: "profile", label: "Профиль", icon: "user", root: "profile" },
@@ -371,6 +372,7 @@ export const nav = {
 function tabBar() {
   const bar = el("nav", "tabs");
   const row = el("div", "tabs__row");
+  row.style.gridTemplateColumns = `repeat(${TABS.length}, minmax(0, 1fr))`;
   for (const tab of TABS) {
     const item = el("button", "tab");
     item.dataset.tab = tab.id;

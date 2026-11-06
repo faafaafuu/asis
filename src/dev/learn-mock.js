@@ -89,6 +89,8 @@
   let speakingUntil = 0;
   /** Сборка курса на витрине: остановили, продолжили, убрали. */
   let buildState = "";
+  /** Цели «в аккаунте» на витрине — одна поставлена нейросетью по MCP. */
+  const serverGoals = [{ id: "mcp-week-1", period: "week", start: (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })(), kind: "topics", course: "devops", topic: "", target: 2, title: "Пройти 2 темы DevOps за неделю", by: "ai", created: Date.now() - 86400000, updated: Date.now() - 86400000 }];
   /** Модель на витрине: текущая и запомненные. */
   let aiNow = { endpoint: "https://m.noahlab.ru/api/noa/bridge/chat/completions", model: "claude-code-bridge:free" };
   const brains = [
@@ -242,6 +244,16 @@
           ]);
         }
         if (rules.includes("наизусть")) return '{"score": 72, "missing": ["не сказали про лимиты ресурсов"], "say": "Почти: суть есть, не хватило лимитов."}';
+        if (rules.includes("Разложи цель")) {
+          const day = new Date().toISOString().slice(0, 10);
+          return JSON.stringify({ goals: [
+            { ref: "m1", period: "month", start: day, kind: "topics", target: 4, title: "Темы 7–10 за месяц" },
+            { ref: "w1", period: "week", start: day, kind: "lesson", topic: "docker", title: "Docker: урок", parent: "m1" },
+            { ref: "w2", period: "week", start: day, kind: "check", topic: "docker", title: "Docker: проверка", parent: "m1" },
+            { ref: "d1", period: "day", start: day, kind: "focus", target: 40, title: "Фокус 40 мин", parent: "w1" },
+            { ref: "x", period: "day", start: day, kind: "shopping", title: "Купить хлеб" },
+          ] });
+        }
         if (rules.includes("наставник")) {
           const turn = (args.thread ?? []).length;
           const said = String(args.said);
@@ -284,6 +296,17 @@
         return { text: "Чем сеть bridge отличается от host?" };
       case "plugin:sufler|clipboard":
         return { text: "docker compose ps" };
+      /* ── Цели ── */
+      case "learn_goals":
+        return serverGoals;
+      case "learn_goals_save": {
+        for (const g of args.goals ?? []) {
+          const at = serverGoals.findIndex((x) => x.id === g.id);
+          if (at < 0) serverGoals.push(g);
+          else if (Number(g.updated) >= Number(serverGoals[at].updated)) serverGoals[at] = g;
+        }
+        return serverGoals;
+      }
       /* ── Модель ── */
       case "ai_settings":
         return { provider: "http", endpoint: aiNow.endpoint, apiKey: "••••", model: aiNow.model, proxy: "" };

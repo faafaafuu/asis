@@ -601,6 +601,28 @@ async fn through_mirror(url: &str, path: &str, token: &str) -> Option<Vec<u8>> {
 
 /* ── Путеводители ─────────────────────────────────────────────────────── */
 
+/* ── Цели обучения (Qrack) ────────────────────────────────────────────── */
+
+/// Цели аккаунта: год, месяц, неделя, день — только по курсам аккаунта.
+pub async fn goals_get() -> Result<Value, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Err("Цели живут в аккаунте — войдите.".into());
+    }
+    let reply = get_with(&url, &format!("/api/noa/goals?_={}", random_hex()), &token).await?;
+    Ok(reply["goals"].clone())
+}
+
+/// Правки целей с устройства — сервер сливает их с аккаунтом и отдаёт итог.
+pub async fn goals_save(goals: Value) -> Result<Value, String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Err("Цели живут в аккаунте — войдите.".into());
+    }
+    let reply = post(&url, "/api/noa/goals", &token, &json!({ "goals": goals })).await?;
+    Ok(reply["goals"].clone())
+}
+
 /// Путеводители аккаунта — карточками.
 pub async fn guide_cards() -> Result<Value, String> {
     let (url, token) = settings();
