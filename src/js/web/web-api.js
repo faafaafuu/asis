@@ -386,6 +386,11 @@ async function learnApp(noa, cmd, args) {
       return Boolean(noa.user);
     case "account_name":
       return noa.user?.name ?? "";
+    // Удалить аккаунт со всем обучением — по входу на сайте.
+    case "account_delete":
+      await site("/api/account/delete", { confirm: "удалить" });
+      location.reload();
+      return null;
     case "account_login":
       // Вход — на сайте (Telegram или Google), потом обратно сюда.
       location.href = `/#/login?next=${encodeURIComponent(location.pathname + location.search)}`;

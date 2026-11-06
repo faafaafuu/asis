@@ -274,6 +274,9 @@
         return phoneVoice;
       case "account_status":
         return params.get("signed") !== "0";
+      case "account_delete":
+        await wait(600);
+        return null;
       case "account_login":
         await wait(1500);
         return "Владелец";

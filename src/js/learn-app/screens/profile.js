@@ -4,6 +4,7 @@ import { el, icon, label, header, nav, register, call, prefs, toast, plural, loa
 import { store } from "../store.js";
 import { signInCard, buildCourse } from "./courses.js";
 import { modelRow } from "../models.js";
+import { confirmAction } from "../gestures.js";
 
 function setting(name, hint, on, onToggle) {
   const row = el("button", "setting");
@@ -225,6 +226,33 @@ register("profile", (screen) => {
       ),
     );
     content.append(about);
+    // Удалить аккаунт — из самого приложения, со всем обучением.
+    if (signed) {
+      const erase = el("button", "setting setting--danger");
+      const text = el("span", "setting__text");
+      text.append(el("span", "setting__name", "Удалить аккаунт"), el("span", "setting__hint", "Курсы, прогресс и цели пропадут на всех устройствах"));
+      erase.append(icon("trash", 20, 2), text);
+      erase.addEventListener("click", async () => {
+        const sure = await confirmAction({
+          title: "Удалить аккаунт навсегда?",
+          text: "Курсы, прогресс, цели и ключи доступа сотрутся с сервера и со всех устройств. Это не отменить.",
+          ok: "Удалить навсегда",
+        });
+        if (!sure) return;
+        erase.disabled = true;
+        try {
+          await call("account_delete", {}, { slow: true, retries: 0 });
+          for (const key of ["goals", "goals.pending", "name", "course", "interviews", "interviewSession", "drilled"]) prefs.set(key, null);
+          store.forget();
+          toast("Аккаунт удалён");
+          nav.refresh();
+        } catch (err) {
+          erase.disabled = false;
+          toast(String(err).replace(/^Error:\s*/, ""));
+        }
+      });
+      content.append(erase);
+    }
     if (version) {
       const foot = el("span", "small dim", `Qrack · ${version}`);
       foot.style.textAlign = "center";

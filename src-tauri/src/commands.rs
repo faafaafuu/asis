@@ -751,6 +751,25 @@ pub async fn account_login(app: AppHandle, state: State<'_, AppState>) -> Result
 }
 
 /// Вошёл ли человек в аккаунт (есть ли ключ площадки).
+/// Удалить аккаунт и выйти: ключ площадки стирается с устройства, модель
+/// через мост аккаунта — тоже (она была по этому ключу).
+#[tauri::command]
+pub async fn account_delete(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    crate::platform::account_delete().await?;
+    {
+        let mut config = state.config_mut();
+        config.platform.token = String::new();
+        if config.ai.endpoint.contains("/api/noa/bridge") {
+            config.ai.api_key = String::new();
+            config.ai.chosen = false;
+        }
+    }
+    persist(&app, &state)?;
+    let config = state.config();
+    state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn account_status(state: State<'_, AppState>) -> bool {
     !state.config().platform.token.trim().is_empty()

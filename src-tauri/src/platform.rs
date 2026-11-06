@@ -601,6 +601,15 @@ async fn through_mirror(url: &str, path: &str, token: &str) -> Option<Vec<u8>> {
 
 /* ── Путеводители ─────────────────────────────────────────────────────── */
 
+/// Удалить аккаунт со всем, что в нём: курсы, прогресс, цели, ключи.
+pub async fn account_delete() -> Result<(), String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Err("Вход не выполнен — удалять нечего.".into());
+    }
+    post(&url, "/api/account/delete", &token, &json!({ "confirm": "удалить" })).await.map(|_| ())
+}
+
 /* ── Цели обучения (Qrack) ────────────────────────────────────────────── */
 
 /// Цели аккаунта: год, месяц, неделя, день — только по курсам аккаунта.

@@ -364,6 +364,7 @@ pub fn run() {
             commands::learn_overview,
             commands::window_error,
             commands::account_login,
+            commands::account_delete,
             commands::account_status,
             commands::learn_build,
             commands::learn_builds,

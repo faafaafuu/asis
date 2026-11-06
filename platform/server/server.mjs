@@ -443,6 +443,22 @@ route("POST", /^\/api\/account\/logout-others$/, ({ req, user }) => {
   return { ok: true };
 });
 
+/**
+ * Удалить аккаунт целиком: человека, его модули и всё, что лежит под его
+ * номером в любой таблице (курсы, прогресс, цели, сборки, ключи, сессии).
+ * Таблицы ищутся по колонке user_id — новая таблица не останется с данными.
+ */
+function eraseAccount(userId) {
+  db.prepare("DELETE FROM modules WHERE owner_id = ?").run(userId);
+  for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all()) {
+    const columns = db.prepare("SELECT name FROM pragma_table_info(?)").all(name).map((c) => c.name);
+    if (!columns.includes("user_id")) continue;
+    // Номер в части таблиц — числом, в части — строкой.
+    db.prepare(`DELETE FROM "${name}" WHERE user_id = ? OR user_id = ?`).run(userId, String(userId));
+  }
+  db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+}
+
 route("DELETE", /^\/api\/account$/, async ({ req, res, user, ip }) => {
   if (!user) throw new Fail(401, "Войдите.");
   if (throttled(ip)) throw new Fail(429, "Слишком много попыток. Подождите несколько минут.");
@@ -450,10 +466,21 @@ route("DELETE", /^\/api\/account$/, async ({ req, res, user, ip }) => {
   const row = db.prepare("SELECT pass FROM users WHERE id = ?").get(user.id);
   const hasPassword = String(row.pass).startsWith("scrypt$");
   if (hasPassword && !(await checkPassword(String(password ?? ""), row.pass))) throw new Fail(403, "Пароль не подходит.");
-  db.prepare("DELETE FROM modules WHERE owner_id = ?").run(user.id);
-  db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
+  eraseAccount(user.id);
   // Прежняя cookie — без домена: её тоже стираем, иначе выход не выходит.
   res.setHeader("Set-Cookie", [sessionCookie("", 0), "noah_session=; Path=/; Max-Age=0"]);
+  return { ok: true };
+});
+
+// Из приложения (Qrack на телефоне) — по ключу площадки, с подтверждением
+// словом: ключ у телефона и так есть, пароля у входа через Telegram нет.
+route("POST", /^\/api\/account\/delete$/, async ({ req, user, tokenUser, ip }) => {
+  const who = user ?? tokenUser;
+  if (!who) throw new Fail(401, "Войдите.");
+  if (throttled(ip)) throw new Fail(429, "Слишком много попыток. Подождите несколько минут.");
+  const { confirm } = await readJson(req);
+  if (String(confirm ?? "").trim().toLowerCase() !== "удалить") throw new Fail(400, "Подтвердите удаление словом «удалить».");
+  eraseAccount(who.id);
   return { ok: true };
 });
 
