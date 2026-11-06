@@ -687,6 +687,7 @@ const TYPES = {
   ".ttf": "font/ttf",
   ".jpg": "image/jpeg",
   ".mp4": "video/mp4",
+  ".md": "text/markdown; charset=utf-8",
 };
 
 /* ── Сайт «NOAH Учёба» ─────────────────────────────────────────────────────
@@ -698,8 +699,16 @@ const LEARN_SITE = process.env.NOAH_LEARN_SITE ?? "/opt/noah-learn/site";
 const LEARN_CSP =
   "default-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
+/**
+ * Демо приложения на сайте (demo/): те же правила, что у приложения, но его
+ * можно показать в окне на странице сайта — только на своём же адресе.
+ */
+const LEARN_DEMO_CSP = APP_CSP.replace("frame-ancestors 'none'", "frame-ancestors 'self'").replace("connect-src 'self' https: http://localhost:* http://127.0.0.1:*", "connect-src 'self'");
+
 /** Файл сайта; нет такого — false. Ролики — с перемоткой (Range). */
 async function serveLearnSite(req, res, rel) {
+  // Папка — её index.html (демо приложения: /qrack/demo/).
+  if (rel.endsWith("/")) rel += "index.html";
   if (!/^[\w./-]+$/.test(rel) || rel.split("/").some((part) => !part || part.startsWith("."))) return false;
   const file = join(LEARN_SITE, rel);
   let info;
@@ -711,9 +720,11 @@ async function serveLearnSite(req, res, rel) {
   if (!info.isFile()) return false;
   const type = TYPES[extname(file)] ?? "application/octet-stream";
   const page = extname(file) === ".html";
+  const demo = rel.startsWith("demo/");
   const head = {
     ...SECURITY_HEADERS,
-    "Content-Security-Policy": LEARN_CSP,
+    "Content-Security-Policy": demo ? LEARN_DEMO_CSP : LEARN_CSP,
+    ...(demo ? { "X-Frame-Options": "SAMEORIGIN" } : {}),
     "Content-Type": type,
     "Accept-Ranges": "bytes",
     // Страница — всегда свежая (CDN зеркала иначе держит её часами), остальное — на час.
