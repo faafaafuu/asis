@@ -86,6 +86,23 @@ register("profile", (screen) => {
 
     // Настройки.
     const settings = el("div", "list");
+    // Вид: Неон или Классика — тема NOAH, светлая.
+    settings.append(label("// вид"));
+    const look = el("div", "seg");
+    for (const [id, name] of [
+      ["neon", "Неон"],
+      ["classic", "Классика"],
+    ]) {
+      const btn = el("button", "", name);
+      btn.setAttribute("aria-pressed", String(prefs.get("look", "neon") === id));
+      btn.addEventListener("click", () => {
+        prefs.set("look", id);
+        for (const other of look.children) other.setAttribute("aria-pressed", String(other === btn));
+        dispatchEvent(new Event("learn:look"));
+      });
+      look.append(btn);
+    }
+    settings.append(look);
     settings.append(label("// голос"));
     settings.append(
       setting("Читать вслух", "Ноа озвучивает разборы, ответы и замечания практики. Код не зачитывает.", prefs.get("aloud", true), (on) => {

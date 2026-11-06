@@ -398,8 +398,23 @@ class SuflerPlugin: Plugin, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
         }
     }
 
+    class BarArgs: Decodable {
+        let light: Bool?
+    }
+
+    /// Значки строки состояния под фон страницы: светлая тема (классика) —
+    /// тёмные значки, тёмная (неон) — светлые. Иначе на белом фоне часы и
+    /// заряд были бы белыми и пропадали.
     @objc public func barStyle(_ invoke: Invoke) {
-        invoke.resolve()
+        let light = (try? invoke.parseArgs(BarArgs.self))?.light ?? false
+        DispatchQueue.main.async {
+            for scene in UIApplication.shared.connectedScenes {
+                for window in (scene as? UIWindowScene)?.windows ?? [] {
+                    window.overrideUserInterfaceStyle = light ? .light : .dark
+                }
+            }
+            invoke.resolve()
+        }
     }
 
     class UrlArgs: Decodable {

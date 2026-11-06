@@ -53,20 +53,23 @@ function followKeyboard() {
 }
 
 /**
- * Тема приложения — «Неон», всегда. Окно телефона программа создаёт со
- * скриптом, который ставит тему из настроек компьютера, — и повторяет это,
- * когда документ догружается. Здесь тема возвращается.
+ * Тема приложения — своя: «Неон» или «Классика» (тема NOAH), выбор в
+ * профиле. Окно телефона программа создаёт со скриптом, который ставит тему
+ * из настроек компьютера, — и повторяет это, когда документ догружается.
+ * Здесь тема приложения возвращается.
  */
-function keepNeon() {
+function keepTheme() {
   const root = document.documentElement;
-  const neon = () => {
-    if (root.dataset.theme !== "neon") root.dataset.theme = "neon";
+  const own = () => {
+    const wanted = prefs.get("look", "neon") === "classic" ? "noah" : "neon";
+    if (root.dataset.theme !== wanted) root.dataset.theme = wanted;
   };
-  neon();
-  new MutationObserver(neon).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+  own();
+  new MutationObserver(own).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+  addEventListener("learn:look", own);
 }
 
-keepNeon();
+keepTheme();
 followKeyboard();
 await sprite();
 // В браузере имя — из входа на сайт (на телефоне его запоминает вход через Telegram).
