@@ -66,6 +66,11 @@ export function baseError(model) {
 function headers(model) {
   const out = { "Content-Type": "application/json" };
   if (model.key) out.Authorization = `Bearer ${model.key}`;
+  // Claude по ключу Anthropic отвечает браузеру, только если об этом сказано прямо.
+  if (/api\.anthropic\.com/.test(model.base ?? "")) {
+    out["anthropic-dangerous-direct-browser-access"] = "true";
+    if (model.key) out["x-api-key"] = model.key;
+  }
   if (model.kind === "openrouter") {
     // OpenRouter показывает в статистике, откуда запросы.
     out["HTTP-Referer"] = location.origin;

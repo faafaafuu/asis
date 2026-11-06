@@ -57,7 +57,7 @@ register("profile", (screen) => {
       const card = el("div", "plate");
       const name = prefs.get("name", "");
       card.append(label("// аккаунт"), el("span", "continue__title", name || "Вход выполнен"));
-      card.append(el("span", "small muted", "noahlab.ru · курсы, прогресс и мост — общие с компьютером"));
+      card.append(el("span", "small muted", "Курсы, прогресс и цели — общие на телефоне, компьютере и в браузере"));
       content.append(card);
     } else content.append(signInCard());
 
@@ -125,20 +125,8 @@ register("profile", (screen) => {
         ),
       );
     }
-    // В браузере модель — своя у Ноа онлайн: мост (если вошли владельцем)
-    // или подключённая в её настройках.
-    if (isWeb) {
-      const model = await call("web_model").catch(() => null);
-      settings.append(label("// модель"));
-      settings.append(
-        model
-          ? link("Модель подключена", model.kind === "bridge" ? "Мост к подписке — как в программе" : model.model || model.kind, "check", () => (location.href = "/app/#settings"))
-          : link("Подключить модель", "Без неё не работают ответы Ноа, проверка и разборы", "plus", () => (location.href = "/app/#settings")),
-      );
-    } else {
-      // В приложении — свой выбор модели, как у Ноа на компьютере.
-      settings.append(label("// модель"), await modelRow());
-    }
+    // Модель — тем же окном везде: в приложении и в браузере, как у Ноа.
+    settings.append(label("// модель"), await modelRow());
     content.append(settings);
 
     // Курсы: собрать, идущие сборки.

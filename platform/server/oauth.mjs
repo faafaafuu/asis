@@ -280,7 +280,9 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     const pair = /^[A-Za-z0-9]{8,32}$/.test(code) && tgCodes.get(code)?.app ? code : null;
     const back = pair ? null : mirrorOrigin(req);
     const redirect = callbackFor(key, back);
-    states.set(state, { key, verifier, at: Date.now(), back, redirect, pair });
+    // Вход из Qrack в браузере — обратно в Qrack, а не на страницу сайта.
+    const app = url.searchParams.get("next") === "/qrack/app/";
+    states.set(state, { key, verifier, at: Date.now(), back, redirect, pair, app });
     const params = new URLSearchParams({
       response_type: "code",
       client_id: p.id,
@@ -306,6 +308,10 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     states.delete(state);
     const back = (message) => {
       if (saved?.pair) return appPage(res, "Не получилось войти", `${message} Вернитесь в Qrack и нажмите «Войти» ещё раз.`);
+      if (saved?.app) {
+        res.writeHead(302, { Location: `${saved.back ?? ""}/qrack/app/?v=${Date.now().toString(36)}&login_error=${encodeURIComponent(message)}` });
+        return res.end();
+      }
       res.writeHead(302, { Location: `${saved?.back ?? ""}${fresh()}#/login?error=${encodeURIComponent(message)}` });
       res.end();
     };
@@ -339,7 +345,8 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
       }
       const linking = Boolean(sessionUser(req));
       const cookie = signIn(req, key, profile, !p.untrustedEmail);
-      res.writeHead(302, { Location: `${saved.back ?? ""}${fresh()}${linking ? "#/account" : "#/connect"}`, "Set-Cookie": cookie });
+      const to = saved.app ? `/qrack/app/?v=${Date.now().toString(36)}` : `${fresh()}${linking ? "#/account" : "#/connect"}`;
+      res.writeHead(302, { Location: `${saved.back ?? ""}${to}`, "Set-Cookie": cookie });
       res.end();
     } catch (err) {
       console.error(`вход через ${key}:`, err.message);
@@ -356,7 +363,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
    */
   const safeNext = (value) => {
     const next = String(value ?? "");
-    if (next === "/app/" || /^\/#\/[\w\-/?=&%.]{0,150}$/.test(next)) return next;
+    if (next === "/app/" || next === "/qrack/app/" || /^\/#\/[\w\-/?=&%.]{0,150}$/.test(next)) return next;
     return "/#/connect";
   };
 
@@ -439,7 +446,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     }
     entry.finished = true;
     // Ноа онлайн — адресом с меткой: голый /app/ CDN зеркала отдаёт из памяти.
-    const to = entry.next === "/app/" ? `/app/?v=${Date.now().toString(36)}` : entry.next.replace(/^\/#/, `${fresh()}#`);
+    const to = entry.next === "/app/" || entry.next === "/qrack/app/" ? `${entry.next}?v=${Date.now().toString(36)}` : entry.next.replace(/^\/#/, `${fresh()}#`);
     res.writeHead(302, { Location: to, "Set-Cookie": [signIn(req, "telegram", entry.user), `noah_tg=; Path=/; Max-Age=0${cookieDomain}`], "Cache-Control": "no-store" });
     res.end();
   };

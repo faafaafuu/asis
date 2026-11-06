@@ -3,7 +3,10 @@
 // Ключ хранится в настройках программы зашифрованным и никуда, кроме своего
 // сервиса, не уходит.
 
-import { el, icon, label, call, sheet, toast, isDesktop } from "./core.js";
+import { el, icon, label, call, sheet, toast, isDesktop, isWeb } from "./core.js";
+
+/** Компьютер — программа или браузер не на телефоне: тут бывает своя Ollama. */
+const onComputer = isDesktop || (isWeb && !/iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
 
 /** Готовые сервисы: человек выбирает сервис, а не вписывает адреса. */
 const SERVICES = [
@@ -37,13 +40,15 @@ const SERVICES = [
     model: "llama-3.3-70b-versatile",
   },
   // На компьютере — своя модель без ключа и без интернета, как в Ноа.
-  ...(isDesktop
+  ...(onComputer
     ? [
         {
           id: "ollama",
           name: "Ollama — на этом компьютере",
-          hint: "Бесплатно, без ключа и без интернета. Нужна установленная Ollama (ollama.com) и скачанная модель — например, qwen3 или llama3.",
-          endpoint: "http://127.0.0.1:11434/api/chat",
+          hint: isWeb
+            ? "Бесплатно и без ключа. Нужна запущенная Ollama (ollama.com) со скачанной моделью; браузеру она отвечает, если в её настройках разрешён сайт: OLLAMA_ORIGINS=https://noahlab.ru,https://m.noahlab.ru."
+            : "Бесплатно, без ключа и без интернета. Нужна установленная Ollama (ollama.com) и скачанная модель — например, qwen3 или llama3.",
+          endpoint: isWeb ? "http://localhost:11434/v1/chat/completions" : "http://127.0.0.1:11434/api/chat",
           model: "",
           local: true,
         },

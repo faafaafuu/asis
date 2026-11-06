@@ -372,19 +372,13 @@ export function signInCard() {
   const go = button("", async () => {
     go.disabled = true;
     try {
-      let name;
-      if (isWeb) {
-        status.textContent = "Открываю вход на сайте…";
-        name = await call("account_login");
-      } else {
-        name = await chooseSignIn().catch((err) => {
-          if (err?.message === "closed") return null;
-          throw err;
-        });
-        if (name === null) {
-          go.disabled = false;
-          return;
-        }
+      const name = await chooseSignIn().catch((err) => {
+        if (err?.message === "closed") return null;
+        throw err;
+      });
+      if (name === null) {
+        go.disabled = false;
+        return;
       }
       if (name) prefs.set("name", name);
       status.textContent = "Вход выполнен. Подтягиваю курсы…";

@@ -13,7 +13,7 @@ import { WebHost } from "../web-host.js";
 import { speak, stopSpeaking, speaking, canListen, dictate, listen } from "./voice.js";
 import { startTalk } from "./talk.js";
 import { splitScheme } from "../scheme.js";
-import { dictionaryClient, loadModel, saveModel, bridgeAvailable, chat } from "./ai-web.js";
+import { dictionaryClient, loadModel, saveModel, bridgeAvailable, chat, listModels, PROVIDERS } from "./ai-web.js";
 import { request } from "./net.js";
 import { sections as lessonSections } from "./learn-core.js";
 
@@ -380,6 +380,40 @@ function chime() {
   }
 }
 
+/* ── Модель в Qrack онлайн — тем же окном, что в приложении ───────────────
+   Приложение говорит адресами …/chat/completions, Ноа онлайн хранит вид
+   сервиса и базовый адрес: здесь одно переводится в другое. Подключённые
+   модели запоминаются, чтобы переключаться между ними одним касанием. */
+
+const MODELS_KEY = "qrack.web.models";
+const kindOf = (endpoint) =>
+  /\/api\/noa\/bridge/.test(endpoint) ? "bridge" : /openrouter\.ai/.test(endpoint) ? "openrouter" : /(localhost|127\.0\.0\.1):11434/.test(endpoint) ? "ollama" : "openai";
+const baseOfEndpoint = (endpoint) => String(endpoint ?? "").trim().replace(/\/chat\/completions\/?$/, "");
+function endpointOf(model) {
+  if (model.kind === "bridge") return `${location.origin}/api/noa/bridge/chat/completions`;
+  return `${(model.base || PROVIDERS[model.kind]?.base || "").replace(/\/+$/, "")}/chat/completions`;
+}
+function webModel(endpoint, apiKey, name) {
+  const kind = kindOf(endpoint);
+  return { kind, base: kind === "bridge" ? "" : baseOfEndpoint(endpoint), key: String(apiKey ?? ""), model: String(name ?? "") };
+}
+function rememberedModels() {
+  try {
+    return JSON.parse(localStorage.getItem(MODELS_KEY) ?? "[]") ?? [];
+  } catch {
+    return [];
+  }
+}
+function rememberModel(model) {
+  const list = rememberedModels().filter((m) => !(endpointOf(m) === endpointOf(model) && m.model === model.model));
+  list.unshift(model);
+  try {
+    localStorage.setItem(MODELS_KEY, JSON.stringify(list.slice(0, 12)));
+  } catch {
+    /* не запомнится — не беда */
+  }
+}
+
 async function learnApp(noa, cmd, args) {
   switch (cmd) {
     case "account_status":
@@ -391,6 +425,46 @@ async function learnApp(noa, cmd, args) {
       await site("/api/account/delete", { confirm: "удалить" });
       location.reload();
       return null;
+    // Вход прямо в Qrack — те же способы, что в приложении на телефоне.
+    case "account_login_options": {
+      const { providers = [] } = await site(`/api/auth/providers?_=${Date.now()}`);
+      const options = providers.map((p) => ({ id: p.id, title: p.title, link: p.id === "telegram" ? "telegram" : `/auth/${p.id}?next=${encodeURIComponent("/qrack/app/")}` }));
+      return { code: "web", options };
+    }
+    case "account_login_open": {
+      if (args.link === "telegram") {
+        // Бот — в новой вкладке, а эта ждёт, пока человек нажмёт Start.
+        const tab = window.open("about:blank", "_blank");
+        const { link } = await site("/api/auth/telegram/start", { next: "/qrack/app/" });
+        if (tab) tab.location.href = link;
+        else window.open(link, "_blank");
+        return null;
+      }
+      // Google и другие — уходим к ним, возвращаемся сюда же, уже войдя.
+      location.href = args.link;
+      return new Promise(() => {});
+    }
+    case "account_login_wait": {
+      for (let i = 0; i < 150; i++) {
+        await new Promise((done) => setTimeout(done, 2000));
+        const state = await site(`/api/auth/telegram/status?_=${Date.now()}`).catch((err) => {
+          if (/устарел/i.test(err.message)) throw err;
+          return { done: false };
+        });
+        if (state.done) {
+          location.reload();
+          return new Promise(() => {});
+        }
+      }
+      throw new Error("Вход не завершился — нажмите «Войти» ещё раз.");
+    }
+    case "account_login_password": {
+      const body = { email: String(args.email ?? "").trim(), password: String(args.password ?? "") };
+      if (args.create) await site("/api/app/register", body);
+      await site("/api/auth/login", body);
+      location.reload();
+      return new Promise(() => {});
+    }
     case "account_login":
       // Вход — на сайте (Telegram или Google), потом обратно сюда.
       location.href = `/#/login?next=${encodeURIComponent(location.pathname + location.search)}`;
@@ -433,6 +507,51 @@ async function learnApp(noa, cmd, args) {
     case "phone_talk":
       return { text: await assistantAnswer(String(args.text ?? "")), spoken: false };
     // Тренировки «Наизусть» и «Собеседование»: модель по указаниям экрана.
+    case "ai_settings": {
+      const model = loadModel();
+      return model?.model ? { provider: "http", endpoint: endpointOf(model), model: model.model, apiKey: "" } : null;
+    }
+    case "brains_list": {
+      const now = loadModel();
+      const list = rememberedModels();
+      if (now?.model && !list.some((m) => endpointOf(m) === endpointOf(now) && m.model === now.model)) list.unshift(now);
+      if (noa.user && !list.some((m) => m.kind === "bridge") && (await bridgeAvailable())) list.push({ kind: "bridge", base: "", key: "", model: "claude-code-bridge" });
+      return list.map((m) => ({
+        endpoint: endpointOf(m),
+        model: m.model,
+        kind: { bridge: "мост", ollama: "этот компьютер", openrouter: "облако" }[m.kind] ?? "облако",
+        current: Boolean(now && endpointOf(now) === endpointOf(m) && now.model === m.model),
+      }));
+    }
+    case "brains_use": {
+      const found = [...rememberedModels(), ...(loadModel() ? [loadModel()] : [])].find((m) => endpointOf(m) === args.endpoint && m.model === args.model) ?? webModel(args.endpoint, "", args.model);
+      saveModel(found);
+      rememberModel(found);
+      return "Модель включена.";
+    }
+    case "cloud_models":
+      return listModels(webModel(args.endpoint, args.apiKey, "x"));
+    case "save_ai_settings": {
+      const s = args.settings ?? {};
+      const model = webModel(s.endpoint, s.apiKey, s.model);
+      saveModel(model);
+      rememberModel(model);
+      return null;
+    }
+    case "test_ai": {
+      const model = loadModel();
+      if (!model) throw new Error("Модель не подключена.");
+      return String(await chat(model, [{ role: "user", content: "Ответь одним словом: «работаю»." }], { maxTokens: 30, timeoutMs: 60_000 }));
+    }
+    // Ollama на этом компьютере: что скачано (браузер спрашивает её сам).
+    case "local_models":
+      try {
+        const reply = await fetch("http://localhost:11434/api/tags", { signal: AbortSignal.timeout(4000) });
+        const data = await reply.json();
+        return { running: true, present: true, installed: (data.models ?? []).map((m) => ({ name: m.name, sizeGb: Math.round((m.size ?? 0) / 1e8) / 10 })) };
+      } catch {
+        return { running: false, present: false, installed: [] };
+      }
     // Сборка курса в приложении — моделью, подключённой в этом браузере.
     case "learn_course_format":
       return noa.courseFormat();

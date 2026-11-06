@@ -1,7 +1,7 @@
 // Qrack — приложение обучения на телефоне. Подключает значки и экраны
 // и открывает вкладку «Курсы».
 
-import { start, api, nav, isWeb, prefs } from "./core.js";
+import { start, api, nav, isWeb, prefs, toast } from "./core.js";
 import { store } from "./store.js";
 import { mountAssistant } from "./assistant.js";
 import { mountSuflyor } from "./suflyor.js";
@@ -78,6 +78,11 @@ if (isWeb) {
   if (name) prefs.set("name", name);
 }
 start(document.querySelector("main.app"));
+// Вход в браузере не удался (Google и другие возвращают сюда с причиной).
+{
+  const failed = new URLSearchParams(location.search).get("login_error");
+  if (failed) setTimeout(() => toast(failed, 6000), 600);
+}
 mountAssistant();
 mountSuflyor();
 
