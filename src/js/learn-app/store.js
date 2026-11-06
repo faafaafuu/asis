@@ -2,6 +2,7 @@
 // памяти страницы, чтобы переходы между экранами не ждали каждый раз.
 
 import { call, prefs } from "./core.js";
+import { localBuilds } from "./builder.js";
 
 let overview = null;
 let practice = null;
@@ -49,7 +50,8 @@ export const store = {
   /** Сборки курсов на сервере: идущая — пунктиром в «Моих курсах». */
   async builds(fresh = false) {
     if (!builds || fresh) builds = (await call("learn_builds").catch(() => [])) ?? [];
-    return Array.isArray(builds) ? builds : [];
+    // Сборка на устройстве — первой: её ведёт это приложение.
+    return [...localBuilds(), ...(Array.isArray(builds) ? builds : [])];
   },
 
   /** Курсы, уже прочитанные с устройства, — без ожидания. */

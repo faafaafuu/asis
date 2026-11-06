@@ -3,6 +3,7 @@
 import { el, icon, label, header, nav, register, call, prefs, toast, plural, loading, isWeb } from "../core.js";
 import { store } from "../store.js";
 import { signInCard, buildCourse } from "./courses.js";
+import { buildAction } from "../builder.js";
 import { modelRow } from "../models.js";
 import { confirmAction } from "../gestures.js";
 
@@ -164,7 +165,7 @@ register("profile", (screen) => {
           }
           stop.disabled = true;
           try {
-            await call("learn_build_stop", { id: build.id }, { slow: true });
+            await buildAction(build, "stop");
             toast("Сборка остановлена");
             nav.refresh();
           } catch (err) {
@@ -181,7 +182,7 @@ register("profile", (screen) => {
         resume.addEventListener("click", async () => {
           resume.disabled = remove.disabled = true;
           try {
-            await call("learn_build_resume", { id: build.id }, { slow: true });
+            await buildAction(build, "resume");
             toast("Сборка продолжается — с последней готовой темы");
             await store.builds(true);
             nav.refresh();
@@ -193,7 +194,7 @@ register("profile", (screen) => {
         remove.addEventListener("click", async () => {
           resume.disabled = remove.disabled = true;
           try {
-            await call("learn_build_remove", { id: build.id }, { slow: true });
+            await buildAction(build, "remove");
             await store.builds(true);
             row.remove();
           } catch (err) {

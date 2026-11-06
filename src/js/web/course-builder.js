@@ -365,21 +365,23 @@ const LOGIN = /authenticat|oauth|\/login|not logged|unauthori[sz]ed|invalid api 
 const BLOCKED = /can'?t receive replies|verification portal|portal\.anthropic\.com\/verify|account (has been )?(disabled|suspended|banned)/i;
 const SPENT = /session limit|usage limit|hit your (usage )?limit|limit (will )?reset|out of (extra )?usage|credit balance/i;
 const LIMIT = /rate.?limit|overloaded|529|429|quota/i;
+/** Модели нет вовсе — ждать бесполезно, нужно подключить её в настройках. */
+const NO_MODEL = /модель не подключена|не собирается/i;
 
 /** Пройдёт ли отказ сам: перегрузка и обрыв — да; вход, блокировка, лимит — нет. */
 export function passing(err) {
   const text = String(err?.message ?? err);
-  return !LOGIN.test(text) && !BLOCKED.test(text) && !SPENT.test(text);
+  return !LOGIN.test(text) && !BLOCKED.test(text) && !SPENT.test(text) && !NO_MODEL.test(text);
 }
 
 /** Причина отказа словами — её видит человек в списке сборок. */
 export function plainError(err) {
   const text = String(err?.message ?? err);
   if (BLOCKED.test(text))
-    return "Модель недоступна: Anthropic приостановил аккаунт Claude, через который работает мост, до проверки (Verification Portal). Пока его не разблокируют, курсы не собираются.";
-  if (LOGIN.test(text)) return "Мост к Claude не вошёл в аккаунт — войдите в Claude Code на сервере и нажмите «Продолжить».";
-  if (SPENT.test(text)) return "Кончился лимит подписки Claude — нажмите «Продолжить», когда он обновится (обычно через несколько часов). Готовые темы останутся.";
-  if (LIMIT.test(text)) return "Claude перегружен — нажмите «Продолжить» чуть позже, готовые темы останутся.";
+    return "Модель недоступна: сервис приостановил аккаунт до проверки. Выберите другую модель в Профиль → Модель и нажмите «Продолжить» — готовые темы останутся.";
+  if (LOGIN.test(text)) return "Модель не приняла ключ — проверьте его в Профиль → Модель и нажмите «Продолжить».";
+  if (SPENT.test(text)) return "Кончился лимит подписки у модели — нажмите «Продолжить», когда он обновится, или выберите другую модель. Готовые темы останутся.";
+  if (LIMIT.test(text)) return "Модель перегружена — нажмите «Продолжить» чуть позже, готовые темы останутся.";
   if (/claude завершился с ошибкой/.test(text)) return "Модель не ответила — нажмите «Продолжить», сборка пойдёт с того же места.";
   return text;
 }

@@ -157,6 +157,17 @@ impl AiError {
 pub trait AiProvider: Send + Sync {
     async fn explain(&self, term: &str, context: &str) -> Result<Explanation, AiError>;
 
+    /// Свободный запрос со своим потолком длины: правила и задание, при
+    /// нужде — ответ объектом JSON. Им курс собирается моделью человека — урок
+    /// длиннее любой реплики разговора.
+    async fn compose(&self, rules: &str, said: &str, _limit: u32, json: bool) -> Result<String, AiError> {
+        if json {
+            self.interpret(rules, said).await
+        } else {
+            self.advise(rules, said).await
+        }
+    }
+
     /// Модель и сообщения вопроса — для хода разговора на сайте, где ответ
     /// озвучивается по предложениям, пока модель пишет. `None` — этот способ
     /// так не умеет (не мост сайта).
@@ -1394,6 +1405,14 @@ fn strip_foreign(text: &str) -> String {
 
 #[async_trait]
 impl AiProvider for HttpProvider {
+    async fn compose(&self, rules: &str, said: &str, limit: u32, json: bool) -> Result<String, AiError> {
+        let messages = vec![
+            Message { role: "system", content: rules.to_string() },
+            Message { role: "user", content: said.to_string() },
+        ];
+        self.answer_limited(messages, json, limit).await
+    }
+
     fn ask_payload(&self, term: &str, context: &str, thread: &[ThreadItem], question: &str) -> Option<(String, serde_json::Value)> {
         if !self.endpoint.ends_with("/api/noa/bridge/chat/completions") {
             return None;

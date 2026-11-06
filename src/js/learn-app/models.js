@@ -3,7 +3,7 @@
 // Ключ хранится в настройках программы зашифрованным и никуда, кроме своего
 // сервиса, не уходит.
 
-import { el, icon, label, call, sheet, toast } from "./core.js";
+import { el, icon, label, call, sheet, toast, isDesktop } from "./core.js";
 
 /** Готовые сервисы: человек выбирает сервис, а не вписывает адреса. */
 const SERVICES = [
@@ -36,6 +36,19 @@ const SERVICES = [
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
     model: "llama-3.3-70b-versatile",
   },
+  // На компьютере — своя модель без ключа и без интернета, как в Ноа.
+  ...(isDesktop
+    ? [
+        {
+          id: "ollama",
+          name: "Ollama — на этом компьютере",
+          hint: "Бесплатно, без ключа и без интернета. Нужна установленная Ollama (ollama.com) и скачанная модель — например, qwen3 или llama3.",
+          endpoint: "http://127.0.0.1:11434/api/chat",
+          model: "",
+          local: true,
+        },
+      ]
+    : []),
   {
     id: "custom",
     name: "Свой сервис",
@@ -155,7 +168,7 @@ function connect(service, form, done) {
   key.type = "password";
   key.autocomplete = "off";
   key.placeholder = service.id === "custom" ? "Ключ, если нужен" : "Ключ сервиса";
-  field("Ключ", key);
+  if (!service.local) field("Ключ", key);
   const model = el("input", "field");
   model.value = service.model;
   model.placeholder = "Имя модели";
@@ -167,6 +180,22 @@ function connect(service, form, done) {
   form.append(options);
   const catalog = el("span", "small dim");
   form.append(catalog);
+  // Ollama: какие модели уже скачаны на этом компьютере.
+  if (service.local) {
+    catalog.textContent = "Смотрю, что установлено в Ollama…";
+    call("local_models", {}, { retries: 0 })
+      .then((status) => {
+        if (!status?.running) {
+          catalog.textContent = status?.present ? "Ollama установлена, но не запущена — запустите её и откройте этот экран снова." : "Ollama не найдена — установите её с ollama.com.";
+          return;
+        }
+        const names = (status.installed ?? []).map((m) => m.name);
+        options.replaceChildren(...names.map((name) => new Option(name, name)));
+        if (!model.value && names[0]) model.value = names[0];
+        catalog.textContent = names.length ? `Скачано моделей: ${names.length}` : "Моделей нет — скачайте: ollama pull qwen3";
+      })
+      .catch(() => (catalog.textContent = "Ollama не отвечает — впишите имя модели сами."));
+  }
   // Ключ вписан — список моделей сервиса, с ценами: имя наизусть помнить не нужно.
   key.addEventListener("change", async () => {
     if (!key.value.trim() || !endpoint.value.trim()) return;
@@ -183,7 +212,8 @@ function connect(service, form, done) {
   const go = el("button", "btn btn--primary btn--big", "Проверить и включить");
   go.addEventListener("click", async () => {
     if (!endpoint.value.trim()) return (error.textContent = "Впишите адрес сервиса.");
-    if (service.id !== "custom" && !key.value.trim()) return (error.textContent = "Впишите ключ сервиса.");
+    if (service.id !== "custom" && !service.local && !key.value.trim()) return (error.textContent = "Впишите ключ сервиса.");
+    if (service.local && !model.value.trim()) return (error.textContent = "Выберите модель Ollama.");
     go.disabled = true;
     error.textContent = "";
     go.textContent = "Проверяю…";
@@ -201,5 +231,5 @@ function connect(service, form, done) {
     }
   });
   form.append(error, go);
-  key.focus();
+  (service.local ? model : key).focus();
 }

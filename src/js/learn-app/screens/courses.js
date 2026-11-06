@@ -12,6 +12,7 @@ import { guideShelf } from "./guide.js";
 import { confirmAction } from "../gestures.js";
 import { todayCard } from "./goals.js";
 import { goals } from "../goals.js";
+import { buildLocal, buildAction } from "../builder.js";
 
 register("courses", (screen) => {
   screen.append(header({ home: true, onMic: () => openAssistant() }));
@@ -112,7 +113,6 @@ register("courses", (screen) => {
       }),
     );
     content.append(tune);
-    if (!signed) return;
     // Сборки — над списком курсов: идущая с «Остановить», упавшая или
     // остановленная — с причиной, «Продолжить» и «Убрать». Раньше упавшая
     // сборка просто исчезала, и было не понять, что случилось.
@@ -318,6 +318,45 @@ function chooseSignIn() {
         pick.append(el("span", `signin__mark signin__mark--${option.id}`, option.title.slice(0, 1)), el("span", "", option.title));
         list.append(pick);
       }
+      // Почта и пароль — те же аккаунты, что на сайте.
+      const mail = button("", () => {
+        mail.hidden = true;
+        form.hidden = false;
+        email.focus();
+      }, "btn btn--secondary signin__option");
+      mail.append(el("span", "signin__mark signin__mark--mail", "@"), el("span", "", "Почта и пароль"));
+      list.append(mail);
+      const form = el("div", "signin__form");
+      form.hidden = true;
+      const email = el("input", "field");
+      email.type = "email";
+      email.autocomplete = "email";
+      email.placeholder = "Почта";
+      const password = el("input", "field");
+      password.type = "password";
+      password.autocomplete = "current-password";
+      password.placeholder = "Пароль — от 10 знаков";
+      const send = (create) => async () => {
+        if (!email.value.trim() || !password.value) {
+          status.textContent = "Впишите почту и пароль.";
+          return;
+        }
+        for (const one of form.querySelectorAll("button")) one.disabled = true;
+        status.textContent = create ? "Создаю аккаунт…" : "Вхожу…";
+        try {
+          const name = await call("account_login_password", { email: email.value.trim(), password: password.value, create }, { retries: 0 });
+          settled = true;
+          close();
+          resolve(name);
+        } catch (err) {
+          status.textContent = String(err?.message ?? err).replace(/^Error:\s*/, "");
+          for (const one of form.querySelectorAll("button")) one.disabled = false;
+        }
+      };
+      const row = el("div", "signin__row");
+      row.append(button("Войти", send(false), "btn btn--primary"), button("Создать аккаунт", send(true), "btn btn--plain"));
+      form.append(email, password, row);
+      list.append(form);
     }, () => {
       if (!settled) reject(new Error("closed"));
     });
@@ -367,26 +406,16 @@ export function signInCard() {
   return card;
 }
 
-/** «Собрать курс»: цель и модель — сервер соберёт через мост. */
+/**
+ * «Собрать курс»: цель словами — и курс собирается прямо здесь, на модели
+ * из Профиль → Модель, как в Ноа.
+ */
 export function buildCourse() {
   sheet("Собрать курс", (content, close) => {
-    content.append(el("span", "muted", "Напишите, о чём курс и зачем. Ноа составит план и напишет курс тема за темой: урок, понятия, карточки, задачи, мини-экзамен. Курс появится сам — по первой теме можно учиться сразу."));
+    content.append(el("span", "muted", "Напишите, о чём курс и зачем. Ноа составит план и напишет курс тема за темой: урок, понятия, карточки, задачи, мини-экзамен. По первой теме можно учиться сразу, пока остальные дописываются."));
     const goal = el("textarea", "field");
-    goal.placeholder = "Например: Kubernetes с нуля до продакшена — чтобы пройти собеседование на DevOps";
-    const quality = el("div", "seg");
-    let level = "sonnet";
-    for (const [value, text] of [
-      ["sonnet", "Sonnet — точнее"],
-      ["haiku", "Haiku — бережёт лимит"],
-    ]) {
-      const option = el("button", "", text);
-      option.setAttribute("aria-pressed", String(value === level));
-      option.addEventListener("click", () => {
-        level = value;
-        for (const other of quality.children) other.setAttribute("aria-pressed", String(other === option));
-      });
-      quality.append(option);
-    }
+    goal.placeholder = "Например: матанализ к сессии — пределы, производные, Тейлор, интегралы; нужны доказательства для устного";
+    const model = el("span", "small muted", "Соберу на модели из Профиль → Модель. Не закрывайте приложение, пока идёт сборка: прервётся — продолжите с готовой темы.");
     const error = el("span", "error");
     const go = button("Собрать курс", async () => {
       const text = goal.value.trim();
@@ -397,7 +426,7 @@ export function buildCourse() {
       go.disabled = true;
       error.textContent = "";
       try {
-        await call("learn_build", { goal: text, quality: level }, { slow: true, retries: 0 });
+        buildLocal(text);
         close();
         toast("Курс собирается — первая тема появится через несколько минут");
         store.forget();
@@ -415,7 +444,7 @@ export function buildCourse() {
         go.disabled = false;
       }
     }, "btn btn--primary btn--big");
-    content.append(goal, quality, error, go);
+    content.append(goal, model, error, go);
     goal.focus();
   });
 }
@@ -457,17 +486,17 @@ function buildCard(build, changed) {
       act("Остановить", async () => {
         const sure = await confirmAction({ title: "Остановить сборку?", text: "Готовые темы останутся — по ним можно учиться. Продолжить можно потом.", ok: "Остановить" });
         if (!sure) throw new Error("");
-        await call("learn_build_stop", { id: build.id }, { slow: true });
+        await buildAction(build, "stop");
         toast("Сборка остановлена");
       }),
     );
   } else {
     tools.append(
       act("Продолжить", async () => {
-        await call("learn_build_resume", { id: build.id }, { slow: true, retries: 0 });
+        await buildAction(build, "resume");
         toast("Сборка продолжается — с последней готовой темы");
       }, "btn btn--primary"),
-      act("Убрать", () => call("learn_build_remove", { id: build.id }, { slow: true }), "btn btn--plain"),
+      act("Убрать", () => buildAction(build, "remove"), "btn btn--plain"),
     );
   }
   card.append(tools);

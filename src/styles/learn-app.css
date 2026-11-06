@@ -3218,3 +3218,7 @@ button.plate:active,
 .signin__mark--github { background: #24292f; }
 .signin__mark--x { background: #000; }
 .signin__mark--telegram { background: #2aabee; }
+.signin__mark--mail { background: transparent; color: var(--accent, #3ce3f0); border: 1px solid currentColor; }
+.signin__form { display: grid; gap: 8px; }
+.signin__form[hidden] { display: none; }
+.signin__row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

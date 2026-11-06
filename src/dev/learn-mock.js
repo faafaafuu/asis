@@ -237,6 +237,15 @@
       case "phone_ask":
         await network();
         return "Сегодня по плану тема Docker: урок прочитан наполовину, две карточки ждут повторения.";
+      // Сборка в приложении: в витрине модели нет — честно говорим об этом.
+      case "learn_course_format":
+        return "";
+      case "learn_compose":
+        await wait(1200);
+        throw "В демо курс не собирается: подключите свою модель в настоящем Qrack.";
+      case "learn_build_save":
+      case "learn_course_raw":
+        return null;
       case "learn_build":
         await network();
         return { build: { id: "b1", status: "running" } };
@@ -320,6 +329,9 @@
         };
       case "account_login_open":
         return null;
+      case "account_login_password":
+        await wait(900);
+        return "Владелец";
       case "account_login_wait":
         await wait(1800);
         return "Владелец";

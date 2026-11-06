@@ -433,6 +433,27 @@ async function learnApp(noa, cmd, args) {
     case "phone_talk":
       return { text: await assistantAnswer(String(args.text ?? "")), spoken: false };
     // Тренировки «Наизусть» и «Собеседование»: модель по указаниям экрана.
+    // Сборка курса в приложении — моделью, подключённой в этом браузере.
+    case "learn_course_format":
+      return noa.courseFormat();
+    case "learn_compose": {
+      const model = loadModel();
+      if (!model) throw new Error("Модель не подключена — выберите её в Профиль → Модель.");
+      const tokens = Math.min(16000, Math.max(256, Number(args.maxTokens) || 4000));
+      const messages = [
+        { role: "system", content: String(args.rules ?? "") },
+        { role: "user", content: String(args.said ?? "") },
+      ];
+      return String(await chat(model, messages, { maxTokens: tokens, json: Boolean(args.json), timeoutMs: tokens > 2800 ? 600_000 : 120_000 }));
+    }
+    case "learn_build_save":
+      await noa.saveBuilding(args.course);
+      return null;
+    case "learn_course_raw": {
+      const course = noa.courses().find((item) => item.id === args.id);
+      if (!course) throw new Error("Курса нет — начните сборку заново.");
+      return course;
+    }
     case "learn_coach": {
       const model = loadModel();
       if (!model) throw new Error("Модель не подключена — войдите на сайт или подключите её в Ноа онлайн.");

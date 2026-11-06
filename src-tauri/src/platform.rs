@@ -524,6 +524,20 @@ pub async fn pair_options() -> Result<serde_json::Value, String> {
     Ok(json!({ "code": code, "options": options }))
 }
 
+/// Вход по почте и паролю — те же аккаунты, что на сайте. `create` —
+/// завести новый. Отдаёт ключ и имя аккаунта.
+pub async fn password_login(email: &str, password: &str, create: bool) -> Result<(String, String), String> {
+    let (url, _) = settings();
+    let path = if create { "/api/app/register" } else { "/api/app/login" };
+    let reply = post(&url, path, "", &json!({ "email": email, "password": password })).await?;
+    let token = reply["token"].as_str().unwrap_or_default().to_string();
+    let name = reply["name"].as_str().unwrap_or_default().to_string();
+    if token.is_empty() {
+        return Err("Сайт не выдал ключ — попробуйте ещё раз.".into());
+    }
+    Ok((token, name))
+}
+
 /// Ждёт, пока человек войдёт любым способом. Отдаёт ключ и имя аккаунта.
 pub async fn pair_wait(code: &str) -> Result<(String, String), String> {
     let (url, _) = settings();
@@ -1214,6 +1228,35 @@ pub async fn remove_course(course_id: &str) -> Result<(), String> {
         if stamps.remove(course_id).is_some() {
             let _ = std::fs::write(&path, serde_json::to_string_pretty(&stamps).unwrap_or_default());
         }
+    }
+    Ok(())
+}
+
+/// Курс, собранный на устройстве, — в аккаунт кусками, после каждой темы:
+/// телефон, компьютер и браузер видят его сразу. Не вошли — только здесь.
+pub async fn push_course(course: &crate::learning::Course) -> Result<(), String> {
+    let (url, token) = settings();
+    if token.is_empty() {
+        return Ok(());
+    }
+    let text = serde_json::to_string(course).map_err(|err| err.to_string())?;
+    let size = text.encode_utf16().count();
+    let mut at = 0usize;
+    let mut chars = text.chars().peekable();
+    while chars.peek().is_some() {
+        let mut part = String::new();
+        let mut part_units = 0usize;
+        while let Some(&ch) = chars.peek() {
+            if part_units + ch.len_utf16() > 5000 {
+                break;
+            }
+            part.push(ch);
+            part_units += ch.len_utf16();
+            chars.next();
+        }
+        let path = format!("/api/app/courses/{}/part", course.id);
+        post(&url, &path, &token, &json!({ "at": at, "text": part, "size": size })).await?;
+        at += part_units;
     }
     Ok(())
 }

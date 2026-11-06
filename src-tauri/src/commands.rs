@@ -779,6 +779,20 @@ pub fn account_login_open(link: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Вход по почте и паролю (`create` — новый аккаунт). Отдаёт имя.
+#[tauri::command]
+pub async fn account_login_password(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    email: String,
+    password: String,
+    create: Option<bool>,
+) -> Result<String, String> {
+    let (token, name) = crate::platform::password_login(email.trim(), &password, create.unwrap_or(false)).await?;
+    signed_in(&app, &state, &token, &name)?;
+    Ok(name)
+}
+
 /// Ждёт, пока человек войдёт выбранным способом, и сохраняет ключ. Отдаёт имя.
 #[tauri::command]
 pub async fn account_login_wait(app: AppHandle, state: State<'_, AppState>, code: String) -> Result<String, String> {
@@ -1991,6 +2005,55 @@ pub fn window_error(page: String, text: String) {
 pub async fn learn_build(goal: String, quality: Option<String>) -> Result<serde_json::Value, String> {
     let quality = quality.unwrap_or_else(|| "sonnet".into());
     crate::platform::build_course(goal.trim(), &quality).await
+}
+
+/// Стандарт курса — для сборки моделью человека прямо в приложении.
+#[tauri::command]
+pub fn learn_course_format() -> String {
+    crate::learning::FORMAT.to_string()
+}
+
+/// Запрос сборки курса к модели из настроек — той, что подключил человек:
+/// Ollama, OpenRouter, Claude, Gemini, Groq, свой сервис или мост аккаунта.
+#[tauri::command]
+pub async fn learn_compose(
+    state: State<'_, AppState>,
+    rules: String,
+    said: String,
+    max_tokens: Option<u32>,
+    json: Option<bool>,
+) -> Result<String, String> {
+    if state.config().ai.endpoint.trim().is_empty() {
+        return Err("Модель не подключена — выберите её в Профиль → Модель.".into());
+    }
+    let provider = state.provider();
+    let fallback = state.error_text();
+    // Длинный ответ (урок) модель пишет минуты: запас — как у трёх обычных.
+    let limit = state.config().ai.call_limit() * 3;
+    let tokens = max_tokens.unwrap_or(4000).clamp(256, 16_000);
+    let json = json.unwrap_or(false);
+    guarded("сборка курса", async move { provider.compose(&rules, &said, tokens, json).await }, fallback, limit).await
+}
+
+/// Курс целиком, как он лежит на устройстве, — чтобы продолжить сборку
+/// с готовых тем.
+#[tauri::command]
+pub fn learn_course_raw(id: String) -> Result<serde_json::Value, String> {
+    let course = crate::learning::courses().into_iter().find(|course| course.id == id).ok_or("Курса нет на устройстве.")?;
+    serde_json::to_value(course).map_err(|err| err.to_string())
+}
+
+/// Тема готова — курс на устройство и в аккаунт. Проверку по стандарту
+/// сборщик уже прошёл; здесь — та же, что у курса из MCP.
+#[tauri::command]
+pub async fn learn_build_save(course: serde_json::Value) -> Result<(), String> {
+    let course: crate::learning::Course = serde_json::from_value(course).map_err(|err| format!("Курс не разобрался: {err}"))?;
+    crate::learning::save_course(course.clone())?;
+    if let Err(err) = crate::platform::push_course(&course).await {
+        // Не беда: при следующей сверке курс уйдёт в аккаунт сам.
+        log::warn!("курс «{}» не выгружен в аккаунт: {err}", course.id);
+    }
+    Ok(())
 }
 
 /// Цели обучения аккаунта (Qrack).

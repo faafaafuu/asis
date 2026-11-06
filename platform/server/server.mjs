@@ -416,6 +416,49 @@ route("POST", /^\/api\/auth\/login$/, async ({ req, res, ip }) => {
   return { user: { id: row.id, email: row.email, name: row.name } };
 });
 
+/* ── Вход в приложение по почте и паролю ───────────────────────────────────
+   Те же аккаунты, что на сайте. Приложению нужна не cookie, а ключ площадки:
+   выдаём его, как после входа через Telegram или Google. */
+
+/** Ключ приложения: прежний ключ устройства уступает новому. */
+function appToken(userId) {
+  db.prepare("DELETE FROM tokens WHERE user_id = ? AND label = 'Телефон'").run(userId);
+  const token = `noah_${randomBytes(24).toString("base64url")}`;
+  db.prepare("INSERT INTO tokens (user_id, label, hash) VALUES (?, ?, ?)").run(userId, "Телефон", sha(token));
+  return token;
+}
+
+/** Имя автора из почты: латиница, цифры, точка, дефис; свободное. */
+function nameFromEmail(email) {
+  let base = String(email).split("@")[0].toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-._]+|[-._]+$/g, "").slice(0, 18);
+  if (base.length < 3) base = `user-${base}`.replace(/-$/, "").slice(0, 18);
+  if (base === "noah-core") base = "user";
+  let name = base;
+  for (let i = 2; db.prepare("SELECT 1 FROM users WHERE name = ?").get(name); i++) name = `${base}-${i}`;
+  return name;
+}
+
+route("POST", /^\/api\/app\/login$/, async ({ req, ip }) => {
+  if (throttled(ip)) throw new Fail(429, "Слишком много попыток. Подождите несколько минут.");
+  const { email, password } = await readJson(req);
+  const row = db.prepare("SELECT id, name, pass FROM users WHERE email = ?").get(String(email ?? "").trim());
+  const ok = await checkPassword(String(password ?? ""), row?.pass ?? "scrypt$AAAAAAAAAAAAAAAAAAAAAA==$" + "A".repeat(86) + "==");
+  if (!row || !ok) throw new Fail(401, "Неверная почта или пароль.");
+  return { token: appToken(row.id), name: row.name };
+});
+
+route("POST", /^\/api\/app\/register$/, async ({ req, ip }) => {
+  if (throttled(ip)) throw new Fail(429, "Слишком много попыток. Подождите несколько минут.");
+  const { email, password } = await readJson(req);
+  const mail = String(email ?? "").trim();
+  if (!/^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(mail)) throw new Fail(400, "Проверьте почту.");
+  if (String(password ?? "").length < 10) throw new Fail(400, "Пароль — от 10 знаков.");
+  if (db.prepare("SELECT 1 FROM users WHERE email = ?").get(mail)) throw new Fail(409, "Эта почта уже зарегистрирована — войдите с паролем.");
+  const name = nameFromEmail(mail);
+  const info = db.prepare("INSERT INTO users (email, name, pass) VALUES (?, ?, ?)").run(mail, name, await hashPassword(password));
+  return { token: appToken(Number(info.lastInsertRowid)), name };
+});
+
 route("POST", /^\/api\/auth\/logout$/, ({ req, res }) => {
   const token = cookies(req).noah_session;
   if (token) db.prepare("DELETE FROM sessions WHERE hash = ?").run(sha(token));
