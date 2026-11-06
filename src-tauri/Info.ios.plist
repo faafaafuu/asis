@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Ноа</string>
+	<string>Qrack</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Ноа слушает вопросы и пересказ урока голосом.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

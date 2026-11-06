@@ -1,4 +1,4 @@
-// Ядро приложения «NOAH Учёба»: связь с программой, навигация, общие куски
+// Ядро приложения Qrack: связь с программой, навигация, общие куски
 // экранов. Экраны — функции, которые рисуют себя в узел и сами грузят
 // данные; навигация — стек экранов у каждой из четырёх вкладок.
 
@@ -677,7 +677,7 @@ export function start(root, first = "courses") {
 /* ── Шапки ─────────────────────────────────────────────────────────────── */
 
 /**
- * Шапка экрана. `home` — главная раздела (знак, NOAH, УЧЁБА, микрофон);
+ * Шапка экрана. `home` — главная раздела (знак, QRACK, микрофон);
  * `big` — заголовок раздела крупно; иначе — «Назад», заголовок, «Ещё».
  */
 export function header({ home = false, big = "", meta = null, title = "", back = true, close = false, onBack = null, right = null, onMic = null } = {}) {
@@ -688,7 +688,7 @@ export function header({ home = false, big = "", meta = null, title = "", back =
     img.src = "assets/noah-mark.svg";
     img.alt = "";
     mark.append(img);
-    bar.append(mark, el("span", "bar__name", "NOAH"), el("span", "bar__app", "Обучение"), el("span", "grow"));
+    bar.append(mark, el("span", "bar__name", "QRACK"), el("span", "grow"));
     if (onMic) bar.append(iconButton("mic", "Спросить Ноа", onMic));
     return bar;
   }

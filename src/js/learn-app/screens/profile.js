@@ -209,7 +209,7 @@ register("profile", (screen) => {
     );
     content.append(about);
     if (version) {
-      const foot = el("span", "small dim", `NOAH Учёба · ${version}`);
+      const foot = el("span", "small dim", `Qrack · ${version}`);
       foot.style.textAlign = "center";
       content.append(foot);
     }
