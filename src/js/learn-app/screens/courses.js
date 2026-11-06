@@ -273,17 +273,80 @@ function courseCard(course) {
   return row;
 }
 
-/** Вход в аккаунт через Telegram — без ключа вручную. */
+/** Как входят: подсказка под кнопкой, пока ждём возвращения. */
+const WAIT_HINT = {
+  telegram: "Открыла Telegram — нажмите там Start и вернитесь сюда.",
+};
+
+/**
+ * Способы входа — те же, что на сайте и в Ноа: Google, Яндекс, VK, GitHub,
+ * X, Telegram. Выбрал — открывается браузер или бот, приложение ждёт ключ.
+ */
+function chooseSignIn() {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    sheet("Вход в аккаунт", async (content, close) => {
+      content.append(el("span", "muted", "Один аккаунт на компьютере, телефоне и в браузере: курсы, прогресс и цели — везде."));
+      const list = el("div", "signin");
+      const status = el("span", "small muted");
+      list.append(loading());
+      content.append(list, status);
+      let offer;
+      try {
+        offer = await call("account_login_options", {}, { retries: 1 });
+      } catch (err) {
+        list.replaceChildren();
+        status.textContent = String(err);
+        return;
+      }
+      list.replaceChildren();
+      for (const option of offer.options ?? []) {
+        const pick = button("", async () => {
+          for (const other of list.querySelectorAll("button")) other.disabled = true;
+          status.textContent = WAIT_HINT[option.id] ?? `Открыла вход через ${option.title} в браузере — войдите и вернитесь сюда.`;
+          try {
+            await call("account_login_open", { link: option.link }, { retries: 0 });
+            const name = await call("account_login_wait", { code: offer.code }, { retries: 0, slow: true });
+            settled = true;
+            close();
+            resolve(name);
+          } catch (err) {
+            status.textContent = String(err);
+            for (const other of list.querySelectorAll("button")) other.disabled = false;
+          }
+        }, "btn btn--secondary signin__option");
+        pick.append(el("span", `signin__mark signin__mark--${option.id}`, option.title.slice(0, 1)), el("span", "", option.title));
+        list.append(pick);
+      }
+    }, () => {
+      if (!settled) reject(new Error("closed"));
+    });
+  });
+}
+
+/** Вход в аккаунт — способами сайта, без ключа вручную. */
 export function signInCard() {
   const card = el("div", "plate plate--active");
   card.append(label("// вход"), el("span", "continue__title", "Войдите в аккаунт"));
-  card.append(el("span", "continue__lead", "Подтянутся курсы, прогресс и мост — то же, что на компьютере."));
+  card.append(el("span", "continue__lead", "Google, Яндекс, Telegram и другие — как на сайте. Подтянутся курсы, прогресс и цели со всех устройств."));
   const status = el("span", "small muted");
   const go = button("", async () => {
     go.disabled = true;
-    status.textContent = isWeb ? "Открываю вход на сайте…" : "Открываю Telegram — нажмите там Start и вернитесь сюда.";
     try {
-      const name = await call("account_login");
+      let name;
+      if (isWeb) {
+        status.textContent = "Открываю вход на сайте…";
+        name = await call("account_login");
+      } else {
+        name = await chooseSignIn().catch((err) => {
+          if (err?.message === "closed") return null;
+          throw err;
+        });
+        if (name === null) {
+          go.disabled = false;
+          return;
+        }
+      }
       if (name) prefs.set("name", name);
       status.textContent = "Вход выполнен. Подтягиваю курсы…";
       // Курсы аккаунта приходят кусками — большой курс по мобильной сети
@@ -299,8 +362,7 @@ export function signInCard() {
       go.disabled = false;
     }
   }, "btn btn--primary");
-  // В браузере — вход сайта (Telegram или Google), на телефоне — бот Telegram.
-  go.append(icon("user", 16, 2.25), isWeb ? "Войти" : "Войти через Telegram");
+  go.append(icon("user", 16, 2.25), "Войти");
   card.append(go, status);
   return card;
 }

@@ -505,7 +505,26 @@ pub async fn pair_start() -> Result<(String, String), String> {
     Ok((code, link))
 }
 
-/// Ждёт, пока человек нажмёт Start у бота. Отдаёт ключ и имя аккаунта.
+/// Способы входа для приложения: код и ссылки — Google, Яндекс, VK, GitHub,
+/// X через браузер, Telegram через бота. Отдаёт `{ code, options: [{ id, title, link }] }`.
+pub async fn pair_options() -> Result<serde_json::Value, String> {
+    let (url, _) = settings();
+    let reply = post(&url, "/api/app/pair/start", "", &json!({})).await?;
+    let code = reply["code"].as_str().unwrap_or_default().to_string();
+    let mut options = reply["options"].as_array().cloned().unwrap_or_default();
+    // Сервер прежней версии отдаёт только ссылку на бота.
+    if options.is_empty() {
+        if let Some(link) = reply["link"].as_str().filter(|link| !link.is_empty()) {
+            options.push(json!({ "id": "telegram", "title": "Telegram", "link": link }));
+        }
+    }
+    if code.is_empty() || options.is_empty() {
+        return Err("Сайт не дал способов входа.".into());
+    }
+    Ok(json!({ "code": code, "options": options }))
+}
+
+/// Ждёт, пока человек войдёт любым способом. Отдаёт ключ и имя аккаунта.
 pub async fn pair_wait(code: &str) -> Result<(String, String), String> {
     let (url, _) = settings();
     let deadline = std::time::Instant::now() + Duration::from_secs(300);

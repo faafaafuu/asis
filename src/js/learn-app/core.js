@@ -726,8 +726,9 @@ export function header({ home = false, big = "", meta = null, title = "", back =
 /**
  * Лист снизу: выезжает, закрывается крестиком, тапом мимо или смахиванием
  * вниз — за ручку, шапку или содержимое, прокрученное к началу.
+ * `onClose` — когда лист закрылся любым способом.
  */
-export function sheet(title, fill) {
+export function sheet(title, fill, onClose) {
   const layer = el("div", "sheet");
   const body = el("div", "sheet__body");
   const head = el("div", "sheet__head");
@@ -736,6 +737,7 @@ export function sheet(title, fill) {
     if (closed) return;
     closed = true;
     voice.stop();
+    onClose?.();
     layer.style.pointerEvents = "none";
     if (still()) return layer.remove();
     const from = getComputedStyle(body).transform;

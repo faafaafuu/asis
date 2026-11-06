@@ -736,17 +736,54 @@ pub async fn account_login(app: AppHandle, state: State<'_, AppState>) -> Result
     #[cfg(desktop)]
     crate::pc::open(&link)?;
     let (token, name) = crate::platform::pair_wait(&code).await?;
+    signed_in(&app, &state, &token, &name)?;
+    Ok(name)
+}
+
+/// Сохраняет выданный ключ аккаунта — как если бы его вписали в «Площадку».
+fn signed_in(app: &AppHandle, state: &State<'_, AppState>, token: &str, name: &str) -> Result<(), String> {
     {
         let mut config = state.config_mut();
-        config.platform.token = crate::secret::protect(&token);
+        config.platform.token = crate::secret::protect(token);
         #[cfg(any(mobile, feature = "qrack"))]
         if crate::brains::adopt_site_bridge(&mut config) {
             let (language, wake) = (config.ui.language.clone(), config.voice.wake_name.clone());
             state.rebuild_provider(&config.ai, &language, &wake);
         }
     }
-    persist(&app, &state)?;
-    log::info!("вход в аккаунт через Telegram: {name}");
+    persist(app, state)?;
+    log::info!("вход в аккаунт: {name}");
+    Ok(())
+}
+
+/// Вход как на сайте: способы — Google, Яндекс, VK, GitHub, X, Telegram.
+/// Отдаёт код входа и ссылки; дальше — `account_login_open` и `account_login_wait`.
+#[tauri::command]
+pub async fn account_login_options() -> Result<serde_json::Value, String> {
+    crate::platform::pair_options().await
+}
+
+/// Открывает выбранный способ входа: страницу провайдера в браузере или бота.
+#[tauri::command]
+pub fn account_login_open(link: String) -> Result<(), String> {
+    let allowed = link.starts_with("https://t.me/") || link.starts_with(&format!("{}/auth/", crate::config::DEFAULT_PLATFORM_URL));
+    if !allowed {
+        return Err("Незнакомая ссылка входа.".into());
+    }
+    #[cfg(mobile)]
+    {
+        let _ = crate::mobile::call::<serde_json::Value>("openUrl", serde_json::json!({ "url": link }));
+    }
+    #[cfg(desktop)]
+    crate::pc::open(&link)?;
+    Ok(())
+}
+
+/// Ждёт, пока человек войдёт выбранным способом, и сохраняет ключ. Отдаёт имя.
+#[tauri::command]
+pub async fn account_login_wait(app: AppHandle, state: State<'_, AppState>, code: String) -> Result<String, String> {
+    let (token, name) = crate::platform::pair_wait(&code).await?;
+    signed_in(&app, &state, &token, &name)?;
     Ok(name)
 }
 

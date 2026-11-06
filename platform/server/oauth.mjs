@@ -112,6 +112,17 @@ async function postForm(url, body, headers = {}) {
  */
 const fresh = () => `/?v=${Date.now().toString(36)}`;
 
+/** Страница после входа для приложения: ключ заберёт само приложение. */
+function appPage(res, title, text) {
+  const safe = (value) => String(value).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'" });
+  res.end(
+    `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${safe(title)} — Qrack</title>` +
+      `<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#060809;color:#c5eef3;font:17px/1.5 system-ui,sans-serif}main{max-width:420px;padding:32px;text-align:center}h1{color:#f2fdff;font-size:26px;margin:0 0 12px}</style>` +
+      `</head><body><main><h1>${safe(title)}</h1><p>${safe(text)}</p></main></body></html>`,
+  );
+}
+
 export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession, cookies, cookieDomain = "", mirrorOrigin = () => "" }) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS identities (
@@ -185,26 +196,34 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     return userId;
   };
 
-  /* ── Вход в приложение на телефоне ─────────────────────────────────────
-     Приложение не держит cookie сайта: ему нужен ключ площадки. Вход тот
-     же, что на сайте, — через бота в Telegram: приложение показывает ссылку,
-     человек жмёт Start, и приложение забирает выпущенный для него ключ. По
-     ключу дальше идут курсы, прогресс, мост и сборка курсов. */
+  /* ── Вход в приложение (телефон, программа на компьютере) ──────────────
+     Приложение не держит cookie сайта: ему нужен ключ площадки. Способы входа
+     те же, что на сайте: Google, Яндекс, VK, GitHub, X — через браузер, Telegram
+     — через бота. Приложение получает код и ссылки, человек входит любым
+     способом, и приложение забирает выпущенный для него ключ. По ключу дальше
+     идут курсы, прогресс, мост и сборка курсов. */
 
   route("POST", /^\/api\/app\/pair\/start$/, () => {
-    if (!tgBot.token || !tgBot.name) throw new Fail(404, "Вход через Telegram не настроен.");
     const code = b64url(randomBytes(12)).replace(/[^A-Za-z0-9]/g, "").slice(0, 16);
-    tgCodes.set(code, { at: Date.now(), user: null, app: true });
-    return { code, link: `https://t.me/${tgBot.name}?start=${code}` };
+    // Ссылки — на основной адрес: возврат от провайдеров зарегистрирован там.
+    const options = enabled(null)
+      .filter((option) => option.id !== "telegram")
+      .map((option) => ({ ...option, link: `${PUBLIC_URL}/auth/${option.id}?pair=${code}` }));
+    const telegram = tgBot.token && tgBot.name ? `https://t.me/${tgBot.name}?start=${code}` : "";
+    if (telegram) options.push({ id: "telegram", title: "Telegram", link: telegram });
+    if (!options.length) throw new Fail(404, "Вход не настроен.");
+    tgCodes.set(code, { at: Date.now(), user: null, userId: null, app: true });
+    // link — для прежних версий приложения, которые входят только через Telegram.
+    return { code, link: telegram, options };
   });
 
   route("GET", /^\/api\/app\/pair\/status$/, ({ url }) => {
     const code = String(url.searchParams.get("code") ?? "");
     const entry = tgCodes.get(code);
-    if (!entry?.app || Date.now() - entry.at > TG_TTL) throw new Fail(410, "Время входа вышло — нажмите «Войти через Telegram» ещё раз.");
-    if (!entry.user) return { done: false };
+    if (!entry?.app || Date.now() - entry.at > TG_TTL) throw new Fail(410, "Время входа вышло — нажмите «Войти» ещё раз.");
+    if (!entry.user && !entry.userId) return { done: false };
     tgCodes.delete(code);
-    const userId = userFor("telegram", entry.user);
+    const userId = entry.userId ?? userFor("telegram", entry.user);
     // Ключ телефона один: прежний, выпущенный при прошлом входе, больше не нужен.
     db.prepare("DELETE FROM tokens WHERE user_id = ? AND label = 'Телефон'").run(userId);
     const token = `noah_${randomBytes(24).toString("base64url")}`;
@@ -251,14 +270,17 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
    */
   const callbackFor = (key, back) => (back && MIRROR_CALLBACK.has(key) ? `${back}/auth/${key}/callback` : `${PUBLIC_URL}/auth/${key}/callback`);
 
-  const start = (req, res, key) => {
+  const start = (req, res, url, key) => {
     const p = PROVIDERS[key];
     if (!p?.id || !p.secret) throw new Fail(404, "Этот способ входа не настроен.");
     const state = b64url(randomBytes(24));
     const verifier = b64url(randomBytes(48));
-    const back = mirrorOrigin(req);
+    // Вход для приложения: ключ получит приложение по коду, а не этот браузер.
+    const code = String(url.searchParams.get("pair") ?? "");
+    const pair = /^[A-Za-z0-9]{8,32}$/.test(code) && tgCodes.get(code)?.app ? code : null;
+    const back = pair ? null : mirrorOrigin(req);
     const redirect = callbackFor(key, back);
-    states.set(state, { key, verifier, at: Date.now(), back, redirect });
+    states.set(state, { key, verifier, at: Date.now(), back, redirect, pair });
     const params = new URLSearchParams({
       response_type: "code",
       client_id: p.id,
@@ -283,6 +305,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     const saved = states.get(state);
     states.delete(state);
     const back = (message) => {
+      if (saved?.pair) return appPage(res, "Не получилось войти", `${message} Вернитесь в Qrack и нажмите «Войти» ещё раз.`);
       res.writeHead(302, { Location: `${saved?.back ?? ""}${fresh()}#/login?error=${encodeURIComponent(message)}` });
       res.end();
     };
@@ -308,6 +331,12 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
       const token = await postForm(p.token, body, headers);
       const profile = await p.profile(token);
       if (!profile.subject) throw new Error("провайдер не прислал профиль");
+      if (saved.pair) {
+        const entry = tgCodes.get(saved.pair);
+        if (!entry?.app || Date.now() - entry.at > TG_TTL) return back("Время входа вышло.");
+        entry.userId = userFor(key, profile, null, !p.untrustedEmail);
+        return appPage(res, "Вход выполнен", "Вернитесь в Qrack — курсы, прогресс и цели подтянутся сами. Эту вкладку можно закрыть.");
+      }
       const linking = Boolean(sessionUser(req));
       const cookie = signIn(req, key, profile, !p.untrustedEmail);
       res.writeHead(302, { Location: `${saved.back ?? ""}${fresh()}${linking ? "#/account" : "#/connect"}`, "Set-Cookie": cookie });
@@ -376,7 +405,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
             markup = { inline_keyboard: [[{ text: "🌐 Вернуться в NOAH", url: `${entry.base ?? PUBLIC_URL}/auth/telegram/finish?code=${match[1]}` }]] };
             // Вход в приложение: возвращаться не на сайт, а в приложение.
             if (entry.app) {
-              reply = "Готово — вход выполнен. Вернитесь в приложение Ноа: курсы и прогресс подтянутся сами.";
+              reply = "Готово — вход выполнен. Вернитесь в приложение: курсы и прогресс подтянутся сами.";
               markup = undefined;
             }
           }
@@ -423,7 +452,7 @@ export function mountOAuth({ route, db, Fail, readJson, sessionUser, openSession
     const match = /^\/auth\/(google|github|x|yandex|vk)(\/callback)?$/.exec(url.pathname);
     if (!match || req.method !== "GET") return false;
     if (match[2]) await finish(req, res, url, match[1]);
-    else start(req, res, match[1]);
+    else start(req, res, url, match[1]);
     return true;
   };
 }

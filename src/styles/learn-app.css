@@ -3207,3 +3207,14 @@ button.plate:active,
 [data-theme="noah"] .m-cell.is-now {
   box-shadow: inset 0 0 0 2px #2b5bc4 !important;
 }
+
+/* Вход: способы как на сайте — Google, Яндекс, VK, GitHub, X, Telegram. */
+.signin { display: grid; gap: 8px; margin: 16px 0 12px; }
+.signin__option { display: grid; grid-template-columns: 28px 1fr; justify-content: start; justify-items: start; gap: 12px; height: 48px; text-align: left; }
+.signin__mark { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; font: 700 14px/1 var(--font-ui, sans-serif); color: #fff; background: #3a4252; }
+.signin__mark--google { background: #4285f4; }
+.signin__mark--yandex { background: #fc3f1d; }
+.signin__mark--vk { background: #0077ff; }
+.signin__mark--github { background: #24292f; }
+.signin__mark--x { background: #000; }
+.signin__mark--telegram { background: #2aabee; }

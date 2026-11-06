@@ -311,6 +311,18 @@
       case "account_login":
         await wait(1500);
         return "Владелец";
+      // Вход как на сайте: способы, открыть выбранный, дождаться ключа.
+      case "account_login_options":
+        await wait(400);
+        return {
+          code: "demo",
+          options: ["Google", "Яндекс", "VK", "GitHub", "Telegram"].map((title) => ({ id: { Google: "google", Яндекс: "yandex", VK: "vk", GitHub: "github", Telegram: "telegram" }[title], title, link: "" })),
+        };
+      case "account_login_open":
+        return null;
+      case "account_login_wait":
+        await wait(1800);
+        return "Владелец";
       case "app_version":
         return "1.15.0";
 
