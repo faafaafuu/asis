@@ -12,7 +12,8 @@ import { guideShelf } from "./guide.js";
 import { confirmAction } from "../gestures.js";
 import { todayCard } from "./goals.js";
 import { goals } from "../goals.js";
-import { buildLocal, buildAction } from "../builder.js";
+import { buildLocal, buildAction, onBuild } from "../builder.js";
+import { modelRow, openModels } from "../models.js";
 
 register("courses", (screen) => {
   screen.append(header({ home: true, onMic: () => openAssistant() }));
@@ -35,6 +36,7 @@ register("courses", (screen) => {
 
   let alive = true;
   let waitTimer = 0;
+  let stopWatch = null;
   let buildTimer = 0;
   (async () => {
     // Курсы, практика и вход — с устройства, без сети: экран рисуется сразу.
@@ -151,12 +153,16 @@ register("courses", (screen) => {
       if (shown.some((b) => b.status === "running")) buildTimer = setTimeout(refreshBuilds, 8000);
     }
     refreshBuilds();
+    stopWatch = onBuild(() => {
+      if (alive) store.builds().then((builds) => alive && paint(builds));
+    });
   })();
   return {
     cleanup: () => {
       alive = false;
       clearTimeout(waitTimer);
       clearTimeout(buildTimer);
+      stopWatch?.();
     },
   };
 });
@@ -418,7 +424,38 @@ export function buildCourse() {
     content.append(el("span", "muted", "Напишите, о чём курс и зачем. Ноа составит план и напишет курс тема за темой: урок, понятия, карточки, задачи, мини-экзамен. По первой теме можно учиться сразу, пока остальные дописываются."));
     const goal = el("textarea", "field");
     goal.placeholder = "Например: матанализ к сессии — пределы, производные, Тейлор, интегралы; нужны доказательства для устного";
-    const model = el("span", "small muted", "Соберу на модели из Профиль → Модель. Не закрывайте приложение, пока идёт сборка: прервётся — продолжите с готовой темы.");
+    // На какой модели собирать — здесь же, с «Сменить»: без модели курс не собрать.
+    const model = el("div", "build-model");
+    const noModel = el("span", "error");
+    const checkModel = async () => {
+      const ai = await call("ai_settings").catch(() => null);
+      const ready = Boolean(ai?.endpoint);
+      noModel.textContent = ready ? "" : "Модель не выбрана — нажмите на строку выше и выберите OpenRouter, Ollama, мост или свою.";
+      go.disabled = !ready;
+      return ready;
+    };
+    modelRow().then((row) => {
+      // Строка открывает выбор модели; после выбора — проверяем ещё раз.
+      row.addEventListener("click", () => setTimeout(checkModel, 400));
+      model.replaceChildren(row);
+    });
+    // Подробно или быстро: на медленной модели «быстро» — в 2–3 раза скорее.
+    let depth = "full";
+    const speed = el("div", "seg");
+    for (const [value, text] of [
+      ["full", "Подробно"],
+      ["brief", "Быстро — короче уроки"],
+    ]) {
+      const option = el("button", "", text);
+      option.type = "button";
+      option.setAttribute("aria-pressed", String(value === depth));
+      option.addEventListener("click", () => {
+        depth = value;
+        for (const other of speed.children) other.setAttribute("aria-pressed", String(other === option));
+      });
+      speed.append(option);
+    }
+    const note = el("span", "small muted", "Не закрывайте приложение, пока идёт сборка: прервётся — «Продолжить» доберёт с готовой темы. Учиться можно с первой темы.");
     // Что нужно в курсе: лишнее не показывается и не тратит силы модели.
     // Пока человек не трогал переключатели, они следуют за темой: для
     // матанализа терминал выключен, для DevOps — включён.
@@ -464,7 +501,11 @@ export function buildCourse() {
       go.disabled = true;
       error.textContent = "";
       try {
-        buildLocal(text, { ...choice });
+        if (!(await checkModel())) {
+          go.disabled = false;
+          return;
+        }
+        buildLocal(text, { ...choice }, depth);
         close();
         toast("Курс собирается — первая тема появится через несколько минут");
         store.forget();
@@ -482,7 +523,8 @@ export function buildCourse() {
         go.disabled = false;
       }
     }, "btn btn--primary btn--big");
-    content.append(goal, parts, model, error, go);
+    content.append(model, noModel, goal, speed, parts, note, error, go);
+    checkModel();
     goal.focus();
   });
 }
@@ -500,7 +542,21 @@ function buildCard(build, changed) {
   card.append(top);
   if (build.total) card.append(progress((build.done / build.total) * 100, "m-bar"));
   const what = running ? build.message || (build.total ? `Готово ${build.done} из ${build.total} тем` : "Составляю план курса") : build.message;
+  if (running && build.total) card.append(el("span", "small build-card__step", `Тема ${Math.min(build.done + 1, build.total)} из ${build.total}`));
   if (what) card.append(el("span", running ? "small muted" : "small build-card__why", what));
+  // Сборка на устройстве: сколько идёт, на какой модели, сколько модель думает
+  // над этим шагом. Долго молчит — так и пишем, и даём сменить модель.
+  if (running && build.local && build.startedAt) {
+    const now = Date.now();
+    const parts = [`идёт ${elapsed(now - build.startedAt)}`];
+    if (build.model) parts.push(build.model);
+    if (build.waitingSince) parts.push(`модель думает ${elapsed(now - build.waitingSince)}`);
+    card.append(el("span", "small dim build-card__time", parts.join(" · ")));
+    if (build.waitingSince && now - build.waitingSince > 180_000) {
+      const slow = el("span", "small build-card__why", "Модель отвечает дольше 3 минут — так бывает на бесплатных и локальных моделях. Можно подождать, остановить или сменить модель: готовые темы останутся, «Продолжить» доберёт с того же места.");
+      card.append(slow);
+    }
+  }
   if (build.total && !running) card.append(el("span", "small dim", `Готово ${build.done} из ${build.total} тем — по ним уже можно учиться`));
   const tools = el("div", "build-tools");
   const act = (text, run, kind = "btn btn--secondary") => {
@@ -519,6 +575,7 @@ function buildCard(build, changed) {
     });
     return btn;
   };
+  if (running && build.local) tools.append(act("Сменить модель", async () => openModels(), "btn btn--plain"));
   if (running) {
     tools.append(
       act("Остановить", async () => {
@@ -542,3 +599,12 @@ function buildCard(build, changed) {
 }
 
 export { topicCard };
+
+/** 1 мин 20 с, 45 с — сколько идёт сборка или думает модель. */
+function elapsed(ms) {
+  const sec = Math.max(0, Math.round(ms / 1000));
+  if (sec < 60) return `${sec} с`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} мин${sec % 60 ? ` ${sec % 60} с` : ""}`;
+  return `${Math.floor(min / 60)} ч ${min % 60} мин`;
+}

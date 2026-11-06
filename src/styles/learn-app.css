@@ -3415,3 +3415,15 @@ button.plate:active,
   .suf-demo { animation: none; background: rgb(var(--tint) / 0.22); }
 }
 
+/* Сборка курса: шаг, время, модель; выбор модели в окне сборки. */
+.build-card__step {
+  color: var(--c-accent);
+  letter-spacing: 0.04em;
+}
+.build-card__time {
+  font-variant-numeric: tabular-nums;
+}
+.build-model .setting {
+  width: 100%;
+}
+

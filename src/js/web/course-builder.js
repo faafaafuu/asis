@@ -99,7 +99,16 @@ const sectionCount = (lesson) => lesson.split("\n").filter((line) => line.starts
 
 /* ── Подсказки модели ───────────────────────────────────────────────────── */
 
-function planRules(format) {
+/**
+ * Подробность курса. «Быстро» — меньше тем и уроки короче: курс готов в
+ * 2–3 раза быстрее, что важно на медленной или бесплатной модели.
+ */
+const DEPTH = {
+  full: { topics: "3–10 тем по объёму: узкая область — 3–4 темы, профессия с нуля — 6–10", words: "1500–2500 слов", sections: "4–7", lessonTokens: 8000 },
+  brief: { topics: "3–5 тем: только главное, без второстепенного", words: "700–1100 слов, плотно и без воды", sections: "3–4", lessonTokens: 4000 },
+};
+
+function planRules(format, depth = DEPTH.full) {
   return [
     "Ты — методист NOAH: собираешь учебный курс для приложения Ноа по методике ниже. Сейчас нужен только план курса.",
     formatPart(format, "Порядок работы"),
@@ -107,7 +116,7 @@ function planRules(format) {
     formatPart(format, "Тема", { shallow: true }),
     [
       "Составь план по просьбе человека:",
-      "- 3–10 тем по объёму: узкая область — 3–4 темы, профессия с нуля — 6–10. Тема — одна связная область на 6–15 понятий; от простого к сложному, каждая следующая опирается на прошлые.",
+      `- ${depth.topics}. Тема — одна связная область на 6–15 понятий; от простого к сложному, каждая следующая опирается на прошлые.`,
       '- id курса и тем — латиница, цифры и дефис, коротко и по смыслу: "cabling", "cctv-basics".',
       "- summary темы — одна строка: что человек поймёт и сможет после неё.",
       "- aliases — как курс и тему назовут голосом, 1–3 варианта по-русски.",
@@ -124,7 +133,7 @@ function outline(plan, current) {
   return plan.topics.map((t, at) => `${at + 1}. ${t.title} — ${t.summary}${t.id === current ? "   ← эта тема" : ""}`).join("\n");
 }
 
-function lessonRules(format, plan, topic, earlier) {
+function lessonRules(format, plan, topic, earlier, depth = DEPTH.full) {
   const known = earlier.length
     ? `\n\nПонятия прошлых тем — их не объясняй заново, опирайся на них и ссылайся:\n${earlier.map((c) => `- ${c.term}`).join("\n")}`
     : "";
@@ -135,8 +144,8 @@ function lessonRules(format, plan, topic, earlier) {
     [
       "Требования к уроку этой темы:",
       "- Перед первым разделом — 2–3 предложения вступления: о чём тема и зачем она.",
-      "- 4–7 разделов «## …», в каждом одна мысль: что это → зачем → как устроено внутри (кто что делает и в каком порядке) → живой пример → где ошибаются.",
-      "- 1500–2500 слов. Ключевые термины — **жирным**, команды и конфиги — в блоках ```.",
+      `- ${depth.sections} разделов «## …», в каждом одна мысль: что это → зачем → как устроено внутри (кто что делает и в каком порядке) → живой пример → где ошибаются.`,
+      `- ${depth.words}. Ключевые термины — **жирным**, команды и конфиги — в блоках \`\`\`.`,
       "- Всё, о чём потом спросят, в разделе объяснено, а не только названо.",
       "- Не повторяй прошлые темы — продолжай с того места, где они закончились.",
       "Пиши по-русски. Верни только текст урока в Markdown — без вступлений вроде «Вот урок» и без ``` вокруг всего ответа.",
@@ -412,7 +421,8 @@ async function pause(ms, check) {
  * `resume` — сохранённый недособранный курс (с полем building): сборка
  * продолжится со следующей темы. `taken` — id курсов, которые уже есть.
  */
-export async function buildCourse({ goal, format, chat, save, progress = () => {}, stopped = () => false, resume = null, taken = new Set() }) {
+export async function buildCourse({ goal, format, chat, save, progress = () => {}, stopped = () => false, resume = null, taken = new Set(), depth: depthName = "full" }) {
+  const depth = DEPTH[depthName] ?? DEPTH.full;
   const check = () => {
     if (stopped()) throw new Stopped("Сборка остановлена.");
   };
@@ -446,7 +456,7 @@ export async function buildCourse({ goal, format, chat, save, progress = () => {
     progress({ stage: "plan", done: 0, total: 0, message: "Составляю план курса" });
     for (let attempt = 0; attempt < 2 && !plan; attempt++) {
       check();
-      const raw = jsonIn(await ask([{ role: "system", content: planRules(format) }, { role: "user", content: goal }], { json: true, maxTokens: 2500 }));
+      const raw = jsonIn(await ask([{ role: "system", content: planRules(format, depth) }, { role: "user", content: goal }], { json: true, maxTokens: 2500 }));
       plan = shapePlan(raw, taken);
     }
     if (!plan) throw new Error("Модель не прислала план курса — попробуйте сформулировать тему иначе.");
@@ -466,10 +476,10 @@ export async function buildCourse({ goal, format, chat, save, progress = () => {
       const text = cleanLesson(
         await ask(
           [
-            { role: "system", content: lessonRules(format, plan, planTopic, earlier) },
+            { role: "system", content: lessonRules(format, plan, planTopic, earlier, depth) },
             { role: "user", content: `Напиши урок темы «${planTopic.title}»: ${planTopic.summary}\n\nЧто человек хотел от курса: ${goal}` },
           ],
-          { maxTokens: 8000, long: true },
+          { maxTokens: depth.lessonTokens, long: true },
         ),
       );
       if (sectionCount(text) >= 3 && chars(text) >= 1500) return text;

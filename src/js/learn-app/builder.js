@@ -11,6 +11,7 @@
 import { buildCourse as runBuilder, Stopped } from "../web/course-builder.js";
 import { call, prefs } from "./core.js";
 import { setCourseChoice } from "../learn-features.js";
+import { modelName } from "./models.js";
 
 const KEY = "localBuild";
 let current = null;
@@ -49,19 +50,53 @@ export function localBuilds() {
 
 export const isBuilding = () => current?.state.status === "running";
 
-function start({ goal, resume = null, choice = null }) {
+function start({ goal, resume = null, choice = null, depth = null }) {
   if (isBuilding()) throw new Error("Уже собирается курс — дождитесь его или остановите.");
+  const now = Date.now();
   const control = {
     stop: false,
-    state: { status: "running", goal, title: resume?.title ?? "", message: "Составляю план курса", done: resume?.topics?.length ?? 0, total: resume?.building?.total ?? 0, courseId: resume?.id ?? "", building: resume?.building ?? null },
+    state: {
+      status: "running",
+      goal,
+      depth: depth ?? "full",
+      title: resume?.title ?? "",
+      message: "Составляю план курса",
+      done: resume?.topics?.length ?? 0,
+      total: resume?.building?.total ?? 0,
+      courseId: resume?.id ?? "",
+      building: resume?.building ?? null,
+      // Что видно в карточке: сколько идёт сборка, на какой модели и сколько
+      // модель думает над текущим шагом — чтобы было ясно, жива ли сборка.
+      startedAt: now,
+      stepAt: now,
+      waitingSince: null,
+      answers: 0,
+      model: "",
+    },
   };
   current = control;
   remember(control.state);
   changed();
-  const chat = (messages, opts = {}) => {
+  // Пока идёт — карточка обновляет время сама.
+  const ticker = setInterval(() => current === control && changed(), 5000);
+  call("ai_settings")
+    .then((ai) => {
+      control.state.model = ai?.endpoint ? modelName(ai.model, ai.endpoint) : "";
+      changed();
+    })
+    .catch(() => {});
+  const chat = async (messages, opts = {}) => {
     const system = messages.find((m) => m.role === "system")?.content ?? "";
     const said = messages.filter((m) => m.role !== "system").map((m) => m.content).join("\n\n");
-    return call("learn_compose", { rules: system, said, maxTokens: opts.maxTokens ?? 4000, json: Boolean(opts.json) }, { retries: 0, slow: true });
+    control.state.waitingSince = Date.now();
+    changed();
+    try {
+      return await call("learn_compose", { rules: system, said, maxTokens: opts.maxTokens ?? 4000, json: Boolean(opts.json) }, { retries: 0, slow: true });
+    } finally {
+      control.state.waitingSince = null;
+      control.state.answers += 1;
+      changed();
+    }
   };
   (async () => {
     const format = await call("learn_course_format", {}, { retries: 1 });
@@ -85,6 +120,7 @@ function start({ goal, resume = null, choice = null }) {
         changed();
       },
       progress: (p) => {
+        if (p.message !== control.state.message) control.state.stepAt = Date.now();
         Object.assign(control.state, { message: p.message, done: p.done, total: p.total, title: p.title ?? control.state.title, courseId: p.courseId ?? control.state.courseId });
         remember(control.state);
         changed();
@@ -92,6 +128,7 @@ function start({ goal, resume = null, choice = null }) {
       stopped: () => control.stop,
       resume,
       taken,
+      depth: control.state.depth,
     });
   })()
     .then(() => {
@@ -105,6 +142,10 @@ function start({ goal, resume = null, choice = null }) {
       control.state.message = stopped ? "Сборка остановлена — готовые темы остались." : String(err?.message ?? err).replace(/^Error:\s*/, "");
     })
     .finally(() => {
+      clearInterval(ticker);
+      control.state.waitingSince = null;
+      // Остановили раньше — состояние уже записано, новое не трогаем.
+      if (current !== control) return;
       current = null;
       // Готовый курс — карточка сборки больше не нужна.
       remember(control.state.status === "done" ? null : control.state);
@@ -113,13 +154,24 @@ function start({ goal, resume = null, choice = null }) {
 }
 
 /** Собрать курс по цели — моделью из настроек. */
-export function buildLocal(goal, choice = null) {
-  start({ goal, choice });
+export function buildLocal(goal, choice = null, depth = "full") {
+  start({ goal, choice, depth });
 }
 
-/** Остановить: текущий запрос доработает, следующий не начнётся. */
+/**
+ * Остановить — сразу: карточка показывает «остановлена», а ответ модели на
+ * текущий шаг, если придёт, в дело не пойдёт.
+ */
 export function stopLocal() {
-  if (current) current.stop = true;
+  const control = current;
+  if (!control) return;
+  control.stop = true;
+  control.state.status = "stopped";
+  control.state.waitingSince = null;
+  control.state.message = "Сборка остановлена — готовые темы остались.";
+  current = null;
+  remember(control.state);
+  changed();
 }
 
 /** Продолжить прерванную — со следующей темы. */
@@ -127,9 +179,9 @@ export async function resumeLocal() {
   const state = saved();
   if (!state) throw new Error("Нечего продолжать.");
   // Плана ещё не было — собираем заново по той же цели.
-  if (!state.building?.plan || !state.courseId) return start({ goal: state.goal });
+  if (!state.building?.plan || !state.courseId) return start({ goal: state.goal, depth: state.depth });
   const course = await call("learn_course_raw", { id: state.courseId }, { retries: 1 });
-  start({ goal: state.goal, resume: { ...course, building: state.building } });
+  start({ goal: state.goal, depth: state.depth, resume: { ...course, building: state.building } });
 }
 
 /** Убрать карточку: готовые темы остаются курсом. */
