@@ -89,6 +89,12 @@
   let speakingUntil = 0;
   /** Сборка курса на витрине: остановили, продолжили, убрали. */
   let buildState = "";
+  /** Модель на витрине: текущая и запомненные. */
+  let aiNow = { endpoint: "https://m.noahlab.ru/api/noa/bridge/chat/completions", model: "claude-code-bridge:free" };
+  const brains = [
+    { endpoint: "https://m.noahlab.ru/api/noa/bridge/chat/completions", model: "claude-code-bridge:free", kind: "мост" },
+    { endpoint: "https://openrouter.ai/api/v1/chat/completions", model: "z-ai/glm-5.2:free", kind: "облако" },
+  ];
   let phoneVoice = "phone";
   const stats = { today: 25, week: 110, streak: 5, sessionsToday: 1 };
 
@@ -278,6 +284,25 @@
         return { text: "Чем сеть bridge отличается от host?" };
       case "plugin:sufler|clipboard":
         return { text: "docker compose ps" };
+      /* ── Модель ── */
+      case "ai_settings":
+        return { provider: "http", endpoint: aiNow.endpoint, apiKey: "••••", model: aiNow.model, proxy: "" };
+      case "brains_list":
+        return brains.map((b) => ({ ...b, current: b.endpoint === aiNow.endpoint && b.model === aiNow.model }));
+      case "brains_use":
+        aiNow = { endpoint: args.endpoint, model: args.model };
+        return `Переключила на ${args.model}`;
+      case "save_ai_settings":
+        aiNow = { endpoint: args.settings.endpoint, model: args.settings.model };
+        if (!brains.some((b) => b.endpoint === aiNow.endpoint && b.model === aiNow.model)) brains.unshift({ ...aiNow, kind: "облако" });
+        return null;
+      case "cloud_models":
+        await wait(600);
+        return [{ id: "z-ai/glm-5.2:free", free: true }, { id: "anthropic/claude-sonnet-5.5" }, { id: "deepseek/deepseek-v4" }];
+      case "test_ai":
+        await wait(800);
+        if (/bad/.test(aiNow.model)) throw "Сервис не нашёл такую модель.";
+        return "Альбедо — доля света, которую поверхность отражает.";
       case "learn_sync":
         await wait(900);
         return false;

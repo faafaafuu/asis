@@ -289,11 +289,13 @@ pub fn site_bridge(config: &Config) -> Option<Brain> {
 /// Включает мост через сайт, если модели ещё нет — так телефон сразу
 /// отвечает после того, как в него вписали ключ площадки.
 pub fn adopt_site_bridge(config: &mut Config) -> bool {
-    // На iPhone программа — только обучение, выбора модели там нет: модель —
-    // всегда мост через сайт. Иначе на телефоне оставалась модель из прошлых
-    // установок (с чужим или старым ключом), и Ноа отвечала «не принял ключ».
+    // На iPhone модель, которую человек не выбирал сам, — мост через сайт:
+    // иначе оставалась модель из прошлых установок (с чужим или старым
+    // ключом), и Ноа отвечала «не принял ключ». Выбранная в настройках
+    // приложения (`chosen`) остаётся.
     let ours = config.ai.endpoint.contains("/api/noa/bridge");
-    let has_model = !cfg!(target_os = "ios") && config.ai.provider == "http" && !config.ai.endpoint.trim().is_empty() && !ours;
+    let picked = !cfg!(target_os = "ios") || config.ai.chosen;
+    let has_model = picked && config.ai.provider == "http" && !config.ai.endpoint.trim().is_empty() && !ours;
     if ours && config.ai.provider == "http" && config.ai.model == "claude-code-bridge:free" {
         return false;
     }
@@ -511,6 +513,7 @@ fn switch(app: &AppHandle, brain: Brain) -> String {
         config.ai.endpoint = brain.endpoint.clone();
         config.ai.model = brain.model.clone();
         config.ai.proxy = brain.proxy.clone();
+        config.ai.chosen = true;
         // Самый свежий ключ этого сервиса — он первым в списке запомненных.
         let fresh = key_for(&config, &brain.endpoint);
         let key = if fresh.is_empty() { brain.api_key.clone() } else { fresh };

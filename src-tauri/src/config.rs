@@ -267,6 +267,12 @@ pub struct AiConfig {
     /// лежал бы открытым, а обещание защиты было бы пустым.
     #[serde(skip)]
     pub key_stored_plain: bool,
+
+    /// Модель выбрал человек — в настройках или списком. На телефоне без
+    /// этой отметки модель при запуске ставится на мост через сайт (там
+    /// часто оставалась модель прежних установок с чужим ключом); с ней —
+    /// выбор человека не трогается.
+    pub chosen: bool,
 }
 
 impl Default for AiConfig {
@@ -310,6 +316,7 @@ impl Default for AiConfig {
             retries: 1,
             retry_backoff_ms: 400,
             key_stored_plain: false,
+            chosen: false,
         }
     }
 }

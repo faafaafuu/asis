@@ -3,6 +3,7 @@
 import { el, icon, label, header, nav, register, call, prefs, toast, plural, loading, isWeb } from "../core.js";
 import { store } from "../store.js";
 import { signInCard, buildCourse } from "./courses.js";
+import { modelRow } from "../models.js";
 
 function setting(name, hint, on, onToggle) {
   const row = el("button", "setting");
@@ -115,6 +116,9 @@ register("profile", (screen) => {
           ? link("Модель подключена", model.kind === "bridge" ? "Мост к подписке — как в программе" : model.model || model.kind, "check", () => (location.href = "/app/#settings"))
           : link("Подключить модель", "Без неё не работают ответы Ноа, проверка и разборы", "plus", () => (location.href = "/app/#settings")),
       );
+    } else {
+      // В приложении — свой выбор модели, как у Ноа на компьютере.
+      settings.append(label("// модель"), await modelRow());
     }
     content.append(settings);
 

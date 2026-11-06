@@ -247,6 +247,7 @@ pub fn save_ai_settings(
         config.ai.provider = settings.provider;
         config.ai.model = settings.model;
         config.ai.proxy = settings.proxy;
+        config.ai.chosen = true;
         // Пустое поле ключа означает «не менять»: в окно он приходит замаскированным,
         // и сохранять маску вместо настоящего ключа нельзя.
         let moved = config.ai.endpoint.trim().trim_end_matches('/') != settings.endpoint.trim().trim_end_matches('/');
