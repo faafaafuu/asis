@@ -376,8 +376,25 @@ export const nav = {
   },
 };
 
+/** Знак и QRACK — всегда на главную: к корню «Обучения». */
+function brand(className) {
+  const box = el("button", className);
+  box.type = "button";
+  box.setAttribute("aria-label", "Qrack — на главную");
+  const mark = el("span", "bar__mark");
+  const img = el("img");
+  img.src = "assets/noah-mark.svg";
+  img.alt = "";
+  mark.append(img);
+  box.append(mark, el("span", "bar__name", "QRACK"));
+  box.addEventListener("click", () => nav.tab("courses", true));
+  return box;
+}
+
 function tabBar() {
   const bar = el("nav", "tabs");
+  // На компьютере меню — сбоку, и знак с названием — над ним.
+  bar.append(brand("tabs__brand"));
   const row = el("div", "tabs__row");
   row.style.gridTemplateColumns = `repeat(${TABS.length}, minmax(0, 1fr))`;
   for (const tab of TABS) {
@@ -692,12 +709,7 @@ export function start(root, first = "courses") {
 export function header({ home = false, big = "", meta = null, title = "", back = true, close = false, onBack = null, right = null, onMic = null } = {}) {
   const bar = el("header", home ? "bar bar--home" : big ? "bar bar--title" : "bar");
   if (home) {
-    const mark = el("span", "bar__mark");
-    const img = el("img");
-    img.src = "assets/noah-mark.svg";
-    img.alt = "";
-    mark.append(img);
-    bar.append(mark, el("span", "bar__name", "QRACK"), el("span", "grow"));
+    bar.append(brand("bar__brand"), el("span", "grow"));
     if (onMic) bar.append(iconButton("mic", "Спросить Ноа", onMic));
     return bar;
   }

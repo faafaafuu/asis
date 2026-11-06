@@ -5,7 +5,7 @@
 // (ai_explain / ai_ask) — через мост сайта.
 
 import { WebHost } from "../web-host.js";
-import { api, voice, isWeb } from "./core.js";
+import { api, voice, isWeb, prefs } from "./core.js";
 
 /** Абзац вокруг выделения — чтобы слово объяснялось в своём смысле. */
 function selectionContext() {
@@ -61,7 +61,15 @@ export function mountSuflyor() {
     if (voice.aloud()) view.onSpeak(answer);
   };
   const showAt = host.showAt.bind(host);
-  host.showAt = (anchor, term, context = "") => showAt(anchor, term, context || selectionContext());
+  host.showAt = (anchor, term, context = "") => {
+    // Попробовал сам — подсказка в уроке больше не нужна.
+    if (!prefs.get("suflyorUsed")) {
+      prefs.set("suflyorUsed", true);
+      for (const node of document.querySelectorAll(".suf-hint")) node.remove();
+      for (const node of document.querySelectorAll(".suf-demo")) node.classList.remove("suf-demo");
+    }
+    return showAt(anchor, term, context || selectionContext());
+  };
   quietSystemMenu();
   return host;
 }

@@ -178,6 +178,21 @@ svg.icon {
   width: 20px;
   display: block;
 }
+/* Знак и QRACK — кнопка «на главную». */
+.bar__brand,
+.tabs__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+}
+.tabs__brand {
+  display: none;
+}
 .bar__name {
   font-family: "Exo 2", sans-serif;
   font-weight: 700;
@@ -3222,3 +3237,181 @@ button.plate:active,
 .signin__form { display: grid; gap: 8px; }
 .signin__form[hidden] { display: none; }
 .signin__row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+/* ── Компьютер: вид для большого экрана ───────────────────────────────────
+   Окно программы и браузер на ПК: меню — сбоку (знак, QRACK, разделы),
+   экран — шире, листы — окном по центру. Телефон и узкое окно — как было. */
+@media (min-width: 900px) {
+  :root {
+    --col: 100vw;
+    --col-gap: 0px;
+  }
+  .app {
+    left: 0;
+    right: 0;
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    border: 0;
+    box-shadow: none;
+  }
+  .tabs {
+    grid-column: 1;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 18px 12px;
+    border-top: 0;
+    border-right: 1px solid var(--line);
+    background: var(--tabs-bg);
+  }
+  .tabs__brand {
+    display: flex;
+    padding: 0 8px;
+  }
+  /* Урок и практика на телефоне — во весь экран; на компьютере меню остаётся. */
+  .tabs[hidden] {
+    display: flex !important;
+  }
+  .tabs__row {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    gap: 2px;
+  }
+  .tab {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    height: 40px;
+    padding: 0 12px;
+    font-size: 13.5px;
+    border-radius: 2px;
+  }
+  .tab:hover {
+    color: var(--c-soft);
+    background: rgb(var(--tint) / 0.05);
+  }
+  .tab[aria-current="page"] {
+    background: rgb(var(--tint) / 0.08);
+    box-shadow: inset 2px 0 0 var(--c-accent);
+  }
+  .tab__count {
+    position: static;
+    margin-left: auto;
+  }
+  .stage {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  /* Знак и QRACK уже в меню слева. */
+  .bar__brand {
+    display: none;
+  }
+  .bar {
+    padding-left: 20px;
+  }
+  .content {
+    width: 100%;
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 24px 28px;
+  }
+  body:not(.is-full) .content {
+    padding-bottom: 96px;
+  }
+  .sheet {
+    left: 0;
+    right: 0;
+    justify-content: center;
+    align-items: center;
+  }
+  .sheet__body {
+    width: min(560px, calc(100vw - 48px));
+    max-height: 84%;
+    border: 1px solid var(--c-accent);
+  }
+  .sheet__grab {
+    display: none;
+  }
+  .toast {
+    left: auto;
+    right: 24px;
+    width: 380px;
+  }
+  .net {
+    left: 256px;
+    right: 24px;
+  }
+  .orb-fab {
+    right: 24px;
+  }
+  .assistant {
+    left: auto;
+    right: 20px;
+    width: 440px;
+  }
+}
+
+/* «Собрать курс»: что будет в курсе — свернуто, одной строкой. */
+.build-parts summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--c-soft);
+  padding: 6px 0;
+}
+.build-parts .features__list {
+  margin-top: 8px;
+}
+
+/* Подсказка Суфлёра в уроке и мерцающее слово-пример. */
+.suf-hint {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgb(var(--tint) / 0.45);
+  background: rgb(var(--tint) / 0.06);
+  box-shadow: 0 0 26px -12px rgb(var(--tint) / 0.6);
+}
+.suf-hint__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.suf-hint__chip {
+  padding: 5px 10px;
+  font-size: 12px;
+  background: var(--c-accent);
+  color: #04181c;
+}
+.suf-hint__title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 15px;
+  text-transform: uppercase;
+  color: var(--c-head);
+}
+.suf-hint__text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--c-soft);
+}
+.suf-hint__ok {
+  justify-self: start;
+  height: 32px;
+  padding: 0;
+  font-size: 13px;
+}
+.suf-demo {
+  border-radius: 2px;
+  animation: suf-demo 1.8s ease-in-out infinite;
+}
+@keyframes suf-demo {
+  0%, 100% { background: transparent; }
+  50% { background: rgb(var(--tint) / 0.28); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .suf-demo { animation: none; background: rgb(var(--tint) / 0.22); }
+}
+

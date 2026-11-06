@@ -3,6 +3,7 @@
 
 import { el, icon, label, progress, loading, header, nav, register, call, iconButton, plural, markdown, toast, prefs, isWeb } from "../core.js";
 import { store, topicPercent, isDone, currentTopic } from "../store.js";
+import { uses, courseFeaturesBox } from "../../learn-features.js";
 import { pressMenu, confirmAction } from "../gestures.js";
 import { tiles } from "./courses.js";
 
@@ -77,7 +78,7 @@ register("course", (screen, { course: courseId }) => {
     talk.append(icon("mic", 16, 2), "Урок с Ноа");
     talk.addEventListener("click", () => nav.push("lesson", params));
     pair.append(talk);
-    if (!isWeb) {
+    if (!isWeb && uses("practice", course)) {
       const practice = el("button", "m-btn m-btn--soft");
       practice.append(icon("window", 16, 2), "Практика");
       practice.addEventListener("click", () => nav.push("practice", params));
@@ -235,6 +236,13 @@ register("topics-more", (screen, { course: courseId }) => {
   const content = el("div", "content");
   content.append(label("// о курсе"));
   content.append(markdown(course?.description || "Описания у курса нет.", "md md--small"));
+
+  // Что использовать в этом курсе: в матанализе терминал не нужен.
+  if (course) {
+    content.append(label("// что в курсе"));
+    content.append(el("span", "small muted", "Выключенное не показывается в темах и уроках этого курса."));
+    content.append(courseFeaturesBox({ el, course }));
+  }
 
   content.append(label("// удалить"));
   const remove = el("button", "setting setting--danger");

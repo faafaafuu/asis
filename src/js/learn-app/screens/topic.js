@@ -104,14 +104,14 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
         panel: () => {
           const wrap = el("div", "");
           wrap.append(commandsBox({ api, el, course: courseId, topic: topicId, lesson: topic.lesson }));
-          if (!isWeb && uses("practice")) wrap.append(button("Практика в терминале", () => open("practice")));
+          if (!isWeb && uses("practice", course)) wrap.append(button("Практика в терминале", () => open("practice")));
           return wrap;
         },
       },
     ];
     // Выключенное в «Что использовать в учёбе» — не показываем.
     const FEATURE = { video: "video", drama: "drama", interview: "interview", commands: "commands" };
-    for (let i = STEPS.length - 1; i >= 0; i--) if (FEATURE[STEPS[i].id] && !uses(FEATURE[STEPS[i].id])) STEPS.splice(i, 1);
+    for (let i = STEPS.length - 1; i >= 0; i--) if (FEATURE[STEPS[i].id] && !uses(FEATURE[STEPS[i].id], course)) STEPS.splice(i, 1);
     const now = STEPS.find((step) => !step.done) ?? null;
     const flow = el("div", "flow");
     for (const [n, step] of STEPS.entries()) {
@@ -136,7 +136,7 @@ register("topic", (screen, { course: courseId, topic: topicId }) => {
     const more = el("details", "more-modes");
     more.append(el("summary", "", "Ещё: материал, карточки, конспект, мини-экзамен"));
     const grid = el("div", "modes");
-    const off = { practice: !uses("practice"), cards: !uses("cards"), sheet: !uses("sheet") };
+    const off = { practice: isWeb || !uses("practice", course), cards: !uses("cards", course), sheet: !uses("sheet", course) };
     for (const mode of MODES.filter((m) => !["lesson", "interview"].includes(m.id) && !off[m.id])) {
       const tile = el("button", `mode${done[mode.id] ? " is-done" : ""}`);
       tile.append(icon(mode.icon), el("span", "mode__name", mode.name), el("span", "mode__state", status[mode.id]));

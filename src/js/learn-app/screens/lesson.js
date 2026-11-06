@@ -3,7 +3,7 @@
 // «Частая ошибка», «Разобрать подробно» и «Обсудить» голосом. Внизу —
 // «Назад» и «Дальше: следующий раздел». Место в уроке помнится.
 
-import { el, icon, label, loading, nav, register, iconButton, sections, sectionTitle, sectionBody, markdown, speakable, voice, call, sheet, steps, ring, toast, api } from "../core.js";
+import { el, icon, label, loading, nav, register, iconButton, sections, sectionTitle, sectionBody, markdown, speakable, voice, call, sheet, steps, ring, toast, api, prefs } from "../core.js";
 import { store, topicCard } from "../store.js";
 import { videoBox } from "../../video-panel.js";
 import { commandsBox } from "../../lesson-commands.js";
@@ -61,7 +61,9 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
     segs.replaceChildren(steps(parts.length, at, at, { thin: true }));
     const part = parts[at];
     const title = sectionTitle(part) || (at === 0 ? card.title : `Раздел ${at + 1}`);
-    content.replaceChildren(label(`// раздел ${at + 1} из ${parts.length} · ${card.title}`), el("span", "display read-title", title), markdown(sectionBody(part)));
+    const body = markdown(sectionBody(part));
+    content.replaceChildren(label(`// раздел ${at + 1} из ${parts.length} · ${card.title}`), el("span", "display read-title", title), body);
+    suflyorHint(content, body);
     const pair = el("div", "pair");
     const deep = el("button", "btn btn--secondary", "Разобрать подробно");
     deep.addEventListener("click", () => openDeep());
@@ -71,7 +73,7 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
     pair.append(deep, talk);
     content.append(pair);
     // Ролик по разделу: собирается на сервере, смотрится прямо здесь.
-    if (uses("video")) content.append(
+    if (uses("video", course)) content.append(
       videoBox({
         api,
         el,
@@ -86,7 +88,7 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
       }),
     );
     // Последний раздел — команды урока, чтобы сразу попробовать руками.
-    if (uses("commands") && at === parts.length - 1) content.append(commandsBox({ api, el, course: courseId, topic: topicId, lesson: parts.join("\n\n") }));
+    if (uses("commands", course) && at === parts.length - 1) content.append(commandsBox({ api, el, course: courseId, topic: topicId, lesson: parts.join("\n\n") }));
     content.scrollTop = 0;
     const following = parts[at + 1];
     next.replaceChildren(
@@ -205,3 +207,33 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
     },
   };
 });
+
+/**
+ * Суфлёр сам себя не показывает: пока человек ни разу не выделял слово,
+ * над текстом урока — подсказка, а одно ключевое слово раздела мерцает:
+ * «выделите — Ноа объяснит». Попробовал или нажал «Понятно» — подсказки нет.
+ */
+function suflyorHint(content, body) {
+  if (prefs.get("suflyorUsed") || prefs.get("suflyorHintOff")) return;
+  const touch = matchMedia("(pointer: coarse)").matches;
+  const word = body.querySelector("strong, b, code");
+  if (word) word.classList.add("suf-demo");
+  const term = word?.textContent.trim().slice(0, 40);
+  const hint = el("div", "suf-hint");
+  const head = el("span", "suf-hint__head");
+  head.append(el("span", "suf-hint__chip", "Объяснить"), el("span", "suf-hint__title", "Непонятно — выделите"));
+  const how = touch ? "Задержите палец на слове или формуле" : "Выделите мышью слово, формулу или фразу";
+  const example = term ? ` — например, «${term}»` : "";
+  hint.append(
+    head,
+    el("span", "suf-hint__text", `${how}${example}. Появится «Объяснить»: Ноа разберёт это в смысле абзаца, а дальше можно уточнять — текстом или голосом, сколько нужно.`),
+  );
+  const ok = el("button", "btn btn--plain suf-hint__ok", "Понятно");
+  ok.addEventListener("click", () => {
+    prefs.set("suflyorHintOff", true);
+    hint.remove();
+    word?.classList.remove("suf-demo");
+  });
+  hint.append(ok);
+  content.querySelector(".read-title")?.after(hint);
+}

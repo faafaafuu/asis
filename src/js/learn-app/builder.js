@@ -10,6 +10,7 @@
 
 import { buildCourse as runBuilder, Stopped } from "../web/course-builder.js";
 import { call, prefs } from "./core.js";
+import { setCourseChoice } from "../learn-features.js";
 
 const KEY = "localBuild";
 let current = null;
@@ -48,7 +49,7 @@ export function localBuilds() {
 
 export const isBuilding = () => current?.state.status === "running";
 
-function start({ goal, resume = null }) {
+function start({ goal, resume = null, choice = null }) {
   if (isBuilding()) throw new Error("Уже собирается курс — дождитесь его или остановите.");
   const control = {
     stop: false,
@@ -76,6 +77,8 @@ function start({ goal, resume = null }) {
         await call("learn_build_save", { course: clean }, { retries: 2, slow: true });
         // Помним только план: готовые темы лежат на устройстве.
         control.state.building = building ?? null;
+        // Что выбрано для курса при сборке — как только известен его id.
+        if (choice && control.state.courseId !== course.id) setCourseChoice(course.id, choice);
         control.state.courseId = course.id;
         control.state.title = course.title;
         remember(control.state);
@@ -110,8 +113,8 @@ function start({ goal, resume = null }) {
 }
 
 /** Собрать курс по цели — моделью из настроек. */
-export function buildLocal(goal) {
-  start({ goal });
+export function buildLocal(goal, choice = null) {
+  start({ goal, choice });
 }
 
 /** Остановить: текущий запрос доработает, следующий не начнётся. */

@@ -3,7 +3,7 @@
 // пунктиром), закреплённая «Собрать курс».
 
 import { el, icon, button, label, progress, steps, loading, header, nav, register, prefs, plural, sheet, call, toast, isWeb } from "../core.js";
-import { featuresBox } from "../../learn-features.js";
+import { featuresBox, uses, suggestChoice, FEATURES } from "../../learn-features.js";
 import { store, currentTopic, topicCard, greeting, isDone } from "../store.js";
 import { open as openAssistant } from "../assistant.js";
 import { removeCourse, topicActions } from "./course.js";
@@ -187,7 +187,7 @@ function continueCard(course) {
   talk.append(icon("mic", 20, 2));
   talk.addEventListener("click", () => go("lesson"));
   actions.append(main, talk);
-  if (!isWeb) {
+  if (!isWeb && uses("practice", course)) {
     const practice = el("button", "m-btn m-btn--icon");
     practice.title = "Практика";
     practice.setAttribute("aria-label", "Практика");
@@ -416,6 +416,41 @@ export function buildCourse() {
     const goal = el("textarea", "field");
     goal.placeholder = "Например: матанализ к сессии — пределы, производные, Тейлор, интегралы; нужны доказательства для устного";
     const model = el("span", "small muted", "Соберу на модели из Профиль → Модель. Не закрывайте приложение, пока идёт сборка: прервётся — продолжите с готовой темы.");
+    // Что нужно в курсе: лишнее не показывается и не тратит силы модели.
+    // Пока человек не трогал переключатели, они следуют за темой: для
+    // матанализа терминал выключен, для DevOps — включён.
+    let choice = suggestChoice("");
+    let touched = false;
+    const parts = el("details", "build-parts");
+    const summary = el("summary", "", "Что будет в курсе");
+    const list = el("div", "features__list");
+    const checks = {};
+    for (const feature of FEATURES) {
+      const row = el("label", "features__row");
+      const check = el("input", "features__check");
+      check.type = "checkbox";
+      check.addEventListener("change", () => {
+        touched = true;
+        choice[feature.id] = check.checked;
+      });
+      checks[feature.id] = check;
+      const text = el("span", "features__text");
+      text.append(el("span", "features__name", feature.name), el("span", "features__about", feature.about));
+      row.append(check, text);
+      list.append(row);
+    }
+    const paint = () => {
+      for (const [id, check] of Object.entries(checks)) check.checked = choice[id] !== false;
+      const off = FEATURES.filter((f) => choice[f.id] === false).map((f) => f.name.toLowerCase());
+      summary.textContent = off.length ? `Что будет в курсе · без: ${off.join(", ")}` : "Что будет в курсе · всё";
+    };
+    goal.addEventListener("input", () => {
+      if (touched) return;
+      choice = suggestChoice(goal.value);
+      paint();
+    });
+    paint();
+    parts.append(summary, list);
     const error = el("span", "error");
     const go = button("Собрать курс", async () => {
       const text = goal.value.trim();
@@ -426,7 +461,7 @@ export function buildCourse() {
       go.disabled = true;
       error.textContent = "";
       try {
-        buildLocal(text);
+        buildLocal(text, { ...choice });
         close();
         toast("Курс собирается — первая тема появится через несколько минут");
         store.forget();
@@ -444,7 +479,7 @@ export function buildCourse() {
         go.disabled = false;
       }
     }, "btn btn--primary btn--big");
-    content.append(goal, model, error, go);
+    content.append(goal, parts, model, error, go);
     goal.focus();
   });
 }

@@ -1394,10 +1394,11 @@ pub fn show_onboarding(app: &AppHandle) -> tauri::Result<()> {
         // Рамку рисует само окно: заголовок NOAH со своими «Свернуть» и «Закрыть»
         // (дизайн-система, главное окно). Двигают за заголовок, тянут за края.
         .decorations(false);
-    // Qrack — окно приложения в рост телефона, с обычной рамкой системы:
-    // своей шапки-заголовка у приложения обучения нет. Шире — колонка по центру.
+    // Qrack — окно программы для компьютера, с обычной рамкой системы. От
+    // 900 точек приложение раскладывается по-компьютерному: меню слева, экран
+    // шире; сузить окно — станет как на телефоне.
     #[cfg(all(desktop, feature = "qrack"))]
-    let builder = builder.inner_size(480.0, 900.0).min_inner_size(380.0, 620.0).resizable(true).center();
+    let builder = builder.inner_size(1120.0, 760.0).min_inner_size(400.0, 600.0).resizable(true).center();
     let window = builder.build()?;
 
     #[cfg(all(desktop, not(feature = "qrack")))]
