@@ -1069,7 +1069,9 @@ async function handle(req, res) {
     if (req.method === "GET" && url.pathname.startsWith("/learn/") && !url.pathname.startsWith("/learn/app")) {
       if (await serveLearnSite(req, res, url.pathname.slice("/learn/".length) || "index.html")) return;
     }
-    if (req.method === "GET" && ["/learn/app", "/learn/app/", "/qrack/app", "/qrack/app/"].includes(url.pathname) && !url.search) {
+    // С параметрами тоже: вход возвращает сюда с меткой ?v= (и ?login_error=),
+    // и без этого адрес проваливался в главную NOAH.
+    if (req.method === "GET" && ["/learn/app", "/learn/app/", "/qrack/app", "/qrack/app/"].includes(url.pathname)) {
       const body =
         '<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Qrack</title>' +
         '<script src="/app/go-learn.js"></script></head><body></body></html>';
