@@ -52,12 +52,16 @@ export function mountMcpAuth({ db, publicUrl, sessionUser }) {
     for (const [key, value] of pending) if (now - value.at > PENDING_TTL) pending.delete(key);
   }, 60_000).unref();
 
-  const resourceMeta = () => ({
-    resource: `${publicUrl}/mcp`,
-    authorization_servers: [publicUrl],
-    bearer_methods_supported: ["header"],
-    resource_name: "NOAH",
-  });
+  /** Описание ресурса: /mcp — NOAH, /qrack/mcp — Qrack (тот же вход, свои инструменты). */
+  const resourceMeta = (path = "") => {
+    const qrack = path.endsWith("/qrack/mcp");
+    return {
+      resource: `${publicUrl}${qrack ? "/qrack/mcp" : "/mcp"}`,
+      authorization_servers: [publicUrl],
+      bearer_methods_supported: ["header"],
+      resource_name: qrack ? "Qrack" : "NOAH",
+    };
+  };
   const serverMeta = () => ({
     issuer: publicUrl,
     authorization_endpoint: `${publicUrl}/oauth/authorize`,
@@ -131,7 +135,7 @@ export function mountMcpAuth({ db, publicUrl, sessionUser }) {
       return true;
     }
     if (path.startsWith("/.well-known/oauth-protected-resource")) {
-      json(res, 200, resourceMeta());
+      json(res, 200, resourceMeta(path));
       return true;
     }
     if (path.startsWith("/.well-known/oauth-authorization-server") || path.startsWith("/.well-known/openid-configuration")) {
@@ -294,6 +298,6 @@ ${linkedNote(user.id)}
 }
 
 /** Заголовок ответа 401 для `/mcp`: где клиенту найти вход. */
-export function authChallenge(publicUrl) {
-  return `Bearer resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`;
+export function authChallenge(publicUrl, resource = "") {
+  return `Bearer resource_metadata="${publicUrl}/.well-known/oauth-protected-resource${resource}"`;
 }

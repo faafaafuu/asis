@@ -13,6 +13,7 @@
 // TCP-ответ до зарубежного сервера обрывается на первых десятках килобайт.
 
 import { saveCourse, saveTopic, readProgress, writeProgress, queueMissingForApp, removeCourse } from "./noa.mjs";
+import { KINDS, PERIODS, cleanGoal, courseIndex, goalsText, mergeGoals, readGoals, writeGoals } from "./goals.mjs";
 import { randomUUID } from "node:crypto";
 import { authChallenge } from "./mcpauth.mjs";
 import { existsSync, readFileSync } from "node:fs";
@@ -88,7 +89,92 @@ const INSTRUCTIONS =
   "целиком, затем create_course (и add_topic для следующих тем); курс появится в Ноа онлайн " +
   "(noahlab.ru/app) и в окне «Обучение» NOAH. Не говори, что курс готов, до успешного отчёта.";
 
+/** Курсы и цели — общие для NOAH (/mcp) и Qrack (/qrack/mcp). */
+const LEARN_TOOLS = [
+  { name: "course_format", description: "Формат и методика курса обучения с примерами. Вызови перед create_course и add_topic.", inputSchema: { type: "object", properties: {} } },
+  {
+    name: "create_course",
+    description: "Создать или заменить курс обучения пользователя — он сразу появится в приложении. Курс проверяется по course_format; ответ — отчёт проверки.",
+    inputSchema: { type: "object", properties: { course: { type: "object", description: "Курс в формате из course_format" } }, required: ["course"] },
+  },
+  {
+    name: "add_topic",
+    description: "Добавить тему в курс пользователя или заменить тему с тем же id — так тему и правят. Ответ — отчёт проверки курса.",
+    inputSchema: {
+      type: "object",
+      properties: { course: { type: "string", description: "id курса" }, topic: { type: "object", description: "Тема в формате из course_format" } },
+      required: ["course", "topic"],
+    },
+  },
+  {
+    name: "remove_topic",
+    description: "Убрать тему из курса пользователя. Последнюю тему убрать нельзя.",
+    inputSchema: { type: "object", properties: { course: { type: "string" }, topic: { type: "string", description: "id темы" } }, required: ["course", "topic"] },
+  },
+  { name: "list_courses", description: "Курсы обучения в аккаунте пользователя: id, название, темы.", inputSchema: { type: "object", properties: {} } },
+  {
+    name: "get_course",
+    description: "Курс целиком без текстов уроков: описание, темы с id, понятия. Нужен, чтобы поправить курс или поставить цели.",
+    inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+  },
+  {
+    name: "get_topic",
+    description: "Тема курса целиком (урок, понятия, карточки, задачи, экзамен) — чтобы поправить её и отправить через add_topic.",
+    inputSchema: { type: "object", properties: { course: { type: "string" }, topic: { type: "string" } }, required: ["course", "topic"] },
+  },
+  {
+    name: "list_goals",
+    description: "Цели обучения пользователя — год, месяц, неделя, день — с отметками выполнения.",
+    inputSchema: { type: "object", properties: { period: { type: "string", enum: PERIODS } } },
+  },
+  {
+    name: "add_goal",
+    description:
+      "Поставить цель обучения: только учебную и только по курсу аккаунта. Большая цель тянет меньшие — " +
+      "у месячной parent = id годовой, у недельной — месячной, у задачи дня — недельной. Виды (kind): " +
+      Object.entries(KINDS).map(([id, k]) => `${id} — ${k.name}`).join("; ") +
+      ". Для урока, проверки, наизусть и практики нужна тема (topic), для карточек, фокуса и тем — число (target).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        period: { type: "string", enum: PERIODS, description: "Срок: day, week, month, year" },
+        kind: { type: "string", enum: Object.keys(KINDS) },
+        course: { type: "string", description: "id курса" },
+        topic: { type: "string", description: "id темы" },
+        target: { type: "number", description: "Сколько: карточек, минут фокуса или тем" },
+        title: { type: "string", description: "Как назвать цель; для kind=custom обязательно" },
+        note: { type: "string", description: "Пояснение, зачем эта цель" },
+        start: { type: "string", description: "Дата в срок цели, ГГГГ-ММ-ДД; по умолчанию — текущий срок" },
+        parent: { type: "string", description: "id большей цели, к которой относится эта" },
+      },
+      required: ["period", "kind", "course"],
+    },
+  },
+  {
+    name: "update_goal",
+    description: "Поправить цель: отметить выполненной, переименовать, перенести на другой срок, сменить число.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" }, done: { type: "boolean" }, title: { type: "string" }, target: { type: "number" }, start: { type: "string" }, note: { type: "string" } },
+      required: ["id"],
+    },
+  },
+  { name: "remove_goal", description: "Убрать цель.", inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
+];
+const LEARN_NAMES = new Set(LEARN_TOOLS.map((tool) => tool.name));
+
+const QRACK_INSTRUCTIONS =
+  "Qrack — приложение для обучения: курсы по любой теме (урок, понятия, карточки, задачи, экзамен), " +
+  "повторение, практика, тренировка собеседования и цели. Через эти инструменты ты собираешь и правишь " +
+  "курсы пользователя и ставишь ему цели обучения. Курс: course_format — прочитай формат и методику " +
+  "целиком, затем create_course (большой — по частям: add_topic на каждую тему). Править тему — get_topic, " +
+  "исправить, отправить через add_topic. Всё проверяется по стандарту; не говори, что курс готов, до " +
+  "успешного отчёта. Цели: list_courses → get_course → add_goal — от большой к малой (год → месяц → " +
+  "неделя → день, parent связывает), только учебные и только по курсам аккаунта; задачи дня приложение " +
+  "отмечает само, когда урок пройден или проверка сдана.";
+
 const TOOLS = [
+  ...LEARN_TOOLS.filter((tool) => !["course_format", "create_course", "add_topic", "list_courses"].includes(tool.name)),
   { name: "module_format", description: "Регламент модуля NOAH с примерами. Вызови перед create_module.", inputSchema: { type: "object", properties: {} } },
   { name: "environment", description: "Что установлено у пользователя (Node.js, Python) и на связи ли NOAH на его компьютере.", inputSchema: { type: "object", properties: {} } },
   {
@@ -428,7 +514,98 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
     return id;
   };
 
+  /** Курс аккаунта как объект — или понятная ошибка. */
+  const accountCourse = (user, id) => {
+    const row = db.prepare("SELECT body FROM noa_courses WHERE user_id = ? AND course_id = ?").get(String(user.id), courseId(id));
+    if (!row) throw new Error(`Курса «${id}» в аккаунте нет — list_courses покажет, какие есть.`);
+    return JSON.parse(row.body);
+  };
+
   const tools = {
+    list_courses: (user) => {
+      const rows = db.prepare("SELECT course_id, body FROM noa_courses WHERE user_id = ? ORDER BY updated DESC").all(String(user.id));
+      if (!rows.length) return "Курсов в аккаунте пока нет — собери первый: course_format, затем create_course.";
+      return rows
+        .map((row) => {
+          const course = JSON.parse(row.body);
+          const topics = (course.topics ?? []).map((t) => `${t.id} — ${t.title}`).join("; ");
+          return `${course.title} (id: ${row.course_id})${course.building ? " — ещё собирается" : ""}\n  темы: ${topics}`;
+        })
+        .join("\n");
+    },
+
+    get_course: (user, args) => {
+      const course = accountCourse(user, args.id);
+      const brief = {
+        id: course.id,
+        title: course.title,
+        description: course.description,
+        topics: (course.topics ?? []).map((t) => ({
+          id: t.id,
+          title: t.title,
+          summary: t.summary,
+          concepts: (t.concepts ?? []).map((c) => `${c.id} — ${c.term}`),
+          tasks: (t.tasks ?? []).length,
+          exam: (t.exam ?? []).length,
+        })),
+        final: (course.final ?? []).length,
+      };
+      return JSON.stringify(brief, null, 1);
+    },
+
+    get_topic: (user, args) => {
+      const course = accountCourse(user, args.course);
+      const topic = (course.topics ?? []).find((t) => t.id === String(args.topic ?? ""));
+      if (!topic) throw new Error(`Темы «${args.topic}» в курсе нет. Темы: ${(course.topics ?? []).map((t) => t.id).join(", ")}.`);
+      return JSON.stringify(topic, null, 1);
+    },
+
+    remove_topic: (user, args) => {
+      const course = accountCourse(user, args.course);
+      const left = (course.topics ?? []).filter((t) => t.id !== String(args.topic ?? ""));
+      if (left.length === (course.topics ?? []).length) throw new Error(`Темы «${args.topic}» в курсе нет.`);
+      if (!left.length) throw new Error("Последнюю тему убрать нельзя — удалите курс в приложении.");
+      return saveCourse(db, user.id, { ...course, topics: left }, { forApp: true });
+    },
+
+    list_goals: (user, args) => {
+      const courses = courseIndex(db, user.id);
+      const goals = readGoals(db, user.id).filter((g) => !g.deleted && (!args.period || g.period === args.period));
+      return goalsText(goals, courses);
+    },
+
+    add_goal: (user, args) => {
+      const courses = courseIndex(db, user.id);
+      const goals = readGoals(db, user.id);
+      if (args.parent && !goals.some((g) => g.id === args.parent && !g.deleted)) throw new Error(`Большой цели «${args.parent}» нет — list_goals покажет id.`);
+      const goal = cleanGoal({ ...args, id: undefined, done: false, by: "ai" }, courses, { by: "ai" });
+      writeGoals(db, user.id, mergeGoals(goals, [goal]));
+      return `Цель поставлена: ${goal.title} (id: ${goal.id}, срок — ${goal.period} с ${goal.start}). Она уже в приложении.`;
+    },
+
+    update_goal: (user, args) => {
+      const courses = courseIndex(db, user.id);
+      const goals = readGoals(db, user.id);
+      const goal = goals.find((g) => g.id === String(args.id ?? "") && !g.deleted);
+      if (!goal) throw new Error(`Цели «${args.id}» нет — list_goals покажет id.`);
+      const next = { ...goal, updated: Date.now() };
+      for (const key of ["title", "target", "start", "note"]) if (args[key] !== undefined) next[key] = args[key];
+      if (args.done !== undefined) {
+        next.done = Boolean(args.done);
+        next.doneAt = next.done ? Date.now() : 0;
+      }
+      const clean = cleanGoal(next, courses, { by: goal.by });
+      writeGoals(db, user.id, mergeGoals(goals, [{ ...clean, updated: Date.now() }]));
+      return `Цель обновлена: ${clean.done ? "✓ " : ""}${clean.title}.`;
+    },
+
+    remove_goal: (user, args) => {
+      const goals = readGoals(db, user.id);
+      if (!goals.some((g) => g.id === String(args.id ?? "") && !g.deleted)) throw new Error(`Цели «${args.id}» нет.`);
+      writeGoals(db, user.id, mergeGoals(goals, [{ id: String(args.id), deleted: true, updated: Date.now() }]));
+      return "Цель убрана.";
+    },
+
     module_format: () => standardText(),
 
     course_format: () => courseFormatText(),
@@ -451,13 +628,6 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
       const id = courseId(args.course);
       const web = saveTopic(db, user.id, id, topic);
       return withWeb(web, await courseJob(user, id, "topic", { course: id, topic }));
-    },
-
-    list_courses: (user) => {
-      const { row, on } = online(user);
-      const list = row?.courses || "";
-      if (!row) return `NOAH ещё ни разу не подключался к этому аккаунту.\n${offlineHint}`;
-      return `${on ? "" : "NOAH сейчас не на связи — список на момент последней связи.\n"}${list || "Курсов пока нет."}`;
     },
 
     course_status: (user, args) => {
@@ -556,7 +726,7 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
 
   /* ── Протокол ──────────────────────────────────────────────────────────── */
 
-  async function handle(message, user) {
+  async function handle(message, user, learn = false) {
     const { id, method, params = {} } = message ?? {};
     const reply = (result) => ({ jsonrpc: "2.0", id, result });
     const fail = (code, text) => ({ jsonrpc: "2.0", id, error: { code, message: text } });
@@ -566,15 +736,15 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
         return reply({
           protocolVersion: params.protocolVersion ?? PROTOCOL,
           capabilities: { tools: {} },
-          serverInfo: { name: "noah-platform", version: "1.0.0" },
-          instructions: INSTRUCTIONS,
+          serverInfo: learn ? { name: "qrack", version: "1.0.0" } : { name: "noah-platform", version: "1.0.0" },
+          instructions: learn ? QRACK_INSTRUCTIONS : INSTRUCTIONS,
         });
       case "ping":
         return reply({});
       case "tools/list":
-        return reply({ tools: TOOLS });
+        return reply({ tools: learn ? LEARN_TOOLS : TOOLS });
       case "tools/call": {
-        const tool = tools[params.name];
+        const tool = !learn || LEARN_NAMES.has(params.name) ? tools[params.name] : null;
         if (!tool) return reply({ content: [{ type: "text", text: `Нет инструмента «${params.name}».` }], isError: true });
         try {
           const text = await tool(user, params.arguments ?? {});
@@ -598,7 +768,9 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
     // Ключ в ссылке — прежний способ, вход OAuth — нынешний. Устаревший ключ в
     // ссылке не должен перебивать рабочий токен входа: пробуем оба.
     const who = () => userForKey(url.searchParams.get("key")) ?? userForKey(bearer0);
-    const denied = { ...headers, "Content-Type": "application/json", "WWW-Authenticate": authChallenge(publicUrl) };
+    // /qrack/mcp — Qrack: только курсы и цели, свои инструкции.
+    const learn = url.pathname === "/qrack/mcp";
+    const denied = { ...headers, "Content-Type": "application/json", "WWW-Authenticate": authChallenge(publicUrl, learn ? "/qrack/mcp" : "") };
     // GET — необязательный по протоколу поток для сообщений от сервера. Мы их
     // не шлём — ответы и так уходят прямо на POST, — но часть клиентов (Qwen
     // и другие) открывает этот поток первым делом и обрывается на отказе.
@@ -640,7 +812,7 @@ export function mountRemote({ route, db, Fail, readJson, userForKey, publishModu
       );
     }
     const batch = Array.isArray(body);
-    const answers = (await Promise.all((batch ? body : [body]).map((message) => handle(message, user)))).filter(Boolean);
+    const answers = (await Promise.all((batch ? body : [body]).map((message) => handle(message, user, learn)))).filter(Boolean);
     if (!answers.length) {
       res.writeHead(202, headers);
       return res.end();

@@ -24,6 +24,7 @@ import { mountMcpAuth } from "./mcpauth.mjs";
 import { mountNoa } from "./noa.mjs";
 import { mountVideo } from "./video.mjs";
 import { mountGuides } from "./guides.mjs";
+import { mountGoals } from "./goals.mjs";
 import { mountPronounce } from "./pronounce.mjs";
 import { mountCommands } from "./commands.mjs";
 import { mountDrama } from "./drama.mjs";
@@ -896,6 +897,8 @@ const noa = mountNoa({ route, db, Fail, readJson });
 mountVideo({ route, db, Fail, readJson, chat: noa.bridgeChat, owner: noa.bridgeUser });
 mountDrama({ route, db, Fail, readJson, chat: noa.bridgeChat, owner: noa.bridgeUser });
 mountGuides({ route, db, Fail, readJson, chat: noa.bridgeChat, owner: noa.bridgeUser, need: noa.need, dataDir: DATA });
+// Цели обучения Qrack: год → месяц → неделя → день, только по курсам аккаунта.
+mountGoals({ route, db, Fail, readJson, need: noa.need });
 mountPronounce({ route, readJson, need: noa.need, chat: noa.bridgeChat, dataDir: DATA });
 mountCommands({ route, db, Fail, readJson, chat: noa.bridgeChat, owner: noa.bridgeUser });
 const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY, publicUrl: PUBLIC_URL });
@@ -921,7 +924,8 @@ async function handle(req, res) {
   if (!local) res.shouldKeepAlive = false;
   try {
     // MCP по ссылке: нейросеть пользователя подключается сюда адресом с ключом.
-    if (url.pathname === "/mcp") return await mcpHandler(req, res, url);
+    // /qrack/mcp — тот же сервер для Qrack: только курсы и цели.
+    if (url.pathname === "/mcp" || url.pathname === "/qrack/mcp") return await mcpHandler(req, res, url);
     // Вход нейросети в MCP по OAuth: описание сервера, регистрация, согласие, токены.
     if ((url.pathname.startsWith("/.well-known/") || url.pathname.startsWith("/oauth/")) && (await mcpAuthHandler(req, res, url))) return;
     // Страницы по голому IP — на российское зеркало. Прямой путь к серверу
