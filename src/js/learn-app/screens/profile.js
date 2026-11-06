@@ -58,6 +58,24 @@ register("profile", (screen) => {
       const name = prefs.get("name", "");
       card.append(label("// аккаунт"), el("span", "continue__title", name || "Вход выполнен"));
       card.append(el("span", "small muted", "Курсы, прогресс и цели — общие на телефоне, компьютере и в браузере"));
+      // Выйти — чтобы войти другим способом (другим аккаунтом).
+      const out = el("button", "btn btn--plain", "Выйти");
+      out.style.cssText = "height:36px;padding:0;justify-content:flex-start";
+      out.addEventListener("click", async () => {
+        const sure = await confirmAction({ title: "Выйти из аккаунта?", text: "Курсы и прогресс останутся в аккаунте — войдёте снова, и они вернутся.", ok: "Выйти" });
+        if (!sure) return;
+        out.disabled = true;
+        try {
+          await call("account_logout", {}, { retries: 0 });
+          prefs.set("name", "");
+          store.forget();
+          nav.home();
+        } catch (err) {
+          toast(String(err));
+          out.disabled = false;
+        }
+      });
+      card.append(out);
       content.append(card);
     } else content.append(signInCard());
 

@@ -329,6 +329,8 @@
         };
       case "account_login_open":
         return null;
+      case "account_logout":
+        return null;
       case "account_login_password":
         await wait(900);
         return "Владелец";

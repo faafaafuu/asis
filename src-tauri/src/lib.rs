@@ -406,6 +406,7 @@ pub fn run() {
             commands::account_login_open,
             commands::account_login_wait,
             commands::account_login_password,
+            commands::account_logout,
             commands::account_delete,
             commands::account_status,
             commands::learn_build,

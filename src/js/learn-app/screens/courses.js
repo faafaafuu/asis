@@ -51,7 +51,16 @@ register("courses", (screen) => {
 
     if (!signed) content.append(signInCard());
 
-    if (!courses.length && signed) {
+    if (!courses.length && signed && isWeb) {
+      // В браузере курсы аккаунта приходят сразу — ждать нечего: курсов нет.
+      const name = await call("account_name").catch(() => "");
+      const empty = el("div", "plate");
+      empty.append(
+        label("// курсов пока нет"),
+        el("span", "muted", `${name ? `Вы вошли как ${name}. ` : ""}В этом аккаунте курсов нет — соберите первый кнопкой «+». Если курсы были в другом аккаунте (например, входили через Telegram, а сейчас через Google), войдите тем способом: Профиль → Выйти.`),
+      );
+      content.append(empty);
+    } else if (!courses.length && signed) {
       // Вошли, а курсов на устройстве ещё нет — они в пути с сайта.
       // Ждём их, а не пишем «курсов нет»: курс появится сам.
       const wait = el("div", "plate");

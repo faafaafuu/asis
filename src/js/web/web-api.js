@@ -458,6 +458,10 @@ async function learnApp(noa, cmd, args) {
       }
       throw new Error("Вход не завершился — нажмите «Войти» ещё раз.");
     }
+    case "account_logout":
+      await site("/api/auth/logout", {});
+      location.reload();
+      return new Promise(() => {});
     case "account_login_password": {
       const body = { email: String(args.email ?? "").trim(), password: String(args.password ?? "") };
       if (args.create) await site("/api/app/register", body);

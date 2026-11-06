@@ -801,6 +801,24 @@ pub async fn account_login_wait(app: AppHandle, state: State<'_, AppState>, code
     Ok(name)
 }
 
+/// Выйти из аккаунта: ключ площадки стирается с устройства (модель через мост
+/// аккаунта — тоже). Курсы и прогресс остаются в аккаунте.
+#[tauri::command]
+pub fn account_logout(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    {
+        let mut config = state.config_mut();
+        config.platform.token = String::new();
+        if config.ai.endpoint.contains("/api/noa/bridge") {
+            config.ai.api_key = String::new();
+            config.ai.chosen = false;
+        }
+    }
+    persist(&app, &state)?;
+    let config = state.config();
+    state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
+    Ok(())
+}
+
 /// Вошёл ли человек в аккаунт (есть ли ключ площадки).
 /// Удалить аккаунт и выйти: ключ площадки стирается с устройства, модель
 /// через мост аккаунта — тоже (она была по этому ключу).
