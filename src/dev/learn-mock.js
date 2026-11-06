@@ -3,6 +3,8 @@
 // learning::dump_learn_fixtures; файл в git не идёт), без него — короткий
 // пример. Ноа отвечает заготовками, терминал — эхом.
 //
+// ?demo=1 — выдуманные курсы из dev/learn-demo.json (scripts/make-learn-demo.py):
+// по ним снимаются экраны для сайта, чтобы в публичное не попадало своё.
 // Параметры: ?signed=0 — не вошли; ?build=1 — курс собирается; ?ssh=0 —
 // практика просит подключиться; ?scenario=0 — практика без сценария;
 // ?slow=1 — модель отвечает 6 с (видно «Медленно…»); ?offline=1 — первый
@@ -53,7 +55,7 @@
   let data = null;
   const fixtures = (async () => {
     try {
-      const reply = await fetch("dev/learn-fixtures.json");
+      const reply = await fetch(params.get("demo") ? "dev/learn-demo.json" : "dev/learn-fixtures.json");
       if (reply.ok) data = await reply.json();
     } catch {
       /* без выгрузки — пример */
@@ -83,14 +85,14 @@
   let practice = { course: null, topic: null, scenario: null, step: 0, done: false, feed: [], here: "", watching: true };
   let connected = !params.get("ssh");
   let line = "";
-  const prompt = "\x1b[32mroot@vmi3213709:~/dk11#\x1b[0m ";
+  const prompt = "\x1b[32mroot@demo:~/dk11#\x1b[0m ";
   const publish = (say = "") => emit("practice:state", { practice: structuredClone(practice), say, spoken: false });
 
   let speakingUntil = 0;
   /** Сборка курса на витрине: остановили, продолжили, убрали. */
   let buildState = "";
   /** Цели «в аккаунте» на витрине — одна поставлена нейросетью по MCP. */
-  const serverGoals = [{ id: "mcp-week-1", period: "week", start: (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })(), kind: "topics", course: "devops", topic: "", target: 2, title: "Пройти 2 темы DevOps за неделю", by: "ai", created: Date.now() - 86400000, updated: Date.now() - 86400000 }];
+  const serverGoals = [{ id: "mcp-week-1", period: "week", start: (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })(), kind: "topics", course: "", topic: "", target: 2, title: "Пройти 2 темы за неделю", by: "ai", created: Date.now() - 86400000, updated: Date.now() - 86400000 }];
   /** Модель на витрине: текущая и запомненные. */
   let aiNow = { endpoint: "https://m.noahlab.ru/api/noa/bridge/chat/completions", model: "claude-code-bridge:free" };
   const brains = [
@@ -301,6 +303,8 @@
         return { text: "docker compose ps" };
       /* ── Цели ── */
       case "learn_goals":
+        // Цель «от нейросети» — про первый курс витрины, какой бы он ни был.
+        for (const g of serverGoals) g.course ||= d.overview[0]?.id ?? "";
         return serverGoals;
       case "learn_goals_save": {
         for (const g of args.goals ?? []) {
@@ -431,6 +435,12 @@
         publish();
         return null;
       default: {
+        // Для снимков — выдуманные путеводители без картинок.
+        if (params.get("demo") && cmd === "guides_list")
+          return [
+            { id: "g2", title: "Кофе: от зерна до чашки", subtitle: "Сорта, обжарка и заваривание", emoji: "☕", cover: null, sections: 5, written: 2, status: "building", message: "", created: 2 },
+            { id: "g1", title: "Птицы большого города", subtitle: "Кого слышно во дворе и в парке", emoji: "🐦", cover: null, sections: 4, written: 4, status: "ready", message: "", created: 1 },
+          ];
         const guided = (await import("/dev/guides-mock.js")).mockGuides(cmd, args);
         if (guided !== undefined) return guided;
         console.warn("витрина: нет подмены для", cmd, args);

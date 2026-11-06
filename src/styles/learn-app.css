@@ -3203,3 +3203,7 @@ button.plate:active,
 [data-theme="noah"] .bar__mark {
   box-shadow: 2px 2px 0 #14306b !important;
 }
+/* Текущая тема в «Пути курса» — рамкой: свечения в классике нет. */
+[data-theme="noah"] .m-cell.is-now {
+  box-shadow: inset 0 0 0 2px #2b5bc4 !important;
+}
