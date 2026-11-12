@@ -436,6 +436,7 @@ export function buildCourse() {
     const noModel = el("span", "error");
     let onServer = false;
     let level = "sonnet";
+    let engine = "claude-code-bridge";
     const checkModel = async () => {
       const ai = await call("ai_settings").catch(() => null);
       const ready = Boolean(ai?.endpoint);
@@ -444,6 +445,7 @@ export function buildCourse() {
       // Мост NOAH — курс собирает сервер: приложение можно закрыть.
       onServer = /\/api\/noa\/bridge/.test(ai?.endpoint ?? "");
       level = bridgeLevel(ai?.model);
+      engine = String(ai?.model ?? "").split(":")[0] || "claude-code-bridge";
       note.textContent = onServer
         ? "Курс собирает сервер — приложение можно закрыть, сборка не прервётся. Первая тема появится через несколько минут."
         : "Курс собирается в приложении на этой модели — не закрывайте его, пока идёт сборка. Прервётся — «Продолжить» доберёт с готовой темы.";
@@ -521,7 +523,7 @@ export function buildCourse() {
           return;
         }
         if (onServer) {
-          await call("learn_build", { goal: text, quality: level, depth }, { slow: true, retries: 0 });
+          await call("learn_build", { goal: text, quality: level, depth, model: engine }, { slow: true, retries: 0 });
           // Что в курсе — когда сервер назовёт курс (карточка сборки это увидит).
           prefs.set("serverChoice", { goal: text, choice: { ...choice } });
         } else {

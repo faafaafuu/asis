@@ -2020,10 +2020,11 @@ pub fn window_error(page: String, text: String) {
 
 /// Собрать новый курс на сервере через мост — курс придёт в окно сам.
 #[tauri::command]
-pub async fn learn_build(goal: String, quality: Option<String>, depth: Option<String>) -> Result<serde_json::Value, String> {
+pub async fn learn_build(goal: String, quality: Option<String>, depth: Option<String>, model: Option<String>) -> Result<serde_json::Value, String> {
     let quality = quality.unwrap_or_else(|| "sonnet".into());
     let depth = depth.unwrap_or_else(|| "full".into());
-    crate::platform::build_course(goal.trim(), &quality, &depth).await
+    let model = model.unwrap_or_else(|| "claude-code-bridge".into());
+    crate::platform::build_course(goal.trim(), &quality, &depth, &model).await
 }
 
 /// Мост аккаунта: какой Claude отвечает — sonnet (точнее) или haiku
@@ -2045,6 +2046,36 @@ pub fn bridge_level(app: AppHandle, state: State<'_, AppState>, level: String) -
     let config = state.config();
     state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
     Ok(format!("Мост: Claude {}", if level == "haiku" { "Haiku" } else { "Sonnet" }))
+}
+
+/// Мост NOAH с нужным движком: Claude (sonnet или haiku), ChatGPT (Codex),
+/// Gemini или Qwen — подписки на сервере NOAH, ключ не нужен. Если сейчас
+/// выбрана другая модель — включает мост по ключу аккаунта.
+#[tauri::command]
+pub fn bridge_use(app: AppHandle, state: State<'_, AppState>, engine: String, level: Option<String>) -> Result<String, String> {
+    const ENGINES: [(&str, &str); 4] = [("claude-code-bridge", "Claude"), ("codex-bridge", "ChatGPT"), ("gemini-bridge", "Gemini"), ("qwen-bridge", "Qwen")];
+    let name = ENGINES.iter().find(|(id, _)| *id == engine).map(|(_, name)| *name).ok_or("Такого моста нет.")?;
+    let haiku = level.as_deref() == Some("haiku");
+    {
+        let mut config = state.config_mut();
+        if !config.ai.endpoint.contains("/api/noa/bridge") {
+            let brain = crate::brains::site_bridge(&config).ok_or("Мост NOAH доступен после входа в аккаунт.")?;
+            config.ai.provider = "http".into();
+            config.ai.endpoint = brain.endpoint;
+            config.ai.api_key = brain.api_key;
+        }
+        config.ai.model = if engine == "claude-code-bridge" {
+            format!("claude-code-bridge:{}", if haiku { "haiku" } else { "sonnet" })
+        } else {
+            format!("{engine}:free")
+        };
+        config.ai.chosen = true;
+    }
+    persist(&app, &state)?;
+    let config = state.config();
+    state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
+    let level = if engine == "claude-code-bridge" { if haiku { " Haiku" } else { " Sonnet" } } else { "" };
+    Ok(format!("Мост: {name}{level}"))
 }
 
 /// Стандарт курса — для сборки моделью человека прямо в приложении.

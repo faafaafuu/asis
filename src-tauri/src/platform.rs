@@ -578,12 +578,12 @@ pub async fn pair_wait(code: &str) -> Result<(String, String), String> {
 /// Собрать новый курс на сервере — через мост, как «Собрать курс» в Ноа
 /// онлайн. Курс приходит в программу сам: сайт ставит его в очередь, а
 /// `sync` забирает. `quality` — sonnet (точнее) или haiku (бережёт лимит).
-pub async fn build_course(goal: &str, quality: &str, depth: &str) -> Result<Value, String> {
+pub async fn build_course(goal: &str, quality: &str, depth: &str, model: &str) -> Result<Value, String> {
     let (url, token) = settings();
     if token.is_empty() {
         return Err("Сначала впишите ключ площадки в настройках — по нему курс соберётся на сервере.".into());
     }
-    let reply = post(&url, "/api/noa/builds", &token, &json!({ "goal": goal, "quality": quality, "depth": depth })).await?;
+    let reply = post(&url, "/api/noa/builds", &token, &json!({ "goal": goal, "quality": quality, "depth": depth, "model": model })).await?;
     Ok(reply["build"].clone())
 }
 

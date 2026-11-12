@@ -115,6 +115,71 @@ export async function modelRow() {
   return row;
 }
 
+/** Движки моста NOAH: что это и чем хорош каждый. */
+const ENGINES = [
+  { id: "claude-code-bridge", name: "Claude", hint: "лучше всех пишет уроки и проверяет ответы" },
+  { id: "codex-bridge", name: "ChatGPT", hint: "Codex от OpenAI" },
+  { id: "gemini-bridge", name: "Gemini", hint: "от Google, быстрый" },
+  { id: "qwen-bridge", name: "Qwen", hint: "от Alibaba, запасной" },
+];
+
+/**
+ * «Мост NOAH»: на чём работать без своего ключа. Выбрал — модель сразу
+ * проверяется короткой просьбой: видно, отвечает ли этот мост сейчас.
+ */
+function bridgeBox(now, status, changed) {
+  const box = el("div", "list");
+  box.append(label("// мост noah — без ключа"));
+  box.append(el("span", "small muted", "Модели по подписке на сервере NOAH: ключ не нужен, курс с ними собирает сервер — приложение можно закрыть."));
+  const currentEngine = /\/api\/noa\/bridge/.test(now?.endpoint ?? "") ? String(now?.model ?? "").split(":")[0] : "";
+  const rows = [];
+  const pick = async (engine, level) => {
+    status.textContent = "Переключаю и проверяю…";
+    try {
+      const said = await call("bridge_use", { engine, level }, { retries: 0 });
+      try {
+        await call("test_ai", {}, { slow: true, retries: 0 });
+        status.textContent = `${said} — отвечает.`;
+      } catch (err) {
+        status.textContent = `${said}, но сейчас не ответил: ${String(err?.message ?? err).replace(/^Error:\s*/, "")}. Выберите другой.`;
+      }
+      for (const row of rows) row.classList.toggle("is-current", row.dataset.engine === engine);
+      await changed();
+    } catch (err) {
+      status.textContent = String(err?.message ?? err).replace(/^Error:\s*/, "");
+    }
+  };
+  for (const engine of ENGINES) {
+    const row = el("button", engine.id === currentEngine ? "setting is-current" : "setting");
+    row.dataset.engine = engine.id;
+    const text = el("span", "setting__text");
+    text.append(el("span", "setting__name", engine.name), el("span", "setting__hint", engine.hint));
+    row.append(icon("cpu", 20, 2), text);
+    row.addEventListener("click", () => pick(engine.id, engine.id === "claude-code-bridge" ? bridgeLevel(now?.model) : undefined));
+    rows.push(row);
+    box.append(row);
+  }
+  // У Claude — точнее или быстрее.
+  const levels = el("div", "seg");
+  let active = bridgeLevel(now?.model);
+  for (const [value, text] of [
+    ["sonnet", "Claude Sonnet — точнее"],
+    ["haiku", "Claude Haiku — быстрее"],
+  ]) {
+    const option = el("button", "", text);
+    option.type = "button";
+    option.setAttribute("aria-pressed", String(currentEngine === "claude-code-bridge" && value === active));
+    option.addEventListener("click", async () => {
+      active = value;
+      for (const other of levels.children) other.setAttribute("aria-pressed", String(other === option));
+      await pick("claude-code-bridge", value);
+    });
+    levels.append(option);
+  }
+  box.append(levels, el("span", "small dim", "Haiku отвечает в 2–3 раза быстрее — курс собирается скорее; Sonnet пишет подробнее."));
+  return box;
+}
+
 /** Лист «Модель»: быстрые варианты и подключение новой. */
 export function openModels(changed = () => {}) {
   sheet("Модель", async (content, close) => {
@@ -145,36 +210,11 @@ export function openModels(changed = () => {}) {
     }
     if (!brains.length) list.append(el("span", "small dim", "Пока ни одной — подключите ниже."));
 
-    // Мост с Claude: какой Claude отвечает — точнее или быстрее.
+    // Мост NOAH: подписки на сервере, ключ не нужен. Есть у аккаунтов,
+    // которым он открыт, — его видно в списке выше.
     const now = await call("ai_settings").catch(() => null);
-    if (now?.endpoint && /\/api\/noa\/bridge/.test(now.endpoint) && String(now.model).startsWith("claude")) {
-      content.append(label("// какой claude"));
-      const levels = el("div", "seg");
-      let active = bridgeLevel(now.model);
-      for (const [value, text] of [
-        ["sonnet", "Sonnet — точнее"],
-        ["haiku", "Haiku — быстрее"],
-      ]) {
-        const option = el("button", "", text);
-        option.type = "button";
-        option.setAttribute("aria-pressed", String(value === active));
-        option.addEventListener("click", async () => {
-          if (value === active) return;
-          status.textContent = "Переключаю…";
-          try {
-            status.textContent = await call("bridge_level", { level: value }, { retries: 0 });
-            active = value;
-            for (const other of levels.children) other.setAttribute("aria-pressed", String(other === option));
-            await changed();
-            toast(status.textContent);
-          } catch (err) {
-            status.textContent = String(err?.message ?? err).replace(/^Error:\s*/, "");
-          }
-        });
-        levels.append(option);
-      }
-      content.append(levels, el("span", "small dim", "Haiku отвечает в 2–3 раза быстрее — курс собирается скорее. Sonnet пишет подробнее и точнее."));
-    }
+    const hasBridge = brains.some((b) => /\/api\/noa\/bridge/.test(b.endpoint)) || /\/api\/noa\/bridge/.test(now?.endpoint ?? "");
+    if (hasBridge) content.append(bridgeBox(now, status, changed));
 
     content.append(label("// подключить"));
     const pick = el("div", "chips");

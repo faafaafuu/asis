@@ -491,7 +491,7 @@ async function learnApp(noa, cmd, args) {
       return (await site("/api/noa/goals", { goals: args.goals ?? [] })).goals ?? [];
     case "learn_build":
       if (!noa.user) throw new Error("Сборка курса — после входа на сайт.");
-      return site("/api/noa/builds", { goal: args.goal, quality: args.quality ?? "sonnet", depth: args.depth ?? "full" });
+      return site("/api/noa/builds", { goal: args.goal, quality: args.quality ?? "sonnet", depth: args.depth ?? "full", model: args.model ?? "claude-code-bridge" });
     case "learn_build_stop":
       return site(`/api/noa/builds/${encodeURIComponent(args.id)}/stop`, {});
     case "learn_commands":
@@ -528,6 +528,16 @@ async function learnApp(noa, cmd, args) {
         kind: { bridge: "мост", ollama: "этот компьютер", openrouter: "облако" }[m.kind] ?? "облако",
         current: Boolean(now && endpointOf(now) === endpointOf(m) && now.model === m.model),
       }));
+    }
+    case "bridge_use": {
+      const engines = { "claude-code-bridge": "Claude", "codex-bridge": "ChatGPT", "gemini-bridge": "Gemini", "qwen-bridge": "Qwen" };
+      if (!engines[args.engine]) throw new Error("Такого моста нет.");
+      if (!(await bridgeAvailable())) throw new Error("Мост NOAH открыт не всем аккаунтам — выберите свою модель ниже.");
+      const claude = args.engine === "claude-code-bridge";
+      const next = { kind: "bridge", base: "", key: "", model: args.engine, ...(claude ? { quality: args.level === "haiku" ? "haiku" : "sonnet" } : {}) };
+      saveModel(next);
+      rememberModel(next);
+      return `Мост: ${engines[args.engine]}${claude ? (args.level === "haiku" ? " Haiku" : " Sonnet") : ""}`;
     }
     case "bridge_level": {
       const model = loadModel();

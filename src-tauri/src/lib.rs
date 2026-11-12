@@ -400,6 +400,7 @@ pub fn run() {
             commands::account_login,
             commands::learn_course_format,
             commands::bridge_level,
+            commands::bridge_use,
             commands::learn_compose,
             commands::learn_build_save,
             commands::learn_course_raw,

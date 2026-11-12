@@ -327,6 +327,11 @@
           code: "demo",
           options: ["Google", "Яндекс", "VK", "GitHub", "Telegram"].map((title) => ({ id: { Google: "google", Яндекс: "yandex", VK: "vk", GitHub: "github", Telegram: "telegram" }[title], title, link: "" })),
         };
+      case "bridge_use": {
+        const claude = args.engine === "claude-code-bridge";
+        aiNow = { ...aiNow, model: claude ? `claude-code-bridge:${args.level === "haiku" ? "haiku" : "sonnet"}` : `${args.engine}:free` };
+        return `Мост: ${{ "claude-code-bridge": "Claude", "codex-bridge": "ChatGPT", "gemini-bridge": "Gemini", "qwen-bridge": "Qwen" }[args.engine]}${claude ? (args.level === "haiku" ? " Haiku" : " Sonnet") : ""}`;
+      }
       case "bridge_level":
         aiNow = { ...aiNow, model: `claude-code-bridge:${args.level}` };
         return `Мост: Claude ${args.level === "haiku" ? "Haiku" : "Sonnet"}`;
