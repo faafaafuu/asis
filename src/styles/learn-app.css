@@ -3524,3 +3524,20 @@ button.plate:active,
   transform: translateY(-1px) rotate(-45deg);
 }
 
+/* Справка в профиле. */
+.help-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.help-item__title {
+  font-weight: 600;
+  color: var(--c-head);
+}
+.help-item__text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--c-soft);
+}
+

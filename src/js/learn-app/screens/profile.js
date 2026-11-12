@@ -1,6 +1,6 @@
 // Профиль — аккаунт, итоги занятий, настройки голоса, сборки курсов и версия.
 
-import { el, icon, label, header, nav, register, call, prefs, toast, plural, loading, isWeb } from "../core.js";
+import { el, icon, label, header, nav, register, call, prefs, toast, plural, loading, isWeb, sheet } from "../core.js";
 import { store } from "../store.js";
 import { signInCard, buildCourse } from "./courses.js";
 import { buildAction } from "../builder.js";
@@ -223,16 +223,7 @@ register("profile", (screen) => {
     );
     content.append(make);
 
-    const about = el("div", "note");
-    about.append(
-      label("// как это работает"),
-      el(
-        "span",
-        "",
-        "Уроки, разборы, проверка ответов и практика идут через ваш мост на noahlab.ru — ту же модель, что на компьютере. Если ответы не приходят, мост не запущен или его вход истёк.",
-      ),
-    );
-    content.append(about);
+    content.append(label("// справка"), link("Как пользоваться Qrack", "Суфлёр, разговор по теме, чтение вслух, модели, сборка курса", "help", () => openHelp()));
     // Удалить аккаунт — из самого приложения, со всем обучением.
     if (signed) {
       const erase = el("button", "setting setting--danger");
@@ -268,3 +259,23 @@ register("profile", (screen) => {
   })();
   return { cleanup: () => (alive = false) };
 });
+
+/** Справка: что умеет Qrack и где это найти — в одном месте, а не на каждом экране. */
+const HELP = [
+  ["Непонятное слово — выделите", "Выделите слово, формулу или фразу в уроке, карточке или ответе (на телефоне — задержите палец) — появится «Объяснить». Ноа объяснит в смысле абзаца, а дальше можно уточнять текстом или голосом, сколько нужно."],
+  ["Разобрать подробно и Обсудить", "Под каждым разделом урока: «Разобрать подробно» — раздел по шагам с примером, «Обсудить» — разговор по разделу голосом или текстом."],
+  ["Чтение вслух и пауза", "Значок динамика в уроке читает раздел. Нажмите ещё раз — пауза; снова — продолжит с того же места, даже если вы выходили из урока."],
+  ["Модель", "Профиль → Модель. Мост NOAH — без ключа: Claude Sonnet (подробнее) или Haiku (быстрее), ChatGPT, Gemini, Qwen. Или свой ключ: OpenRouter, Gemini, Groq, Claude; на компьютере — Ollama."],
+  ["Сборка курса", "«+» в «Моих курсах»: опишите цель, выберите «Подробно», «Быстро» или «Суть» и что будет в курсе. С мостом курс собирает сервер — приложение можно закрыть; с другой моделью держите его открытым."],
+  ["Цели", "Год → месяц → неделя → сегодня. Задачи дня отмечаются сами: урок прочитан, экзамен сдан, карточки повторены."],
+];
+
+function openHelp() {
+  sheet("Как пользоваться Qrack", (box) => {
+    for (const [title, text] of HELP) {
+      const item = el("div", "help-item");
+      item.append(el("span", "help-item__title", title), el("span", "help-item__text", text));
+      box.append(item);
+    }
+  });
+}

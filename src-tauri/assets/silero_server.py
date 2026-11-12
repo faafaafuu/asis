@@ -289,6 +289,26 @@ def speakable(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
+def _known_chunk(match: re.Match) -> str:
+    chunk = match.group(0)
+    trail = re.search(r"[.,:\-/=]+$", chunk)
+    end = trail.group(0) if trail else ""
+    core = chunk[: len(chunk) - len(end)] if end else chunk
+    found = known(core)
+    return found + end if found else chunk
+
+
+def speakable_neural(text: str) -> str:
+    """Для нейроголоса Microsoft (Светлана): числа и английские слова — как
+    есть. Он сам склоняет числа по смыслу («двадцати четырёх часов») и читает
+    английские слова; наш перевод в слова давал именительный падеж и
+    «трансфирабис». Свои термины из словаря (kubectl, DNS…) — по словарю."""
+    text = CHUNK.sub(_known_chunk, text)
+    text = text.replace("&", " и ").replace("→", " — ").replace("->", " — ").replace("№", "номер ")
+    text = re.sub(r"[|{}\[\]<>\\^]", " ", text)
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
+
+
 def chunks(text: str, limit: int = 800):
     """Длинный текст — кусками по границам предложений: у модели есть предел."""
     part = ""
@@ -391,7 +411,7 @@ def edge_speech(text: str, speaker: str, rate: float, raw: bool = False):
     """Нейроголос Microsoft: MP3 от Microsoft, с ffmpeg рядом — WAV 48 кГц.
     Скорость — чуть бодрее заданной, тон чуть выше: так Светлана звучит живее."""
     # Пункты списка — с паузой: строка без точки в конце читалась слитно со следующей.
-    words = re.sub(r"(?<![.!?…:;,])\n", ".\n", speakable(text))
+    words = re.sub(r"(?<![.!?…:;,])\n", ".\n", speakable_neural(text))
     if not words:
         raise ValueError("пустой текст")
     percent = round((rate - 1) * 60 + 6)

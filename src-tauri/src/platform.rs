@@ -66,15 +66,23 @@ fn mirror_ok() -> bool {
         let was = known.is_none_or(|(ok, _)| ok);
         *MIRROR_OK.lock().unwrap_or_else(|err| err.into_inner()) = Some((was, std::time::Instant::now()));
         let _ = std::thread::Builder::new().name("sufler-mirror-probe".into()).spawn(move || {
+            // Две попытки: одна сорвавшаяся на мобильной сети уводила телефон
+            // на прямой путь по IP, а он рвёт всё длиннее 16 КБ — голос и курсы.
             let ok = tauri::async_runtime::block_on(async {
-                let Ok(client) = crate::net::client_builder().timeout(Duration::from_secs(8)).build() else {
+                let Ok(client) = crate::net::client_builder().timeout(Duration::from_secs(12)).build() else {
                     return false;
                 };
-                client
-                    .get(format!("{MIRROR_URL}/api/health?_={}", random_hex()))
-                    .send()
-                    .await
-                    .is_ok_and(|response| response.status().is_success())
+                for _ in 0..2 {
+                    let answered = client
+                        .get(format!("{MIRROR_URL}/api/health?_={}", random_hex()))
+                        .send()
+                        .await
+                        .is_ok_and(|response| response.status().is_success());
+                    if answered {
+                        return true;
+                    }
+                }
+                false
             });
             *MIRROR_OK.lock().unwrap_or_else(|err| err.into_inner()) = Some((ok, std::time::Instant::now()));
             if ok != was {

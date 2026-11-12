@@ -474,7 +474,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
     const taken = new Set(db.prepare("SELECT course_id FROM noa_courses WHERE user_id = ?").all(job.user_id).map((row) => row.course_id));
     buildCourse({
       goal: job.goal,
-      depth: job.depth === "brief" ? "brief" : "full",
+      depth: ["brief", "core"].includes(job.depth) ? job.depth : "full",
       format: courseFormat(),
       chat: (messages, opts) => {
         const engine = job.model || "claude-code-bridge";
@@ -536,7 +536,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
     const level = ["haiku", "sonnet", "opus"].includes(quality) ? quality : "sonnet";
     db.prepare(
       "INSERT INTO noa_builds (id, user_id, goal, model, quality, depth, status, stage, message) VALUES (?, ?, ?, ?, ?, ?, 'running', 'plan', 'Составляю план курса')",
-    ).run(id, user.id, text, engine, level, depth === "brief" ? "brief" : "full");
+    ).run(id, user.id, text, engine, level, ["brief", "core"].includes(depth) ? depth : "full");
     runBuild(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(id));
     return { build: buildRow(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(id)) };
   });

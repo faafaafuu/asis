@@ -461,7 +461,8 @@ export function buildCourse() {
     const speed = el("div", "seg");
     for (const [value, text] of [
       ["full", "Подробно"],
-      ["brief", "Быстро — короче уроки"],
+      ["brief", "Быстро"],
+      ["core", "Суть"],
     ]) {
       const option = el("button", "", text);
       option.type = "button";

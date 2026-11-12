@@ -58,12 +58,12 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
   })();
 
   function paint() {
+    if (readAt && prefs.get("readPlace")?.section !== at) readAt = 0;
     segs.replaceChildren(steps(parts.length, at, at, { thin: true }));
     const part = parts[at];
     const title = sectionTitle(part) || (at === 0 ? card.title : `Раздел ${at + 1}`);
     const body = markdown(sectionBody(part));
     content.replaceChildren(label(`// раздел ${at + 1} из ${parts.length} · ${card.title}`), el("span", "display read-title", title), body);
-    suflyorHint(content, body);
     const pair = el("div", "pair");
     const deep = el("button", "btn btn--secondary", "Разобрать подробно");
     deep.addEventListener("click", () => openDeep());
@@ -105,16 +105,39 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
     paint();
   }
 
+  // Чтение вслух — кусками по паре предложений: пауза останавливает на
+  // текущем куске, «читать» продолжает с него же. Место помнится и после
+  // выхода из урока — позвонили, вернулся, продолжил.
+  let readToken = 0;
+  let readAt = 0;
+
   function toggleRead() {
     reading = !reading;
     speaker.setAttribute("aria-pressed", String(reading));
     if (reading) readAloud();
-    else voice.stop();
+    else {
+      readToken += 1;
+      voice.stop();
+      if (readAt > 0) toast("Пауза — нажмите «Читать», продолжу с этого места");
+    }
   }
 
-  function readAloud() {
+  async function readAloud() {
     const part = parts[at];
-    voice.speak(`${sectionTitle(part)}. ${speakable(sectionBody(part))}`);
+    const list = readPieces(`${sectionTitle(part)}. ${speakable(sectionBody(part))}`);
+    const place = prefs.get("readPlace");
+    if (place?.course === courseId && place?.topic === topicId && place?.section === at && place.piece < list.length) readAt = place.piece;
+    const mine = ++readToken;
+    for (; readAt < list.length; readAt++) {
+      prefs.set("readPlace", { course: courseId, topic: topicId, section: at, piece: readAt });
+      await voice.speak(list[readAt]);
+      if (mine !== readToken) return;
+    }
+    // Дочитали раздел — с начала в следующий раз.
+    readAt = 0;
+    prefs.set("readPlace", null);
+    reading = false;
+    speaker.setAttribute("aria-pressed", "false");
   }
 
   async function finish() {
@@ -208,32 +231,19 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
   };
 });
 
-/**
- * Суфлёр сам себя не показывает: пока человек ни разу не выделял слово,
- * над текстом урока — подсказка, а одно ключевое слово раздела мерцает:
- * «выделите — Ноа объяснит». Попробовал или нажал «Понятно» — подсказки нет.
- */
-function suflyorHint(content, body) {
-  if (prefs.get("suflyorUsed") || prefs.get("suflyorHintOff")) return;
-  const touch = matchMedia("(pointer: coarse)").matches;
-  const word = body.querySelector("strong, b, code");
-  if (word) word.classList.add("suf-demo");
-  const term = word?.textContent.trim().slice(0, 40);
-  const hint = el("div", "suf-hint");
-  const head = el("span", "suf-hint__head");
-  head.append(el("span", "suf-hint__chip", "Объяснить"), el("span", "suf-hint__title", "Непонятно — выделите"));
-  const how = touch ? "Задержите палец на слове или формуле" : "Выделите мышью слово, формулу или фразу";
-  const example = term ? ` — например, «${term}»` : "";
-  hint.append(
-    head,
-    el("span", "suf-hint__text", `${how}${example}. Появится «Объяснить»: Ноа разберёт это в смысле абзаца, а дальше можно уточнять — текстом или голосом, сколько нужно.`),
-  );
-  const ok = el("button", "btn btn--plain suf-hint__ok", "Понятно");
-  ok.addEventListener("click", () => {
-    prefs.set("suflyorHintOff", true);
-    hint.remove();
-    word?.classList.remove("suf-demo");
-  });
-  hint.append(ok);
-  content.querySelector(".read-title")?.after(hint);
+
+/** Куски для чтения вслух: по одному-два предложения, до ~280 знаков. */
+function readPieces(text) {
+  const sentences = String(text).replace(/\s+/g, " ").match(/[^.!?…]+[.!?…]+["»)]*\s*|[^.!?…]+$/g) ?? [text];
+  const out = [];
+  let piece = "";
+  for (const sentence of sentences) {
+    if (piece && piece.length + sentence.length > 280) {
+      out.push(piece.trim());
+      piece = "";
+    }
+    piece += sentence;
+  }
+  if (piece.trim()) out.push(piece.trim());
+  return out;
 }

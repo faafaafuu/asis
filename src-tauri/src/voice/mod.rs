@@ -25,6 +25,7 @@ use crate::config::VoiceConfig;
 
 /// Говорит текст выбранным способом. Возвращается сразу, не дожидаясь конца речи.
 pub async fn speak(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<(), String> {
+    let text_in = text;
     let text = clean(&crate::spoken::without_code(text));
     if text.is_empty() {
         return Ok(());
@@ -37,7 +38,11 @@ pub async fn speak(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<
             let Some(voice) = silero::usable(app, &config.silero_voice) else {
                 return piper::speak(app, &config.voice, config.rate, &text);
             };
-            match silero::speak(app, &voice, config.rate, &text).await {
+            // Нейроголосу (Светлана, Дмитрий) — без перевода чисел и латиницы
+            // в слова: он сам склоняет числа и читает английские слова.
+            let neural = ["svetlana", "dmitry"].contains(&voice.as_str()) || voice.ends_with("Neural");
+            let said = if neural { clean_with(&crate::spoken::without_code(text_in), false) } else { text.clone() };
+            match silero::speak(app, &voice, config.rate, &said).await {
                 Ok(()) => Ok(()),
                 Err(err) => {
                     log::warn!("живой голос: {err}; читаю своим голосом");
@@ -220,13 +225,19 @@ pub fn stop() {
 /// и длинные тире. Часть этого синтезатор проговаривает буквально («тире»,
 /// «звёздочка»), часть просто спотыкает интонацию.
 fn clean(text: &str) -> String {
+    clean_with(text, true)
+}
+
+/// `readable` — числа, термины и латиницу словами (для голосов, которые
+/// сами их не прочтут); без него — только разметка и знаки.
+fn clean_with(text: &str, readable: bool) -> String {
     // Построчно: строка — пункт списка или абзац, и звучать она должна
     // отдельным предложением. Раньше переносы и маркеры превращались в
     // пробелы, и «по шагам» из пяти пунктов читалось одной кашей — без
     // единой точки, без паузы и без понижения голоса между шагами.
     let lines: Vec<(bool, String)> = text
         .lines()
-        .map(|line| (is_item(line), clean_line(line)))
+        .map(|line| (is_item(line), clean_line(line, readable)))
         .filter(|(_, line)| !line.is_empty())
         .collect();
     let count = lines.len();
@@ -256,7 +267,7 @@ fn is_item(line: &str) -> bool {
 }
 
 /// Одна строка: без маркера списка, разметки и украшений.
-fn clean_line(line: &str) -> String {
+fn clean_line(line: &str, readable: bool) -> String {
     let mut line = line.trim();
     // Маркер пункта: «- », «• », «* », «1. », «2) », «#».
     line = line.trim_start_matches(['-', '•', '·', '*', '#', '>', '–', '—']).trim_start();
@@ -289,10 +300,10 @@ fn clean_line(line: &str) -> String {
         let lower = out.to_lowercase();
         let mut chars = lower.chars();
         let line = chars.next().map(|first| first.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default();
-        return crate::speech::readable(&line);
+        return if readable { crate::speech::readable(&line) } else { line };
     }
     // Числа, термины и аббревиатуры — словами (src/speech.rs).
-    crate::speech::readable(&out)
+    if readable { crate::speech::readable(&out) } else { out }
 }
 
 #[cfg(test)]

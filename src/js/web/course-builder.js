@@ -106,6 +106,8 @@ const sectionCount = (lesson) => lesson.split("\n").filter((line) => line.starts
 const DEPTH = {
   full: { topics: "3–10 тем по объёму: узкая область — 3–4 темы, профессия с нуля — 6–10", words: "1500–2500 слов", sections: "4–7", lessonTokens: 8000 },
   brief: { topics: "3–5 тем: только главное, без второстепенного", words: "700–1100 слов, плотно и без воды", sections: "3–4", lessonTokens: 4000 },
+  // «Суть»: курс на вечер — одна-две темы, только то, без чего тему не понять.
+  core: { topics: "1–2 темы: только суть — то, без чего тему не понять и что точно спросят", words: "450–700 слов, сжато, без истории и отступлений", sections: "3", lessonTokens: 2800 },
 };
 
 function planRules(format, depth = DEPTH.full) {

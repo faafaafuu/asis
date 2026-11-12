@@ -70,9 +70,15 @@ static READ_REQUEST: AtomicU64 = AtomicU64::new(0);
 /// Выключили в профиле — Ирина (Piper), встроенная в приложение: сразу и без
 /// сети. Не вышел один — говорит другой, не вышли оба — системный.
 pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<(), String> {
-    // Числа, термины и аббревиатуры — словами: ни Ирина, ни Silero их сами
-    // не прочтут (src/speech.rs).
-    let text = crate::speech::readable(text.trim());
+    // Светлане (голос Ноа с сервера) — текст как есть: она сама склоняет
+    // числа и читает английские слова. Ирине и системному голосу — словами
+    // (src/speech.rs): сами они цифры и латиницу не прочтут.
+    let plain = text.trim().to_string();
+    if plain.is_empty() {
+        return Ok(());
+    }
+    let neural = config.engine == "silero" && !["kseniya", "xenia", "baya", "aidar", "eugene"].contains(&config.silero_voice.as_str());
+    let text = if neural { plain.clone() } else { crate::speech::readable(&plain) };
     if text.is_empty() {
         return Ok(());
     }
@@ -85,6 +91,7 @@ pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result
             Ok(()) => Ok(()),
             Err(rest) if rest.is_empty() => Ok(()),
             Err(rest) => {
+                let rest = if neural { crate::speech::readable(&rest) } else { rest };
                 let second = if server_first { irina::speak(config, &rest, request).await } else { server_voice(config, &rest, request).await };
                 match second {
                     Ok(()) => Ok(()),
@@ -307,7 +314,7 @@ fn server_down() -> bool {
 
 fn mark_server_down() {
     *SERVER_DOWN_UNTIL.lock().unwrap_or_else(|err| err.into_inner()) =
-        Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
+        Some(std::time::Instant::now() + std::time::Duration::from_secs(20));
 }
 
 async fn system_speak(config: &VoiceConfig, text: &str) -> Result<(), String> {
@@ -541,20 +548,24 @@ async fn irina_or_system(config: &VoiceConfig, text: &str, request: u64) -> Resu
 
 /// Фраза голосом Ноа — MP3 с сервера.
 async fn fetch_phrase(base: String, token: String, voice: String, phrase: String) -> Result<Vec<u8>, String> {
-    // Через зеркало запись — туннелем (platform::site_call): это пара коротких
-    // запросов, поэтому ждём чуть дольше, чем прямой.
+    // Мобильная сеть рвёт отдельный запрос — повторяем фразу, прежде чем
+    // сдаться: иначе посреди урока голос менялся на Ирину.
     let body = serde_json::json!({ "text": phrase, "voice": voice, "lite": true });
-    let sent = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        crate::platform::site_call(&base, "POST", "/api/noa/tts", &token, Some(&body)),
-    )
-    .await
-    .map_err(|_| "голос не успел".to_string())??;
-    let (status, data) = sent;
-    if !(200..300).contains(&status) {
-        return Err(format!("голос ответил {status}"));
+    let mut last = String::new();
+    for wait in [15, 25] {
+        let sent = tokio::time::timeout(
+            std::time::Duration::from_secs(wait),
+            crate::platform::site_call(&base, "POST", "/api/noa/tts", &token, Some(&body)),
+        )
+        .await;
+        match sent {
+            Ok(Ok((status, data))) if (200..300).contains(&status) && !data.is_empty() => return Ok(data),
+            Ok(Ok((status, _))) => last = format!("голос ответил {status}"),
+            Ok(Err(err)) => last = err,
+            Err(_) => last = "голос не успел".to_string(),
+        }
     }
-    Ok(data)
+    Err(last)
 }
 
 /// Голосом Ноа. Ошибка — текст, который осталось сказать (пустой — перебили).
