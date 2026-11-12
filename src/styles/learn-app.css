@@ -3476,3 +3476,51 @@ button.plate:active,
   .build-spin, .build-bar--wait::after { animation: none; }
 }
 
+/* «Что будет в курсе» — чипы с галочкой, всё видно сразу. */
+.build-parts {
+  display: grid;
+  gap: 8px;
+}
+.build-parts__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.build-part {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 10px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--c-dim);
+  border: 1px solid rgb(var(--tint) / 0.18);
+  background: transparent;
+}
+.build-part[aria-pressed="true"] {
+  color: var(--c-head);
+  border-color: rgb(var(--tint) / 0.6);
+  background: rgb(var(--tint) / 0.08);
+}
+.build-part__tick {
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  display: grid;
+  place-items: center;
+}
+.build-part[aria-pressed="true"] .build-part__tick {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+}
+.build-part[aria-pressed="true"] .build-part__tick::after {
+  content: "";
+  width: 8px;
+  height: 4px;
+  border-left: 2px solid #04181c;
+  border-bottom: 2px solid #04181c;
+  transform: translateY(-1px) rotate(-45deg);
+}
+

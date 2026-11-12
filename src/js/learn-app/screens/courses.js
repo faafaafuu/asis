@@ -478,28 +478,28 @@ export function buildCourse() {
     // матанализа терминал выключен, для DevOps — включён.
     let choice = suggestChoice("");
     let touched = false;
-    const parts = el("details", "build-parts");
-    const summary = el("summary", "", "Что будет в курсе");
-    const list = el("div", "features__list");
-    const checks = {};
+    // Всё на виду: чипы с галочкой — нажал, и часть включилась или выключилась.
+    const parts = el("div", "build-parts");
+    const summary = el("span", "small dim", "");
+    const list = el("div", "build-parts__grid");
+    const chips = {};
     for (const feature of FEATURES) {
-      const row = el("label", "features__row");
-      const check = el("input", "features__check");
-      check.type = "checkbox";
-      check.addEventListener("change", () => {
+      const chip = el("button", "build-part");
+      chip.type = "button";
+      chip.title = feature.about;
+      chip.append(el("span", "build-part__tick"), el("span", "", feature.name));
+      chip.addEventListener("click", () => {
         touched = true;
-        choice[feature.id] = check.checked;
+        choice[feature.id] = choice[feature.id] === false;
+        paint();
       });
-      checks[feature.id] = check;
-      const text = el("span", "features__text");
-      text.append(el("span", "features__name", feature.name), el("span", "features__about", feature.about));
-      row.append(check, text);
-      list.append(row);
+      chips[feature.id] = chip;
+      list.append(chip);
     }
     const paint = () => {
-      for (const [id, check] of Object.entries(checks)) check.checked = choice[id] !== false;
+      for (const [id, chip] of Object.entries(chips)) chip.setAttribute("aria-pressed", String(choice[id] !== false));
       const off = FEATURES.filter((f) => choice[f.id] === false).map((f) => f.name.toLowerCase());
-      summary.textContent = off.length ? `Что будет в курсе · без: ${off.join(", ")}` : "Что будет в курсе · всё";
+      summary.textContent = off.length ? `Не будет: ${off.join(", ")}` : "Всё включено";
     };
     goal.addEventListener("input", () => {
       if (touched) return;
@@ -507,7 +507,7 @@ export function buildCourse() {
       paint();
     });
     paint();
-    parts.append(summary, list);
+    parts.append(label("// что будет в курсе"), list, summary);
     const error = el("span", "error");
     const go = button("Собрать курс", async () => {
       const text = goal.value.trim();
