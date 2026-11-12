@@ -13,7 +13,8 @@ import { confirmAction } from "../gestures.js";
 import { todayCard } from "./goals.js";
 import { goals } from "../goals.js";
 import { buildLocal, buildAction, onBuild } from "../builder.js";
-import { modelRow, openModels } from "../models.js";
+import { modelRow, openModels, bridgeLevel } from "../models.js";
+import { setCourseChoice } from "../../learn-features.js";
 
 register("courses", (screen) => {
   screen.append(header({ home: true, onMic: () => openAssistant() }));
@@ -130,6 +131,12 @@ register("courses", (screen) => {
     const shelf = el("div", "list build-shelf");
     list.before(shelf);
     const paint = (builds) => {
+      const wanted = prefs.get("serverChoice");
+      const named = wanted && builds.find((b) => !b.local && b.goal === wanted.goal && b.courseId);
+      if (named) {
+        setCourseChoice(named.courseId, wanted.choice);
+        prefs.set("serverChoice", null);
+      }
       const shown = builds.filter((b) => b.status !== "done").slice(0, 2);
       shelf.replaceChildren(...shown.map((b) => buildCard(b, refreshBuilds)));
       shelf.hidden = !shown.length;
@@ -427,11 +434,19 @@ export function buildCourse() {
     // На какой модели собирать — здесь же, с «Сменить»: без модели курс не собрать.
     const model = el("div", "build-model");
     const noModel = el("span", "error");
+    let onServer = false;
+    let level = "sonnet";
     const checkModel = async () => {
       const ai = await call("ai_settings").catch(() => null);
       const ready = Boolean(ai?.endpoint);
       noModel.textContent = ready ? "" : "Модель не выбрана — нажмите на строку выше и выберите OpenRouter, Ollama, мост или свою.";
       go.disabled = !ready;
+      // Мост NOAH — курс собирает сервер: приложение можно закрыть.
+      onServer = /\/api\/noa\/bridge/.test(ai?.endpoint ?? "");
+      level = bridgeLevel(ai?.model);
+      note.textContent = onServer
+        ? "Курс собирает сервер — приложение можно закрыть, сборка не прервётся. Первая тема появится через несколько минут."
+        : "Курс собирается в приложении на этой модели — не закрывайте его, пока идёт сборка. Прервётся — «Продолжить» доберёт с готовой темы.";
       return ready;
     };
     modelRow().then((row) => {
@@ -505,7 +520,13 @@ export function buildCourse() {
           go.disabled = false;
           return;
         }
-        buildLocal(text, { ...choice }, depth);
+        if (onServer) {
+          await call("learn_build", { goal: text, quality: level, depth }, { slow: true, retries: 0 });
+          // Что в курсе — когда сервер назовёт курс (карточка сборки это увидит).
+          prefs.set("serverChoice", { goal: text, choice: { ...choice } });
+        } else {
+          buildLocal(text, { ...choice }, depth);
+        }
         close();
         toast("Курс собирается — первая тема появится через несколько минут");
         store.forget();
@@ -546,6 +567,7 @@ function buildCard(build, changed) {
   if (what) card.append(el("span", running ? "small muted" : "small build-card__why", what));
   // Сборка на устройстве: сколько идёт, на какой модели, сколько модель думает
   // над этим шагом. Долго молчит — так и пишем, и даём сменить модель.
+  if (running && !build.local) card.append(el("span", "small dim build-card__time", "собирает сервер — приложение можно закрыть"));
   if (running && build.local && build.startedAt) {
     const now = Date.now();
     const parts = [`идёт ${elapsed(now - build.startedAt)}`];

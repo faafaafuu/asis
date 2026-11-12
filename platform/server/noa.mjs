@@ -161,6 +161,10 @@ export function mountNoa({ route, db, Fail, readJson }) {
   if (!db.prepare("SELECT name FROM pragma_table_info('noa_builds') WHERE name = 'hidden'").get()) {
     db.exec("ALTER TABLE noa_builds ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
   }
+  // Подробность: «brief» — меньше тем и уроки короче, курс готов быстрее.
+  if (!db.prepare("SELECT name FROM pragma_table_info('noa_builds') WHERE name = 'depth'").get()) {
+    db.exec("ALTER TABLE noa_builds ADD COLUMN depth TEXT NOT NULL DEFAULT 'full'");
+  }
 
   /**
    * Номер человека — строкой. Число node:sqlite передаёт как дробное, и в
@@ -470,6 +474,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
     const taken = new Set(db.prepare("SELECT course_id FROM noa_courses WHERE user_id = ?").all(job.user_id).map((row) => row.course_id));
     buildCourse({
       goal: job.goal,
+      depth: job.depth === "brief" ? "brief" : "full",
       format: courseFormat(),
       chat: (messages, opts) => {
         const engine = job.model || "claude-code-bridge";
@@ -520,7 +525,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
   // программа (на компьютере и телефоне), курс приходит в неё сам.
   route("POST", /^\/api\/noa\/builds$/, async ({ req, user: who, tokenUser }) => {
     const user = bridgeUser(who ?? tokenUser);
-    const { goal, model, quality } = await readJson(req);
+    const { goal, model, quality, depth } = await readJson(req);
     const text = String(goal ?? "").trim();
     if (text.length < 10) throw new Fail(400, "Опишите курс подробнее: о чём он и для чего — хотя бы одним предложением.");
     if (text.length > 3000) throw new Fail(400, "Слишком длинно — хватит пары абзацев.");
@@ -530,8 +535,8 @@ export function mountNoa({ route, db, Fail, readJson }) {
     const engine = BUILD_MODELS.has(model) ? model : "claude-code-bridge";
     const level = ["haiku", "sonnet", "opus"].includes(quality) ? quality : "sonnet";
     db.prepare(
-      "INSERT INTO noa_builds (id, user_id, goal, model, quality, status, stage, message) VALUES (?, ?, ?, ?, ?, 'running', 'plan', 'Составляю план курса')",
-    ).run(id, user.id, text, engine, level);
+      "INSERT INTO noa_builds (id, user_id, goal, model, quality, depth, status, stage, message) VALUES (?, ?, ?, ?, ?, ?, 'running', 'plan', 'Составляю план курса')",
+    ).run(id, user.id, text, engine, level, depth === "brief" ? "brief" : "full");
     runBuild(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(id));
     return { build: buildRow(db.prepare("SELECT * FROM noa_builds WHERE id = ?").get(id)) };
   });

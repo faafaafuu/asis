@@ -15,6 +15,8 @@ const PART = 3000;
 const PARALLEL = 4;
 
 const onMirror = () => typeof location !== "undefined" && /^m\./.test(location.hostname);
+/** Зеркало ответило на запись «405» — дальше только туннелем. */
+let tunnelOnly = false;
 
 /**
  * Метка против чужих сайтов: страница кладёт её в cookie и повторяет в
@@ -50,6 +52,13 @@ export async function siteFetch(url, init = {}) {
   if (method === "GET" || method === "HEAD" || !onMirror() || !String(url).startsWith("/")) return fetch(url, init);
 
   const bytes = init.body == null ? new Uint8Array() : new Uint8Array(await new Response(init.body).arrayBuffer());
+  // Зеркало теперь — свой сервер (Caddy) и пропускает запись как есть.
+  // Туннель — запасной путь, если перед зеркалом снова CDN с «405».
+  if (!tunnelOnly) {
+    const direct = await fetch(url, { ...init, body: init.body == null ? undefined : bytes });
+    if (direct.status !== 405) return direct;
+    tunnelOnly = true;
+  }
   const k = mark();
   const id = crypto.randomUUID();
   const common = { credentials: "same-origin", cache: "no-store", signal: init.signal };

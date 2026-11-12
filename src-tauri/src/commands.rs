@@ -2020,9 +2020,10 @@ pub fn window_error(page: String, text: String) {
 
 /// Собрать новый курс на сервере через мост — курс придёт в окно сам.
 #[tauri::command]
-pub async fn learn_build(goal: String, quality: Option<String>) -> Result<serde_json::Value, String> {
+pub async fn learn_build(goal: String, quality: Option<String>, depth: Option<String>) -> Result<serde_json::Value, String> {
     let quality = quality.unwrap_or_else(|| "sonnet".into());
-    crate::platform::build_course(goal.trim(), &quality).await
+    let depth = depth.unwrap_or_else(|| "full".into());
+    crate::platform::build_course(goal.trim(), &quality, &depth).await
 }
 
 /// Мост аккаунта: какой Claude отвечает — sonnet (точнее) или haiku

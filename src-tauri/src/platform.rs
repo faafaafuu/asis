@@ -148,10 +148,19 @@ pub async fn site_call(url: &str, method: &str, path: &str, token: &str, body: O
         return direct_call(url, method, path, token, body.is_some(), bytes).await.map_err(|err| err.replace(NO_LINK, ""));
     }
     // Через зеркало; не соединилось — тот же запрос по IP (сервер его не видел).
-    let first = if method != "GET" {
+    // Зеркало — свой сервер (Caddy) и пропускает запись как есть; туннель —
+    // только если оно ответит «405», как прежний CDN.
+    let first = if method != "GET" && TUNNEL_ONLY.load(std::sync::atomic::Ordering::Relaxed) {
         tunnel(path, method, token, &bytes).await
     } else {
-        direct_call(MIRROR_URL, method, path, token, body.is_some(), bytes.clone()).await
+        match direct_call(MIRROR_URL, method, path, token, body.is_some(), bytes.clone()).await {
+            Ok((405, _)) if method != "GET" => {
+                log::info!("зеркало не принимает запись — дальше туннелем");
+                TUNNEL_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
+                tunnel(path, method, token, &bytes).await
+            }
+            other => other,
+        }
     };
     match first {
         Err(err) if err.starts_with(NO_LINK) => {
@@ -162,9 +171,18 @@ pub async fn site_call(url: &str, method: &str, path: &str, token: &str, body: O
     }
 }
 
-/// Обычный запрос без туннеля: `(статус, тело)`.
+/// Зеркало не принимает запись (CDN с «405») — писать только туннелем.
+static TUNNEL_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Обычный запрос без туннеля: `(статус, тело)`. Ждёт до десяти минут: ответ
+/// модели (урок курса) идёт до минуты и дольше; сроки короче ставят те, кто зовёт.
 async fn direct_call(url: &str, method: &str, path: &str, token: &str, has_body: bool, bytes: Vec<u8>) -> Result<(u16, Vec<u8>), String> {
-    let client = client()?;
+    let wait = if path.starts_with("/api/noa/bridge") { 600 } else { 40 };
+    let client = crate::net::client_builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(wait))
+        .build()
+        .map_err(|err| err.to_string())?;
     let mut request = if method == "GET" { client.get(format!("{url}{path}")) } else { client.post(format!("{url}{path}")) };
     if !token.is_empty() {
         request = request.bearer_auth(token);
@@ -560,12 +578,12 @@ pub async fn pair_wait(code: &str) -> Result<(String, String), String> {
 /// Собрать новый курс на сервере — через мост, как «Собрать курс» в Ноа
 /// онлайн. Курс приходит в программу сам: сайт ставит его в очередь, а
 /// `sync` забирает. `quality` — sonnet (точнее) или haiku (бережёт лимит).
-pub async fn build_course(goal: &str, quality: &str) -> Result<Value, String> {
+pub async fn build_course(goal: &str, quality: &str, depth: &str) -> Result<Value, String> {
     let (url, token) = settings();
     if token.is_empty() {
         return Err("Сначала впишите ключ площадки в настройках — по нему курс соберётся на сервере.".into());
     }
-    let reply = post(&url, "/api/noa/builds", &token, &json!({ "goal": goal, "quality": quality })).await?;
+    let reply = post(&url, "/api/noa/builds", &token, &json!({ "goal": goal, "quality": quality, "depth": depth })).await?;
     Ok(reply["build"].clone())
 }
 

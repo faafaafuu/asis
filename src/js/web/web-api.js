@@ -491,7 +491,7 @@ async function learnApp(noa, cmd, args) {
       return (await site("/api/noa/goals", { goals: args.goals ?? [] })).goals ?? [];
     case "learn_build":
       if (!noa.user) throw new Error("Сборка курса — после входа на сайт.");
-      return site("/api/noa/builds", { goal: args.goal, quality: args.quality ?? "sonnet" });
+      return site("/api/noa/builds", { goal: args.goal, quality: args.quality ?? "sonnet", depth: args.depth ?? "full" });
     case "learn_build_stop":
       return site(`/api/noa/builds/${encodeURIComponent(args.id)}/stop`, {});
     case "learn_commands":
