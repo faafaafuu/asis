@@ -3427,3 +3427,52 @@ button.plate:active,
   width: 100%;
 }
 
+/* Сборка курса: кольцо, полоса с процентами, бегущая полоса до плана. */
+.build-card__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.build-spin {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgb(var(--tint) / 0.25);
+  border-top-color: var(--c-accent);
+  animation: build-spin 0.9s linear infinite;
+}
+@keyframes build-spin {
+  to { transform: rotate(360deg); }
+}
+.build-bar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+.build-bar__pct {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-accent);
+}
+.build-bar--wait {
+  position: relative;
+  overflow: hidden;
+}
+.build-bar--wait::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  background: var(--c-accent);
+  animation: build-wait 1.4s ease-in-out infinite;
+}
+@keyframes build-wait {
+  0% { left: -30%; }
+  100% { left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .build-spin, .build-bar--wait::after { animation: none; }
+}
+

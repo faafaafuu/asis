@@ -561,15 +561,30 @@ function buildCard(build, changed) {
   const card = el("div", running ? "plate plate--building build-card" : "plate build-card is-stopped");
   const top = el("div", "course-card__top");
   const state = { running: "собираю", failed: "не собрался", stopped: "остановлен" }[build.status] ?? build.status;
-  top.append(el("span", "course-card__title", build.title || build.goal || "Новый курс"), el("span", running ? "building" : "small dim", state));
+  const badge = el("span", running ? "building build-card__state" : "small dim", state);
+  // Идёт — крутится кольцо: видно, что сборка жива.
+  if (running) badge.prepend(el("span", "build-spin"));
+  top.append(el("span", "course-card__title", build.title || build.goal || "Новый курс"), badge);
   card.append(top);
-  if (build.total) card.append(progress((build.done / build.total) * 100, "m-bar"));
+  // Полоса с процентами: план — первые 5 %, дальше каждая тема — урок,
+  // понятия, вопросы; пока плана нет — бегущая полоса.
+  const percent = buildPercent(build);
+  if (running && percent === null) card.append(el("div", "m-bar build-bar--wait"));
+  else if (percent !== null) {
+    const bar = el("div", "build-bar");
+    bar.append(progress(percent, "m-bar"), el("span", "build-bar__pct", `${Math.round(percent)}%`));
+    card.append(bar);
+  }
   const what = running ? build.message || (build.total ? `Готово ${build.done} из ${build.total} тем` : "Составляю план курса") : build.message;
   if (running && build.total) card.append(el("span", "small build-card__step", `Тема ${Math.min(build.done + 1, build.total)} из ${build.total}`));
   if (what) card.append(el("span", running ? "small muted" : "small build-card__why", what));
   // Сборка на устройстве: сколько идёт, на какой модели, сколько модель думает
   // над этим шагом. Долго молчит — так и пишем, и даём сменить модель.
-  if (running && !build.local) card.append(el("span", "small dim build-card__time", "собирает сервер — приложение можно закрыть"));
+  if (running && !build.local) {
+    const fresh = build.updated ? Date.parse(`${String(build.updated).replace(" ", "T")}Z`) : NaN;
+    const ago = Number.isFinite(fresh) ? ` · последний шаг ${elapsed(Date.now() - fresh)} назад` : "";
+    card.append(el("span", "small dim build-card__time", `собирает сервер — приложение можно закрыть${ago}`));
+  }
   if (running && build.local && build.startedAt) {
     const now = Date.now();
     const parts = [`идёт ${elapsed(now - build.startedAt)}`];
@@ -631,4 +646,18 @@ function elapsed(ms) {
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min} мин${sec % 60 ? ` ${sec % 60} с` : ""}`;
   return `${Math.floor(min / 60)} ч ${min % 60} мин`;
+}
+
+/**
+ * Сколько собрано, в процентах: план — 5 %, остальное — темы поровну, а
+ * внутри темы урок, понятия и вопросы — по трети. Плана ещё нет — null.
+ */
+function buildPercent(build) {
+  if (!build.total) return build.status === "running" ? null : 0;
+  if (build.status === "done") return 100;
+  const per = 95 / build.total;
+  const message = String(build.message ?? "");
+  const inside = /задачи и экзамен/i.test(message) ? 2 / 3 : /понятия/i.test(message) ? 1 / 3 : 0;
+  const finishing = /финальн/i.test(message);
+  return Math.min(99, 5 + per * (build.done + (finishing ? 0 : inside)));
 }
