@@ -42,14 +42,57 @@ function save() {
   }
 }
 
-/** Латинские слова из прочитанного голосом — в очередь на разучивание. */
-export function note(text) {
+/** Незнакомые латинские слова текста (без аббревиатур — их голос читает по буквам и так верно). */
+function unknownIn(text) {
+  const out = new Set();
   for (const word of String(text ?? "").match(/[A-Za-z][A-Za-z0-9]{2,30}/g) ?? []) {
-    // Прописные — аббревиатура, их голос читает по буквам и так верно.
     if (/^[A-Z0-9]+$/.test(word)) continue;
     const lower = word.toLowerCase();
-    if (!known(lower) && queue.size < 500) queue.add(lower);
+    if (!known(lower)) out.add(lower);
   }
+  return [...out];
+}
+
+/** Латинские слова из прочитанного голосом — в очередь на разучивание. */
+export function note(text) {
+  for (const word of unknownIn(text)) if (queue.size < 500) queue.add(word);
+}
+
+/** Слова, которые модель разбирает прямо сейчас: второй запрос ждёт тот же ответ. */
+const pending = new Map();
+
+/** Спросить модель, как звучат слова по-русски, и запомнить ответ. */
+async function ask(words) {
+  const reply = await chat("claude-code-bridge", [{ role: "system", content: RULES }, { role: "user", content: words.join("\n") }], false, "haiku");
+  const answer = jsonIn(reply) ?? {};
+  let taught = 0;
+  for (const [word, spoken] of Object.entries(answer)) if (words.includes(word.toLowerCase()) && teach(word, spoken)) taught += 1;
+  return taught;
+}
+
+/**
+ * Перед озвучкой: незнакомые английские слова — модели сразу, а не через
+ * пять минут. Голос Microsoft читает латиницу русскими правилами — выходит
+ * каша; выученное слово он читает кириллицей. Ждём не дольше `wait`:
+ * не успела модель — фраза звучит как есть, слово выучится к следующему разу.
+ */
+export async function learnNow(text, wait = 8000) {
+  if (!chat) return;
+  const words = unknownIn(text);
+  if (!words.length) return;
+  const fresh = words.filter((word) => !pending.has(word)).slice(0, BATCH);
+  if (fresh.length) {
+    for (const word of fresh) queue.delete(word);
+    const job = ask(fresh)
+      .then((taught) => console.log(`произношение: сразу выучено ${taught} из ${fresh.length}`))
+      .catch((err) => console.error("произношение: модель не ответила:", err?.message ?? err))
+      .finally(() => fresh.forEach((word) => pending.delete(word)));
+    for (const word of fresh) pending.set(word, job);
+  }
+  const jobs = [...new Set(words.map((word) => pending.get(word)).filter(Boolean))];
+  let timer;
+  await Promise.race([Promise.allSettled(jobs), new Promise((done) => (timer = setTimeout(done, wait)))]);
+  clearTimeout(timer);
 }
 
 /** Термин с произношением — от модели или из аудиодрамы. */
@@ -68,10 +111,7 @@ async function study() {
   const words = [...queue].slice(0, BATCH);
   for (const word of words) queue.delete(word);
   try {
-    const reply = await chat("claude-code-bridge", [{ role: "system", content: RULES }, { role: "user", content: words.join("\n") }], false, "haiku");
-    const answer = jsonIn(reply) ?? {};
-    let taught = 0;
-    for (const [word, spoken] of Object.entries(answer)) if (words.includes(word.toLowerCase()) && teach(word, spoken)) taught += 1;
+    const taught = await ask(words);
     console.log(`произношение: выучено ${taught} из ${words.length}`);
   } catch (err) {
     console.error("произношение: модель не ответила:", err?.message ?? err);
