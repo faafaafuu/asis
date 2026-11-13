@@ -220,7 +220,9 @@ export function onTopic(page, context) {
   const topic = significant(context);
   if (!topic.length) return true;
   const text = norm(`${page?.title ?? ""} ${page?.description ?? ""} ${page?.extract ?? ""}`);
-  return topic.some((word) => text.includes(stemOf(word)));
+  // Корень покороче, чем для названий: «птицы» в теме, «птиц» в статье.
+  const root = (word) => [...word].slice(0, Math.max(4, [...word].length - 3)).join("");
+  return topic.some((word) => text.includes(root(word)));
 }
 
 async function summaryOf(lang, hint) {
@@ -269,7 +271,13 @@ export async function findPicture(wanted, width) {
   const hints = [ru, en, name].filter(Boolean);
   if (!hints.length) return null;
   const page = (found) => found && !aboutPerson(found, hints) && { url: imageUrl(found, width), source: found.content_urls?.desktop?.page ?? "", caption: found.title };
-  let picked = page(await summaryOf("ru", ru)) || page(await summaryOf("en", en));
+  // Статья по названию — тоже проверяется на тему: «Гейша» в путеводителе о
+  // кофе по прямому названию вела к японским артисткам. Русская нашлась, но
+  // не о том — английская того же слова тоже не о том, идём в поиск.
+  const direct = await summaryOf("ru", ru);
+  const offTopic = Boolean(direct) && !onTopic(direct, topic);
+  let picked = direct && !offTopic ? page(direct) : null;
+  if (!picked && !direct) picked = page(await summaryOf("en", en));
   if (!picked) {
     for (const other of await searchOf("ru", ru || name)) {
       if (!relevant(other, [ru, name].filter(Boolean), context)) continue;
@@ -279,14 +287,16 @@ export async function findPicture(wanted, width) {
       if (found && onTopic(found, topic) && (picked = page(found))) break;
     }
   }
-  if (!picked && en) {
+  // Русская статья с этим названием — о другом: английская того же слова
+  // тоже о другом («Geisha»), и файлы Commons по нему — тоже.
+  if (!picked && en && !offTopic) {
     for (const other of await searchOf("en", en)) {
       if (relevant(other, [en], context) && (picked = page(await summaryOf("en", other)))) break;
     }
   }
   // Файлы Commons — только по названной статье: одно слово («Балка») там
   // находит овраг на Украине.
-  if (!picked && (en || ru)) picked = await commonsFile(en || ru, [en, ru].filter(Boolean), width, context);
+  if (!picked && !offTopic && (en || ru)) picked = await commonsFile(en || ru, [en, ru].filter(Boolean), width, context);
   return picked?.url ? picked : null;
 }
 

@@ -128,11 +128,30 @@ register("lesson", (screen, { course: courseId, topic: topicId }) => {
     const place = prefs.get("readPlace");
     if (place?.course === courseId && place?.topic === topicId && place?.section === at && place.piece < list.length) readAt = place.piece;
     const mine = ++readToken;
-    for (; readAt < list.length; readAt++) {
-      prefs.set("readPlace", { course: courseId, topic: topicId, section: at, piece: readAt });
-      await voice.speak(list[readAt]);
+    const from = readAt;
+    // Одним потоком — голос готовит следующие фразы, пока звучит текущая,
+    // и сообщает, какую начал: по ней помним место для паузы.
+    const remember = (piece) => prefs.set("readPlace", { course: courseId, topic: topicId, section: at, piece });
+    remember(from);
+    let heard = [];
+    const unlisten = await api?.listen?.("voice-phrase", (event) => {
       if (mine !== readToken) return;
+      const phrase = String(event?.payload ?? "").trim().slice(0, 24);
+      const index = phrase ? list.findIndex((piece, n) => n >= from && piece.includes(phrase)) : -1;
+      if (index < 0) return;
+      // Продолжим с куска перед звучащим: фраза повторится, но ничего не пропадёт.
+      heard = [...heard.slice(-1), index];
+      readAt = heard[0];
+      remember(readAt);
+    });
+    try {
+      await voice.speak(list.slice(from).join(" "));
+      // На компьютере голос возвращается сразу, звук ещё в очереди.
+      while (mine === readToken && (await voice.busy())) await new Promise((done) => setTimeout(done, 700));
+    } finally {
+      unlisten?.();
     }
+    if (mine !== readToken) return;
     // Дочитали раздел — с начала в следующий раз.
     readAt = 0;
     prefs.set("readPlace", null);

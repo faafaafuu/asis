@@ -281,7 +281,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
     return -1;
   };
   async function voiceMp3(text, voice, rate) {
-    await learnNow(text, 6000);
+    await learnNow(text, 3000);
     const response = await fetch(`${VOICE_URL}/tts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -587,7 +587,7 @@ export function mountNoa({ route, db, Fail, readJson }) {
     const phrase = String(text ?? "").trim().slice(0, MAX_PHRASE);
     if (!phrase) throw new Fail(400, "Нечего читать.");
     // Незнакомые английские слова — модели сразу: голос читает их кириллицей.
-    await learnNow(phrase, 8000);
+    await learnNow(phrase, 4000);
     const hour = Date.now() - 3_600_000;
     const recent = (spoke.get(user.id) ?? []).filter((at) => at > hour);
     if (recent.length >= VOICE_PER_HOUR) throw new Fail(429, "Голоса на этот час хватит — дальше читаю голосом браузера.");

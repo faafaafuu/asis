@@ -69,7 +69,7 @@ static READ_REQUEST: AtomicU64 = AtomicU64::new(0);
 /// Microsoft (`voice.engine = "silero"`), по фразам: каждая — секунда-две.
 /// Выключили в профиле — Ирина (Piper), встроенная в приложение: сразу и без
 /// сети. Не вышел один — говорит другой, не вышли оба — системный.
-pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<(), String> {
+pub async fn speak(app: &AppHandle, config: &VoiceConfig, text: &str) -> Result<(), String> {
     // Светлане (голос Ноа с сервера) — текст как есть: она сама склоняет
     // числа и читает английские слова. Ирине и системному голосу — словами
     // (src/speech.rs): сами они цифры и латиницу не прочтут.
@@ -86,13 +86,13 @@ pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result
     SPEAKING.store(true, Ordering::SeqCst);
     let result = if cfg!(target_os = "ios") {
         let server_first = config.engine == "silero";
-        let first = if server_first { server_voice(config, &text, request).await } else { irina::speak(config, &text, request).await };
+        let first = if server_first { server_voice(app, config, &text, request).await } else { irina::speak(config, &text, request).await };
         match first {
             Ok(()) => Ok(()),
             Err(rest) if rest.is_empty() => Ok(()),
             Err(rest) => {
                 let rest = if neural { crate::speech::readable(&rest) } else { rest };
-                let second = if server_first { irina::speak(config, &rest, request).await } else { server_voice(config, &rest, request).await };
+                let second = if server_first { irina::speak(config, &rest, request).await } else { server_voice(app, config, &rest, request).await };
                 match second {
                     Ok(()) => Ok(()),
                     Err(left) if left.is_empty() => Ok(()),
@@ -108,11 +108,11 @@ pub async fn speak(_app: &AppHandle, config: &VoiceConfig, text: &str) -> Result
 }
 
 /// Голос с сервера — если сервер только что не ответил, минуту не пробуем.
-async fn server_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(), String> {
+async fn server_voice(app: &AppHandle, config: &VoiceConfig, text: &str, request: u64) -> Result<(), String> {
     if server_down() {
         return Err(text.to_string());
     }
-    noa_voice(config, text, request).await
+    noa_voice(app, config, text, request).await
 }
 
 /// Голос на телефоне: `silero` — голос Ноа с сервера, иное — Ирина в телефоне.
@@ -569,7 +569,8 @@ async fn fetch_phrase(base: String, token: String, voice: String, phrase: String
 }
 
 /// Голосом Ноа. Ошибка — текст, который осталось сказать (пустой — перебили).
-async fn noa_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(), String> {
+async fn noa_voice(app: &AppHandle, config: &VoiceConfig, text: &str, request: u64) -> Result<(), String> {
+    use tauri::Emitter;
     let (base, token) = crate::platform::settings();
     if token.is_empty() {
         crate::platform::diag("голос Ноа: нет ключа площадки — говорит системный");
@@ -578,9 +579,11 @@ async fn noa_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(),
     let voice = if config.silero_voice.trim().is_empty() { "svetlana".to_string() } else { config.silero_voice.clone() };
     let list = quick_start(phrases(text, 180));
     let start = |phrase: &String| tauri::async_runtime::spawn(fetch_phrase(base.clone(), token.clone(), voice.clone(), phrase.clone()));
-    let mut next = list.first().map(start);
+    // Две фразы впрок: длинная фраза готовится секунд пять, и с одной впрок
+    // между абзацами повисала тишина.
+    let mut ahead: std::collections::VecDeque<_> = list.iter().take(2).map(start).collect();
     for (at, _) in list.iter().enumerate() {
-        let Some(task) = next.take() else { break };
+        let Some(task) = ahead.pop_front() else { break };
         let audio = match task.await.map_err(|err| err.to_string()).and_then(|got| got) {
             Ok(audio) => audio,
             Err(err) => {
@@ -589,13 +592,15 @@ async fn noa_voice(config: &VoiceConfig, text: &str, request: u64) -> Result<(),
                 return Err(list[at..].join(" "));
             }
         };
-        if let Some(following) = list.get(at + 1) {
-            next = Some(start(following));
+        if let Some(following) = list.get(at + 2) {
+            ahead.push_back(start(following));
         }
         if READ_REQUEST.load(Ordering::SeqCst) != request {
             return Err(String::new());
         }
-        let path = std::env::temp_dir().join(format!("noa-phrase-{}.mp3", at % 2));
+        // Какая фраза звучит — окну: пауза в уроке продолжит с неё.
+        let _ = app.emit("voice-phrase", &list[at]);
+        let path = std::env::temp_dir().join(format!("noa-phrase-{}.mp3", at % 3));
         std::fs::write(&path, &audio).map_err(|err| err.to_string())?;
         let played = crate::mobile::call_async::<serde_json::Value>(
             "playAudio",

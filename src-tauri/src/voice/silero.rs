@@ -425,6 +425,11 @@ pub async fn speak(app: &AppHandle, voice: &str, rate: f32, text: &str) -> Resul
                 return Ok(());
             }
             let (samples, hz) = if wav.starts_with(b"RIFF") { super::azure::decode_wav(&wav)? } else { decode_mp3(wav)? };
+            // Какой кусок встал в очередь — окну: пауза в уроке продолжит с него.
+            {
+                use tauri::Emitter;
+                let _ = app.emit("voice-phrase", &piece);
+            }
             super::audio::play(samples, hz);
         }
         Ok(())
