@@ -604,7 +604,9 @@ async function learnApp(noa, cmd, args) {
       const messages = [{ role: "system", content: String(args.rules ?? "") }];
       for (const item of (args.thread ?? []).slice(-10)) messages.push({ role: "user", content: item.q }, { role: "assistant", content: item.a });
       messages.push({ role: "user", content: String(args.said ?? "") });
-      return String(await chat(model, messages, { maxTokens: args.long ? 2500 : 900, timeoutMs: 180_000 }));
+      // Живой разговор — у моста с Claude Haiku: быстрее.
+      const quick = args.fast && model.kind === "bridge" && String(model.model).startsWith("claude") ? { ...model, quality: "haiku" } : model;
+      return String(await chat(quick, messages, { maxTokens: args.long ? 2500 : 900, timeoutMs: 180_000 }));
     }
     case "plugin:sufler|listen": {
       hearing?.abort();

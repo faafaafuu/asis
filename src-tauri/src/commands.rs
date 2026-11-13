@@ -1979,8 +1979,21 @@ pub async fn learn_coach(
     thread: Vec<ThreadItem>,
     said: String,
     long: Option<bool>,
+    fast: Option<bool>,
 ) -> Result<String, String> {
-    let provider = state.provider();
+    // Живой разговор (собеседование): у моста с Claude — Haiku, он отвечает в
+    // 2–3 раза быстрее, а короткой реплике подробность Sonnet не нужна.
+    let provider = {
+        let config = state.config();
+        let ai = &config.ai;
+        if fast.unwrap_or(false) && ai.endpoint.contains("/api/noa/bridge") && ai.model.starts_with("claude-code-bridge") {
+            let mut quick = ai.clone();
+            quick.model = "claude-code-bridge:haiku".into();
+            std::sync::Arc::from(crate::ai_client::build_provider(&quick, &config.ui.language, &config.voice.wake_name))
+        } else {
+            state.provider()
+        }
+    };
     let fallback = state.error_text();
     let limit = state.config().ai.call_limit();
     let long = long.unwrap_or(false);

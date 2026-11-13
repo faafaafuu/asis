@@ -3,9 +3,12 @@
 
 import { call } from "./core.js";
 
-/** Спросить модель. `thread` — прошлые обмены `{q, a}`; `long` — длинный ответ. */
-export function coach(rules, said, { thread = [], long = false } = {}) {
-  return call("learn_coach", { rules, said, thread, long }, { slow: true });
+/**
+ * Спросить модель. `thread` — прошлые обмены `{q, a}`; `long` — длинный ответ;
+ * `fast` — реплика живого разговора: у моста с Claude — Haiku, быстрее.
+ */
+export function coach(rules, said, { thread = [], long = false, fast = false } = {}) {
+  return call("learn_coach", { rules, said, thread, long, fast }, { slow: true });
 }
 
 /** JSON из ответа модели: она охотно пишет пояснения вокруг. */

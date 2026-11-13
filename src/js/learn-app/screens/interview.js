@@ -397,7 +397,8 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
     `Хороший ответ раскрывает: ${(q.points ?? []).join("; ") || "суть, пример, подводные камни"}.\n` +
     "Цель — чтобы человек понял, запомнил и прошёл настоящее собеседование. Говоришь вслух, как живой человек на созвоне: " +
     "просто, тепло, на «ты». СТРОГО: не больше 2 коротких предложений (до 35 слов) и не больше одного вопроса за раз. " +
-    "Без списков, разметки и лекций.\n" +
+    "Без списков, разметки и лекций. Начинай с короткой живой реакции, как на звонке («Ага», «Да, верно», «Хм, почти», «Смотри») — " +
+    "без «Отличный вопрос» и «Спасибо за ответ».\n" +
     "Человек отвечает голосом: речь распознаётся с ошибками (MTV вместо MTU, слова слитно), говорит просто, коряво, разговорно. " +
     "Засчитывай СУТЬ, сказанную своими словами, в любой момент разговора; не придирайся к терминам и формулировкам.\n" +
     "Как вести разговор:\n" +
@@ -419,11 +420,11 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
   /** Реплика наставника на сказанное; `thread` — разговор по этому вопросу. */
   async function mentor(q, thread, said) {
     const rules = mentorRules(q);
-    let raw = await coach(rules, said, { thread });
+    let raw = await coach(rules, said, { thread, fast: true });
     try {
       return { reply: parseJson(raw), raw };
     } catch {
-      raw = await coach(`${rules}\nСТРОГО: только JSON, без слов вокруг.`, said, { thread });
+      raw = await coach(`${rules}\nСТРОГО: только JSON, без слов вокруг.`, said, { thread, fast: true });
       return { reply: parseJson(raw), raw };
     }
   }
@@ -546,14 +547,20 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
       const ticket = {};
       current = ticket;
       voice
-        .listen({ pause: 3.5, idle, limit: 120, ends: ENDINGS, asks: ASKS })
+        // Конец фразы — по короткой паузе, как в живом разговоре: если человек
+        // продолжит, следующий кусок склеится с этим (см. hearTurn).
+        .listen({ pause: 1.6, idle, limit: 120, ends: ENDINGS, asks: ASKS })
         .then((text) => current === ticket && finish(text))
         .catch(() => current === ticket && finish(""));
       return answer;
     };
 
-    /** Реплика человека целиком: куски речи копятся, пока он не закончит. */
-    const hearTurn = async () => {
+    /**
+     * Реплика человека целиком: куски речи копятся, пока он не закончит.
+     * `early(text)` — начать ответ заранее, пока ждём, не продолжит ли он:
+     * замолчал — ответ уже почти готов; продолжил — черновик выбрасывается.
+     */
+    const hearTurn = async (early = () => {}) => {
       const parts = [];
       let quiet = 0;
       let fails = 0;
@@ -582,8 +589,8 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
         heardBefore = parts.join(" ");
         bubble();
         const from = Date.now();
-        // Уже что-то сказал — после паузы ждём продолжения недолго; ещё молчит — дольше.
-        const got = await segment(parts.length ? 3.5 : 12);
+        // Уже что-то сказал — после паузы ждём продолжения недолго (2 с); ещё молчит — дольше.
+        const got = await segment(parts.length ? 2 : 12);
         if (got === STOP || stopped) return done(STOP);
         if (paused) continue;
         if (got === DONE) {
@@ -610,7 +617,9 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
             return done(cmd);
           }
           if (wantDone || ended(parts.join(" ")) || (parts.length === 1 && asking(text))) return done(parts.join(" "));
-          // Пауза на подумать — слушаем дальше.
+          // Пауза — может, договорил, может, думает. Ответ начинаем готовить
+          // сейчас, а слушаем ещё пару секунд.
+          early(parts.join(" "));
           continue;
         }
         if (wantDone) {
@@ -656,7 +665,14 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
         await speak(`${at === 0 ? "Начнём." : "Следующий вопрос."} ${q.q}`);
         let last = q.q;
         while (alive && !stopped) {
-          let said = await hearTurn();
+          // Ответы, начатые заранее, — по тексту сказанного.
+          const ahead = new Map();
+          // Не больше трёх черновиков на ответ: длинный ответ с паузами не
+          // должен заваливать модель запросами.
+          const early = (text) => {
+            if (!ahead.has(text) && ahead.size < 3) ahead.set(text, mentor(q, thread, text).catch((err) => ({ failed: err })));
+          };
+          let said = await hearTurn(early);
           if (said === STOP || !alive || stopped) break;
           if (said === REPEAT) {
             await speak(last);
@@ -670,7 +686,9 @@ register("interview", (screen, { course: courseId, topic: topicId = null }) => {
           mode("look", "Ноа думает…");
           let reply;
           try {
-            const turn = await mentor(q, thread, said);
+            const ready = ahead.get(said);
+            const prepared = ready ? await ready : null;
+            const turn = prepared && !prepared.failed ? prepared : await mentor(q, thread, said);
             reply = turn.reply;
             // В памяти разговора — только сказанное: короче запрос, быстрее ответ.
             thread.push({ q: said, a: JSON.stringify({ say: reply.say ?? "", done: Boolean(reply.done) }) });
