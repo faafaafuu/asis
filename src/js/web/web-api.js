@@ -554,6 +554,15 @@ async function learnApp(noa, cmd, args) {
       rememberModel(found);
       return "Модель включена.";
     }
+    case "models_recommend": {
+      const reply = await fetch(`/api/qrack/models/openrouter?_=${Date.now()}`, { credentials: "same-origin" });
+      return reply.ok ? ((await reply.json()).models ?? []) : [];
+    }
+    case "open_key_page": {
+      const pages = { openrouter: "https://openrouter.ai/keys", groq: "https://console.groq.com/keys", google: "https://aistudio.google.com/app/apikey", anthropic: "https://console.anthropic.com/settings/keys" };
+      if (pages[args.provider]) window.open(pages[args.provider], "_blank", "noopener");
+      return null;
+    }
     case "cloud_models":
       return listModels(webModel(args.endpoint, args.apiKey, "x"));
     case "save_ai_settings": {

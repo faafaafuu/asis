@@ -1318,6 +1318,7 @@ pub fn open_key_page(provider: String) -> Result<(), String> {
         "groq" => "https://console.groq.com/keys",
         "google" => "https://aistudio.google.com/app/apikey",
         "openrouter" => "https://openrouter.ai/keys",
+        "anthropic" => "https://console.anthropic.com/settings/keys",
         other => return Err(format!("для «{other}» страницы ключей нет")),
     };
     open_externally(url)
@@ -2089,6 +2090,15 @@ pub fn bridge_use(app: AppHandle, state: State<'_, AppState>, engine: String, le
     state.rebuild_provider(&config.ai, &config.ui.language, &config.voice.wake_name);
     let level = if engine == "claude-code-bridge" { if haiku { " Haiku" } else { " Sonnet" } } else { "" };
     Ok(format!("Мост: {name}{level}"))
+}
+
+/// Какие модели OpenRouter посоветовать: сервер берёт каталог и отдаёт
+/// короткий список с ценой курса (сам каталог — полмегабайта).
+#[tauri::command]
+pub async fn models_recommend() -> Result<serde_json::Value, String> {
+    let (url, _) = crate::platform::settings();
+    let reply = crate::platform::get(&url, "/api/qrack/models/openrouter").await?;
+    Ok(reply["models"].clone())
 }
 
 /// Стандарт курса — для сборки моделью человека прямо в приложении.

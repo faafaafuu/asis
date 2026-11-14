@@ -23,7 +23,8 @@ const SERVICES = [
     name: "OpenRouter",
     hint: "Ключ — openrouter.ai/keys. Есть бесплатные модели и сотни платных.",
     endpoint: "https://openrouter.ai/api/v1/chat/completions",
-    model: "z-ai/glm-5.2:free",
+    // Модель выбирается карточкой из рекомендуемых (models_recommend).
+    model: "",
   },
   {
     id: "google",
@@ -234,9 +235,27 @@ export function openModels(changed = () => {}) {
   });
 }
 
+/** Где взять ключ — по шагам, с кнопкой на страницу ключей. */
+const KEY_STEPS = {
+  openrouter: ["Войдите на openrouter.ai (можно через Google)", "Нажмите «Create Key» и скопируйте ключ", "Вернитесь сюда и нажмите «Вставить»"],
+  anthropic: ["Войдите в console.anthropic.com", "Settings → API Keys → «Create Key», скопируйте", "Вернитесь сюда и нажмите «Вставить»"],
+  google: ["Войдите в aistudio.google.com", "«Create API key», скопируйте", "Вернитесь сюда и нажмите «Вставить»"],
+  groq: ["Войдите в console.groq.com", "«Create API Key», скопируйте", "Вернитесь сюда и нажмите «Вставить»"],
+};
+
 /** Форма подключения сервиса: ключ, модель, «Проверить и включить». */
 function connect(service, form, done) {
   form.replaceChildren(el("span", "small muted", service.hint));
+  const steps = KEY_STEPS[service.id];
+  if (steps) {
+    const how = el("div", "key-steps");
+    steps.forEach((text, at) => how.append(el("span", "key-steps__row", `${at + 1}. ${text}`)));
+    const get = el("button", "btn btn--secondary", "Получить ключ");
+    get.type = "button";
+    get.addEventListener("click", () => call("open_key_page", { provider: service.id }).catch((err) => toast(String(err))));
+    how.append(get);
+    form.append(how);
+  }
   const field = (title, input) => {
     const box = el("label", "field-label");
     box.append(title, input);
@@ -251,7 +270,25 @@ function connect(service, form, done) {
   key.type = "password";
   key.autocomplete = "off";
   key.placeholder = service.id === "custom" ? "Ключ, если нужен" : "Ключ сервиса";
-  if (!service.local) field("Ключ", key);
+  if (!service.local) {
+    // Ключ — одним нажатием из буфера обмена: длинную строку руками не набрать.
+    const row = el("div", "key-row");
+    const paste = el("button", "btn btn--plain", "Вставить");
+    paste.type = "button";
+    paste.addEventListener("click", async () => {
+      try {
+        const text = (await navigator.clipboard.readText()).trim();
+        if (text) {
+          key.value = text;
+          key.dispatchEvent(new Event("change"));
+        }
+      } catch {
+        toast("Не получилось прочитать буфер — вставьте ключ долгим нажатием");
+      }
+    });
+    row.append(key, paste);
+    field("Ключ", row);
+  }
   const model = el("input", "field");
   model.value = service.model;
   model.placeholder = "Имя модели";
@@ -259,7 +296,39 @@ function connect(service, form, done) {
   options.id = `models-${service.id}`;
   model.setAttribute("list", options.id);
   for (const name of service.models ?? []) options.append(new Option(name, name));
-  field("Модель", model);
+  // OpenRouter: рекомендуемые модели карточками — с ценой курса; своё имя —
+  // под «Другая модель».
+  if (service.id === "openrouter") {
+    const picks = el("div", "model-picks");
+    picks.append(label("// рекомендуем"));
+    const other = el("details", "model-other");
+    other.append(el("summary", "", "Другая модель"));
+    form.append(picks);
+    call("models_recommend", {}, { retries: 1 })
+      .then((list) => {
+        for (const item of list ?? []) {
+          const card = el("button", "model-pick");
+          card.type = "button";
+          const price = item.free ? "бесплатно" : `курс ≈ $${String(item.course).replace(".", ",")}`;
+          card.append(el("span", "model-pick__name", item.label), el("span", "model-pick__price", price), el("span", "model-pick__hint", item.hint));
+          card.addEventListener("click", () => {
+            model.value = item.id;
+            for (const other of picks.querySelectorAll(".model-pick")) other.setAttribute("aria-pressed", String(other === card));
+          });
+          if (!model.value && !item.free) {
+            model.value = item.id;
+            card.setAttribute("aria-pressed", "true");
+          }
+          picks.append(card);
+        }
+        if (!list?.length) picks.append(el("span", "small dim", "Список не пришёл — впишите имя модели в «Другая модель»."));
+      })
+      .catch(() => picks.append(el("span", "small dim", "Список не пришёл — впишите имя модели в «Другая модель».")));
+    const box = el("label", "field-label");
+    box.append("Имя модели", model);
+    other.append(box);
+    form.append(other);
+  } else field("Модель", model);
   form.append(options);
   const catalog = el("span", "small dim");
   form.append(catalog);
@@ -281,6 +350,8 @@ function connect(service, form, done) {
   }
   // Ключ вписан — список моделей сервиса, с ценами: имя наизусть помнить не нужно.
   key.addEventListener("change", async () => {
+    // У OpenRouter — карточки рекомендуемых: весь каталог (полмегабайта) не тянем.
+    if (service.id === "openrouter") return;
     if (!key.value.trim() || !endpoint.value.trim()) return;
     catalog.textContent = "Спрашиваю у сервиса список моделей…";
     try {

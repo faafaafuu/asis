@@ -215,3 +215,10 @@ test("урок следующей темы пишется, пока состав
   await buildCourse({ goal: "x", format: FORMAT, chat, save: () => {} });
   assert.ok(log.indexOf("урок 2 начат") < log.indexOf("вопросы 1 готовы"), log.join(" → "));
 });
+
+test("план с темой из примера методики, о которой не просили, — отклоняется", async () => {
+  const { planLeaked } = await import("./course-builder.js");
+  assert.equal(planLeaked({ id: "devops", title: "DevOps: от сетей до Kubernetes", topics: [] }, "Маркетинг для малого бизнеса"), true);
+  assert.equal(planLeaked({ id: "mk", title: "Маркетинг", topics: [{ id: "a", title: "Воронка продаж" }] }, "Маркетинг"), false);
+  assert.equal(planLeaked({ id: "k8s", title: "Kubernetes в проде", topics: [] }, "Хочу выучить Kubernetes"), false);
+});

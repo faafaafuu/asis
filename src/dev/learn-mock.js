@@ -327,6 +327,15 @@
           code: "demo",
           options: ["Google", "Яндекс", "VK", "GitHub", "Telegram"].map((title) => ({ id: { Google: "google", Яндекс: "yandex", VK: "vk", GitHub: "github", Telegram: "telegram" }[title], title, link: "" })),
         };
+      case "models_recommend":
+        await wait(300);
+        return [
+          { id: "anthropic/claude-haiku-5.5", label: "Claude Haiku", hint: "лучше всех пишет уроки и держит тему курса", course: 0.13, free: false },
+          { id: "deepseek/deepseek-v4.1-flash", label: "DeepSeek Flash", hint: "почти бесплатно, пишет неплохо", course: 0.06, free: false },
+          { id: "google/gemma-4-31b-it:free", label: "Бесплатная", hint: "без оплаты, но слабее: для простых тем, может путать тему", course: 0, free: true },
+        ];
+      case "open_key_page":
+        return null;
       case "bridge_use": {
         const claude = args.engine === "claude-code-bridge";
         aiNow = { ...aiNow, model: claude ? `claude-code-bridge:${args.level === "haiku" ? "haiku" : "sonnet"}` : `${args.engine}:free` };

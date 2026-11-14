@@ -110,9 +110,27 @@ const DEPTH = {
   core: { topics: "1–2 темы: только суть — то, без чего тему не понять и что точно спросят", words: "450–700 слов, сжато, без истории и отступлений", sections: "3", lessonTokens: 2800 },
 };
 
-function planRules(format, depth = DEPTH.full) {
+/**
+ * Примеры в методике (курс «DevOps: от сетей до Kubernetes») — только образец
+ * формата. Слабые модели брали из них тему: человек просил маркетинг, а
+ * собирался DevOps. Об этом — прямо в подсказке, а план с чужой темой — заново.
+ */
+const EXAMPLE_ONLY =
+  "ВАЖНО: примеры в методике (курс про DevOps и Kubernetes, readinessProbe и т. п.) — только образец формата полей. " +
+  "Их тему, названия, id и термины НЕ используй: тема курса — строго из просьбы человека.";
+const EXAMPLE_WORDS = /devops|девопс|kubernetes|кубер|k8s|readiness|kubectl/i;
+
+/** План ушёл в тему примера из методики, о которой человек не просил. */
+export function planLeaked(plan, goal) {
+  if (!plan || EXAMPLE_WORDS.test(String(goal ?? ""))) return false;
+  const text = [plan.id, plan.title, plan.description, ...list(plan.topics).map((t) => `${t.id} ${t.title}`)].join(" ");
+  return EXAMPLE_WORDS.test(text);
+}
+
+function planRules(format, depth = DEPTH.full, goal = "") {
   return [
     "Ты — методист NOAH: собираешь учебный курс для приложения Ноа по методике ниже. Сейчас нужен только план курса.",
+    EXAMPLE_ONLY,
     formatPart(format, "Порядок работы"),
     formatPart(format, "Курс"),
     formatPart(format, "Тема", { shallow: true }),
@@ -125,6 +143,7 @@ function planRules(format, depth = DEPTH.full) {
       "- description — для кого курс и что внутри, два предложения.",
       "Пиши по-русски. Верни только JSON, без пояснений:",
       '{"id":"…","title":"…","aliases":["…"],"description":"…","topics":[{"id":"…","title":"…","aliases":["…"],"summary":"…"}]}',
+      goal ? `\nПросьба человека — именно о ней курс:\n«${String(goal).slice(0, 1500)}»` : "",
     ].join("\n"),
   ]
     .filter(Boolean)
@@ -141,6 +160,7 @@ function lessonRules(format, plan, topic, earlier, depth = DEPTH.full) {
     : "";
   return [
     "Ты — методист NOAH: пишешь урок одной темы учебного курса по методике ниже.",
+    EXAMPLE_ONLY,
     formatPart(format, "Урок"),
     `Курс «${plan.title}». ${plan.description}\n\nТемы курса по порядку:\n${outline(plan, topic.id)}${known}`,
     [
@@ -163,6 +183,7 @@ function conceptRules(format, topic, earlier) {
     : "Прошлых тем нет — related только внутри этой темы.";
   return [
     "Ты — методист NOAH: по готовому уроку составляешь понятия и карточки темы по методике ниже.",
+    EXAMPLE_ONLY,
     formatPart(format, "Понятие"),
     formatPart(format, "Карточка"),
     `Тема: id "${topic.id}", «${topic.title}».\n${known}`,
@@ -181,6 +202,7 @@ function conceptRules(format, topic, earlier) {
 function questionRules(format, topic, concepts) {
   return [
     "Ты — методист NOAH: по готовому уроку составляешь практические задачи и мини-экзамен темы по методике ниже.",
+    EXAMPLE_ONLY,
     formatPart(format, "Вопрос"),
     formatPart(format, "Что проверяет Ноа"),
     `Тема: id "${topic.id}", «${topic.title}». Понятия темы (id — термин):\n${concepts.map((c) => `- ${c.id} — ${c.term}`).join("\n")}`,
@@ -456,11 +478,18 @@ export async function buildCourse({ goal, format, chat, save, progress = () => {
     goal = resume.building.goal || goal;
   } else {
     progress({ stage: "plan", done: 0, total: 0, message: "Составляю план курса" });
+    let leaked = false;
     for (let attempt = 0; attempt < 2 && !plan; attempt++) {
       check();
-      const raw = jsonIn(await ask([{ role: "system", content: planRules(format, depth) }, { role: "user", content: goal }], { json: true, maxTokens: 2500 }));
+      const warn = attempt ? `\n\nПрошлый план был не о том — про DevOps из примера. Составь план строго по просьбе: «${goal}».` : "";
+      const raw = jsonIn(await ask([{ role: "system", content: planRules(format, depth, goal) }, { role: "user", content: `${goal}${warn}` }], { json: true, maxTokens: 2500 }));
       plan = shapePlan(raw, taken);
+      if (planLeaked(plan, goal)) {
+        leaked = true;
+        plan = null;
+      }
     }
+    if (!plan && leaked) throw new Fatal("Модель вместо вашей темы взяла пример из методики (DevOps). Выберите модель посильнее — например, Claude Haiku или Gemini Flash — и соберите ещё раз.");
     if (!plan) throw new Error("Модель не прислала план курса — попробуйте сформулировать тему иначе.");
   }
 

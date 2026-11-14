@@ -3541,3 +3541,59 @@ button.plate:active,
   color: var(--c-soft);
 }
 
+/* Подключение модели: шаги за ключом, «Вставить», рекомендуемые модели. */
+.key-steps {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid rgb(var(--tint) / 0.2);
+}
+.key-steps__row {
+  font-size: 13px;
+  color: var(--c-soft);
+}
+.key-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.model-picks {
+  display: grid;
+  gap: 8px;
+}
+.model-pick {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid rgb(var(--tint) / 0.2);
+  background: transparent;
+  color: var(--c-soft);
+}
+.model-pick[aria-pressed="true"] {
+  border-color: var(--c-accent);
+  background: rgb(var(--tint) / 0.08);
+}
+.model-pick__name {
+  font-weight: 600;
+  color: var(--c-head);
+}
+.model-pick__price {
+  font-size: 12px;
+  color: var(--c-accent);
+  font-variant-numeric: tabular-nums;
+}
+.model-pick__hint {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--c-dim);
+}
+.model-other summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--c-soft);
+  padding: 6px 0;
+}
+

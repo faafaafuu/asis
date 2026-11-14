@@ -26,6 +26,7 @@ import { mountVideo } from "./video.mjs";
 import { mountGuides } from "./guides.mjs";
 import { mountGoals } from "./goals.mjs";
 import { mountPronounce } from "./pronounce.mjs";
+import { mountModels } from "./models.mjs";
 import { mountCommands } from "./commands.mjs";
 import { mountDrama } from "./drama.mjs";
 import { tunnel } from "./tunnel.mjs";
@@ -981,6 +982,7 @@ mountGuides({ route, db, Fail, readJson, chat: noa.bridgeChat, owner: noa.bridge
 // Цели обучения Qrack: год → месяц → неделя → день, только по курсам аккаунта.
 mountGoals({ route, db, Fail, readJson, need: noa.need });
 mountPronounce({ route, readJson, need: noa.need, chat: noa.bridgeChat, dataDir: DATA });
+mountModels({ route });
 mountCommands({ route, db, Fail, readJson, chat: noa.bridgeChat, owner: noa.bridgeUser });
 const mcpHandler = mountRemote({ route, db, Fail, readJson, userForKey, publishModule, lint, validId, send, maxBody: MAX_BODY, publicUrl: PUBLIC_URL });
 
